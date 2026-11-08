@@ -20,17 +20,14 @@ const isPlainObject = (v: object): boolean => {
   return proto === Object.prototype || proto === null;
 };
 
-const assertPlain = (id: ActionId, v: unknown, inObject: boolean): void => {
-  const fail = () => {
-    throw new Error(`Action ${id} holds a value that is not plain JSON`);
-  };
-  if (v === null || typeof v === "string" || typeof v === "boolean") return;
-  if (v === undefined) return inObject ? undefined : fail();
-  if (typeof v === "number") return Number.isFinite(v) ? undefined : fail();
-  if (typeof v !== "object") return fail();
-  if (Array.isArray(v)) return v.forEach((x) => assertPlain(id, x, false));
-  if (!isPlainObject(v)) return fail();
-  Object.values(v).forEach((x) => assertPlain(id, x, true));
+const isPlain = (v: unknown, inObject: boolean): boolean => {
+  if (v === null || typeof v === "string" || typeof v === "boolean") return true;
+  if (v === undefined) return inObject;
+  if (typeof v === "number") return Number.isFinite(v);
+  if (typeof v !== "object") return false;
+  if (Array.isArray(v)) return v.every((x) => isPlain(x, false));
+  if (!isPlainObject(v)) return false;
+  return Object.values(v).every((x) => isPlain(x, true));
 };
 
 const equal = (a: unknown, b: unknown): boolean => {
@@ -44,12 +41,19 @@ const equal = (a: unknown, b: unknown): boolean => {
   return ea.length === mb.size && ea.every(([k, v]) => mb.has(k) && equal(v, mb.get(k)));
 };
 
-const sameRecord = (known: Action, a: Action): boolean => {
-  assertPlain(a.id, a, false);
-  return equal(known, a);
-};
+export interface Refusal {
+  id: ActionId;
+  message: string;
+}
 
-export type ReadyCheck = (a: Action, saw: (ancestor: ActionId) => boolean) => void;
+export interface Admitted {
+  released: readonly Action[];
+  refused: readonly Refusal[];
+}
+
+export type ReadyCheck = (a: Action, saw: (ancestor: ActionId) => boolean) => string | null;
+
+const NONE: Admitted = { released: [], refused: [] };
 
 export class Graph {
   private readonly nodes: Map<ActionId, Node>;
@@ -78,35 +82,48 @@ export class Graph {
     return this.nodes.get(id)?.action;
   }
 
-  add(a: Action, check?: ReadyCheck): readonly Action[] {
+  refusal(a: Action): string | null {
+    if (!isPlain(a, false)) return `Action ${a.id} holds a value that is not plain JSON`;
     const known = this.nodes.get(a.id)?.action ?? this.waiting.get(a.id)?.action;
-    if (known !== undefined) {
-      if (!sameRecord(known, a)) throw new Error(`Action ${a.id} arrived twice with different contents`);
-      return [];
-    }
-    assertPlain(a.id, a, false);
-    const missing = new Set(a.par.filter((p) => !this.nodes.has(p)));
+    if (known !== undefined) return equal(known, a) ? null : `Action ${a.id} arrived twice with different contents`;
+    const missing = this.missingOf(a);
+    if (missing.has(a.id)) return `Action ${a.id} lists itself as a parent`;
+    if (missing.size > 0 && this.closesCycle(a.id, missing)) return `Action ${a.id} closes a parent cycle`;
+    return null;
+  }
+
+  add(a: Action): readonly Action[] {
+    return this.admit(a, () => null).released;
+  }
+
+  admit(a: Action, check: ReadyCheck): Admitted {
+    const reason = this.refusal(a);
+    if (reason !== null) throw new Error(reason);
+    if (this.has(a.id)) return NONE;
+    const missing = this.missingOf(a);
     if (missing.size > 0) {
-      if (missing.has(a.id)) throw new Error(`Action ${a.id} lists itself as a parent`);
-      if (this.closesCycle(a.id, missing)) throw new Error(`Action ${a.id} closes a parent cycle`);
       this.waiting.set(a.id, { action: a, missing });
       missing.forEach((p) => {
         const list = this.blocked.get(p);
         if (list === undefined) this.blocked.set(p, [a.id]);
         else list.push(a.id);
       });
-      return [];
+      return NONE;
     }
-    if (check !== undefined) {
-      const releasing = this.releasable(a);
-      releasing.forEach((r) => check(r, (x) => this.sawWithin(x, r, releasing)));
-    }
-    const released: Action[] = [a];
-    for (const next of released) {
+    const released: Action[] = [];
+    const refused: Refusal[] = [];
+    const queue: Action[] = [a];
+    for (const next of queue) {
+      const message = check(next, (x) => this.nodes.has(x) && next.par.some((p) => this.seen(x, p)));
+      if (message !== null) {
+        refused.push({ id: next.id, message });
+        continue;
+      }
       this.place(next);
-      released.push(...this.unblock(next.id));
+      released.push(next);
+      queue.push(...this.unblock(next.id));
     }
-    return released.sort((x, y) => this.compare(x.id, y.id));
+    return { released: released.sort((x, y) => this.compare(x.id, y.id)), refused };
   }
 
   has(id: ActionId): boolean {
@@ -145,38 +162,8 @@ export class Graph {
     return this.compare(a, b) < 0;
   }
 
-  private releasable(a: Action): ReadonlyMap<ActionId, Action> {
-    const set = new Map<ActionId, Action>([[a.id, a]]);
-    const queue: Action[] = [a];
-    for (const x of queue) {
-      (this.blocked.get(x.id) ?? []).forEach((child) => {
-        if (set.has(child)) return;
-        const w = this.waiting.get(child);
-        if (w === undefined) throw new Error(`Action ${child} was not waiting for ${x.id}`);
-        if (![...w.missing].every((m) => set.has(m))) return;
-        set.set(child, w.action);
-        queue.push(w.action);
-      });
-    }
-    return set;
-  }
-
-  private sawWithin(x: ActionId, r: Action, releasing: ReadonlyMap<ActionId, Action>): boolean {
-    const visited = new Set<ActionId>();
-    const stack = [...r.par];
-    for (let p = stack.pop(); p !== undefined; p = stack.pop()) {
-      if (p === x) return true;
-      if (visited.has(p)) continue;
-      visited.add(p);
-      if (this.nodes.has(p)) {
-        if (this.nodes.has(x) && this.seen(x, p)) return true;
-        continue;
-      }
-      const inner = releasing.get(p);
-      if (inner === undefined) throw new Error(`Action ${p} is neither ready nor released`);
-      stack.push(...inner.par);
-    }
-    return false;
+  private missingOf(a: Action): Set<ActionId> {
+    return new Set(a.par.filter((p) => !this.nodes.has(p)));
   }
 
   private closesCycle(id: ActionId, missing: ReadonlySet<ActionId>): boolean {

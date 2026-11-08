@@ -1,4 +1,4 @@
-import { Graph } from "./graph";
+import { Graph, type ReadyCheck, type Refusal } from "./graph";
 import { OWNER_CAUSES, type Action, type ActionId, type LogDelta, type Rules, type UnitKey, type UnitState, type Write } from "./types";
 
 interface Unit {
@@ -8,109 +8,160 @@ interface Unit {
   state: UnitState | undefined;
 }
 
+const BASIS = Symbol("basis");
+
+class Basis {
+  readonly [BASIS] = true;
+
+  constructor(
+    readonly graph: Graph,
+    readonly table: Map<UnitKey, Unit>,
+    readonly inactive: Set<ActionId>,
+  ) {}
+}
+
 const ACTIVITY = "a:";
 
 const target = (u: UnitKey): ActionId | null => (u.startsWith(ACTIVITY) ? u.slice(ACTIVITY.length) : null);
 
-const refuseDuplicates = (a: Action): void => {
-  const units = new Set<UnitKey>();
-  a.w.forEach((w) => {
-    if (units.has(w.u)) throw new Error(`Action ${a.id} writes ${w.u} twice`);
-    units.add(w.u);
-  });
+const arrivalRefusal = (a: Action): string | null => {
+  const twice = a.w.find((w, i) => a.w.findIndex((o) => o.u === w.u) !== i);
+  if (twice !== undefined) return `Action ${a.id} writes ${twice.u} twice`;
+  const self = a.w.find((w) => target(w.u) === a.id);
+  if (self !== undefined) return `Action ${a.id} writes ${self.u} without having seen it`;
+  const loose = a.w.find((w) => target(w.u) !== null && typeof w.v !== "boolean");
+  if (loose !== undefined) return `Action ${a.id} writes ${loose.u} with a value that is not true or false`;
+  return null;
 };
 
-const checkActivity = (a: Action, saw: (ancestor: ActionId) => boolean): void => {
-  a.w.forEach((w) => {
+const unseenActivity: ReadyCheck = (a, saw) => {
+  const unseen = a.w.find((w) => {
     const x = target(w.u);
-    if (x === null) return;
-    if (x === a.id || !saw(x)) throw new Error(`Action ${a.id} writes ${w.u} without having seen it`);
-    if (typeof w.v !== "boolean") throw new Error(`Action ${a.id} writes ${w.u} with a value that is not true or false`);
+    return x !== null && !saw(x);
   });
+  return unseen === undefined ? null : `Action ${a.id} writes ${unseen.u} without having seen it`;
 };
 
 export class LogState {
   private readonly rules: Rules;
-  private graph = new Graph();
-  private table = new Map<UnitKey, Unit>();
-  private inactive = new Set<ActionId>();
+  private readonly graph: Graph;
+  private readonly table: Map<UnitKey, Unit>;
+  private readonly inactive: Set<ActionId>;
+  private failure: string | null = null;
 
-  constructor(rules: Rules) {
+  constructor(rules: Rules, basis?: Basis) {
     this.rules = rules;
+    this.graph = basis?.graph ?? new Graph();
+    this.table = basis?.table ?? new Map();
+    this.inactive = basis?.inactive ?? new Set();
   }
 
   add(actions: Iterable<Action>): LogDelta {
+    this.usable();
     const batch = [...actions];
-    batch.forEach(refuseDuplicates);
-    const units = new Set<UnitKey>();
-    const was = new Map<ActionId, boolean>();
-    const added = batch.flatMap((a) =>
-      this.graph.add(a, checkActivity).map((r) => {
-        this.apply(r, units, was);
-        return r.id;
-      }),
-    );
-    const activity = new Set([...was].filter(([id, before]) => before !== this.active(id)).map(([id]) => id));
-    return { units, activity, added: added.sort((x, y) => this.compare(x, y)) };
+    try {
+      return this.admit(batch);
+    } catch (e) {
+      this.failure = e instanceof Error ? e.message : String(e);
+      throw e;
+    }
   }
 
   get heads(): readonly ActionId[] {
+    this.usable();
     return this.graph.heads;
   }
 
   get pending(): readonly ActionId[] {
+    this.usable();
     return this.graph.pending;
   }
 
   get(id: ActionId): Action | undefined {
+    this.usable();
     return this.graph.get(id);
   }
 
   unit(u: UnitKey): UnitState | undefined {
+    this.usable();
     return this.table.get(u)?.state;
   }
 
   units(): ReadonlyMap<UnitKey, UnitState> {
+    this.usable();
     return new Map(
       [...this.table].flatMap(([u, t]): [UnitKey, UnitState][] => (t.state === undefined ? [] : [[u, t.state]])),
     );
   }
 
   active(id: ActionId): boolean {
-    return !this.inactive.has(id);
+    this.usable();
+    return this.isActive(id);
   }
 
   seen(ancestor: ActionId, by: ActionId): boolean {
+    this.usable();
     if (!this.graph.ready(by)) throw new Error(`Action ${by} is not ready`);
     return this.graph.ready(ancestor) && this.graph.seen(ancestor, by);
   }
 
   valueWithout(u: UnitKey, without: ReadonlySet<ActionId>): UnitState | undefined {
+    this.usable();
     const t = this.table.get(u);
     if (t === undefined) return undefined;
-    const live = t.writers.filter((id) => this.active(id) && !without.has(id));
+    const live = t.writers.filter((id) => this.isActive(id) && !without.has(id));
     return this.stateOf(u, t, this.frontierOf(live));
   }
 
   order(): readonly ActionId[] {
+    this.usable();
     return this.graph.order();
   }
 
   writers(u: UnitKey): readonly ActionId[] {
+    this.usable();
     return [...(this.table.get(u)?.writers ?? [])];
   }
 
   fork(): LogState {
-    const f = new LogState(this.rules);
-    f.graph = this.graph.copy();
-    f.table = new Map(
+    this.usable();
+    const table = new Map(
       [...this.table].map(([u, t]): [UnitKey, Unit] => [
         u,
         { writers: [...t.writers], writes: new Map(t.writes), frontier: [...t.frontier], state: t.state },
       ]),
     );
-    f.inactive = new Set(this.inactive);
-    return f;
+    return new LogState(this.rules, new Basis(this.graph.copy(), table, new Set(this.inactive)));
+  }
+
+  private usable(): void {
+    if (this.failure !== null) throw new Error(`LogState is unusable after an earlier error: ${this.failure}`);
+  }
+
+  private isActive(id: ActionId): boolean {
+    return !this.inactive.has(id);
+  }
+
+  private admit(batch: readonly Action[]): LogDelta {
+    const units = new Set<UnitKey>();
+    const was = new Map<ActionId, boolean>();
+    const added: ActionId[] = [];
+    const refused: Refusal[] = [];
+    batch.forEach((a) => {
+      const reason = arrivalRefusal(a) ?? this.graph.refusal(a);
+      if (reason !== null) {
+        refused.push({ id: a.id, message: reason });
+        return;
+      }
+      const admitted = this.graph.admit(a, unseenActivity);
+      refused.push(...admitted.refused);
+      admitted.released.forEach((r) => {
+        this.apply(r, units, was);
+        added.push(r.id);
+      });
+    });
+    const activity = new Set([...was].filter(([id, before]) => before !== this.isActive(id)).map(([id]) => id));
+    return { units, activity, added: added.sort((x, y) => this.compare(x, y)), refused };
   }
 
   private apply(a: Action, units: Set<UnitKey>, was: Map<ActionId, boolean>): void {
@@ -140,8 +191,9 @@ export class LogState {
       this.recompute(u, t);
       units.add(u);
       const now = t.state === undefined ? true : t.state.value === true;
-      if (now === this.active(x)) continue;
-      if (!was.has(x)) was.set(x, this.active(x));
+      const before = this.isActive(x);
+      if (now === before) continue;
+      if (!was.has(x)) was.set(x, before);
       if (now) this.inactive.delete(x);
       else this.inactive.add(x);
       const flipped = this.graph.get(x);
@@ -159,7 +211,7 @@ export class LogState {
   }
 
   private recompute(u: UnitKey, t: Unit): void {
-    t.frontier = this.frontierOf(t.writers.filter((id) => this.active(id)));
+    t.frontier = this.frontierOf(t.writers.filter((id) => this.isActive(id)));
     t.state = this.stateOf(u, t, t.frontier);
   }
 

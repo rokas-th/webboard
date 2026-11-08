@@ -38,4 +38,5 @@ export interface LogDelta {
   units: ReadonlySet<UnitKey>;
   activity: ReadonlySet<ActionId>;
   added: readonly ActionId[];
+  refused: readonly { id: ActionId; message: string }[];
 }

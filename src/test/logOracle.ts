@@ -4,6 +4,7 @@ export interface OracleResult {
   order: ActionId[];
   heads: ActionId[];
   pending: ActionId[];
+  refused: Map<ActionId, string>;
   active: Map<ActionId, boolean>;
   units: Map<UnitKey, UnitState>;
 }
@@ -16,23 +17,10 @@ const lookup = <K, V>(m: ReadonlyMap<K, V>, k: K): V => {
 
 export function oracle(delivered: Iterable<Action>, rules: Rules): OracleResult {
   const byId = new Map<ActionId, Action>();
-  [...delivered].forEach((a) => byId.set(a.id, a));
-  const ready = new Set<ActionId>();
-  let grew = true;
-  while (grew) {
-    const fresh = [...byId.values()].filter((a) => !ready.has(a.id) && a.par.every((p) => ready.has(p)));
-    fresh.forEach((a) => ready.add(a.id));
-    grew = fresh.length > 0;
-  }
-  const depth = new Map<ActionId, number>();
+  [...delivered].forEach((a) => {
+    if (!byId.has(a.id)) byId.set(a.id, a);
+  });
   const ancestors = new Map<ActionId, Set<ActionId>>();
-  const depthOf = (id: ActionId): number => {
-    const known = depth.get(id);
-    if (known !== undefined) return known;
-    const d = Math.max(-1, ...lookup(byId, id).par.map(depthOf)) + 1;
-    depth.set(id, d);
-    return d;
-  };
   const ancestorsOf = (id: ActionId): Set<ActionId> => {
     const known = ancestors.get(id);
     if (known !== undefined) return known;
@@ -41,10 +29,43 @@ export function oracle(delivered: Iterable<Action>, rules: Rules): OracleResult 
     ancestors.set(id, set);
     return set;
   };
+  const isActivity = (u: UnitKey) => u.slice(0, 2) === "a:";
+  const refused = new Map<ActionId, string>();
+  byId.forEach((a) => {
+    const units = a.w.map((w) => w.u);
+    const twice = units.find((u, i) => units.slice(0, i).includes(u));
+    const self = a.w.find((w) => w.u === "a:" + a.id);
+    const loose = a.w.find((w) => isActivity(w.u) && w.v !== true && w.v !== false);
+    if (twice !== undefined) refused.set(a.id, `Action ${a.id} writes ${twice} twice`);
+    else if (self !== undefined) refused.set(a.id, `Action ${a.id} writes ${self.u} without having seen it`);
+    else if (loose !== undefined) refused.set(a.id, `Action ${a.id} writes ${loose.u} with a value that is not true or false`);
+  });
+  const ready = new Set<ActionId>();
+  let grew = true;
+  while (grew) {
+    const fresh = [...byId.values()].filter(
+      (a) => !ready.has(a.id) && !refused.has(a.id) && a.par.every((p) => ready.has(p)),
+    );
+    fresh.forEach((a) => {
+      const strict = new Set(a.par.flatMap((p) => [...ancestorsOf(p)]));
+      const unseen = a.w.find((w) => isActivity(w.u) && !strict.has(w.u.slice(2)));
+      if (unseen === undefined) ready.add(a.id);
+      else refused.set(a.id, `Action ${a.id} writes ${unseen.u} without having seen it`);
+    });
+    grew = fresh.length > 0;
+  }
+  const depth = new Map<ActionId, number>();
+  const depthOf = (id: ActionId): number => {
+    const known = depth.get(id);
+    if (known !== undefined) return known;
+    const d = Math.max(-1, ...lookup(byId, id).par.map(depthOf)) + 1;
+    depth.set(id, d);
+    return d;
+  };
   const order = [...ready].sort((x, y) => depthOf(x) - depthOf(y) || (x < y ? -1 : x > y ? 1 : 0));
   const named = new Set(order.flatMap((id) => lookup(byId, id).par));
   const heads = order.filter((id) => !named.has(id));
-  const pending = [...byId.keys()].filter((id) => !ready.has(id)).sort();
+  const pending = [...byId.keys()].filter((id) => !ready.has(id) && !refused.has(id)).sort();
 
   const writeOf = (id: ActionId, u: UnitKey): Write | undefined => lookup(byId, id).w.find((w) => w.u === u);
 
@@ -90,5 +111,5 @@ export function oracle(delivered: Iterable<Action>, rules: Rules): OracleResult 
     );
     if (s !== undefined) units.set(u, s);
   });
-  return { order, heads, pending, active, units };
+  return { order, heads, pending, refused, active, units };
 }

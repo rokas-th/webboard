@@ -183,23 +183,48 @@ describe("Graph", () => {
     expect(c.pending).toEqual(["x"]);
   });
 
-  it("runs a ready check on every action about to become ready, before storing any", () => {
+  it("asks a ready check of every action about to become ready, with its strict ancestry", () => {
     const g = graphOf([act("a"), act("z")]);
     g.add(act("c", ["b"]));
     g.add(act("d", ["c", "z"]));
     const asked: string[] = [];
     const check = (r: Action, saw: (x: ActionId) => boolean) => {
       asked.push(`${r.id}:${["a", "b", "c", "z", "d", "nope"].filter(saw).join("")}`);
+      return null;
     };
-    const refuse = (r: Action) => {
-      if (r.id === "d") throw new Error("no d");
-    };
-    expect(() => g.add(act("b", ["a"]), refuse)).toThrow("no d");
-    expect(g.has("b")).toBe(false);
-    expect(g.pending).toEqual(["c", "d"]);
-    expect(g.order()).toEqual(["a", "z"]);
-    expect(ids(g.add(act("b", ["a"]), check))).toEqual(["b", "c", "d"]);
+    const admitted = g.admit(act("b", ["a"]), check);
+    expect(ids(admitted.released)).toEqual(["b", "c", "d"]);
+    expect(admitted.refused).toEqual([]);
     expect(asked).toEqual(["b:a", "c:ab", "d:abcz"]);
+  });
+
+  it("drops an action its ready check refuses and keeps its descendants waiting", () => {
+    const g = graphOf([act("a")]);
+    g.add(act("c", ["b"]));
+    g.add(act("d", ["c"]));
+    g.add(act("e", ["b"]));
+    const admitted = g.admit(act("b", ["a"]), (r) => (r.id === "c" ? "no c" : null));
+    expect(ids(admitted.released)).toEqual(["b", "e"]);
+    expect(admitted.refused).toEqual([{ id: "c", message: "no c" }]);
+    expect(g.has("c")).toBe(false);
+    expect(g.pending).toEqual(["d"]);
+    expect(g.order()).toEqual(["a", "b", "e"]);
+    expect(g.admit(act("f", ["a"]), () => "no f")).toEqual({ released: [], refused: [{ id: "f", message: "no f" }] });
+    expect(g.has("f")).toBe(false);
+    expect(g.heads).toEqual(["e"]);
+  });
+
+  it("names the refusal of a record before anything is stored", () => {
+    const g = graphOf([act("a"), act("p", ["missing"])]);
+    expect(g.refusal(act("a"))).toBeNull();
+    expect(g.refusal(act("p", ["missing"]))).toBeNull();
+    expect(g.refusal(act("b", ["a"]))).toBeNull();
+    expect(g.refusal({ ...act("a"), lbl: "other" })).toBe("Action a arrived twice with different contents");
+    expect(g.refusal({ ...act("n"), at: Number.NaN })).toBe("Action n holds a value that is not plain JSON");
+    expect(g.refusal(act("s", ["s"]))).toBe("Action s lists itself as a parent");
+    expect(g.refusal(act("missing", ["p"]))).toBe("Action missing closes a parent cycle");
+    expect(g.order()).toEqual(["a"]);
+    expect(g.pending).toEqual(["p"]);
   });
 
   it("refuses an action that lists itself as a parent", () => {

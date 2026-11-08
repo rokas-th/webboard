@@ -4,9 +4,14 @@ import { LogState, replay } from "./state";
 import { OWNER_CAUSES, type Action, type ActionId, type Cause, type Rules, type UnitKey, type UnitState, type Write } from "./types";
 import { oracle, type OracleResult } from "../test/logOracle";
 
+const num = (w: Write): number => {
+  if (typeof w.v !== "number") throw new Error(`the test rules merge numbers only, not ${JSON.stringify(w.v)}`);
+  return w.v;
+};
+
 const rules: Rules = {
   same: (_u, a, b) => JSON.stringify(a) === JSON.stringify(b),
-  mergeDerived: (_u, a, b) => ((a.v as number) > (b.v as number) ? a : b),
+  mergeDerived: (_u, a, b) => (num(a) > num(b) ? a : b),
 };
 
 type W = readonly [UnitKey, unknown, Cause?];
@@ -32,51 +37,120 @@ describe("LogState", () => {
     expect([...OWNER_CAUSES].sort()).toEqual(["own", "resolution", "revert", "undo"]);
   });
 
-  it("refuses an action that writes one unit twice, before storing it", () => {
-    const log = logOf(act("a", [], [["x", 1]]));
-    expect(() => log.add([act("b", ["a"], [["x", 1], ["y", 2], ["x", 3]])])).toThrow("Action b writes x twice");
-    expect(log.get("b")).toBeUndefined();
-    expect(log.order()).toEqual(["a"]);
-    expect(() => log.add([act("p", ["missing"], [["a:a", false], ["a:a", true]])])).toThrow(
-      "Action p writes a:a twice",
-    );
-    expect(log.pending).toEqual([]);
-  });
-
-  it("refuses an activity write to an action it has not seen, leaving the log unchanged", () => {
-    const log = logOf(act("a", [], [["x", 1]]), act("b", [], [["x", 2]]));
+  it("refuses each bad action with its message, storing nothing and keeping the first record", () => {
+    const log = logOf(act("a", [], [["x", 1]]), act("b", [], [["x", 2]], "d2"), act("p", ["q"], [["y", 1]]));
     const before = log.units();
-    expect(() => log.add([act("u", ["a"], [["y", 5], ["a:b", false, "undo"]])])).toThrow(
-      "Action u writes a:b without having seen it",
-    );
-    expect(() => log.add([act("v", ["a"], [["a:v", false, "undo"]])])).toThrow(
-      "Action v writes a:v without having seen it",
-    );
-    expect(() => log.add([act("n", ["a"], [["a:nobody", false, "undo"]])])).toThrow(
-      "Action n writes a:nobody without having seen it",
-    );
+    const cases: [Action, string][] = [
+      [act("t", ["a"], [["x", 1], ["y", 2], ["x", 3]]), "Action t writes x twice"],
+      [act("pt", ["missing"], [["a:a", false, "undo"], ["a:a", true, "undo"]]), "Action pt writes a:a twice"],
+      [act("u", ["a"], [["y", 5], ["a:b", false, "undo"]]), "Action u writes a:b without having seen it"],
+      [act("v", ["a"], [["a:v", false, "undo"]]), "Action v writes a:v without having seen it"],
+      [act("pv", ["missing"], [["a:pv", true, "undo"]]), "Action pv writes a:pv without having seen it"],
+      [act("w", ["a"], [["a:nobody", false, "undo"]]), "Action w writes a:nobody without having seen it"],
+      [act("n", ["a"], [["a:a", 0, "undo"]]), "Action n writes a:a with a value that is not true or false"],
+      [act("m", ["a"], [["y", new Map([["k", 1]])]]), "Action m holds a value that is not plain JSON"],
+      [act("o", ["a", "o"], [["y", 1]]), "Action o lists itself as a parent"],
+      [act("q", ["p"], [["y", 2]]), "Action q closes a parent cycle"],
+      [act("a", [], [["x", 9]]), "Action a arrived twice with different contents"],
+    ];
+    const deltas = cases.map(([bad]) => log.add([bad]));
+    expect(deltas.map((d) => d.refused)).toEqual(cases.map(([bad, message]) => [{ id: bad.id, message }]));
+    expect(deltas.map((d) => [...d.units, ...d.activity, ...d.added])).toEqual(cases.map(() => []));
     expect(log.units()).toEqual(before);
     expect(log.order()).toEqual(["a", "b"]);
+    expect(log.pending).toEqual(["p"]);
+    expect(log.get("a")?.w).toEqual([{ u: "x", v: 1, c: "own" }]);
+    expect(cases.slice(0, -1).filter(([bad]) => log.get(bad.id) !== undefined)).toEqual([]);
     expect(log.active("b")).toBe(true);
   });
 
-  it("refuses a pending action's unseen activity write when its parent arrives, storing neither", () => {
-    const log = logOf(act("a", [], [["x", 1]]), act("b", [], [["x", 2]]));
-    log.add([act("u", ["c"], [["a:b", false, "undo"]])]);
-    expect(log.pending).toEqual(["u"]);
-    expect(() => log.add([act("c", ["a"], [["x", 3]])])).toThrow("Action u writes a:b without having seen it");
+  it("applies the valid actions of a call and lists the refused ones", () => {
+    const log = logOf(act("a", [], [["x", 1]]));
+    const delta = log.add([
+      act("b", ["a"], [["x", 2]]),
+      act("c", ["b"], [["y", 1], ["y", 2]]),
+      act("d", ["b"], [["z", 3]]),
+    ]);
+    expect(delta.added).toEqual(["b", "d"]);
+    expect(delta.refused).toEqual([{ id: "c", message: "Action c writes y twice" }]);
+    expect([...delta.units].sort()).toEqual(["x", "z"]);
+    expect(log.unit("x")).toEqual({ value: 2, from: "b", clash: null });
+    expect(log.unit("y")).toBeUndefined();
     expect(log.get("c")).toBeUndefined();
-    expect(log.pending).toEqual(["u"]);
-    expect(log.order()).toEqual(["a", "b"]);
-    expect(log.unit("x")?.value).toBe(2);
+    expect(log.heads).toEqual(["d"]);
   });
 
-  it("refuses an activity value that is not a boolean", () => {
-    const log = logOf(act("a", [], [["x", 1]]));
-    expect(() => log.add([act("u", ["a"], [["a:a", 0, "undo"]])])).toThrow(
-      "Action u writes a:a with a value that is not true or false",
-    );
+  it("refuses a pending child when its parent arrives, applying the parent and keeping the grandchild pending", () => {
+    const log = logOf(act("a", [], [["x", 1]]), act("b", [], [["x", 2]], "d2"));
+    const u = act("u", ["c"], [["y", 1], ["a:b", false, "undo"]]);
+    log.add([u, act("g", ["u"], [["x", 4]]), act("h", ["c"], [["z", 1]])]);
+    expect(log.pending).toEqual(["g", "h", "u"]);
+    const delta = log.add([act("c", ["a"], [["x", 3]])]);
+    expect(delta.added).toEqual(["c", "h"]);
+    expect(delta.refused).toEqual([{ id: "u", message: "Action u writes a:b without having seen it" }]);
+    expect([...delta.units].sort()).toEqual(["x", "z"]);
+    expect(log.pending).toEqual(["g"]);
     expect(log.get("u")).toBeUndefined();
+    expect(log.get("c")?.id).toBe("c");
+    expect(log.unit("x")).toEqual({ value: 3, from: "c", clash: ["b", "c"] });
+    expect(log.unit("y")).toBeUndefined();
+    expect(log.active("b")).toBe(true);
+    expect(log.add([u]).refused).toEqual([{ id: "u", message: "Action u writes a:b without having seen it" }]);
+    expect(log.pending).toEqual(["g"]);
+  });
+
+  it("refuses the same actions in a replay as in incremental adds", () => {
+    const all = [
+      act("a", [], [["x", 1]]),
+      act("b", [], [["x", 2]], "d2"),
+      act("c", ["a"], [["x", 3]]),
+      act("u", ["c"], [["a:b", false, "undo"]]),
+      act("g", ["u"], [["y", 1]]),
+      act("t", ["a"], [["z", 1], ["z", 2]]),
+      act("k", ["c"], [["a:c", false, "undo"]]),
+      act("n", ["c"], [["a:a", "no", "undo"]], "d2"),
+    ];
+    const byId = (r: readonly { id: ActionId; message: string }[]) => [...r].sort((x, y) => (x.id < y.id ? -1 : 1));
+    const inc = new LogState(rules);
+    const incRefused = [...all].reverse().flatMap((a) => inc.add([a]).refused);
+    const full = new LogState(rules);
+    const fullRefused = full.add(all).refused;
+    expect(byId(incRefused)).toEqual(byId(fullRefused));
+    expect(byId(fullRefused).map((r) => r.id)).toEqual(["n", "t", "u"]);
+    const replayed = replay(all, rules);
+    expect(replayed.units()).toEqual(inc.units());
+    expect(replayed.pending).toEqual(["g"]);
+    expect(inc.pending).toEqual(["g"]);
+    expect(replayed.active("c")).toBe(false);
+  });
+
+  it("becomes unusable after a rules callback throws partway through a call", () => {
+    const log = new LogState({
+      ...rules,
+      mergeDerived: () => {
+        throw new Error("merge broke");
+      },
+    });
+    log.add([act("a", [], [["x", 1]])]);
+    const earlier = log.fork();
+    expect(() =>
+      log.add([act("p", [], [["y", 4, "push"]]), act("q", [], [["y", 7, "push"]], "d2"), act("r", ["a"], [["z", 1]])]),
+    ).toThrow("merge broke");
+    const unusable = "LogState is unusable after an earlier error: merge broke";
+    expect(() => log.units()).toThrow(unusable);
+    expect(() => log.add([act("s", [], [["w", 1]])])).toThrow(unusable);
+    expect(() => log.fork()).toThrow(unusable);
+    expect(() => log.heads).toThrow(unusable);
+    expect(() => log.pending).toThrow(unusable);
+    expect(() => log.get("a")).toThrow(unusable);
+    expect(() => log.unit("x")).toThrow(unusable);
+    expect(() => log.active("a")).toThrow(unusable);
+    expect(() => log.seen("a", "a")).toThrow(unusable);
+    expect(() => log.valueWithout("x", new Set())).toThrow(unusable);
+    expect(() => log.order()).toThrow(unusable);
+    expect(() => log.writers("x")).toThrow(unusable);
+    expect(earlier.unit("x")).toEqual({ value: 1, from: "a", clash: null });
+    expect(earlier.order()).toEqual(["a"]);
   });
 
   it("lets a later write supersede the one it has seen", () => {
@@ -107,11 +181,18 @@ describe("LogState", () => {
     expect(tie.unit("x")).toEqual({ value: 4, from: "b", clash: null });
   });
 
-  it("refuses a derived merge that returns neither of its writes", () => {
+  it("takes the larger of two derived pushes, 4 then 7", () => {
+    const apart = logOf(act("a", [], [["x", 4, "push"]]), act("b", [], [["x", 7, "push"]], "d2"));
+    expect(apart.unit("x")).toEqual({ value: 7, from: "b", clash: null });
+    const chained = logOf(act("a", [], [["x", 4, "push"]]), act("b", ["a"], [["x", 7, "push"]]));
+    expect(chained.unit("x")).toEqual({ value: 7, from: "b", clash: null });
+  });
+
+  it("becomes unusable after a derived merge returns neither of its writes", () => {
     const log = new LogState({ ...rules, mergeDerived: (u, a) => ({ u, v: a.v, c: a.c }) });
-    expect(() => log.add([act("a", [], [["x", 4, "push"]]), act("b", [], [["x", 7, "push"]], "d2")])).toThrow(
-      "mergeDerived for x returned a write that is neither of its two",
-    );
+    const message = "mergeDerived for x returned a write that is neither of its two inputs";
+    expect(() => log.add([act("a", [], [["x", 4, "push"]]), act("b", [], [["x", 7, "push"]], "d2")])).toThrow(message);
+    expect(() => log.unit("x")).toThrow(`LogState is unusable after an earlier error: ${message}`);
   });
 
   it("clashes a late edit with the resolution, not with the rejected side", () => {
@@ -276,6 +357,11 @@ const arbWrite = fc.record({
   revert: fc.boolean(),
 });
 
+type Fate = "normal" | "unseen" | "loose" | "twice" | "withheld" | "doomed";
+
+const fateOf = (n: number): Fate =>
+  n === 0 ? "unseen" : n === 1 ? "loose" : n === 2 ? "twice" : n === 3 ? "withheld" : n <= 5 ? "doomed" : "normal";
+
 const arbCase: fc.Arbitrary<Case> = fc
   .record({
     specs: fc.array(
@@ -284,6 +370,8 @@ const arbCase: fc.Arbitrary<Case> = fc
         tag: fc.constantFrom("a", "b", "c"),
         picks: fc.array(fc.nat(), { maxLength: 2 }),
         writes: fc.array(arbWrite, { minLength: 1, maxLength: 3 }),
+        fate: fc.nat(39),
+        aim: fc.nat(),
       }),
       { minLength: 1, maxLength: MAX_ACTIONS, size: "max" },
     ),
@@ -295,25 +383,47 @@ const arbCase: fc.Arbitrary<Case> = fc
     const anc = new Map<ActionId, Set<ActionId>>();
     const undoers = new Set<ActionId>();
     const ids = specs.map((s, i) => s.tag + i);
+    const normal: ActionId[] = [];
+    const off: ActionId[] = [];
+    const withheld = new Set<ActionId>();
     const actions = specs.map((s, i) => {
+      const id = ids[i];
+      const fate = fateOf(s.fate);
       const dev = DEVICES[s.dev];
       const own = tips.get(dev);
-      const par = [...new Set([...(own === undefined ? [] : [own]), ...(i === 0 ? [] : s.picks.map((p) => ids[p % i]))])];
+      const from = fate === "normal" ? normal : ids.slice(0, i);
+      const picked = from.length === 0 ? [] : s.picks.map((p) => from[p % from.length]);
+      const doom = fate === "doomed" && off.length > 0 ? [off[s.aim % off.length]] : [];
+      const par = [...new Set([...(own === undefined ? [] : [own]), ...picked, ...doom])];
       const seen = new Set(par.flatMap((p) => [p, ...(anc.get(p) ?? [])]));
-      anc.set(ids[i], seen);
-      tips.set(dev, ids[i]);
+      anc.set(id, seen);
       const pool = [...seen].sort();
       const undoPool = pool.filter((x) => undoers.has(x));
       const writes = s.writes.flatMap((w): W[] => {
         if (!w.activity || pool.length === 0) return [["x" + w.unit, w.value, CAUSES[w.cause]]];
-        const from = w.toActivity && undoPool.length > 0 ? undoPool : pool;
-        return [["a:" + from[w.target % from.length], w.flag, w.revert ? "revert" : "undo"]];
+        const targets = w.toActivity && undoPool.length > 0 ? undoPool : pool;
+        return [["a:" + targets[w.target % targets.length], w.flag, w.revert ? "revert" : "undo"]];
       });
       const unique = writes.filter((w, k) => writes.findIndex((o) => o[0] === w[0]) === k);
-      if (unique.some((w) => w[0].startsWith("a:"))) undoers.add(ids[i]);
-      return act(ids[i], par, unique, dev);
+      const unseen = ids.filter((x) => !seen.has(x));
+      const bad: W[] =
+        fate === "unseen"
+          ? [["a:" + unseen[s.aim % unseen.length], false, "undo"]]
+          : fate === "loose"
+            ? [["a:" + (pool.length === 0 ? id : pool[s.aim % pool.length]), s.aim % 3, "undo"]]
+            : fate === "twice"
+              ? [[unique[0][0], 9, "own"]]
+              : [];
+      if (fate === "normal") {
+        tips.set(dev, id);
+        normal.push(id);
+        if (unique.some((w) => w[0].startsWith("a:"))) undoers.add(id);
+      } else off.push(id);
+      if (fate === "withheld") withheld.add(id);
+      return act(id, par, [...unique, ...bad], dev);
     });
-    const all = [...actions.map((_, i) => i), ...repeats.map((r) => r % actions.length)];
+    const sent = actions.flatMap((a, i) => (withheld.has(a.id) ? [] : [i]));
+    const all = [...sent, ...(sent.length === 0 ? [] : repeats.map((r) => sent[r % sent.length]))];
     return fc
       .shuffledSubarray(all, { minLength: all.length, maxLength: all.length })
       .map((delivery) => ({ actions, delivery, cuts }));
@@ -357,16 +467,38 @@ const expected = (o: OracleResult) => ({
 
 const sameState = (a: UnitState | undefined, b: UnitState | undefined) => JSON.stringify(a) === JSON.stringify(b);
 
+const touchedBy = (o: OracleResult, actions: ReadonlyMap<ActionId, Action>, added: readonly ActionId[]) => {
+  const reach = new Set<ActionId>();
+  const queue = [...added];
+  for (const id of queue) {
+    const a = actions.get(id);
+    if (a === undefined) throw new Error(`no action ${id}`);
+    a.w.forEach((w) => {
+      const t = w.u.startsWith("a:") ? w.u.slice(2) : null;
+      if (t !== null && !reach.has(t) && o.order.includes(t)) {
+        reach.add(t);
+        queue.push(t);
+      }
+    });
+  }
+  return new Set(queue.flatMap((id) => actions.get(id)?.w.map((w) => w.u) ?? []));
+};
+
 describe("LogState properties", () => {
-  it("incremental adds equal a full replay and the brute-force oracle", () => {
+  it("incremental adds equal a full replay and the brute-force oracle, refusals and pending included", () => {
     let flips = 0;
     let clashes = 0;
     let largest = 0;
+    let refusedRuns = 0;
+    let releasedRefusals = 0;
+    let pendingRuns = 0;
     fc.assert(
       fc.property(arbCase, (c) => {
         largest = Math.max(largest, c.actions.length);
+        const byId = new Map(c.actions.map((a) => [a.id, a]));
         const log = new LogState(rules);
         const delivered: Action[] = [];
+        const refusedSoFar = new Map<ActionId, string>();
         const problems: string[] = [];
         batchesOf(c).forEach((batch, k) => {
           const prior = oracle(delivered, rules);
@@ -380,27 +512,50 @@ describe("LogState properties", () => {
           );
           const missed = changed.filter((u) => !delta.units.has(u));
           if (missed.length > 0) problems.push(`batch ${k}: delta.units misses ${missed.join(",")}`);
+          const added = now.order.filter((id) => !prior.order.includes(id));
+          const touched = touchedBy(now, byId, added);
+          const extra = [...delta.units].filter((u) => !touched.has(u));
+          if (extra.length > 0) problems.push(`batch ${k}: delta.units lists untouched ${extra.join(",")}`);
           const flipped = now.order.filter((id) => (prior.active.get(id) ?? true) !== now.active.get(id));
           if (JSON.stringify([...delta.activity].sort()) !== JSON.stringify(flipped.sort())) {
             problems.push(`batch ${k}: activity ${[...delta.activity].join(",")} vs ${flipped.join(",")}`);
           }
-          const added = now.order.filter((id) => !prior.order.includes(id));
           if (JSON.stringify(delta.added) !== JSON.stringify(added)) {
             problems.push(`batch ${k}: added ${delta.added.join(",")} vs ${added.join(",")}`);
           }
+          const inBatch = new Set(batch.map((a) => a.id));
+          const fresh = [...now.refused.keys()].filter((id) => !prior.refused.has(id));
+          const listed = new Set(delta.refused.map((r) => r.id));
+          delta.refused.forEach((r) => {
+            if (now.refused.get(r.id) !== r.message) problems.push(`batch ${k}: refused ${r.id} "${r.message}"`);
+            if (!inBatch.has(r.id) && !fresh.includes(r.id)) problems.push(`batch ${k}: refused ${r.id} again unasked`);
+            refusedSoFar.set(r.id, r.message);
+            if (prior.pending.includes(r.id)) releasedRefusals += 1;
+          });
+          const unlisted = fresh.filter((id) => !listed.has(id));
+          if (unlisted.length > 0) problems.push(`batch ${k}: refused but not listed ${unlisted.join(",")}`);
           flips += flipped.length;
         });
         expect(problems).toEqual([]);
-        const final = oracle(c.actions, rules);
-        const full = replay(c.actions, rules);
+        const sent = c.actions.filter((a) => delivered.includes(a));
+        const final = oracle(sent, rules);
+        const full = replay(sent, rules);
         expect(snapshot(full, final.order)).toEqual(expected(final));
         expect(snapshot(log, final.order)).toEqual(snapshot(full, final.order));
+        const fullRefused = new Map(new LogState(rules).add(sent).refused.map((r) => [r.id, r.message]));
+        expect(fullRefused).toEqual(final.refused);
+        expect(refusedSoFar).toEqual(final.refused);
         clashes += [...final.units.values()].filter((s) => s.clash !== null).length > 0 ? 1 : 0;
+        refusedRuns += final.refused.size > 0 ? 1 : 0;
+        pendingRuns += final.pending.length > 0 ? 1 : 0;
       }),
       PARAMS,
     );
     expect(largest).toBeGreaterThan(MAX_ACTIONS / 2);
     expect(flips).toBeGreaterThan(NUM_RUNS);
     expect(clashes).toBeGreaterThan(NUM_RUNS / 4);
+    expect(refusedRuns).toBeGreaterThan(NUM_RUNS / 2);
+    expect(releasedRefusals).toBeGreaterThan(NUM_RUNS / 10);
+    expect(pendingRuns).toBeGreaterThan(NUM_RUNS / 2);
   }, 120_000);
 });
