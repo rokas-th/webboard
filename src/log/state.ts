@@ -1,4 +1,4 @@
-import { Graph, type ReadyCheck, type Refusal } from "./graph";
+import { Graph, type ReadyCheck } from "./graph";
 import { OWNER_CAUSES, type Action, type ActionId, type LogDelta, type Rules, type UnitKey, type UnitState, type Write } from "./types";
 
 interface Unit {
@@ -8,17 +8,13 @@ interface Unit {
   state: UnitState | undefined;
 }
 
-const BASIS = Symbol("basis");
-
-class Basis {
-  readonly [BASIS] = true;
-
-  constructor(
-    readonly graph: Graph,
-    readonly table: Map<UnitKey, Unit>,
-    readonly inactive: Set<ActionId>,
-  ) {}
+interface Basis {
+  graph: Graph;
+  table: Map<UnitKey, Unit>;
+  inactive: Set<ActionId>;
 }
+
+let seed: Basis | null = null;
 
 const ACTIVITY = "a:";
 
@@ -49,7 +45,9 @@ export class LogState {
   private readonly inactive: Set<ActionId>;
   private failure: string | null = null;
 
-  constructor(rules: Rules, basis?: Basis) {
+  constructor(rules: Rules) {
+    const basis = seed;
+    seed = null;
     this.rules = rules;
     this.graph = basis?.graph ?? new Graph();
     this.table = basis?.table ?? new Map();
@@ -131,7 +129,7 @@ export class LogState {
         { writers: [...t.writers], writes: new Map(t.writes), frontier: [...t.frontier], state: t.state },
       ]),
     );
-    return new LogState(this.rules, new Basis(this.graph.copy(), table, new Set(this.inactive)));
+    return forked(this.rules, { graph: this.graph.copy(), table, inactive: new Set(this.inactive) });
   }
 
   private usable(): void {
@@ -146,22 +144,36 @@ export class LogState {
     const units = new Set<UnitKey>();
     const was = new Map<ActionId, boolean>();
     const added: ActionId[] = [];
-    const refused: Refusal[] = [];
+    const refused = new Map<ActionId, string>();
+    const refuse = (id: ActionId, message: string) => {
+      if (!refused.has(id)) refused.set(id, message);
+    };
     batch.forEach((a) => {
+      if (this.graph.known(a.id)) {
+        const repeat = this.graph.refusal(a);
+        if (repeat !== null) refuse(a.id, repeat);
+        return;
+      }
       const reason = arrivalRefusal(a) ?? this.graph.refusal(a);
       if (reason !== null) {
-        refused.push({ id: a.id, message: reason });
+        this.graph.reject(a);
+        refuse(a.id, reason);
         return;
       }
       const admitted = this.graph.admit(a, unseenActivity);
-      refused.push(...admitted.refused);
+      admitted.refused.forEach((r) => refuse(r.id, r.message));
       admitted.released.forEach((r) => {
         this.apply(r, units, was);
         added.push(r.id);
       });
     });
     const activity = new Set([...was].filter(([id, before]) => before !== this.isActive(id)).map(([id]) => id));
-    return { units, activity, added: added.sort((x, y) => this.compare(x, y)), refused };
+    return {
+      units,
+      activity,
+      added: added.sort((x, y) => this.compare(x, y)),
+      refused: [...refused].map(([id, message]) => ({ id, message })),
+    };
   }
 
   private apply(a: Action, units: Set<UnitKey>, was: Map<ActionId, boolean>): void {
@@ -264,6 +276,11 @@ export class LogState {
     }
     list.splice(lo, 0, id);
   }
+}
+
+function forked(rules: Rules, basis: Basis): LogState {
+  seed = basis;
+  return new LogState(rules);
 }
 
 export function replay(actions: Iterable<Action>, rules: Rules): LogState {

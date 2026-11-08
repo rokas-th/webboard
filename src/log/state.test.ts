@@ -95,8 +95,66 @@ describe("LogState", () => {
     expect(log.unit("x")).toEqual({ value: 3, from: "c", clash: ["b", "c"] });
     expect(log.unit("y")).toBeUndefined();
     expect(log.active("b")).toBe(true);
-    expect(log.add([u]).refused).toEqual([{ id: "u", message: "Action u writes a:b without having seen it" }]);
+    expect(log.add([u]).refused).toEqual([]);
+    expect(log.add([{ ...u, w: [{ u: "y", v: 1, c: "own" }] }]).refused).toEqual([
+      { id: "u", message: "Action u arrived twice with different contents" },
+    ]);
     expect(log.pending).toEqual(["g"]);
+  });
+
+  it("remembers a refused record, so a different repeat ends the same whichever arrives first", () => {
+    const a = act("a", [], [["x", 1]]);
+    const b = act("b", [], [["x", 2]], "d2");
+    const u = act("u", ["c"], [["a:b", false, "undo"]]);
+    const other = act("u", ["c"], [["y", 1]]);
+    const g = act("g", ["u"], [["x", 4]]);
+    const c = act("c", ["a"], [["x", 3]]);
+    const twice = "Action u arrived twice with different contents";
+    const unseen = "Action u writes a:b without having seen it";
+    const run = (batches: Action[][]) => {
+      const log = new LogState(rules);
+      const refused = batches.map((batch) => log.add(batch).refused);
+      return { log, refused };
+    };
+    const early = run([[a, b, u, g], [other], [c]]);
+    const late = run([[a, b, u, g], [c], [other]]);
+    expect(early.refused).toEqual([[], [{ id: "u", message: twice }], [{ id: "u", message: unseen }]]);
+    expect(late.refused).toEqual([[], [{ id: "u", message: unseen }], [{ id: "u", message: twice }]]);
+    [early.log, late.log].forEach((log) => {
+      expect(log.order()).toEqual(["a", "b", "c"]);
+      expect(log.pending).toEqual(["g"]);
+      expect(log.get("u")).toBeUndefined();
+      expect(log.unit("y")).toBeUndefined();
+      expect(log.unit("x")).toEqual({ value: 3, from: "c", clash: ["b", "c"] });
+    });
+    expect(early.log.units()).toEqual(late.log.units());
+    expect(late.log.fork().add([other]).refused).toEqual([{ id: "u", message: twice }]);
+  });
+
+  it("checks identity before contents, so a different repeat that writes a unit twice arrived twice", () => {
+    const log = logOf(act("a", [], [["x", 1]]), act("p", ["missing"], [["y", 1]]));
+    log.add([act("t", ["a"], [["z", 1], ["z", 2]])]);
+    const twice = (id: ActionId) => ({ id, message: `Action ${id} arrived twice with different contents` });
+    expect(log.add([act("a", [], [["x", 1], ["x", 2]])]).refused).toEqual([twice("a")]);
+    expect(log.add([act("p", ["missing"], [["y", 1], ["y", 2]])]).refused).toEqual([twice("p")]);
+    expect(log.add([act("t", ["a"], [["z", 1], ["z", 3], ["z", 4]])]).refused).toEqual([twice("t")]);
+    expect(log.add([act("t", ["a"], [["z", 1], ["z", 2]])]).refused).toEqual([]);
+    expect(log.get("a")?.w).toEqual([{ u: "x", v: 1, c: "own" }]);
+  });
+
+  it("lists a refused id at most once per call", () => {
+    const log = logOf(act("a", [], [["x", 1]]), act("b", [], [["x", 2]], "d2"));
+    const t = act("t", ["a"], [["z", 1], ["z", 2]]);
+    expect(log.add([t, t, structuredClone(t)]).refused).toEqual([{ id: "t", message: "Action t writes z twice" }]);
+    const other = act("a", [], [["x", 7]]);
+    expect(log.add([other, other, act("a", [], [["x", 8]])]).refused).toEqual([
+      { id: "a", message: "Action a arrived twice with different contents" },
+    ]);
+    const u = act("u", ["c"], [["a:b", false, "undo"]]);
+    log.add([u]);
+    const delta = log.add([act("c", ["a"], [["x", 3]]), act("u", ["c"], [["y", 1]]), u]);
+    expect(delta.refused).toEqual([{ id: "u", message: "Action u writes a:b without having seen it" }]);
+    expect(delta.added).toEqual(["c"]);
   });
 
   it("refuses the same actions in a replay as in incremental adds", () => {
@@ -372,6 +430,7 @@ const arbCase: fc.Arbitrary<Case> = fc
         writes: fc.array(arbWrite, { minLength: 1, maxLength: 3 }),
         fate: fc.nat(39),
         aim: fc.nat(),
+        variant: fc.nat(9),
       }),
       { minLength: 1, maxLength: MAX_ACTIONS, size: "max" },
     ),
@@ -386,6 +445,7 @@ const arbCase: fc.Arbitrary<Case> = fc
     const normal: ActionId[] = [];
     const off: ActionId[] = [];
     const withheld = new Set<ActionId>();
+    const variants: Action[] = [];
     const actions = specs.map((s, i) => {
       const id = ids[i];
       const fate = fateOf(s.fate);
@@ -420,13 +480,16 @@ const arbCase: fc.Arbitrary<Case> = fc
         if (unique.some((w) => w[0].startsWith("a:"))) undoers.add(id);
       } else off.push(id);
       if (fate === "withheld") withheld.add(id);
+      if (s.variant < (fate === "normal" ? 1 : 5)) variants.push({ ...act(id, par, unique, dev), lbl: id + "'" });
       return act(id, par, [...unique, ...bad], dev);
     });
+    const records = [...actions, ...variants];
     const sent = actions.flatMap((a, i) => (withheld.has(a.id) ? [] : [i]));
-    const all = [...sent, ...(sent.length === 0 ? [] : repeats.map((r) => sent[r % sent.length]))];
+    const twins = variants.map((_, k) => actions.length + k);
+    const all = [...sent, ...twins, ...(sent.length === 0 ? [] : repeats.map((r) => sent[r % sent.length]))];
     return fc
       .shuffledSubarray(all, { minLength: all.length, maxLength: all.length })
-      .map((delivery) => ({ actions, delivery, cuts }));
+      .map((delivery) => ({ actions: records, delivery, cuts }));
   })
   .map((c) =>
     Object.assign(c, {
@@ -484,6 +547,11 @@ const touchedBy = (o: OracleResult, actions: ReadonlyMap<ActionId, Action>, adde
   return new Set(queue.flatMap((id) => actions.get(id)?.w.map((w) => w.u) ?? []));
 };
 
+const TWICE = (id: ActionId) => `Action ${id} arrived twice with different contents`;
+
+const allowed = (o: OracleResult, id: ActionId, message: string) =>
+  o.refused.get(id) === message || (o.conflicts.has(id) && message === TWICE(id));
+
 describe("LogState properties", () => {
   it("incremental adds equal a full replay and the brute-force oracle, refusals and pending included", () => {
     let flips = 0;
@@ -492,17 +560,23 @@ describe("LogState properties", () => {
     let refusedRuns = 0;
     let releasedRefusals = 0;
     let pendingRuns = 0;
+    let conflictRuns = 0;
+    let readinessConflicts = 0;
     fc.assert(
       fc.property(arbCase, (c) => {
-        largest = Math.max(largest, c.actions.length);
-        const byId = new Map(c.actions.map((a) => [a.id, a]));
+        largest = Math.max(largest, new Set(c.actions.map((a) => a.id)).size);
+        const byId = new Map<ActionId, Action>();
         const log = new LogState(rules);
         const delivered: Action[] = [];
-        const refusedSoFar = new Map<ActionId, string>();
+        const refusedSoFar = new Map<ActionId, Set<string>>();
         const problems: string[] = [];
         batchesOf(c).forEach((batch, k) => {
           const prior = oracle(delivered, rules);
           delivered.push(...batch);
+          batch.forEach((a) => {
+            if (!byId.has(a.id)) byId.set(a.id, a);
+          });
+          const different = new Set(batch.filter((a) => byId.get(a.id) !== a).map((a) => a.id));
           const delta = log.add(batch);
           const now = oracle(delivered, rules);
           const got = snapshot(log, now.order);
@@ -526,25 +600,39 @@ describe("LogState properties", () => {
           const inBatch = new Set(batch.map((a) => a.id));
           const fresh = [...now.refused.keys()].filter((id) => !prior.refused.has(id));
           const listed = new Set(delta.refused.map((r) => r.id));
+          if (listed.size !== delta.refused.length) problems.push(`batch ${k}: an id listed twice in refused`);
+          const unknown = [...different].filter((id) => !now.conflicts.has(id));
+          if (unknown.length > 0) problems.push(`batch ${k}: oracle misses conflicts ${unknown.join(",")}`);
           delta.refused.forEach((r) => {
-            if (now.refused.get(r.id) !== r.message) problems.push(`batch ${k}: refused ${r.id} "${r.message}"`);
+            const judged = fresh.includes(r.id) && now.refused.get(r.id) === r.message;
+            const repeated = different.has(r.id) && r.message === TWICE(r.id);
+            if (!judged && !repeated) problems.push(`batch ${k}: refused ${r.id} "${r.message}"`);
             if (!inBatch.has(r.id) && !fresh.includes(r.id)) problems.push(`batch ${k}: refused ${r.id} again unasked`);
-            refusedSoFar.set(r.id, r.message);
-            if (prior.pending.includes(r.id)) releasedRefusals += 1;
+            refusedSoFar.set(r.id, new Set([...(refusedSoFar.get(r.id) ?? []), r.message]));
+            if (judged && prior.pending.includes(r.id)) releasedRefusals += 1;
           });
-          const unlisted = fresh.filter((id) => !listed.has(id));
+          const unlisted = [...fresh, ...different].filter((id) => !listed.has(id));
           if (unlisted.length > 0) problems.push(`batch ${k}: refused but not listed ${unlisted.join(",")}`);
           flips += flipped.length;
         });
         expect(problems).toEqual([]);
-        const sent = c.actions.filter((a) => delivered.includes(a));
-        const final = oracle(sent, rules);
-        const full = replay(sent, rules);
+        const final = oracle(delivered, rules);
+        const full = replay(delivered, rules);
         expect(snapshot(full, final.order)).toEqual(expected(final));
         expect(snapshot(log, final.order)).toEqual(snapshot(full, final.order));
-        const fullRefused = new Map(new LogState(rules).add(sent).refused.map((r) => [r.id, r.message]));
-        expect(fullRefused).toEqual(final.refused);
-        expect(refusedSoFar).toEqual(final.refused);
+        const expectedIds = [...new Set([...final.refused.keys(), ...final.conflicts])].sort();
+        const once = new LogState(rules).add(delivered).refused;
+        expect(once.map((r) => r.id).sort()).toEqual(expectedIds);
+        expect(once.filter((r) => !allowed(final, r.id, r.message))).toEqual([]);
+        expect([...refusedSoFar.keys()].sort()).toEqual(expectedIds);
+        expect([...refusedSoFar].flatMap(([id, ms]) => [...ms].filter((m) => !allowed(final, id, m)))).toEqual([]);
+        conflictRuns += final.conflicts.size > 0 ? 1 : 0;
+        readinessConflicts += [...final.conflicts].filter((id) => {
+          const first = byId.get(id);
+          const m = final.refused.get(id);
+          return first !== undefined && m !== undefined && m.endsWith("without having seen it") &&
+            !first.w.some((w) => w.u === "a:" + id);
+        }).length;
         clashes += [...final.units.values()].filter((s) => s.clash !== null).length > 0 ? 1 : 0;
         refusedRuns += final.refused.size > 0 ? 1 : 0;
         pendingRuns += final.pending.length > 0 ? 1 : 0;
@@ -557,5 +645,7 @@ describe("LogState properties", () => {
     expect(refusedRuns).toBeGreaterThan(NUM_RUNS / 2);
     expect(releasedRefusals).toBeGreaterThan(NUM_RUNS / 10);
     expect(pendingRuns).toBeGreaterThan(NUM_RUNS / 2);
+    expect(conflictRuns).toBeGreaterThan(NUM_RUNS / 2);
+    expect(readinessConflicts).toBeGreaterThan(NUM_RUNS / 10);
   }, 120_000);
 });

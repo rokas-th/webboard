@@ -62,6 +62,7 @@ export class Graph {
   private readonly blocked: Map<ActionId, ActionId[]>;
   private readonly tips: ActionId[];
   private readonly sorted: ActionId[];
+  private readonly rejected: Map<ActionId, Action>;
 
   constructor(from?: Graph) {
     this.nodes = new Map(from?.nodes);
@@ -72,6 +73,7 @@ export class Graph {
     this.blocked = new Map([...(from?.blocked ?? [])].map(([id, list]): [ActionId, ActionId[]] => [id, [...list]]));
     this.tips = [...(from?.tips ?? [])];
     this.sorted = [...(from?.sorted ?? [])];
+    this.rejected = new Map(from?.rejected);
   }
 
   copy(): Graph {
@@ -82,10 +84,22 @@ export class Graph {
     return this.nodes.get(id)?.action;
   }
 
+  known(id: ActionId): boolean {
+    return this.has(id) || this.rejected.has(id);
+  }
+
+  reject(a: Action): void {
+    if (this.known(a.id)) throw new Error(`Action ${a.id} is already known`);
+    this.rejected.set(a.id, a);
+  }
+
   refusal(a: Action): string | null {
+    const known = this.nodes.get(a.id)?.action ?? this.waiting.get(a.id)?.action ?? this.rejected.get(a.id);
+    if (known !== undefined) {
+      const same = known === a || (isPlain(a, false) && equal(known, a));
+      return same ? null : `Action ${a.id} arrived twice with different contents`;
+    }
     if (!isPlain(a, false)) return `Action ${a.id} holds a value that is not plain JSON`;
-    const known = this.nodes.get(a.id)?.action ?? this.waiting.get(a.id)?.action;
-    if (known !== undefined) return equal(known, a) ? null : `Action ${a.id} arrived twice with different contents`;
     const missing = this.missingOf(a);
     if (missing.has(a.id)) return `Action ${a.id} lists itself as a parent`;
     if (missing.size > 0 && this.closesCycle(a.id, missing)) return `Action ${a.id} closes a parent cycle`;
@@ -99,7 +113,7 @@ export class Graph {
   admit(a: Action, check: ReadyCheck): Admitted {
     const reason = this.refusal(a);
     if (reason !== null) throw new Error(reason);
-    if (this.has(a.id)) return NONE;
+    if (this.known(a.id)) return NONE;
     const missing = this.missingOf(a);
     if (missing.size > 0) {
       this.waiting.set(a.id, { action: a, missing });
@@ -116,6 +130,7 @@ export class Graph {
     for (const next of queue) {
       const message = check(next, (x) => this.nodes.has(x) && next.par.some((p) => this.seen(x, p)));
       if (message !== null) {
+        this.rejected.set(next.id, next);
         refused.push({ id: next.id, message });
         continue;
       }

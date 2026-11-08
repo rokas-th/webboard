@@ -143,9 +143,9 @@ describe("Graph", () => {
     expect(ids(g.add(withV("ok", { n: 1, gone: undefined }, ["r"])))).toEqual(["ok"]);
   });
 
-  it("refuses a repeat that holds values other than plain JSON", () => {
+  it("refuses a repeat that holds values other than plain JSON as a different record", () => {
     const withV = (v: unknown): Action => ({ ...act("a1"), w: [{ u: "pn", v, c: "own" }] });
-    const notPlain = "Action a1 holds a value that is not plain JSON";
+    const notPlain = "Action a1 arrived twice with different contents";
     const plain = graphOf([withV({ n: 1 })]);
     expect(() => plain.add(withV(new Map([["k", 2]])))).toThrow(notPlain);
     expect(() => plain.add(withV(new Date(1)))).toThrow(notPlain);
@@ -212,6 +212,27 @@ describe("Graph", () => {
     expect(g.admit(act("f", ["a"]), () => "no f")).toEqual({ released: [], refused: [{ id: "f", message: "no f" }] });
     expect(g.has("f")).toBe(false);
     expect(g.heads).toEqual(["e"]);
+  });
+
+  it("remembers a refused record: an equal repeat is ignored and a different one refused", () => {
+    const g = graphOf([act("a")]);
+    g.add(act("c", ["b"]));
+    g.add(act("d", ["c"]));
+    expect(g.admit(act("b", ["a"]), (r) => (r.id === "c" ? "no c" : null)).refused).toEqual([{ id: "c", message: "no c" }]);
+    expect(g.known("c")).toBe(true);
+    expect(g.has("c")).toBe(false);
+    expect(g.refusal(act("c", ["b"]))).toBeNull();
+    expect(g.admit(act("c", ["b"]), () => "never asked")).toEqual({ released: [], refused: [] });
+    expect(g.refusal({ ...act("c", ["b"]), lbl: "other" })).toBe("Action c arrived twice with different contents");
+    const bad = act("s", ["s"]);
+    g.reject(bad);
+    expect(g.refusal(bad)).toBeNull();
+    expect(g.refusal(act("s"))).toBe("Action s arrived twice with different contents");
+    expect(() => g.reject(act("a"))).toThrow("Action a is already known");
+    const copy = g.copy();
+    expect(copy.refusal({ ...act("c", ["b"]), lbl: "other" })).toBe("Action c arrived twice with different contents");
+    expect(g.pending).toEqual(["d"]);
+    expect(g.order()).toEqual(["a", "b"]);
   });
 
   it("names the refusal of a record before anything is stored", () => {

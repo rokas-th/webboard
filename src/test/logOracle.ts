@@ -5,6 +5,7 @@ export interface OracleResult {
   heads: ActionId[];
   pending: ActionId[];
   refused: Map<ActionId, string>;
+  conflicts: Set<ActionId>;
   active: Map<ActionId, boolean>;
   units: Map<UnitKey, UnitState>;
 }
@@ -15,10 +16,24 @@ const lookup = <K, V>(m: ReadonlyMap<K, V>, k: K): V => {
   return v;
 };
 
+const canonical = (v: unknown): string => {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
+  if (typeof v === "object" && v !== null) {
+    const entries = Object.entries(v)
+      .filter(([, x]) => x !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, x]) => `${JSON.stringify(k)}:${canonical(x)}`).join(",")}}`;
+  }
+  return JSON.stringify(v);
+};
+
 export function oracle(delivered: Iterable<Action>, rules: Rules): OracleResult {
   const byId = new Map<ActionId, Action>();
+  const conflicts = new Set<ActionId>();
   [...delivered].forEach((a) => {
-    if (!byId.has(a.id)) byId.set(a.id, a);
+    const first = byId.get(a.id);
+    if (first === undefined) byId.set(a.id, a);
+    else if (canonical(first) !== canonical(a)) conflicts.add(a.id);
   });
   const ancestors = new Map<ActionId, Set<ActionId>>();
   const ancestorsOf = (id: ActionId): Set<ActionId> => {
@@ -111,5 +126,5 @@ export function oracle(delivered: Iterable<Action>, rules: Rules): OracleResult 
     );
     if (s !== undefined) units.set(u, s);
   });
-  return { order, heads, pending, refused, active, units };
+  return { order, heads, pending, refused, conflicts, active, units };
 }
