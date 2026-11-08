@@ -1,0 +1,116 @@
+import type { InvokeArgs, InvokeOptions } from "@tauri-apps/api/core";
+
+export interface Call {
+  cmd: string;
+  args: InvokeArgs | undefined;
+  options: InvokeOptions | undefined;
+}
+
+export type Answer = (args: InvokeArgs | undefined) => unknown;
+
+export const tauri = {
+  calls: [] as Call[],
+  answers: {} as Record<string, Answer>,
+};
+
+interface Held {
+  promise: Promise<unknown>;
+  resolve(value: unknown): void;
+  reject(e: { code: string; message: string }): void;
+}
+
+const holds = new Map<string, Held>();
+
+export function invoke(cmd: string, args?: InvokeArgs, options?: InvokeOptions): Promise<unknown> {
+  tauri.calls.push({ cmd, args, options });
+  const held = holds.get(cmd);
+  if (held !== undefined) {
+    holds.delete(cmd);
+    return held.promise;
+  }
+  const answer = tauri.answers[cmd];
+  if (answer === undefined) {
+    return Promise.reject(new Error(`no fixture answers ${cmd}`));
+  }
+  try {
+    return Promise.resolve(answer(args));
+  } catch (e) {
+    return Promise.reject(e);
+  }
+}
+
+export function hold(cmd: string): {
+  resolve(value: unknown): void;
+  reject(e: { code: string; message: string }): void;
+} {
+  if (holds.has(cmd)) throw new Error(`hold(${cmd}) is already pending`);
+  let resolve!: (value: unknown) => void;
+  let reject!: (e: { code: string; message: string }) => void;
+  const promise = new Promise<unknown>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  holds.set(cmd, { promise, resolve, reject });
+  return { resolve, reject };
+}
+
+type EventHandler = (event: { payload: never }) => void;
+
+const subscriptions = new Map<string, Set<EventHandler>>();
+
+export function listen(name: string, handler: EventHandler): Promise<() => void> {
+  let open = subscriptions.get(name);
+  if (open === undefined) {
+    open = new Set();
+    subscriptions.set(name, open);
+  }
+  open.add(handler);
+  return Promise.resolve(() => {
+    open.delete(handler);
+  });
+}
+
+export function emitFromRust(name: string, payload: unknown): void {
+  const open = subscriptions.get(name);
+  if (open === undefined) return;
+  for (const handler of [...open]) handler({ payload } as { payload: never });
+}
+
+export function listenerCount(name: string): number {
+  return subscriptions.get(name)?.size ?? 0;
+}
+
+export function getCurrentWindow() {
+  return {
+    startDragging: () => Promise.resolve(),
+    startResizeDragging: () => Promise.resolve(),
+    isMaximized: () => Promise.resolve(false),
+    onResized: () => Promise.resolve(() => {}),
+    minimize: () => Promise.resolve(),
+    toggleMaximize: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+  };
+}
+
+export function resetTauri(answers: Record<string, Answer>): void {
+  subscriptions.clear();
+  holds.clear();
+  tauri.calls.length = 0;
+  for (const k of Object.keys(tauri.answers)) delete tauri.answers[k];
+  Object.assign(tauri.answers, answers);
+}
+
+export function commandsSince(from: number): string[] {
+  return tauri.calls.slice(from).map((c) => c.cmd);
+}
+
+function recordArgs(a: InvokeArgs | undefined): Record<string, unknown> | undefined {
+  if (a === undefined || a instanceof Uint8Array || a instanceof ArrayBuffer || Array.isArray(a)) return undefined;
+  return a as Record<string, unknown>;
+}
+
+export function commandsWith(from: number, cmd: string, args: Record<string, unknown>): number {
+  return tauri.calls
+    .slice(from)
+    .filter((c) => c.cmd === cmd && Object.entries(args).every(([k, v]) => recordArgs(c.args)?.[k] === v)).length;
+}

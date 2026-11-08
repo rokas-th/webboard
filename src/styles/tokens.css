@@ -1,0 +1,15 @@
+:root {
+  --void: #0A0A14;
+  --panel: #10101E;
+  --panel-2: #16162A;
+  --line: #23233D;
+  --cyan: #24E0FF;
+  --cyan-dim: #158CA6;
+  --amber: #FFB000;
+  --magenta: #FF3B6B;
+  --text: #C8D3E0;
+  --dim: #5A6B85;
+  --heading: #EAF3FF;
+  --display: "Chakra Petch", -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
