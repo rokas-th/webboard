@@ -3,3 +3,5 @@ target/
 dist/
 node_modules/
 src-tauri/gen/schemas/
+.claude/agent-memory-local/
+.claude/settings.local.json
