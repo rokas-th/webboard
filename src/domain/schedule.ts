@@ -215,3 +215,48 @@ export function lagThatHolds(succ: Sched, link: Link, pred: Sched, cal: WorkCale
   while (start < earliest(succ, { ...link, lag }, pred, cal)) lag -= 1;
   return lag;
 }
+
+export interface RecalResult {
+  starts: ReadonlyMap<ItemId, Day>;
+  durs: ReadonlyMap<ItemId, number>;
+  pushed: PushResult;
+  endsChanged: number;
+  movedLater: number;
+}
+
+export function recalendar(view: SchedView, next: WorkCalendar): RecalResult {
+  const items = [...view.items.values()];
+  const durs = new Map(
+    items
+      .filter((s) => s.kind === "task" && s.lock === "done")
+      .map((s) => [s.id, Math.max(1, next.workBetween(next.snapF(s.start), endOf(s, view.cal)))] as const)
+      .filter(([id, dur]) => dur !== (view.items.get(id) as Sched).dur),
+  );
+  const starts = new Map(
+    items
+      .filter((s) => s.lock === null)
+      .map((s) => [s.id, next.snapF(s.start)] as const)
+      .filter(([id, start]) => start !== (view.items.get(id) as Sched).start),
+  );
+  const recal: SchedView = {
+    items: new Map(
+      items.map((s) => [s.id, { ...s, start: starts.get(s.id) ?? s.start, dur: durs.get(s.id) ?? s.dur }] as const),
+    ),
+    links: view.links,
+    cal: next,
+  };
+  const loops = loopLinks(view.links);
+  const led = new Set(
+    view.links
+      .filter((l) => !loops.has(linkKey(l.from, l.to)) && view.items.has(l.from) && view.items.has(l.to))
+      .map((l) => l.to),
+  );
+  const roots = items.map((s) => s.id).filter((id) => !led.has(id)).sort(byId);
+  const pushed = push(recal, roots);
+  const endsChanged = items.filter((s) => {
+    const r = recal.items.get(s.id) as Sched;
+    const m = pushed.moves.get(s.id);
+    return endOf(m === undefined ? r : { ...r, start: m }, next) !== endOf(s, view.cal);
+  }).length;
+  return { starts, durs, pushed, endsChanged, movedLater: pushed.moves.size };
+}
