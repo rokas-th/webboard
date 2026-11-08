@@ -394,6 +394,122 @@ describe("choices", () => {
     const { cs } = run(act("m1", ["a0"], [w("n:A", "Alpha one")], mac), act("p1", ["m1"], [w("n:A", "Alpha two")], iph));
     expect(cs).toEqual([]);
   });
+
+  it("iPhone moves Q into S while the Mac trashes S", () => {
+    const { cs, plan } = run(
+      act("q", ["a0"], item("Q", "task", "Quote", null, "a5", sched("2026-11-16")), mac),
+      act("m1", ["q"], [w("e:S", { k: "group", t: true })], mac),
+      act("p1", ["q"], [w("p:Q", ["S", "a1"])], iph),
+    );
+    const c = only(cs);
+    expect(c.kind).toBe("delete");
+    expect(c.units).toEqual(["e:S", "p:Q"]);
+    expect(c.sides.map((s) => s.actions)).toEqual([["m1"], ["p1"]]);
+    expect(sideText(c, "m1", plan)).toBe("“Sprint 4” stays in the Trash");
+  });
+
+  it("a device's later edit joins its earlier edit's side against a trash", () => {
+    const { cs } = run(
+      act("m1", ["a0"], [w("e:S", { k: "group", t: true })], mac),
+      act("p1", ["a0"], [w("n:R", "Final review")], iph),
+      act("p2", ["p1"], [w("s:R", sched("2026-11-25"))], iph),
+    );
+    const c = only(cs);
+    expect(c.kind).toBe("delete");
+    expect(c.units).toEqual(["e:S", "n:R", "s:R"]);
+    expect(labels(c)).toEqual(["Mac", "iPhone"]);
+    expect(c.sides.map((s) => s.actions)).toEqual([["m1"], ["p1", "p2"]]);
+    expect(c.sides[1].values.get("n:R")).toBe("Final review");
+  });
+
+  it("two devices trashing a group apart share the trash side against a third device's edit", () => {
+    const { cs } = run(
+      act("m1", ["a0"], [w("e:S", { k: "group", t: true })], mac),
+      act("p1", ["a0"], [w("e:S", { k: "group", t: true })], iph),
+      act("t1", ["a0"], [w("n:R", "Final review")], ipad),
+    );
+    const c = only(cs);
+    expect(c.kind).toBe("delete");
+    expect(c.sides.map((s) => s.actions)).toEqual([["m1", "p1"], ["t1"]]);
+    expect(labels(c)).toEqual(["Mac + iPhone", "iPad"]);
+    expect(c.sides[0].values.get("e:S")).toEqual({ k: "group", t: true });
+    expect(c.sides[1].values.get("e:S")).toEqual({ k: "group", t: false });
+  });
+
+  it("one action trashing two groups while the iPhone edits a child of each is one delete choice on both", () => {
+    const { cs } = run(
+      act("q", ["a0"], item("C", "task", "Calc", "GA", "a0", sched("2026-11-16")), mac),
+      act("m1", ["q"], [w("e:S", { k: "group", t: true }), w("e:GA", { k: "group", t: true })], mac),
+      act("p1", ["q"], [w("n:R", "Final review"), w("n:C", "Calculation")], iph),
+    );
+    const c = only(cs);
+    expect(c.kind).toBe("delete");
+    expect(c.units).toEqual(["e:GA", "e:S", "n:C", "n:R"]);
+    expect(c.sides.map((s) => s.actions)).toEqual([["m1"], ["p1"]]);
+  });
+
+  it("a three-group parent loop keeps one device's two ordered moves on one side", () => {
+    const { cs } = run(
+      act("g", ["a0"], item("GC", "group", "Test", null, "a5"), mac),
+      act("m1", ["g"], [w("p:GA", ["GB", "a0"])], mac),
+      act("m2", ["m1"], [w("p:GB", ["GC", "a0"])], mac),
+      act("p1", ["g"], [w("p:GC", ["GA", "a0"])], iph),
+    );
+    const c = only(cs);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["p:GA", "p:GB", "p:GC"]);
+    expect(c.sides.map((s) => s.actions)).toEqual([["m1", "m2"], ["p1"]]);
+    expect(labels(c)).toEqual(["Mac", "iPhone"]);
+  });
+
+  it("a clash on undoing an undo takes its items from the action the undo undid", () => {
+    const { cs, held } = run(
+      act("b", ["a0"], [w("n:A", "Alpha b")], mac),
+      act("u0", ["b"], [w("a:b", false, "undo")], { dev: "d1", meta: { undo: "b" } }),
+      act("x1", ["u0"], [w("a:u0", false, "undo")], { dev: "d1", meta: { undo: "u0" } }),
+      act("y1", ["u0"], [w("a:u0", false, "undo")], { dev: "d2", meta: { undo: "u0" } }),
+      act("y2", ["y1"], [w("a:u0", true, "undo")], { dev: "d2", meta: { redo: "y1" } }),
+    );
+    const c = only(cs);
+    expect(c.kind).toBe("activity");
+    expect(c.units).toEqual(["a:u0"]);
+    expect(c.items).toEqual(["A"]);
+    expect([...held]).toEqual(["A"]);
+  });
+
+  it("a resolution side with no value for a written schedule does not count it as moving", () => {
+    const m1 = act("m1", ["a0"], [w("s:A", sched("2026-11-17"))], mac);
+    const p1 = act("p1", ["a0"], [w("s:A", sched("2026-11-18"))], iph);
+    const meta = { resolves: only(run(m1, p1).cs).id };
+    const { cs } = run(
+      m1,
+      p1,
+      act("R1", ["m1", "p1"], [w("s:A", sched("2026-11-17"), "resolution"), ...item("Z", "task", "Zed", null, "a6", sched("2026-12-20"))], { dev: "d1", meta }),
+      act("R2", ["m1", "p1"], [w("s:A", sched("2026-11-18"), "resolution")], { dev: "d2", meta }),
+    );
+    const c = only(cs);
+    expect(c.kind).toBe("resolutions");
+    expect(labels(c)).toEqual(["“Alpha” starts 17 Nov", "“Alpha” starts 18 Nov"]);
+  });
+
+  it("a resolution side with no value for the named schedule is an error, not a missing start", () => {
+    const m1 = act("m1", ["a0"], [w("s:B", sched("2026-11-20"))], mac);
+    const p1 = act("p1", ["a0"], [w("s:B", sched("2026-11-23"))], iph);
+    const t1 = act("t1", ["a0"], [w("s:B", sched("2026-11-24"))], ipad);
+    const meta = { resolves: only(run(m1, p1, t1).cs).id };
+    const par = ["m1", "p1", "t1"];
+    const created = (start: string) => item("A2", "task", "Alpha two", null, "a6", sched(start));
+    const log = logOf(
+      a0,
+      m1,
+      p1,
+      t1,
+      act("R1", par, [w("s:B", sched("2026-11-20"), "resolution"), ...created("2026-11-20")], { dev: "d1", meta }),
+      act("R2", par, [w("s:B", sched("2026-11-20"), "resolution"), ...created("2026-11-23")], { dev: "d2", meta }),
+      act("R3", par, [w("s:B", sched("2026-11-24"), "resolution")], { dev: "d3", meta }),
+    );
+    expect(() => choices(log, projectPlan("P", log), DEVICES)).toThrow("Side R3 has no value for s:A2");
+  });
 });
 
 describe("choiceOf and sideText", () => {

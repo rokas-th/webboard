@@ -21,19 +21,24 @@ export interface Choice {
 
 interface Deletion {
   item: ItemId;
-  by: ActionId;
+  by: readonly ActionId[];
 }
 
 interface Found {
   units: readonly UnitKey[];
   parts: readonly ActionId[];
   lists: readonly (readonly ActionId[])[];
+  bound: readonly (readonly ActionId[])[];
   deletions: readonly Deletion[];
 }
 
 interface Side {
   actions: ActionId[];
 }
+
+type Start = { kind: "none" } | { kind: "start"; start: string | null };
+
+const NO_START: Start = { kind: "none" };
 
 const ITEM_UNITS: readonly UnitKind[] = ["e", "n", "s", "p", "r"];
 const CALENDAR_UNITS: readonly UnitKind[] = ["cr", "cw", "cc", "ct", "ch"];
@@ -56,15 +61,27 @@ export function fnv1a64(s: string): string {
 
 const deviceName = (devices: ReadonlyMap<DeviceId, string>, dev: DeviceId): string => devices.get(dev) ?? `Device ${dev.slice(0, 4)}`;
 
+const successor = (u: UnitKey): ItemId => {
+  const k = parseKey(u);
+  if (k.to === undefined) throw new Error(`Link ${u} has no successor`);
+  return k.to;
+};
+
 const itemsOf = (units: readonly UnitKey[]): ItemId[] =>
   unique(
     units.flatMap((u) => {
       const k = parseKey(u);
       if (ITEM_UNITS.includes(k.kind)) return [k.arg];
-      if (k.kind === "l") return [k.to as string];
+      if (k.kind === "l") return [successor(u)];
       return [];
     }),
   );
+
+const itemIn = (plan: PlanState, id: ItemId) => {
+  const it = plan.items.get(id);
+  if (it === undefined) throw new Error(`Item ${id} is not in the plan`);
+  return it;
+};
 
 const parentIn = (plan: PlanState, parent: ItemId | null): ItemId | null => {
   if (parent === null) return null;
@@ -76,18 +93,12 @@ const insideFrom = (plan: PlanState, parent: ItemId | null, x: ItemId): boolean 
   const chain = (at: ItemId | null): boolean => {
     if (at === null) return false;
     if (at === x) return true;
-    const it = plan.items.get(at);
-    if (it === undefined) throw new Error(`Item ${at} is not in the plan`);
-    return chain(it.place.parent);
+    return chain(itemIn(plan, at).place.parent);
   };
   return chain(parentIn(plan, parent));
 };
 
-const itemName = (plan: PlanState, id: ItemId): string => {
-  const it = plan.items.get(id);
-  if (it === undefined) throw new Error(`Item ${id} is not in the plan`);
-  return it.name;
-};
+const itemName = (plan: PlanState, id: ItemId): string => itemIn(plan, id).name;
 
 class Reader {
   private readonly pos: ReadonlyMap<ActionId, number>;
@@ -121,6 +132,12 @@ class Reader {
     return this.action(id).w.find((x) => x.u === u);
   }
 
+  write(id: ActionId, u: UnitKey): Write {
+    const wr = this.writeOf(id, u);
+    if (wr === undefined) throw new Error(`Action ${id} holds no write to ${u}`);
+    return wr;
+  }
+
   frontier(u: UnitKey): readonly ActionId[] {
     const known = this.fronts.get(u);
     if (known !== undefined) return known;
@@ -139,7 +156,12 @@ class Reader {
       const d = new Map<ActionId, number>();
       this.log.order().forEach((x) => {
         const par = this.action(x).par;
-        d.set(x, par.length === 0 ? 0 : 1 + Math.max(...par.map((p) => d.get(p) as number)));
+        const at = (p: ActionId): number => {
+          const got = d.get(p);
+          if (got === undefined) throw new Error(`Action ${p} has no depth before ${x}`);
+          return got;
+        };
+        d.set(x, par.length === 0 ? 0 : 1 + Math.max(...par.map(at)));
       });
       this.depths = d;
     }
@@ -151,19 +173,26 @@ class Reader {
 
 const unitClashes = (r: Reader): Found[] =>
   [...r.log.units()].flatMap(([u, s]): Found[] =>
-    s.clash === null ? [] : [{ units: [u], parts: [...s.clash], lists: [s.clash], deletions: [] }],
+    s.clash === null ? [] : [{ units: [u], parts: [...s.clash], lists: [s.clash], bound: [], deletions: [] }],
   );
 
-const trashedBy = (r: Reader, x: ItemId): ActionId | null => {
+const trashers = (r: Reader, u: UnitKey, trashing: (v: unknown) => boolean): readonly ActionId[] => {
+  const ts = r.frontier(u).filter((id) => trashing(r.write(id, u).v));
+  if (ts.length === 0) throw new Error(`No live write to ${u} trashes its item`);
+  return ts;
+};
+
+const trashedBy = (r: Reader, x: ItemId): readonly ActionId[] | null => {
   const u = key.e(x);
   const st = r.log.unit(u);
-  if (st !== undefined) return decodeAs("existence", u, st.value).t ? st.from : null;
+  if (st !== undefined) return decodeAs("existence", u, st.value).t ? trashers(r, u, (v) => decodeAs("existence", u, v).t) : null;
   const ws = r.log.writers(u);
-  if (ws.length === 0) return null;
+  if (ws.length === 0) throw new Error(`Item ${x} is in the plan but has no e: writes`);
   const create = ws[0];
-  const act = r.log.unit(key.a(create));
+  const au = key.a(create);
+  const act = r.log.unit(au);
   if (act === undefined || act.value !== false) throw new Error(`Item ${x} has no existence while its create ${create} is active`);
-  return act.from;
+  return trashers(r, au, (v) => v === false);
 };
 
 const deletions = (r: Reader): Found[] => {
@@ -174,13 +203,10 @@ const deletions = (r: Reader): Found[] => {
   const under = (x: ItemId): ItemId[] => [x, ...(kids.get(x) ?? []).flatMap(under)];
   const ids = [...r.plan.items.keys()].sort(cmp);
   return ids.flatMap((x): Found[] => {
-    const t = trashedBy(r, x);
-    if (t === null) return [];
+    const ts = trashedBy(r, x);
+    if (ts === null) return [];
     const editors = (u: UnitKey): ActionId[] =>
-      r.frontier(u).filter((e) => {
-        const wr = r.writeOf(e, u);
-        return wr !== undefined && OWNER_CAUSES.has(wr.c) && r.concurrent(e, t);
-      });
+      r.frontier(u).filter((e) => OWNER_CAUSES.has(r.write(e, u).c) && ts.every((t) => r.concurrent(e, t)));
     const inside = new Set(under(x));
     const named = [...inside].flatMap((y) => [key.n(y), key.s(y)]).map((u): [UnitKey, ActionId[]] => [u, editors(u)]);
     const placed = ids.map((y): [UnitKey, ActionId[]] => {
@@ -188,7 +214,7 @@ const deletions = (r: Reader): Found[] => {
       return [
         u,
         editors(u).filter((e) => {
-          if (y === x) return true;
+          if (inside.has(y)) return true;
           const before = r.log.valueWithout(u, new Set([e]));
           return before !== undefined && insideFrom(r.plan, decodeAs("place", u, before.value).parent, x);
         }),
@@ -197,7 +223,15 @@ const deletions = (r: Reader): Found[] => {
     const hit = [...named, ...placed].filter(([, es]) => es.length > 0);
     if (hit.length === 0) return [];
     const es = unique(hit.flatMap(([, e]) => e));
-    return [{ units: [key.e(x), ...hit.map(([u]) => u)], parts: [t, ...es], lists: [[t, ...es]], deletions: [{ item: x, by: t }] }];
+    return [
+      {
+        units: [key.e(x), ...hit.map(([u]) => u)],
+        parts: [...ts, ...es],
+        lists: hit.map(([, e]) => [...ts, ...e]),
+        bound: [ts],
+        deletions: [{ item: x, by: ts }],
+      },
+    ];
   });
 };
 
@@ -226,12 +260,15 @@ const placeLoops = (r: Reader): Found[] => {
   return cycles(parentOf).flatMap((loop): Found[] => {
     const froms = loop.map((y): [UnitKey, ActionId] => {
       const u = key.p(y);
-      return [u, (r.log.unit(u) as { from: ActionId }).from];
+      const st = r.log.unit(u);
+      if (st === undefined) throw new Error(`Unit ${u} in a parent loop has no live value`);
+      return [u, st.from];
     });
     const kept = froms.filter(([, f]) => froms.some(([, g]) => r.concurrent(f, g)));
     if (kept.length < 2) return [];
     const parts = unique(kept.map(([, f]) => f));
-    return [{ units: kept.map(([u]) => u), parts, lists: [parts], deletions: [] }];
+    const lists = parts.flatMap((f, i) => parts.slice(i + 1).filter((g) => r.concurrent(f, g)).map((g) => [f, g]));
+    return [{ units: kept.map(([u]) => u), parts, lists, bound: [], deletions: [] }];
   });
 };
 
@@ -240,7 +277,7 @@ const grouped = (found: readonly Found[]): Found[] => {
   const find = (i: number): number => (root[i] === i ? i : (root[i] = find(root[i])));
   const owner = new Map<string, number>();
   found.forEach((f, i) =>
-    [...f.parts.map((p) => "a " + p), ...f.units.map((u) => "u " + u)].forEach((k) => {
+    f.parts.forEach((k) => {
       const j = owner.get(k);
       if (j === undefined) owner.set(k, i);
       else root[find(i)] = find(j);
@@ -252,20 +289,34 @@ const grouped = (found: readonly Found[]): Found[] => {
     units: unique(fs.flatMap((f) => f.units)).sort(cmp),
     parts: unique(fs.flatMap((f) => f.parts)),
     lists: fs.flatMap((f) => f.lists),
+    bound: fs.flatMap((f) => f.bound),
     deletions: fs.flatMap((f) => f.deletions),
   }));
 };
 
-const sidesOf = (r: Reader, parts: readonly ActionId[], lists: readonly (readonly ActionId[])[]): Side[] => {
+const sidesOf = (r: Reader, g: Found): Side[] => {
   const sides: Side[] = [];
   const sideOf = new Map<ActionId, Side>();
-  const shares = (a: ActionId, b: ActionId) => lists.some((l) => l.includes(a) && l.includes(b));
-  parts.forEach((p) => {
-    const seen = parts.find((q) => sideOf.has(q) && r.log.seen(q, p));
-    const side = seen === undefined ? undefined : (sideOf.get(seen) as Side);
+  const sideAt = (q: ActionId): Side => {
+    const side = sideOf.get(q);
+    if (side === undefined) throw new Error(`Action ${q} has no side`);
+    return side;
+  };
+  const join = (side: Side, p: ActionId) => {
+    side.actions.push(p);
+    sideOf.set(p, side);
+  };
+  const shares = (a: ActionId, b: ActionId) => g.lists.some((l) => l.includes(a) && l.includes(b));
+  g.parts.forEach((p) => {
+    const mate = g.parts.find((q) => sideOf.has(q) && g.bound.some((b) => b.includes(q) && b.includes(p)));
+    if (mate !== undefined) {
+      join(sideAt(mate), p);
+      return;
+    }
+    const seen = g.parts.find((q) => sideOf.has(q) && r.log.seen(q, p));
+    const side = seen === undefined ? undefined : sideAt(seen);
     if (side !== undefined && !side.actions.some((a) => shares(a, p))) {
-      side.actions.push(p);
-      sideOf.set(p, side);
+      join(side, p);
       return;
     }
     const opened = { actions: [p] };
@@ -276,8 +327,11 @@ const sidesOf = (r: Reader, parts: readonly ActionId[], lists: readonly (readonl
 };
 
 const valueOn = (r: Reader, side: Side, others: ReadonlySet<ActionId>, u: UnitKey): { v: unknown } | null => {
-  const own = [...side.actions].reverse().find((a) => r.writeOf(a, u) !== undefined);
-  if (own !== undefined) return { v: (r.writeOf(own, u) as Write).v };
+  const own = [...side.actions]
+    .reverse()
+    .map((a) => r.writeOf(a, u))
+    .find((x) => x !== undefined);
+  if (own !== undefined) return { v: own.v };
   const st = r.log.valueWithout(u, others);
   return st === undefined ? null : { v: st.value };
 };
@@ -291,33 +345,33 @@ const kindOf = (r: Reader, g: Found): Choice["kind"] => {
   return "items";
 };
 
-const existenceFallback = (r: Reader, g: Found, side: Side, u: UnitKey): Existence | null => {
-  const d = g.deletions.find((x) => key.e(x.item) === u);
-  if (d === undefined) return null;
+const orphanExistence = (r: Reader, d: Deletion, side: Side, u: UnitKey): Existence => {
+  if (r.log.unit(u) !== undefined) throw new Error(`Side ${side.actions[0]} has no value for ${u} while ${u} is live`);
   const ws = r.log.writers(u);
+  if (ws.length === 0) throw new Error(`Delete choice on ${u} has no e: writes`);
   const last = ws[ws.length - 1];
-  const wr = r.writeOf(last, u);
-  if (wr === undefined) throw new Error(`Action ${last} holds no write to ${u}`);
-  return { k: decodeAs("existence", u, wr.v).k, t: side.actions.includes(d.by) };
+  return { k: decodeAs("existence", u, r.write(last, u).v).k, t: side.actions.some((a) => d.by.includes(a)) };
 };
 
-const startOf = (u: UnitKey, v: { v: unknown } | null): string | null => (v === null ? null : decodeAs("sched", u, v.v).start);
+const startOf = (u: UnitKey, v: { v: unknown } | null): Start => (v === null ? NO_START : { kind: "start", start: decodeAs("sched", u, v.v).start });
+
+const startTag = (s: Start): string => (s.kind === "none" ? "none" : `start ${s.start}`);
+
+const later = (a: Start, b: Start): boolean => a.kind === "start" && b.kind === "start" && a.start !== null && b.start !== null && a.start > b.start;
 
 const resultLabels = (r: Reader, g: Found, sides: readonly Side[], values: readonly ReadonlyMap<UnitKey, unknown>[]): string[] => {
   const othersOf = (i: number) => new Set(sides.filter((_, j) => j !== i).flatMap((s) => s.actions));
-  const startIn = (i: number, u: UnitKey): string | null => (values[i].has(u) ? startOf(u, { v: values[i].get(u) }) : null);
-  const named = g.units.find((u) => parseKey(u).kind === "s" && new Set(sides.map((_, i) => startIn(i, u))).size > 1);
+  const startIn = (i: number, u: UnitKey): Start => startOf(u, values[i].has(u) ? { v: values[i].get(u) } : null);
+  const named = g.units.find((u) => parseKey(u).kind === "s" && new Set(sides.map((_, i) => startTag(startIn(i, u)))).size > 1);
   if (named === undefined) return sides.map((s) => r.action(s.actions[0]).lbl);
   const item = parseKey(named).arg;
   const written = unique(g.parts.flatMap((p) => r.action(p).w.map((x) => x.u))).filter((u) => parseKey(u).kind === "s" && u !== named);
   const starts = written.map((u) => sides.map((s, i) => startOf(u, valueOn(r, s, othersOf(i), u))));
   return sides.map((_, i) => {
     const start = startIn(i, named);
-    const head = start === null ? `“${itemName(r.plan, item)}” has no start` : `“${itemName(r.plan, item)}” starts ${fmtShort(start)}`;
-    const n = starts.filter((row) => {
-      const mine = row[i];
-      return mine !== null && row.some((other, j) => j !== i && other !== null && mine > other);
-    }).length;
+    if (start.kind === "none") throw new Error(`Side ${sides[i].actions[0]} has no value for ${named}`);
+    const head = start.start === null ? `“${itemName(r.plan, item)}” has no start` : `“${itemName(r.plan, item)}” starts ${fmtShort(start.start)}`;
+    const n = starts.filter((row) => row.some((other, j) => j !== i && later(row[i], other))).length;
     return n === 0 ? head : n === 1 ? `${head}, 1 item moves` : `${head}, ${n} items move`;
   });
 };
@@ -338,17 +392,24 @@ const deviceLabels = (r: Reader, sides: readonly Side[], devices: ReadonlyMap<De
   return devs.map((ds, i) =>
     ds
       .map((d) => {
-        const best = deepest.get(d) as number;
+        const best = deepest.get(d);
+        if (best === undefined) throw new Error(`Device ${d} has no deepest side`);
         return best === -1 || best === i ? deviceName(devices, d) : `${deviceName(devices, d)} — earlier copy`;
       })
       .join(" + "),
   );
 };
 
+const touched = (r: Reader, id: ActionId): UnitKey[] =>
+  r.action(id).w.flatMap((x) => {
+    const k = parseKey(x.u);
+    return k.kind === "a" ? touched(r, k.arg) : [x.u];
+  });
+
 const build = (r: Reader, found: Found, devices: ReadonlyMap<DeviceId, string>): Choice => {
   const parts = r.byOrder(found.parts);
   const g: Found = { ...found, parts };
-  const sides = sidesOf(r, parts, g.lists);
+  const sides = sidesOf(r, g);
   const kind = kindOf(r, g);
   const values = sides.map((s, i) => {
     const others = new Set(sides.filter((_, j) => j !== i).flatMap((o) => o.actions));
@@ -356,15 +417,15 @@ const build = (r: Reader, found: Found, devices: ReadonlyMap<DeviceId, string>):
       g.units.flatMap((u): [UnitKey, unknown][] => {
         const got = valueOn(r, s, others, u);
         if (got !== null) return [[u, got.v]];
-        const fallback = existenceFallback(r, g, s, u);
-        return fallback === null ? [] : [[u, fallback]];
+        const d = g.deletions.find((x) => key.e(x.item) === u);
+        return d === undefined ? [] : [[u, orphanExistence(r, d, s, u)]];
       }),
     );
   });
   const labels = kind === "resolutions" ? resultLabels(r, g, sides, values) : deviceLabels(r, sides, devices);
   const items =
     kind === "activity"
-      ? itemsOf(g.units.flatMap((u) => r.action(parseKey(u).arg).w.map((x) => x.u)))
+      ? itemsOf(g.units.flatMap((u) => touched(r, parseKey(u).arg)))
       : itemsOf(g.units);
   return {
     id: fnv1a64([...parts].sort().join(",")),
@@ -391,10 +452,10 @@ export function heldItems(choices: readonly Choice[], plan: PlanState): Readonly
         ...c.units.flatMap((u) => {
           const k = parseKey(u);
           if (k.kind === "s") return [k.arg];
-          if (k.kind === "l") return [k.to as string];
+          if (k.kind === "l") return [successor(u)];
           return [];
         }),
-        ...(c.kind === "activity" ? c.items.filter((i) => (plan.items.get(i)?.schedule ?? null) !== null) : []),
+        ...(c.kind === "activity" ? c.items.filter((i) => plan.items.has(i)).filter((i) => itemIn(plan, i).schedule !== null) : []),
       ]),
   );
 }
