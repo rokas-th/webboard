@@ -121,6 +121,11 @@ export class LogState {
     return [...(this.table.get(u)?.writers ?? [])];
   }
 
+  frontier(u: UnitKey): readonly ActionId[] {
+    this.usable();
+    return [...(this.table.get(u)?.frontier ?? [])];
+  }
+
   fork(): LogState {
     this.usable();
     const table = new Map(

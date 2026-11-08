@@ -3,9 +3,9 @@ import { newId } from "../log/ids";
 import type { LogState } from "../log/state";
 import type { Action, ActionId, UnitKey, Write } from "../log/types";
 import { projectPlan } from "../plan/project";
-import { key, parseKey } from "../plan/units";
+import { decodeAs, key, parseKey, type UnitKind } from "../plan/units";
 import { previewOf } from "./build";
-import { deviceName, q, toastOf } from "./copy";
+import { deviceName, linkText, q, toastOf } from "./copy";
 import { Refused, type Built, type Ctx } from "./intents";
 
 export interface Offer {
@@ -23,8 +23,8 @@ export class OfferRefused extends Refused {
   }
 }
 
-const ITEM_KINDS: ReadonlySet<string> = new Set(["e", "n", "s", "p", "r"]);
-const CALENDAR_KINDS: ReadonlySet<string> = new Set(["cr", "cw", "cc", "ct", "ch"]);
+const ITEM_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["e", "n", "s", "p", "r"]);
+const CALENDAR_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["cr", "cw", "cc", "ct", "ch"]);
 const ORPHAN_UNITS = [key.n, key.s, key.p] as const;
 
 const targetOf = (ctx: Ctx, target: ActionId, what: "undone" | "reverted"): Action => {
@@ -37,11 +37,7 @@ const targetOf = (ctx: Ctx, target: ActionId, what: "undone" | "reverted"): Acti
 const isHistoryAction = (a: Action): boolean =>
   a.meta?.undo !== undefined || a.meta?.redo !== undefined || a.meta?.revert !== undefined;
 
-const frontierHolds = (log: LogState, u: UnitKey, id: ActionId): boolean => {
-  const live = log.writers(u).filter((x) => log.active(x));
-  const front = live.reduceRight<ActionId[]>((acc, x) => (acc.some((f) => log.seen(x, f)) ? acc : [x, ...acc]), []);
-  return front.includes(id);
-};
+const frontierHolds = (log: LogState, u: UnitKey, id: ActionId): boolean => log.frontier(u).includes(id);
 
 const nameOf = (plans: readonly PlanState[], id: ItemId): string => {
   const found = plans.map((p) => p.items.get(id)).find((it) => it !== undefined);
@@ -49,13 +45,12 @@ const nameOf = (plans: readonly PlanState[], id: ItemId): string => {
   return found.name;
 };
 
-const baselineName = (plans: readonly PlanState[], id: string, written: unknown): string => {
+const baselineName = (plans: readonly PlanState[], w: Write, id: string): string => {
   const found = plans.map((p) => p.baselines.get(id)).find((b) => b !== undefined);
   if (found !== undefined) return found.name;
-  if (written !== null && typeof written === "object" && typeof (written as { name?: unknown }).name === "string") {
-    return (written as { name: string }).name;
-  }
-  throw new Error(`No baseline ${id}`);
+  const written = decodeAs("baseline", w.u, w.v);
+  if (written === null) throw new Error(`No baseline ${id}`);
+  return written.name;
 };
 
 interface Subject {
@@ -71,9 +66,9 @@ const subjectOf = (plans: readonly PlanState[], w: Write): Subject => {
   if (k.kind === "pn") return { id: "pn", item: null, text: "The plan name" };
   if (k.kind === "l") {
     if (k.to === undefined) throw new Error(`Link ${w.u} has no successor`);
-    return { id: w.u, item: null, text: `The link ${q(nameOf(plans, k.arg))} → ${q(nameOf(plans, k.to))}` };
+    return { id: w.u, item: null, text: `The link ${linkText(nameOf(plans, k.arg), nameOf(plans, k.to))}` };
   }
-  if (k.kind === "b") return { id: w.u, item: null, text: `Baseline ${q(baselineName(plans, k.arg, w.v))}` };
+  if (k.kind === "b") return { id: w.u, item: null, text: `Baseline ${q(baselineName(plans, w, k.arg))}` };
   throw new Error(`No subject for ${w.u}`);
 };
 
@@ -85,8 +80,12 @@ const fromDevice = (ctx: Ctx, log: LogState, u: UnitKey): string => {
   return deviceName(ctx.devices, by.dev);
 };
 
-const orphanUnit = (log: LogState, item: ItemId): UnitKey | undefined =>
-  log.unit(key.e(item)) !== undefined ? undefined : ORPHAN_UNITS.map((f) => f(item)).find((u) => log.unit(u) !== undefined);
+const trashedBy = (log: LogState, a: Action, item: ItemId): UnitKey | undefined => {
+  if (!a.w.some((w) => w.u === key.e(item)) || log.unit(key.e(item)) !== undefined) return undefined;
+  const u = ORPHAN_UNITS.map((f) => f(item)).find((x) => log.unit(x) !== undefined);
+  if (u === undefined) throw new Error(`Item ${item} has no live unit after ${a.id}`);
+  return u;
+};
 
 const keptLines = (ctx: Ctx, fork: LogState, after: PlanState, flipped: readonly ActionId[]): string[] => {
   const plans = [after, ctx.view.plan];
@@ -101,7 +100,7 @@ const keptLines = (ctx: Ctx, fork: LogState, after: PlanState, flipped: readonly
         if (frontierHolds(holder, w.u, x)) return;
         const s = subjectOf(plans, w);
         if (lines.has(s.id)) return;
-        const orphan = s.item === null ? undefined : orphanUnit(fork, s.item);
+        const orphan = s.item === null ? undefined : trashedBy(fork, a, s.item);
         lines.set(
           s.id,
           orphan === undefined
@@ -137,10 +136,13 @@ const labelOf = (ctx: Ctx, target: Action): string => {
 
 export function buildUndo(ctx: Ctx, target: ActionId): Built {
   const a = targetOf(ctx, target, "undone");
+  if (!ctx.log.active(target)) throw new Error(`Action ${target} is already undone`);
   if (!isHistoryAction(a)) return built(ctx, [{ u: key.a(target), v: false, c: "undo" }], labelOf(ctx, a), { undo: target });
-  const w = a.w
-    .filter((x) => parseKey(x.u).kind === "a")
-    .map((x): Write => ({ u: x.u, v: ctx.log.valueWithout(x.u, new Set([target]))?.value ?? true, c: "undo" }));
+  const stray = a.w.find((x) => parseKey(x.u).kind !== "a");
+  if (a.w.length === 0 || stray !== undefined) {
+    throw new Error(`History action ${target} writes ${stray?.u ?? "nothing"}; expected only a: units`);
+  }
+  const w = a.w.map((x): Write => ({ u: x.u, v: ctx.log.valueWithout(x.u, new Set([target]))?.value ?? true, c: "undo" }));
   return built(ctx, w, labelOf(ctx, a), { redo: target });
 }
 

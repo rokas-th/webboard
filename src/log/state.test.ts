@@ -217,6 +217,14 @@ describe("LogState", () => {
     expect(log.writers("x")).toEqual(["a", "b"]);
   });
 
+  it("reports a unit's frontier: both writes made apart, then only a later write that saw both", () => {
+    const log = logOf(act("a", [], [["x", 1]]), act("b", [], [["x", 2]], "d2"));
+    expect(log.frontier("x")).toEqual(["a", "b"]);
+    log.add([act("c", ["a", "b"], [["x", 3]])]);
+    expect(log.frontier("x")).toEqual(["c"]);
+    expect(log.frontier("y")).toEqual([]);
+  });
+
   it("clashes owner writes made apart, taking the later value in replay order", () => {
     const log = logOf(act("a", [], [["x", 1]]), act("b", [], [["x", 2]], "d2"));
     expect(log.unit("x")).toEqual({ value: 2, from: "b", clash: ["a", "b"] });

@@ -52,6 +52,7 @@ const on = (ctx: Ctx, dev: string): Ctx => ctxOf(ctx.log, dev, TODAY, ctx.device
 const add = (ctx: Ctx, ...actions: Action[]): Ctx => {
   const delta = ctx.log.add(actions);
   expect(delta.refused).toEqual([]);
+  expect(ctx.log.pending).toEqual([]);
   return ctxOf(ctx.log, ctx.dev, TODAY, ctx.devices);
 };
 
@@ -70,9 +71,30 @@ const refusedWith = (ctx: Ctx, build: () => unknown, message: string): void => {
   } catch (e) {
     caught = e;
   }
-  expect(caught).toBeInstanceOf(Refused);
-  expect((caught as Refused).message).toBe(message);
+  if (!(caught instanceof Refused)) throw new Error(`expected a Refused, caught ${String(caught)}`);
+  expect(caught.message).toBe(message);
   expect([...ctx.log.order()]).toEqual(before);
+};
+
+const plainError = (ctx: Ctx, build: () => unknown, message: string): void => {
+  const before = [...ctx.log.order()];
+  let caught: unknown = null;
+  try {
+    build();
+  } catch (e) {
+    caught = e;
+  }
+  if (!(caught instanceof Error)) throw new Error(`expected an Error, caught ${String(caught)}`);
+  expect(caught).not.toBeInstanceOf(Refused);
+  expect(caught.message).toBe(message);
+  expect([...ctx.log.order()]).toEqual(before);
+};
+
+const BASELINE = (name: string): unknown => ({ name, at: "2026-11-09", dates: { A: { start: "2026-11-18", dur: 3 } } });
+
+const keptAfterOverride = (base: readonly Action[], u: string, mine: unknown, theirs: unknown): readonly string[] => {
+  const ctx = ctxFrom(...base, act("m1", [base.length === 0 ? "a0" : base[base.length - 1].id], [w(u, mine)], mac), act("m2", ["m1"], [w(u, theirs)], iph));
+  return buildUndo(ctx, "m1").preview.kept;
 };
 
 const rng = (seed: number): (() => number) => {
@@ -253,12 +275,48 @@ describe("buildUndo", () => {
     expect(ctx.view.choices.map((c) => [c.kind, c.units])).toEqual([["delete", ["e:X", "n:X"]]]);
   });
 
+  it("names the calendar, the plan name, a link and a baseline when another device changed them since", () => {
+    expect(keptAfterOverride([], "cw", [1, 2, 3, 4], [1, 2, 3])).toEqual(["The calendar was changed since on the iPhone — kept"]);
+    expect(keptAfterOverride([], "pn", "Plan 2", "Plan 3")).toEqual(["The plan name was changed since on the iPhone — kept"]);
+    expect(keptAfterOverride([], "l:A>Q", ["FS", 1], ["SS", 1])).toEqual(["The link “A” → “Q” was changed since on the iPhone — kept"]);
+    const saved = act("bs", ["a0"], [w("b:B1", BASELINE("Q2"))], mac);
+    expect(keptAfterOverride([saved], "b:B1", BASELINE("Q3"), BASELINE("Q4"))).toEqual(["Baseline “Q4” was changed since on the iPhone — kept"]);
+  });
+
+  it("an item already in the Trash whose rename was overridden is kept, not moved to the Trash", () => {
+    const ctx = ctxFrom(
+      act("c", ["a0"], item("X", "X", "a3", sched("2026-11-17", 2)), mac),
+      act("r1", ["c"], [w("n:X", "Y1")], mac),
+      act("r2", ["r1"], [w("n:X", "Y2")], iph),
+      act("u0", ["r2"], [w("a:c", false, "undo")], { dev: "d1", meta: { undo: "c" } }),
+    );
+    expect(ctx.view.plan.items.get("X")?.trashed).toBe(true);
+    expect(buildUndo(ctx, "r1").preview.kept).toEqual(["“Y2” was changed since on the iPhone — kept"]);
+  });
+
+  it("refuses to undo an action that is already undone, building nothing", () => {
+    let ctx = ctxFrom(act("b", ["a0"], [w("n:A", "B")], mac));
+    const u = buildUndo(ctx, "b");
+    ctx = applied(ctx, u);
+    plainError(ctx, () => buildUndo(ctx, "b"), "Action b is already undone");
+    ctx = applied(ctx, buildRevert(ctx, u.action.id));
+    plainError(ctx, () => buildUndo(ctx, u.action.id), `Action ${u.action.id} is already undone`);
+  });
+
+  it("refuses a history action that writes anything but activity", () => {
+    const ctx = ctxFrom(
+      act("b", ["a0"], [w("n:A", "B")], mac),
+      act("h", ["b"], [w("a:b", false, "undo"), w("n:A", "Z")], { dev: "d1", meta: { undo: "b" } }),
+    );
+    plainError(ctx, () => buildUndo(ctx, "h"), "History action h writes n:A; expected only a: units");
+  });
+
   it("refuses to undo the plan's first action and names an unknown one", () => {
     const ctx = ctxFrom();
     refusedWith(ctx, () => buildUndo(ctx, "a0"), "The action that created this plan cannot be undone.");
     const imported = ctxOf(logOf(act("i0", [], ROOT, { meta: { imported: "Launch.webboard" } })), "d1", TODAY);
     refusedWith(imported, () => buildUndo(imported, "i0"), "The action that created this plan cannot be undone.");
-    expect(() => buildUndo(ctx, "x9")).toThrow(new Error("Action x9 is not in this plan"));
+    plainError(ctx, () => buildUndo(ctx, "x9"), "Action x9 is not in this plan");
   });
 });
 
@@ -333,7 +391,7 @@ describe("buildRevert", () => {
     refusedWith(ctx, () => buildRevert(ctx, "a0"), "The action that created this plan cannot be reverted.");
     const imported = ctxOf(logOf(act("i0", [], ROOT, { meta: { imported: "Launch.webboard" } })), "d1", TODAY);
     refusedWith(imported, () => buildRevert(imported, "i0"), "The action that created this plan cannot be reverted.");
-    expect(() => buildRevert(ctx, "x9")).toThrow(new Error("Action x9 is not in this plan"));
+    plainError(ctx, () => buildRevert(ctx, "x9"), "Action x9 is not in this plan");
   });
 });
 
@@ -349,8 +407,8 @@ describe("undoOffer", () => {
     ctx = add(on(phone, "d1"), redo.action, revert.action);
     expect(ctx.view.choices.map((c) => [c.kind, c.units])).toEqual([["activity", ["a:b"]]]);
     const choice = ctx.view.choices[0];
-    const other = choice.sides.find((s) => !s.actions.includes(revert.action.id));
-    expect(undoOffer(ctx, revert.action.id)).toEqual({ choice: choice.id, side: other?.key });
+    expect(choice.sides.map((s) => s.actions.includes(revert.action.id))).toEqual([true, false]);
+    expect(undoOffer(ctx, revert.action.id)).toEqual({ choice: choice.id, side: choice.sides[1].key });
     expect(undoOffer(ctx, "b")).toBeNull();
   });
 

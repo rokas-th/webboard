@@ -51,7 +51,7 @@ const STATUS: Readonly<Record<Status, string>> = { done: "done", doing: "in prog
 
 const HORIZON: Readonly<Record<Horizon, string>> = { now: "Now", next: "Next", later: "Later" };
 
-const linkText = (from: string, to: string): string => `${q(from)} → ${q(to)}`;
+export const linkText = (from: string, to: string): string => `${q(from)} → ${q(to)}`;
 
 export const label = {
   moved: (what: string, days: number): string =>
