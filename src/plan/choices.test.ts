@@ -8,8 +8,6 @@ import type { Action, Cause, Write } from "../log/types";
 import { act } from "../test/act";
 import { FIXTURE_DEVICES } from "../test/planCtx";
 
-const DEVICES = FIXTURE_DEVICES;
-
 const mac = { dev: "d1" };
 const iph = { dev: "d2" };
 const ipad = { dev: "d3" };
@@ -50,7 +48,7 @@ const logOf = (...actions: Action[]): LogState => {
 const run = (...actions: Action[]) => {
   const log = logOf(a0, ...actions);
   const plan = projectPlan("P", log);
-  const cs = choices(log, plan, DEVICES);
+  const cs = choices(log, plan, FIXTURE_DEVICES);
   return { log, plan, cs, held: heldItems(cs, plan) };
 };
 
@@ -284,7 +282,7 @@ describe("choices", () => {
       w("s:Ship", s("2026-12-14", 1), "push"),
     ], iph);
     const before = logOf(base, m1, p1);
-    const c = only(choices(before, projectPlan("P", before), DEVICES));
+    const c = only(choices(before, projectPlan("P", before), FIXTURE_DEVICES));
     expect(c.kind).toBe("items");
     const resolves = { resolves: c.id };
     const r1 = act("R1", ["m1", "p1"], [w("s:PFF", s("2026-11-25", 3), "resolution")], { dev: "d1", meta: resolves });
@@ -296,7 +294,7 @@ describe("choices", () => {
       w("s:Ship", s("2026-12-03", 1), "resolution"),
     ], { dev: "d2", meta: resolves });
     const log = logOf(base, m1, p1, r1, r2);
-    const rc = only(choices(log, projectPlan("P", log), DEVICES));
+    const rc = only(choices(log, projectPlan("P", log), FIXTURE_DEVICES));
     expect(rc.kind).toBe("resolutions");
     expect(rc.units).toEqual(["s:PFF"]);
     expect(rc.sides.map((x) => x.key)).toEqual(["R1", "R2"]);
@@ -346,7 +344,7 @@ describe("choices", () => {
     ];
     const reference = (() => {
       const log = logOf(...all);
-      return choices(log, projectPlan("P", log), DEVICES);
+      return choices(log, projectPlan("P", log), FIXTURE_DEVICES);
     })();
     const c = only(reference);
     expect(c.kind).toBe("items");
@@ -358,7 +356,7 @@ describe("choices", () => {
         const log = new LogState(planRules);
         order.forEach((a) => expect(log.add([a]).refused).toEqual([]));
         expect(log.pending).toEqual([]);
-        expect(choices(log, projectPlan("P", log), DEVICES)).toEqual(reference);
+        expect(choices(log, projectPlan("P", log), FIXTURE_DEVICES)).toEqual(reference);
       }),
       { numRuns: 20 },
     );
@@ -519,7 +517,7 @@ describe("choices", () => {
       act("R2", par, [w("s:B", sched("2026-11-20"), "resolution"), ...created("2026-11-23")], { dev: "d2", meta }),
       act("R3", par, [w("s:B", sched("2026-11-24"), "resolution")], { dev: "d3", meta }),
     );
-    expect(() => choices(log, projectPlan("P", log), DEVICES)).toThrow("Side R3 has no value for s:A2");
+    expect(() => choices(log, projectPlan("P", log), FIXTURE_DEVICES)).toThrow("Side R3 has no value for s:A2");
   });
 });
 

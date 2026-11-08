@@ -1,9 +1,9 @@
 import { generateKeyBetween } from "fractional-indexing";
-import { regionKey, workCalendar, type Calendar, type Closure, type Tuning } from "../domain/calendar";
+import { regionKey, workCalendar, type Calendar, type Closure, type Tuning, type WorkCalendar } from "../domain/calendar";
 import { toDay, toIso, type Day, type IsoDate } from "../domain/dates";
 import { derive, schedView, type Derived } from "../domain/derive";
 import { linkKey, type Item, type ItemId, type Link, type PlanState, type Schedule } from "../domain/model";
-import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type PushResult, type RecalResult, type Sched } from "../domain/schedule";
+import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type PushResult, type RecalResult, type Sched, type SchedView, type Stop } from "../domain/schedule";
 import { newId } from "../log/ids";
 import type { Action, DeviceId, SessionId, UnitKey, Write } from "../log/types";
 import { heldItems } from "../plan/choices";
@@ -24,6 +24,7 @@ interface Draft {
   own: readonly Write[];
   roots: readonly ItemId[];
   newNotes: readonly ItemId[];
+  ownStarts?: readonly UnitKey[];
   label(d: Derivation, preview: Preview): string;
   sentences: readonly string[];
 }
@@ -90,8 +91,10 @@ const schedWrite = (id: ItemId, s: Schedule): Write => own(key.s(id), codec.sche
 
 const hasPredecessor = (plan: PlanState, id: ItemId): boolean => liveLinks(plan).some((l) => l.to === id);
 
-const descendants = (plan: PlanState, group: ItemId): Item[] =>
-  childrenOf(plan, group).flatMap((c) => [c, ...(c.kind === "group" ? descendants(plan, c.id) : [])]);
+const untrashedDescendants = (plan: PlanState, group: ItemId): Item[] =>
+  childrenOf(plan, group)
+    .filter((c) => !c.trashed)
+    .flatMap((c) => [c, ...(c.kind === "group" ? untrashedDescendants(plan, c.id) : [])]);
 
 const isInside = (plan: PlanState, at: ItemId | null, ancestor: ItemId): boolean =>
   at !== null && (at === ancestor || isInside(plan, itemOf(plan, at).place.parent, ancestor));
@@ -118,6 +121,25 @@ const pushed = (ctx: Ctx, d: Derivation): string =>
         d.push.moves.size,
         d.push.stopped.map((s) => ({ reason: s.reason, name: nameOf(ctx, s.id) })),
       );
+
+const storedStart = (d: Derivation, id: ItemId): IsoDate | null => {
+  const u = key.s(id);
+  const x = d.writes.find((y) => y.u === u);
+  if (x === undefined) throw new Error(`No write to ${u} in this action`);
+  return codec.decodeAs("sched", u, x.v).start;
+};
+
+const resnapped = (x: Write, cal: WorkCalendar): Write => {
+  const sc = codec.decodeAs("sched", x.u, x.v);
+  if (sc.start === null) throw new Error(`Own start ${x.u} has no start to snap`);
+  return { ...x, v: codec.sched.enc({ ...sc, start: toIso(cal.snapF(toDay(sc.start))) }) };
+};
+
+const linkEnd = (view: SchedView, l: Link, id: ItemId): Sched => {
+  const s = view.items.get(id);
+  if (s === undefined) throw new Error(`Link ${linkKey(l.from, l.to)}: ${id} is not scheduled`);
+  return s;
+};
 
 const plain = (text: string, sentences: readonly string[] = []) => ({ label: () => text, sentences });
 
@@ -215,7 +237,7 @@ const fixDraft = (ctx: Ctx, conflict: Conflict, how: "push" | "shorten" | "remov
     };
   }
   const view = schedView(plan, ctx.view.held);
-  const lag = lagThatHolds(view.items.get(l.to) as Sched, l, view.items.get(l.from) as Sched, view.cal);
+  const lag = lagThatHolds(linkEnd(view, l, l.to), l, linkEnd(view, l, l.from), view.cal);
   return {
     own: [own(key.l(l.from, l.to), codec.link.enc({ type: l.type, lag }))],
     roots: [],
@@ -233,21 +255,26 @@ const scheduleDraft = (ctx: Ctx, id: ItemId, set: Partial<Schedule>): Draft => {
     throw new Refused(refusal.progress);
   }
   if (set.status !== undefined && it.kind === "milestone" && hasPredecessor(plan, it.id)) throw new Refused(refusal.milestoneStatus(it.name));
+  const status = set.status ?? sc.status;
+  if (status === "done" && set.progress !== undefined && set.progress !== 100) {
+    throw new Refused(set.status === "done" ? refusal.doneProgress : refusal.doneSetProgress(it.name));
+  }
   const cal = workCalendar(plan.calendar);
   const start = set.start === undefined ? sc.start : set.start === null ? null : toIso(cal.snapF(toDay(set.start)));
-  const status = set.status ?? sc.status;
   const next: Schedule = {
     start,
     dur: set.dur ?? sc.dur,
     status,
-    progress: status === "done" ? 100 : (set.progress ?? sc.progress),
+    progress: set.progress ?? (status === "done" ? 100 : sc.progress),
     horizon: set.horizon ?? sc.horizon,
   };
   const fields = (Object.keys(set) as (keyof Schedule)[]).filter((k) => set[k] !== undefined);
-  const one = (): string => {
+  const one = (d: Derivation): string => {
     switch (fields[0]) {
-      case "start":
-        return next.start === null ? label.unscheduled(it.name) : label.scheduled(it.name, fmtShort(next.start));
+      case "start": {
+        const stored = storedStart(d, it.id);
+        return stored === null ? label.unscheduled(it.name) : label.scheduled(it.name, fmtShort(stored));
+      }
       case "dur":
         return label.resized(it.name, next.dur);
       case "status":
@@ -263,7 +290,9 @@ const scheduleDraft = (ctx: Ctx, id: ItemId, set: Partial<Schedule>): Draft => {
     own: [schedWrite(it.id, next)],
     roots: moves ? [it.id] : [],
     newNotes: [],
-    ...withPush(ctx, fields.length === 1 ? one() : label.changed(it.name)),
+    ownStarts: start === null || set.start === undefined ? [] : [key.s(it.id)],
+    label: (d) => (fields.length === 1 ? one(d) : label.changed(it.name)) + pushed(ctx, d),
+    sentences: [],
   };
 };
 
@@ -291,6 +320,7 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
         own: [...base, schedWrite(id, { start, dur, status: "todo", progress: 0, horizon: "later" })],
         roots: [],
         newNotes: [id],
+        ownStarts: start === null ? [] : [key.s(id)],
         ...plain(text),
       };
     }
@@ -311,8 +341,8 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
         intent.items.flatMap((id) => {
           const it = live(plan, id);
           if (it.kind === "group") {
-            return descendants(plan, it.id)
-              .filter((d) => d.kind !== "group" && !d.trashed && scheduleOf(d).start !== null)
+            return untrashedDescendants(plan, it.id)
+              .filter((d) => d.kind !== "group" && scheduleOf(d).start !== null)
               .map((d) => d.id);
           }
           datedStart(it);
@@ -322,7 +352,9 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
       const cal = workCalendar(plan.calendar);
       const writes = moved.map((id) => {
         const sc = scheduleOf(itemOf(plan, id));
-        const start = intent.days === 0 ? (sc.start as IsoDate) : toIso(cal.addWork(cal.snapF(toDay(sc.start as IsoDate)), intent.days));
+        const from = sc.start;
+        if (from === null) throw new Error(`Moved item ${id} has no start`);
+        const start = intent.days === 0 ? from : toIso(cal.addWork(cal.snapF(toDay(from)), intent.days));
         return schedWrite(id, { ...sc, start });
       });
       const what = intent.items.length === 1 ? q(itemOf(plan, intent.items[0]).name) : items(moved.length);
@@ -373,7 +405,7 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
       return {
         own: writes,
         ...none,
-        ...(trash ? plain(label.trashed(what), [sentence.trashUndo]) : plain(label.restored(what))),
+        ...(trash ? plain(label.trashed(what), [ids.length === 1 ? sentence.trashUndo : sentence.trashUndoMany]) : plain(label.restored(what))),
       };
     }
     case "link": {
@@ -442,62 +474,66 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
   }
 };
 
-const newHolidayYears = (ctx: Ctx, writes: readonly Write[]): Write[] => {
-  const after = applyWrites(ctx.view.plan, writes);
+const isCalendarWrite = (x: Write): boolean => CALENDAR_UNITS.has(parseKey(x.u).kind);
+
+const newHolidayYears = (ctx: Ctx, ownWrites: readonly Write[], writes: readonly Write[]): Write[] => {
+  const plan = ctx.view.plan;
+  const after = applyWrites(plan, writes);
   const region = after.calendar.region;
   if (region === null) return [];
-  const before = new Set(ctx.view.derived.missingYears);
+  const before = new Set(derive(applyWrites(plan, ownWrites.filter(isCalendarWrite)), ctx.view.held, ctx.view.today).missingYears);
   return derive(after, ctx.view.held, ctx.view.today)
-    .missingYears.filter((y) => !before.has(y) && !writes.some((x) => x.u === key.ch(y)))
+    .missingYears.filter((y) => !before.has(y) && !ownWrites.some((x) => x.u === key.ch(y)))
     .flatMap((y) => {
       const cached = ctx.cachedHolidays(regionKey(region), y);
       return cached === null ? [] : [own(key.ch(y), codec.holidayYear.enc(cached))];
     });
 };
 
-const startDay = (u: UnitKey, v: unknown): Day | null => {
-  const start = codec.decodeAs("sched", u, v).start;
-  return start === null ? null : toDay(start);
-};
+const mergedDerived = (ws: readonly Write[]): Map<UnitKey, Write> =>
+  ws.reduce((m, x) => {
+    const earlier = m.get(x.u);
+    return m.set(x.u, earlier === undefined ? x : planRules.mergeDerived(x.u, earlier, x));
+  }, new Map<UnitKey, Write>());
 
 export function withDerived(ctx: Ctx, ownWrites: readonly Write[], roots: readonly ItemId[], held: ReadonlySet<ItemId>): Derivation {
   const plan = ctx.view.plan;
   const after = applyWrites(plan, ownWrites);
-  const recal = ownWrites.some((x) => CALENDAR_UNITS.has(parseKey(x.u).kind))
-    ? recalendar(schedView(plan, held), workCalendar(after.calendar))
-    : null;
+  const ownUnits = new Map(ownWrites.map((x): [UnitKey, Write] => [x.u, x]));
+  const recal = ownWrites.some(isCalendarWrite) ? recalendar(schedView(plan, held), workCalendar(after.calendar)) : null;
   const pushResult = roots.length > 0 ? push(schedView(after, held), roots) : null;
   const derivedWrite = (id: ItemId, start: Day | undefined, dur: number | undefined, c: Write["c"]): Write => {
+    const u = key.s(id);
     const sc = scheduleOf(itemOf(after, id));
-    if (sc.start === null && start === undefined) throw new Error(`Derived write to unscheduled ${id}`);
-    return { u: key.s(id), v: codec.sched.enc({ ...sc, start: start === undefined ? sc.start : toIso(start), dur: dur ?? sc.dur }), c };
+    if (sc.start === null) {
+      throw new Error(ownUnits.has(u) ? `Derived write to ${u}, which this action unschedules` : `Derived write to unscheduled ${id}`);
+    }
+    return { u, v: codec.sched.enc({ ...sc, start: start === undefined ? sc.start : toIso(start), dur: dur ?? sc.dur }), c };
   };
-  const fromRecal = new Map<ItemId, { start?: Day; dur?: number; c: Write["c"] }>();
-  if (recal !== null) {
-    recal.starts.forEach((start, id) => fromRecal.set(id, { start, c: "recalendar" }));
-    recal.durs.forEach((dur, id) => fromRecal.set(id, { ...fromRecal.get(id), dur, c: fromRecal.get(id)?.c ?? "recalendar" }));
-    recal.pushed.moves.forEach((start, id) => fromRecal.set(id, { ...fromRecal.get(id), start, c: "push" }));
-  }
-  const derived = new Map<UnitKey, Write>(
-    [...fromRecal].map(([id, r]): [UnitKey, Write] => [key.s(id), derivedWrite(id, r.start, r.dur, r.c)]),
-  );
-  pushResult?.moves.forEach((start, id) => {
-    const w = derivedWrite(id, start, undefined, "push");
-    const earlier = derived.get(w.u);
-    derived.set(w.u, earlier === undefined ? w : planRules.mergeDerived(w.u, earlier, w));
-  });
+  const recalWrites: Write[] =
+    recal === null
+      ? []
+      : [
+          ...[...recal.starts].map(([id, start]) => derivedWrite(id, start, recal.durs.get(id), "recalendar")),
+          ...[...recal.durs].filter(([id]) => !recal.starts.has(id)).map(([id, dur]) => derivedWrite(id, undefined, dur, "recalendar")),
+          ...[...recal.pushed.moves].map(([id, start]) => derivedWrite(id, start, recal.durs.get(id), "push")),
+        ];
+  const pushWrites = pushResult === null ? [] : [...pushResult.moves].map(([id, start]) => derivedWrite(id, start, undefined, "push"));
+  const pushedOwn = new Map(pushWrites.filter((x) => ownUnits.has(x.u)).map((x): [UnitKey, Write] => [x.u, x]));
   const merged = ownWrites.map((o) => {
-    const d = derived.get(o.u);
-    if (d === undefined) return o;
-    const ownStart = startDay(o.u, o.v);
-    if (ownStart === null) return o;
-    const dv = codec.decodeAs("sched", d.u, d.v);
-    const later = Math.max(ownStart, toDay(dv.start as IsoDate));
-    return { u: o.u, v: codec.sched.enc({ ...dv, start: toIso(later) }), c: o.c };
+    const p = pushedOwn.get(o.u);
+    return p === undefined ? o : { u: o.u, v: p.v, c: o.c };
   });
-  const ownUnits = new Set(ownWrites.map((x) => x.u));
-  return { writes: [...merged, ...[...derived.values()].filter((x) => !ownUnits.has(x.u))], push: pushResult, recal };
+  const derived = mergedDerived([...recalWrites, ...pushWrites].filter((x) => !ownUnits.has(x.u)));
+  return { writes: [...merged, ...derived.values()], push: pushResult, recal };
 }
+
+const sameStop = (a: Stop, b: Stop): boolean => a.id === b.id && a.reason === b.reason;
+
+const recalStopsCaused = (ctx: Ctx, recal: RecalResult): Stop[] => {
+  const unchanged = recalendar(schedView(ctx.view.plan, ctx.view.held), workCalendar(ctx.view.plan.calendar)).pushed.stopped;
+  return recal.pushed.stopped.filter((s) => !unchanged.some((u) => sameStop(s, u)));
+};
 
 const itemState = (plan: PlanState, dv: Derived, id: ItemId): string => {
   const it = plan.items.get(id);
@@ -514,17 +550,22 @@ export function previewOf(ctx: Ctx, after: PlanState, d: { push: PushResult | nu
     itemsChanged: ids.filter((id) => itemState(beforePlan, before, id) !== itemState(after, next, id)).length,
     endsChanged: ids.filter((id) => before.end.get(id) !== next.end.get(id)).length,
     movedLater: (d.push?.moves.size ?? 0) + (d.recal?.movedLater ?? 0),
-    stopped: [...(d.push?.stopped ?? []), ...(d.recal?.pushed.stopped ?? [])],
-    conflictsAfter: next.conflicts.filter((c) => c.kind !== "dayoff").length,
+    stopped: [...(d.push?.stopped ?? []), ...(d.recal === null ? [] : recalStopsCaused(ctx, d.recal))],
+    conflictsAfter: next.conflicts.length,
     kept,
   };
 }
 
 export function buildAction(ctx: Ctx, intent: Intent): Built {
+  const plan = ctx.view.plan;
   const draft = draftOf(ctx, intent);
   if (draft.own.every((x) => sameAsCurrent(ctx, x))) throw new Refused(refusal.nothing);
-  const d = withDerived(ctx, [...draft.own, ...newHolidayYears(ctx, draft.own)], draft.roots, ctx.view.held);
-  const preview = previewOf(ctx, applyWrites(ctx.view.plan, d.writes), d, []);
+  const years = newHolidayYears(ctx, draft.own, withDerived(ctx, draft.own, draft.roots, ctx.view.held).writes);
+  const cal = workCalendar(applyWrites(plan, [...draft.own.filter(isCalendarWrite), ...years]).calendar);
+  const starts = new Set(draft.ownStarts ?? []);
+  const snapped = draft.own.map((x) => (starts.has(x.u) ? resnapped(x, cal) : x));
+  const d = withDerived(ctx, [...snapped, ...years], draft.roots, ctx.view.held);
+  const preview = previewOf(ctx, applyWrites(plan, d.writes), d, []);
   const lbl = draft.label(d, preview);
   const action: Action = { id: newId(), dev: ctx.dev, ses: ctx.ses, at: ctx.now, par: [...ctx.log.heads], lbl, w: d.writes };
   return { action, newNotes: draft.newNotes, toast: toastOf(lbl, draft.sentences), preview };

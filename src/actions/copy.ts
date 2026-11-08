@@ -86,6 +86,7 @@ export const label = {
 
 export const sentence = {
   trashUndo: "Undo brings it back.",
+  trashUndoMany: "Undo brings them back.",
   calendarUndo: "Undo puts the old one back.",
 };
 
@@ -111,4 +112,6 @@ export const refusal = {
   heldFix: (name: string): string => `${q(name)} is held in an open choice. Choose a version first.`,
   loopFix: "A loop is fixed by removing one of its links.",
   fixed: "This conflict is already fixed.",
+  doneProgress: "A done item is at 100 %.",
+  doneSetProgress: (name: string): string => `${q(name)} is done. Mark it in progress to set its progress.`,
 };

@@ -9,7 +9,7 @@ import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { act } from "../test/act";
 import { ctxOf, FIXTURE_DEVICES } from "../test/planCtx";
-import { buildAction, initialAction, normalizeName } from "./build";
+import { buildAction, initialAction, normalizeName, withDerived } from "./build";
 import { HeldRefused, Refused, type Built, type Ctx, type Intent } from "./intents";
 
 const TODAY = "2026-11-09";
@@ -26,6 +26,8 @@ const item = (id: string, kind: "task" | "milestone" | "group", name: string, pa
 ];
 
 const ROOT: Write[] = [w("pn", "Plan"), w("cw", [1, 2, 3, 4, 5]), w("cr", null)];
+
+const ROOT_CAL = (): Calendar => ({ region: null, workdays: [1, 2, 3, 4, 5], closures: new Map(), tuning: new Map(), holidays: new Map() });
 
 const CHAIN: Write[] = [
   ...ROOT,
@@ -149,10 +151,11 @@ describe("buildAction: push", () => {
   });
 
   it("names a start and duration set together as a change, with the same pushes", () => {
-    const b = buildAction(chain(), { t: "schedule", item: "PFF", set: { start: "2026-11-24", dur: 3 } });
+    const b = buildAction(chain(), { t: "schedule", item: "PFF", set: { start: "2026-11-24", dur: 2 } });
     expect(b.action.lbl).toBe("Changed “Plan file format”; 4 dependent items moved");
     expect(units(b)).toEqual(["s:PFF", ...PUSHED]);
-    expect(PUSHED.map((u) => startOf(b, u))).toEqual(["2026-11-27", "2026-12-02", "2026-12-09", "2026-12-11"]);
+    expect(writeOf(b, "s:PFF").v).toEqual(sched("2026-11-24", 2));
+    expect(PUSHED.map((u) => startOf(b, u))).toEqual(["2026-11-26", "2026-12-01", "2026-12-08", "2026-12-10"]);
   });
 
   it("stops at a held item and says so", () => {
@@ -198,6 +201,57 @@ describe("buildAction: own starts (refinement 29)", () => {
   });
 });
 
+describe("buildAction: merging writes on one unit", () => {
+  it("moves two linked items together with one write per unit", () => {
+    const b = buildAction(chain(), { t: "move", items: ["PFF", "Spec"], days: 6 });
+    expect(b.action.w.map((x) => [x.u, x.c])).toEqual([
+      ["s:PFF", "own"],
+      ["s:Spec", "own"],
+      ["s:Build", "push"],
+      ["s:Review", "push"],
+      ["s:Ship", "push"],
+    ]);
+    expect(startOf(b, "s:Spec")).toBe("2026-11-27");
+  });
+
+  it("turns an own write and a push on one unit into one own write with the pushed value", () => {
+    const ctx = chain();
+    const d = withDerived(ctx, [w("s:PFF", sched("2026-11-24", 3)), w("s:Spec", sched("2026-11-19", 3, "todo", 0, "now"))], ["PFF"], ctx.view.held);
+    expect(d.writes.map((x) => [x.u, x.c])).toEqual([
+      ["s:PFF", "own"],
+      ["s:Spec", "own"],
+      ["s:Build", "push"],
+      ["s:Review", "push"],
+      ["s:Ship", "push"],
+    ]);
+    expect(d.writes[1].v).toEqual(sched("2026-11-27", 3, "todo", 0, "now"));
+  });
+
+  it("keeps an own value over a recalendar write on the same unit", () => {
+    const ctx = chain();
+    const mine = w("s:Ship", sched("2026-12-03", 1, "todo", 0, "now"));
+    const d = withDerived(ctx, [w("cc:c1", ["2026-12-03", "2026-12-03", "Offsite"]), mine], [], ctx.view.held);
+    expect(d.recal?.starts.has("Ship")).toBe(true);
+    expect(d.writes.filter((x) => x.u === "s:Ship")).toEqual([mine]);
+  });
+
+  it("merges a recalendar start and a push on one unit into one derived write", () => {
+    const ctx = chain();
+    const b = buildAction(ctx, {
+      t: "calendar",
+      next: { ...ctx.view.plan.calendar, closures: new Map([["c1", { id: "c1", from: "2026-11-17", to: "2026-11-19", name: "Offsite" }]]) },
+    });
+    expect(b.action.w.filter((x) => x.u === "s:Spec")).toEqual([w("s:Spec", sched("2026-11-24", 3), "push")]);
+  });
+
+  it("refuses a derived write on a unit the action unschedules", () => {
+    const ctx = chain();
+    expect(() =>
+      withDerived(ctx, [w("cc:c1", ["2026-11-19", "2026-11-20", "Offsite"]), w("s:Spec", sched(null, 3))], [], ctx.view.held),
+    ).toThrow(new Error("Derived write to s:Spec, which this action unschedules"));
+  });
+});
+
 describe("buildAction: preview", () => {
   it("counts changed items and ends from derive, not from written units", () => {
     const ctx = ctxFrom([
@@ -217,6 +271,39 @@ describe("buildAction: preview", () => {
     const after = applied(ctx, b).view.derived;
     expect(after.end.get("T1")).toBe(toDay("2026-11-25"));
     expect(after.end.get("T2")).toBe(toDay("2026-11-24"));
+  });
+
+  it("shows only the stops a calendar change causes", () => {
+    const done = replaced(CHAIN, [w("s:Review", sched("2026-12-01", 2, "done", 100))]);
+    const closure = (from: string, to: string): Calendar => ({
+      ...ROOT_CAL(),
+      closures: new Map([["c1", { id: "c1", from, to, name: "Offsite" }]]),
+    });
+    const before = ctxFrom(done, act("a1", ["a0"], [w("s:Build", sched("2026-11-30", 5))]));
+    expect(before.view.derived.conflicts.some((c) => c.kind === "early" && c.succ === "Review")).toBe(true);
+    expect(buildAction(before, { t: "calendar", next: closure("2027-02-01", "2027-02-01") }).preview.stopped).toEqual([]);
+    const caused = buildAction(ctxFrom(done), { t: "calendar", next: closure("2026-11-25", "2026-11-25") });
+    expect(caused.preview.stopped).toEqual([{ id: "Review", reason: "done" }]);
+  });
+
+  it("counts a held item's new day off among the conflicts after", () => {
+    const ctx = chain(
+      act("m", ["a0"], [w("s:Review", sched("2026-12-01", 2, "todo", 0, "next"))], { dev: "d1" }),
+      act("p", ["a0"], [w("s:Review", sched("2026-12-01", 2, "todo", 0, "now"))], { dev: "d2" }),
+    );
+    expect(ctx.view.derived.conflicts).toEqual([]);
+    const b = buildAction(ctx, {
+      t: "calendar",
+      next: { ...ctx.view.plan.calendar, closures: new Map([["c1", { id: "c1", from: "2026-12-01", to: "2026-12-01", name: "Offsite" }]]) },
+    });
+    expect(units(b)).not.toContain("s:Review");
+    expect(b.preview.conflictsAfter).toBe(1);
+    expect(applied(ctx, b).view.derived.conflicts).toEqual([{ kind: "dayoff", item: "Review", shownFrom: toDay("2026-12-02") }]);
+  });
+
+  it("counts a trashed group's descendants, not the group (PF27)", () => {
+    const b = buildAction(groups(), { t: "trash", items: ["S4"] });
+    expect(b.preview.itemsChanged).toBe(1);
   });
 });
 
@@ -267,6 +354,9 @@ describe("buildAction: refusals", () => {
     refusedWith(ctx, { t: "resize", item: "Launch", dur: 2 }, "Milestones have no duration.");
     refusedWith(ctx, { t: "schedule", item: "Admin", set: { progress: 101 } }, "Progress is a whole number from 0 to 100.");
     refusedWith(ctx, { t: "schedule", item: "Admin", set: { progress: 4.5 } }, "Progress is a whole number from 0 to 100.");
+    refusedWith(ctx, { t: "schedule", item: "Admin", set: { status: "done", progress: 40 } }, "A done item is at 100 %.");
+    const done = ctxFrom(replaced(CHAIN, [w("s:Admin", sched("2026-11-23", 2, "done", 100))]));
+    refusedWith(done, { t: "schedule", item: "Admin", set: { progress: 40 } }, "“Admin” is done. Mark it in progress to set its progress.");
   });
 
   it("refuses edits on groups, trashed items and unscheduled items", () => {
@@ -291,6 +381,14 @@ describe("buildAction: refusals", () => {
     const b = buildAction(ctx, { t: "schedule", item: "Kickoff", set: { status: "done" } });
     expect(b.action.lbl).toBe("Marked “Kickoff” done");
     expect(b.action.w).toEqual([w("s:Kickoff", sched("2026-11-16", 0, "done", 100))]);
+  });
+
+  it("takes a status on a milestone whose only predecessor is inside a trashed group", () => {
+    const ctx = ctxFrom(
+      replaced(GROUPS, [...item("M", "milestone", "Gate", null, "a2", sched("2026-12-10", 0)), w("l:R>M", ["FS", 0]), w("e:S4", { k: "group", t: true })]),
+    );
+    const b = buildAction(ctx, { t: "schedule", item: "M", set: { status: "done" } });
+    expect(b.action.lbl).toBe("Marked “Gate” done");
   });
 });
 
@@ -375,9 +473,38 @@ describe("buildAction: calendar (refinement 34)", () => {
     expect(b.preview.movedLater).toBe(3);
   });
 
+  const yearOf = (y: number, region = "oh:CH:CH-ZH", days: HolidayYear["days"] = []): HolidayYear => ({ region, year: y, days, fetchedAt: "2026-11-01" });
+  const cachedRoot = (): Write[] => replaced(CHAIN, [w("cr", CH), w("ch:2026", yearOf(2026)), w("ch:2027", yearOf(2027))]);
+
+  it("snaps an own start to the calendar after the new holiday year", () => {
+    const log = logOf(act("a0", [], cachedRoot()));
+    const neujahr = yearOf(2031, "oh:CH:CH-ZH", [{ date: "2031-01-01", name: "Neujahrstag", kind: "public", sourceId: "n", scope: null }]);
+    const ctx = ctxOf(log, "d1", TODAY, FIXTURE_DEVICES, { cachedHolidays: (r, y) => (r === "oh:CH:CH-ZH" && y === 2031 ? neujahr : null) });
+    const b = buildAction(ctx, { t: "schedule", item: "Ship", set: { start: "2031-01-01" } });
+    expect(writeOf(b, "ch:2031").v).toEqual(neujahr);
+    expect(writeOf(b, "s:Ship")).toEqual(w("s:Ship", sched("2031-01-02", 1)));
+    expect(b.action.lbl).toBe("Scheduled “Ship” from 2 Jan; 1 dependent item moved");
+    const after = applied(ctx, b, { cachedHolidays: ctx.cachedHolidays });
+    expect(after.view.derived.conflicts.filter((c) => c.kind === "dayoff")).toEqual([]);
+  });
+
+  it("adds a holiday year that a push carries a successor into", () => {
+    const log = logOf(act("a0", [], cachedRoot()));
+    const ctx = ctxOf(log, "d1", TODAY, FIXTURE_DEVICES, { cachedHolidays: (r, y) => (r === "oh:CH:CH-ZH" && y === 2031 ? yearOf(2031) : null) });
+    const b = buildAction(ctx, { t: "schedule", item: "Build", set: { start: "2030-12-23" } });
+    expect(startOf(b, "s:Ship")).toBe("2031-01-01");
+    expect(units(b).filter((u) => u.startsWith("ch:"))).toEqual(["ch:2031"]);
+  });
+
+  it("adds no cached year that was already missing under a new region", () => {
+    const log = logOf(act("a0", [], cachedRoot()));
+    const ctx = ctxOf(log, "d1", TODAY, FIXTURE_DEVICES, { cachedHolidays: (r, y) => yearOf(y, r) });
+    const b = buildAction(ctx, { t: "calendar", next: { ...ctx.view.plan.calendar, region: { ...CH, subdivision: "CH-BE" } } });
+    expect(units(b)).toEqual(["cr"]);
+  });
+
   it("adds a newly needed holiday year from the cache, and none without one", () => {
-    const yearOf = (y: number): HolidayYear => ({ region: "oh:CH:CH-ZH", year: y, days: [], fetchedAt: "2026-11-01" });
-    const root = replaced(CHAIN, [w("cr", CH), w("ch:2026", yearOf(2026)), w("ch:2027", yearOf(2027))]);
+    const root = cachedRoot();
     const log = logOf(act("a0", [], root));
     const cached = ctxOf(log, "d1", TODAY, FIXTURE_DEVICES, {
       cachedHolidays: (r, y) => (r === "oh:CH:CH-ZH" && y === 2031 ? yearOf(2031) : null),
@@ -422,13 +549,32 @@ describe("buildAction: fix (§6.4)", () => {
     expect(remove.action.w).toEqual([w("l:Build>Review", null)]);
   });
 
-  it("refuses to push a done successor", () => {
+  it("refuses to push a done successor and one in progress", () => {
     const ctx = ctxFrom(replaced(CHAIN, [w("s:Review", sched("2026-12-01", 2, "done", 100))]), late);
     refusedWith(
       ctx,
       { t: "fix", conflict: early(ctx), how: "push" },
       "“Review” is done; done and in-progress items keep their dates. Shorten the lag or remove the link.",
     );
+    const doing = ctxFrom(replaced(CHAIN, [w("s:Review", sched("2026-12-01", 2, "doing", 50))]), late);
+    refusedWith(
+      doing,
+      { t: "fix", conflict: early(doing), how: "push" },
+      "“Review” is in progress; done and in-progress items keep their dates. Shorten the lag or remove the link.",
+    );
+  });
+
+  it("opens the choice of a held item whose start is a day off", () => {
+    const ctx = chain(
+      act("m", ["a0"], [w("s:Review", sched("2026-11-28", 2, "todo", 0, "next"))], { dev: "d1" }),
+      act("p", ["a0"], [w("s:Review", sched("2026-11-28", 2, "todo", 0, "now"))], { dev: "d2" }),
+    );
+    const conflict = ctx.view.derived.conflicts.find((c) => c.kind === "dayoff");
+    if (conflict === undefined) throw new Error("no dayoff conflict");
+    const e = refusal(ctx, { t: "fix", conflict, how: "push" });
+    expect(e).toBeInstanceOf(HeldRefused);
+    expect(e.message).toBe("“Review” is held in an open choice. Choose a version first.");
+    expect((e as HeldRefused).choice).toBe(ctx.view.choices[0].id);
   });
 
   it("opens the choice of a held successor", () => {
@@ -555,7 +701,7 @@ describe("buildAction: every intent's copy", () => {
     const ctx = chain();
     const several = buildAction(ctx, { t: "trash", items: ["Admin", "Kickoff", "Launch"] });
     expect(several.action.lbl).toBe("Moved 3 items to the Trash");
-    expect(several.toast).toBe("Moved 3 items to the Trash. Undo brings it back.");
+    expect(several.toast).toBe("Moved 3 items to the Trash. Undo brings them back.");
     expect(several.action.w).toEqual([
       w("e:Admin", { k: "task", t: true }),
       w("e:Kickoff", { k: "milestone", t: true }),
@@ -595,6 +741,18 @@ describe("buildAction: every intent's copy", () => {
     const b = buildAction(groups(), { t: "move", items: ["S4"], days: 1 });
     expect(b.action.lbl).toBe("Moved “Sprint 4” later by 1 working day");
     expect(b.action.w).toEqual([w("s:R", sched("2026-12-02", 2))]);
+  });
+
+  it("leaves the items of a trashed inner group where they are", () => {
+    const ctx = ctxFrom(
+      replaced(GROUPS, [
+        w("e:C", { k: "group", t: true }),
+        ...item("T", "task", "Deep", "C", "a0", sched("2026-12-01", 2)),
+        ...item("V", "task", "Visible", "G", "a1", sched("2026-12-02", 1)),
+      ]),
+    );
+    const b = buildAction(ctx, { t: "move", items: ["G"], days: 1 });
+    expect(b.action.w).toEqual([w("s:V", sched("2026-12-03", 1))]);
   });
 
   it("baselines: save, rename and remove", () => {
