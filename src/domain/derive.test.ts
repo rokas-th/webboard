@@ -90,6 +90,12 @@ describe("derive", () => {
     expect(d.horizon.has("X")).toBe(false);
   });
 
+  it("an unscheduled doing item keeps its stored horizon", () => {
+    const d = derive(plan([item("U", { start: null, status: "doing", horizon: "later" })]), NONE, TODAY);
+    expect(d.status.get("U")).toBe("doing");
+    expect(d.horizon.get("U")).toBe("later");
+  });
+
   it("late", () => {
     const d = derive(
       plan([
@@ -185,7 +191,10 @@ describe("derive", () => {
       expect(d.status.has(id)).toBe(false);
       expect(d.horizon.has(id)).toBe(false);
       expect(d.late.has(id)).toBe(false);
+      expect(d.progress.has(id)).toBe(false);
     });
+    const named = d.conflicts.flatMap((c) => (c.kind === "dayoff" ? [c.item] : c.link.split(">")));
+    ["GT", "GT2", "TT", "TM", "T3"].forEach((id) => expect(named).not.toContain(id));
     const v = schedView(p, NONE);
     expect([...v.items.keys()].sort()).toEqual(["T1", "T2"]);
     expect(v.links.map((l) => linkKey(l.from, l.to)).sort()).toEqual(["T1>T2", "T1>UT"]);
@@ -225,6 +234,11 @@ describe("derive", () => {
     expect(d.progress.has("G3")).toBe(false);
     expect(d.progress.has("T1")).toBe(false);
     expect(d.progress.size).toBe(2);
+  });
+
+  it("group progress throws when its tasks have no duration", () => {
+    const p = plan([group("G"), item("A", { parent: "G", dur: 0 }), item("B", { parent: "G", dur: 0, trashed: true })]);
+    expect(() => derive(p, NONE, TODAY)).toThrow(new Error("group G has tasks but no duration"));
   });
 
   it("locks", () => {
@@ -276,6 +290,14 @@ describe("derive", () => {
   it("parent cycle", () => {
     const p = plan([group("G1", { parent: "G2" }), group("G2", { parent: "G1" }), item("T", { parent: "G1" })]);
     expect(() => derive(p, NONE, TODAY)).toThrow(new Error("parent cycle: G1, G2"));
+  });
+
+  it("unknown parent", () => {
+    expect(() => derive(plan([item("T", { parent: "NOPE" })]), NONE, TODAY)).toThrow(new Error("unknown parent NOPE of T"));
+  });
+
+  it("parent that is not a group", () => {
+    expect(() => derive(plan([item("A"), item("T", { parent: "A" })]), NONE, TODAY)).toThrow(new Error("parent A of T is not a group"));
   });
 
   it("conflicts cover the view, unscheduled items included", () => {

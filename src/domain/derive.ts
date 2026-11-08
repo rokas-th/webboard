@@ -27,11 +27,16 @@ const goneSet = (plan: PlanState): ReadonlySet<ItemId> => {
   plan.items.forEach((_, id) => {
     const path: ItemId[] = [];
     let at: ItemId | null = id;
-    while (at !== null && plan.items.has(at) && !gone.has(at)) {
+    while (at !== null && !gone.has(at)) {
       const seen = path.indexOf(at);
       if (seen >= 0) throw new Error(`parent cycle: ${path.slice(seen).sort().join(", ")}`);
       path.push(at);
-      at = (plan.items.get(at) as Item).place.parent;
+      const child: ItemId = at;
+      at = (plan.items.get(child) as Item).place.parent;
+      if (at === null) break;
+      const parent = plan.items.get(at);
+      if (parent === undefined) throw new Error(`unknown parent ${at} of ${child}`);
+      if (parent.kind !== "group") throw new Error(`parent ${at} of ${child} is not a group`);
     }
     const above = at !== null && gone.get(at) === true;
     path.reduceRight((acc, p) => {
@@ -153,6 +158,7 @@ export function derive(plan: PlanState, held: ReadonlySet<ItemId>, today: IsoDat
       .filter((g) => hasTask(g.id))
       .map((g) => {
         const [sum, dur] = weightOf(g.id);
+        if (dur === 0) throw new Error(`group ${g.id} has tasks but no duration`);
         return [g.id, Math.round(sum / dur)] as const;
       }),
   );
