@@ -179,3 +179,39 @@ export function push(view: SchedView, roots: readonly ItemId[]): PushResult {
   });
   return { moves, stopped };
 }
+
+export type Conflict =
+  | { kind: "early"; link: LinkKey; pred: ItemId; succ: ItemId; need: Day; succLock: Lock | null }
+  | { kind: "loop"; link: LinkKey }
+  | { kind: "dayoff"; item: ItemId; shownFrom: Day };
+
+export function conflicts(view: SchedView, storedStarts: ReadonlyMap<ItemId, Day>): Conflict[] {
+  const loops = loopLinks(view.links);
+  const keyed = view.links
+    .map((l) => ({ l, key: linkKey(l.from, l.to) }))
+    .sort((x, y) => byId(x.key, y.key));
+  const loop: Conflict[] = keyed.filter(({ key }) => loops.has(key)).map(({ key }) => ({ kind: "loop", link: key }));
+  const early: Conflict[] = keyed
+    .filter(({ l, key }) => !loops.has(key) && view.items.has(l.from) && view.items.has(l.to))
+    .flatMap(({ l, key }) => {
+      const pred = view.items.get(l.from) as Sched;
+      const succ = view.items.get(l.to) as Sched;
+      const need = earliest(succ, l, pred, view.cal);
+      return startOf(succ, view.cal) < need
+        ? [{ kind: "early" as const, link: key, pred: l.from, succ: l.to, need, succLock: succ.lock }]
+        : [];
+    });
+  const dayoff: Conflict[] = [...view.items.keys()].sort(byId).flatMap((id) => {
+    const stored = storedStarts.get(id);
+    if (stored === undefined) throw new Error(`conflicts: no stored start for ${id}`);
+    return view.cal.isWork(stored) ? [] : [{ kind: "dayoff" as const, item: id, shownFrom: view.cal.snapF(stored) }];
+  });
+  return [...loop, ...early, ...dayoff];
+}
+
+export function lagThatHolds(succ: Sched, link: Link, pred: Sched, cal: WorkCalendar): number {
+  const start = startOf(succ, cal);
+  let lag = link.lag;
+  while (start < earliest(succ, { ...link, lag }, pred, cal)) lag -= 1;
+  return lag;
+}
