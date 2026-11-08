@@ -4,14 +4,11 @@ import { choiceOf, choices, fnv1a64, heldItems, sideText, type Choice } from "./
 import { projectPlan } from "./project";
 import { planRules } from "./rules";
 import { LogState } from "../log/state";
-import type { Action, Cause, DeviceId, Write } from "../log/types";
+import type { Action, Cause, Write } from "../log/types";
 import { act } from "../test/act";
+import { FIXTURE_DEVICES } from "../test/planCtx";
 
-const DEVICES: ReadonlyMap<DeviceId, string> = new Map([
-  ["d1", "Mac"],
-  ["d2", "iPhone"],
-  ["d3", "iPad"],
-]);
+const DEVICES = FIXTURE_DEVICES;
 
 const mac = { dev: "d1" };
 const iph = { dev: "d2" };
