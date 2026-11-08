@@ -126,20 +126,80 @@ describe("Graph", () => {
     expect(g.pending).toEqual([]);
   });
 
+  it("refuses a first arrival that holds values other than plain JSON, storing nothing", () => {
+    const withV = (id: ActionId, v: unknown, par: readonly ActionId[] = []): Action => ({
+      ...act(id, par),
+      w: [{ u: "pn", v, c: "own" }],
+    });
+    const g = graphOf([act("r")]);
+    expect(() => g.add(withV("m", new Map([["k", 1]])))).toThrow("Action m holds a value that is not plain JSON");
+    expect(g.has("m")).toBe(false);
+    expect(() => g.add(withV("d", new Date(0), ["missing"]))).toThrow("Action d holds a value that is not plain JSON");
+    expect(g.has("d")).toBe(false);
+    expect(() => g.add({ ...act("n", ["r"]), at: Number.NaN })).toThrow("Action n holds a value that is not plain JSON");
+    expect(g.has("n")).toBe(false);
+    expect(g.pending).toEqual([]);
+    expect(g.order()).toEqual(["r"]);
+    expect(ids(g.add(withV("ok", { n: 1, gone: undefined }, ["r"])))).toEqual(["ok"]);
+  });
+
   it("refuses a repeat that holds values other than plain JSON", () => {
     const withV = (v: unknown): Action => ({ ...act("a1"), w: [{ u: "pn", v, c: "own" }] });
     const notPlain = "Action a1 holds a value that is not plain JSON";
-    const mapGraph = graphOf([withV(new Map([["k", 1]]))]);
-    expect(() => mapGraph.add(withV(new Map([["k", 2]])))).toThrow(notPlain);
-    const dateGraph = graphOf([withV(new Date(0))]);
-    expect(() => dateGraph.add(withV(new Date(1)))).toThrow(notPlain);
     const plain = graphOf([withV({ n: 1 })]);
+    expect(() => plain.add(withV(new Map([["k", 2]])))).toThrow(notPlain);
+    expect(() => plain.add(withV(new Date(1)))).toThrow(notPlain);
     expect(() => plain.add(withV({ n: Number.NaN }))).toThrow(notPlain);
     expect(() => plain.add(withV({ n: Infinity }))).toThrow(notPlain);
     expect(() => plain.add(withV([undefined]))).toThrow(notPlain);
     expect(() => plain.add(withV(new Set([1])))).toThrow(notPlain);
     expect(plain.add(withV({ n: 1, gone: undefined }))).toEqual([]);
     expect(plain.order()).toEqual(["a1"]);
+  });
+
+  it("returns ready actions only from get", () => {
+    const a = act("a");
+    const g = graphOf([a, act("p", ["missing"])]);
+    expect(g.get("a")).toBe(a);
+    expect(g.get("p")).toBeUndefined();
+    expect(g.get("nope")).toBeUndefined();
+  });
+
+  it("keeps a copy independent of the original", () => {
+    const g = graphOf([act("a"), act("c", ["b"]), act("x", ["a", "y"], "s2")]);
+    const c = g.copy();
+    expect(ids(c.add(act("b", ["a"])))).toEqual(["b", "c"]);
+    c.add(act("d", ["c"]));
+    expect(c.order()).toEqual(["a", "b", "c", "d"]);
+    expect(c.heads).toEqual(["d"]);
+    expect(c.pending).toEqual(["x"]);
+    expect(c.seen("a", "d")).toBe(true);
+    expect(g.order()).toEqual(["a"]);
+    expect(g.heads).toEqual(["a"]);
+    expect(g.pending).toEqual(["c", "x"]);
+    expect(g.has("b")).toBe(false);
+    expect(ids(g.add(act("b", ["a"], "s3")))).toEqual(["b", "c"]);
+    expect(g.seen("b", "c")).toBe(true);
+    expect(c.pending).toEqual(["x"]);
+  });
+
+  it("runs a ready check on every action about to become ready, before storing any", () => {
+    const g = graphOf([act("a"), act("z")]);
+    g.add(act("c", ["b"]));
+    g.add(act("d", ["c", "z"]));
+    const asked: string[] = [];
+    const check = (r: Action, saw: (x: ActionId) => boolean) => {
+      asked.push(`${r.id}:${["a", "b", "c", "z", "d", "nope"].filter(saw).join("")}`);
+    };
+    const refuse = (r: Action) => {
+      if (r.id === "d") throw new Error("no d");
+    };
+    expect(() => g.add(act("b", ["a"]), refuse)).toThrow("no d");
+    expect(g.has("b")).toBe(false);
+    expect(g.pending).toEqual(["c", "d"]);
+    expect(g.order()).toEqual(["a", "z"]);
+    expect(ids(g.add(act("b", ["a"]), check))).toEqual(["b", "c", "d"]);
+    expect(asked).toEqual(["b:a", "c:ab", "d:abcz"]);
   });
 
   it("refuses an action that lists itself as a parent", () => {

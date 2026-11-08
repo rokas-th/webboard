@@ -45,25 +45,46 @@ const equal = (a: unknown, b: unknown): boolean => {
 };
 
 const sameRecord = (known: Action, a: Action): boolean => {
-  assertPlain(a.id, known, false);
   assertPlain(a.id, a, false);
   return equal(known, a);
 };
 
-export class Graph {
-  private readonly nodes = new Map<ActionId, Node>();
-  private readonly waiting = new Map<ActionId, Waiting>();
-  private readonly headSet = new Set<ActionId>();
-  private readonly blocked = new Map<ActionId, ActionId[]>();
-  private readonly tips: ActionId[] = [];
-  private readonly sorted: ActionId[] = [];
+export type ReadyCheck = (a: Action, saw: (ancestor: ActionId) => boolean) => void;
 
-  add(a: Action): readonly Action[] {
+export class Graph {
+  private readonly nodes: Map<ActionId, Node>;
+  private readonly waiting: Map<ActionId, Waiting>;
+  private readonly headSet: Set<ActionId>;
+  private readonly blocked: Map<ActionId, ActionId[]>;
+  private readonly tips: ActionId[];
+  private readonly sorted: ActionId[];
+
+  constructor(from?: Graph) {
+    this.nodes = new Map(from?.nodes);
+    this.waiting = new Map(
+      [...(from?.waiting ?? [])].map(([id, w]): [ActionId, Waiting] => [id, { action: w.action, missing: new Set(w.missing) }]),
+    );
+    this.headSet = new Set(from?.headSet);
+    this.blocked = new Map([...(from?.blocked ?? [])].map(([id, list]): [ActionId, ActionId[]] => [id, [...list]]));
+    this.tips = [...(from?.tips ?? [])];
+    this.sorted = [...(from?.sorted ?? [])];
+  }
+
+  copy(): Graph {
+    return new Graph(this);
+  }
+
+  get(id: ActionId): Action | undefined {
+    return this.nodes.get(id)?.action;
+  }
+
+  add(a: Action, check?: ReadyCheck): readonly Action[] {
     const known = this.nodes.get(a.id)?.action ?? this.waiting.get(a.id)?.action;
     if (known !== undefined) {
       if (!sameRecord(known, a)) throw new Error(`Action ${a.id} arrived twice with different contents`);
       return [];
     }
+    assertPlain(a.id, a, false);
     const missing = new Set(a.par.filter((p) => !this.nodes.has(p)));
     if (missing.size > 0) {
       if (missing.has(a.id)) throw new Error(`Action ${a.id} lists itself as a parent`);
@@ -75,6 +96,10 @@ export class Graph {
         else list.push(a.id);
       });
       return [];
+    }
+    if (check !== undefined) {
+      const releasing = this.releasable(a);
+      releasing.forEach((r) => check(r, (x) => this.sawWithin(x, r, releasing)));
     }
     const released: Action[] = [a];
     for (const next of released) {
@@ -118,6 +143,40 @@ export class Graph {
 
   before(a: ActionId, b: ActionId): boolean {
     return this.compare(a, b) < 0;
+  }
+
+  private releasable(a: Action): ReadonlyMap<ActionId, Action> {
+    const set = new Map<ActionId, Action>([[a.id, a]]);
+    const queue: Action[] = [a];
+    for (const x of queue) {
+      (this.blocked.get(x.id) ?? []).forEach((child) => {
+        if (set.has(child)) return;
+        const w = this.waiting.get(child);
+        if (w === undefined) throw new Error(`Action ${child} was not waiting for ${x.id}`);
+        if (![...w.missing].every((m) => set.has(m))) return;
+        set.set(child, w.action);
+        queue.push(w.action);
+      });
+    }
+    return set;
+  }
+
+  private sawWithin(x: ActionId, r: Action, releasing: ReadonlyMap<ActionId, Action>): boolean {
+    const visited = new Set<ActionId>();
+    const stack = [...r.par];
+    for (let p = stack.pop(); p !== undefined; p = stack.pop()) {
+      if (p === x) return true;
+      if (visited.has(p)) continue;
+      visited.add(p);
+      if (this.nodes.has(p)) {
+        if (this.nodes.has(x) && this.seen(x, p)) return true;
+        continue;
+      }
+      const inner = releasing.get(p);
+      if (inner === undefined) throw new Error(`Action ${p} is neither ready nor released`);
+      stack.push(...inner.par);
+    }
+    return false;
   }
 
   private closesCycle(id: ActionId, missing: ReadonlySet<ActionId>): boolean {
