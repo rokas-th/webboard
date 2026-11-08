@@ -74,7 +74,7 @@ const validWrites: Write[] = [
   { u: "l:A>B", v: ["FS", 0], c: "own" },
   { u: "cc:X", v: ["2026-12-24", "2026-12-31", "Offsite"], c: "own" },
   { u: "ct:2026-12-24", v: { kind: "work" }, c: "own" },
-  { u: "ch:2027", v: zh, c: "recalendar" },
+  { u: "ch:2027", v: zh, c: "own" },
   { u: "b:B1", v: null, c: "own" },
   { u: "a:x1", v: false, c: "undo" },
 ];
@@ -167,12 +167,20 @@ describe("codecs", () => {
 
   it("refuses a closure that ends before it starts", () => {
     expect(() => closure.dec(["2026-12-31", "2026-12-24", "X"])).toThrow("cc: closure ends before it starts");
-    expect(() => closure.dec({ name: "X", from: "2026-12-31", to: "2026-12-24" })).toThrow("cc:");
     expect(() => validateWrite({ u: "cc:Z", v: ["2026-12-31", "2026-12-24", "X"], c: "own" })).toThrow("cc:Z: closure ends before it starts");
   });
 
   it("refuses an encode of a malformed value", () => {
     expect(() => sched.enc({ start: "2026-11-16", dur: 3, status: "done", progress: 40, horizon: "now" })).toThrow("s: progress");
+    expect(() => (sched as Codec<unknown>).enc(null)).toThrow(/^s: cannot encode null: /);
+    expect(() => codecOf("ch").enc({})).toThrow(/^ch: cannot encode \{\}: /);
+    expect(() => codecOf("cw").enc(5)).toThrow(/^cw: cannot encode 5: /);
+    expect(() => codecOf("e").enc("x")).toThrow("e: k is not one of");
+  });
+
+  it("labels name errors without claiming a unit", () => {
+    expect(() => name.dec(" Plan")).toThrow(/^name: name has spaces/);
+    expect(() => validateWrite({ u: "pn", v: " Plan", c: "own" })).toThrow(/^pn: name has spaces/);
   });
 
   it("finds the codec of every kind", () => {
@@ -206,6 +214,15 @@ describe("validateWrite", () => {
     expect(() => validateWrite({ u: "n:A", v: "x", c: "x" as Write["c"] })).toThrow("cause");
     expect(() => validateWrite({ u: "a:b", v: 1, c: "undo" })).toThrow("a:b");
     expect(() => validateWrite({ u: "x:1", v: 1, c: "own" })).toThrow("Unknown unit key “x:1”");
+  });
+
+  it("refuses derived writes it cannot merge", () => {
+    const s = (start: string | null) => [start, 3, "todo", 0, "later"];
+    expect(() => validateWrite({ u: "s:A", v: s("2026-11-16"), c: "recalendar" })).not.toThrow();
+    expect(() => validateWrite({ u: "n:A", v: "Ship", c: "push" })).toThrow(new Error("n:A: push cannot write this unit"));
+    expect(() => validateWrite({ u: "ch:2027", v: zh, c: "recalendar" })).toThrow(new Error("ch:2027: recalendar cannot write this unit"));
+    expect(() => validateWrite({ u: "s:A", v: s(null), c: "push" })).toThrow(new Error("s:A: push cannot write this unit"));
+    expect(() => validateWrite({ u: "s:A", v: s(null), c: "recalendar" })).toThrow(new Error("s:A: recalendar cannot write this unit"));
   });
 
   it("checks that a holiday year matches its key", () => {

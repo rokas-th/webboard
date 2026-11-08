@@ -14,10 +14,10 @@ const deepEqual = (a: unknown, b: unknown): boolean => {
   return ka.length === kb.length && ka.every((k) => k in rb && deepEqual((a as Record<string, unknown>)[k], rb[k]));
 };
 
-const sameYear = (a: unknown, b: unknown): boolean => {
-  if (a === null || b === null) return a === b;
-  const ya = a as Record<string, unknown>;
-  const yb = b as Record<string, unknown>;
+const sameYear = (u: UnitKey, a: unknown, b: unknown): boolean => {
+  const ya = decodeAs("holidayYear", u, a);
+  const yb = decodeAs("holidayYear", u, b);
+  if (ya === null || yb === null) return ya === yb;
   return deepEqual(ya.region, yb.region) && deepEqual(ya.days, yb.days);
 };
 
@@ -29,7 +29,7 @@ const startOf = (u: UnitKey, w: Write): number => {
 
 export const planRules: Rules = {
   same(u, a, b) {
-    return parseKey(u).kind === "ch" ? sameYear(a, b) : deepEqual(a, b);
+    return parseKey(u).kind === "ch" ? sameYear(u, a, b) : deepEqual(a, b);
   },
   mergeDerived(u, earlier, later) {
     if (parseKey(u).kind !== "s") throw new Error(`Derived write to ${u}`);

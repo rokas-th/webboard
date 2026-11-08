@@ -35,6 +35,7 @@ const byOrder = (a: Item, b: Item): number => cmp(a.place.order, b.place.order) 
 
 const REQUIRED: readonly [UnitKey, string][] = [
   ["pn", "name"],
+  ["cr", "holiday region"],
   ["cw", "working week"],
 ];
 
@@ -144,7 +145,7 @@ const build = (id: PlanId, t: Table): PlanState => {
     }),
   );
   const calendar: Calendar = {
-    region: t.live.has("cr") ? decodeAs("region", "cr", t.live.get("cr")) : null,
+    region: decodeAs("region", "cr", t.live.get("cr")),
     workdays: decodeAs("weekdays", "cw", t.live.get("cw")),
     closures: new Map(
       nonNull<Closure>(
@@ -197,8 +198,11 @@ export function applyWrites(plan: PlanState, w: readonly Write[]): PlanState {
   const t = tables.get(plan);
   if (t === undefined) throw new Error("applyWrites needs a plan made by projectPlan or applyWrites");
   const live = new Map(t.live);
+  const seen = new Set<UnitKey>();
   w.forEach((x) => {
     if (parseKey(x.u).kind === "a") throw new Error(`applyWrites cannot apply ${x.u}`);
+    if (seen.has(x.u)) throw new Error(`applyWrites: ${x.u} written twice`);
+    seen.add(x.u);
     validateWrite(x);
     live.set(x.u, x.v);
   });
@@ -210,8 +214,17 @@ export function childrenOf(plan: PlanState, parent: ItemId | null): readonly Ite
 }
 
 export function trashRoots(plan: PlanState): readonly ItemId[] {
+  const parentOf = (i: Item): Item | null => {
+    if (i.place.parent === null) return null;
+    const p = plan.items.get(i.place.parent);
+    if (p === undefined) throw new Error(`Item ${i.id} has a parent ${i.place.parent} that is not in the plan`);
+    return p;
+  };
   return [...plan.items.values()]
-    .filter((i) => i.trashed && (i.place.parent === null || !(plan.items.get(i.place.parent) as Item).trashed))
+    .filter((i) => {
+      const p = parentOf(i);
+      return i.trashed && (p === null || !p.trashed);
+    })
     .map((i) => i.id)
     .sort(cmp);
 }

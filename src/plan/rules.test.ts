@@ -31,6 +31,11 @@ describe("planRules.same", () => {
     expect(planRules.same("a:x", false, false)).toBe(true);
   });
 
+  it("throws on a malformed holiday year instead of comparing it", () => {
+    expect(() => planRules.same("ch:2027", { region: 1 }, { region: 1 })).toThrow("ch:2027: value");
+    expect(() => planRules.same("ch:2027", year("2026-11-01"), "x")).toThrow("ch:2027: value is not an object");
+  });
+
   it("throws on an unknown unit", () => {
     expect(() => planRules.same("x:1", 1, 1)).toThrow("Unknown unit key “x:1”");
   });

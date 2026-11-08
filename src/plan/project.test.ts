@@ -15,6 +15,7 @@ const logOf = (...actions: Action[]): LogState => {
   const log = new LogState(planRules);
   const delta = log.add(actions);
   expect(delta.refused).toEqual([]);
+  expect(log.pending).toEqual([]);
   return log;
 };
 
@@ -50,6 +51,8 @@ const groups = () =>
 const withAction = (log: LogState, a: Action): LogState => {
   const next = log.fork();
   expect(next.add([a]).refused).toEqual([]);
+  expect(log.pending).toEqual([]);
+  expect(next.pending).toEqual([]);
   return next;
 };
 
@@ -119,11 +122,14 @@ describe("projectPlan", () => {
     expect(projectPlan("P", log)).toEqual(expected);
   });
 
-  it("throws PlanIncomplete before the plan name and working week exist", () => {
+  it("throws PlanIncomplete before the plan name, holiday region and working week exist", () => {
     expect(() => projectPlan("P", new LogState(planRules))).toThrow(PlanIncomplete);
-    expect(() => projectPlan("P", logOf(act("a0", [], [w("pn", "Plan")])))).toThrow(PlanIncomplete);
-    expect(() => projectPlan("P", logOf(act("a0", [], [w("cw", [1])])))).toThrow(PlanIncomplete);
-    expect(projectPlan("P", logOf(act("a0", [], [w("pn", "Plan"), w("cw", [1])]))).calendar.region).toBeNull();
+    expect(() => projectPlan("P", logOf(act("a0", [], [w("pn", "Plan"), w("cr", null)])))).toThrow(PlanIncomplete);
+    expect(() => projectPlan("P", logOf(act("a0", [], [w("cw", [1]), w("cr", null)])))).toThrow(PlanIncomplete);
+    expect(() => projectPlan("P", logOf(act("a0", [], [w("pn", "Plan"), w("cw", [1])])))).toThrow(
+      new PlanIncomplete("Plan P is not complete yet: it has no holiday region"),
+    );
+    expect(projectPlan("P", logOf(act("a0", [], [w("pn", "Plan"), w("cw", [1]), w("cr", null)]))).calendar.region).toBeNull();
   });
 
   it("sorts siblings by order, then id", () => {
@@ -196,6 +202,27 @@ describe("projectPlan", () => {
     expect(back.items.get("X")).toEqual({ ...plan.items.get("X"), trashed: false });
   });
 
+  it("projects an orphaned milestone and group as trashed with their own kinds", () => {
+    const c = act("c", ["a0"], [...item("M", "milestone", "Ship", null, "a6", sched("2026-11-30", 0)), ...item("G", "group", "Phase", null, "a7")]);
+    const r = act("r", ["c"], [w("n:M", "Ship it"), w("n:G", "Phase 2")], { dev: "d2" });
+    const u = act("u", ["r"], [w("a:c", false, "undo")], { meta: { undo: "c" } });
+    const plan = projectPlan("P", logOf(act("a0", [], plan0), c, r, u));
+    expect(["M", "G"].map((id) => plan.items.get(id))).toEqual([
+      { id: "M", kind: "milestone", name: "Ship it", trashed: true, schedule: { start: "2026-11-30", dur: 0, status: "todo", progress: 0, horizon: "later" }, place: { parent: null, order: "a6" }, refs: {} },
+      { id: "G", kind: "group", name: "Phase 2", trashed: true, schedule: null, place: { parent: null, order: "a7" }, refs: {} },
+    ]);
+    expect(trashRoots(plan)).toEqual(["G", "M"]);
+  });
+
+  it("names an item it cannot rebuild", () => {
+    const one = (...ws: Write[]) => () => projectPlan("P", logOf(act("a0", [], [...plan0, ...ws])));
+    expect(one(...item("G", "group", "Phase", null, "a0", sched("2026-11-16")))).toThrow(new Error("Group G has a schedule"));
+    expect(one(...item("T", "task", "Spec", null, "a0"))).toThrow(new Error("Item T has no schedule"));
+    expect(one(w("n:X", "Lost"), w("p:X", [null, "a0"]))).toThrow(new Error("Item X has no existence"));
+    expect(one(w("e:X", { k: "group", t: false }), w("p:X", [null, "a0"]))).toThrow(new Error("Item X has no name"));
+    expect(one(w("e:X", { k: "group", t: false }), w("n:X", "Lost"))).toThrow(new Error("Item X has no place"));
+  });
+
   it("drops an item none of whose units has a live value", () => {
     const c = act("c", ["a0"], item("X", "task", "Draft", null, "a5", sched("2026-11-16")));
     const log = logOf(act("a0", [], plan0), c, act("u", ["c"], [w("a:c", false, "undo")]));
@@ -263,6 +290,15 @@ describe("projectPlan", () => {
   });
 });
 
+describe("trashRoots", () => {
+  it("names an item whose parent is not in the plan", () => {
+    const plan = projectPlan("P", groups());
+    const c = plan.items.get("C") as Item;
+    const broken: PlanState = { ...plan, items: new Map([["C", { ...c, trashed: true, place: { parent: "Q", order: "a0" } }]]) };
+    expect(() => trashRoots(broken)).toThrow(new Error("Item C has a parent Q that is not in the plan"));
+  });
+});
+
 describe("applyWrites", () => {
   const cases: [string, Write[]][] = [
     ["a head rename", [w("n:C", "Build it")]],
@@ -288,11 +324,18 @@ describe("applyWrites", () => {
   });
 
   it("refuses activity writes", () => {
-    expect(() => applyWrites(projectPlan("P", groups()), [w("a:a0", false, "undo")])).toThrow("applyWrites cannot apply a:a0");
+    expect(() => applyWrites(projectPlan("P", groups()), [w("a:a0", false, "undo")])).toThrow(new Error("applyWrites cannot apply a:a0"));
   });
 
   it("refuses a plan it did not project", () => {
     const plan = projectPlan("P", groups());
-    expect(() => applyWrites({ ...plan }, [w("n:C", "X")])).toThrow("applyWrites");
+    expect(() => applyWrites({ ...plan }, [w("n:C", "X")])).toThrow(new Error("applyWrites needs a plan made by projectPlan or applyWrites"));
+  });
+
+  it("refuses two writes to one unit, as the log does", () => {
+    const log = groups();
+    const writes = [w("n:C", "First"), w("n:C", "Second")];
+    expect(() => applyWrites(projectPlan("P", log), writes)).toThrow(new Error("applyWrites: n:C written twice"));
+    expect(log.fork().add([act("h1", log.heads, writes)]).refused.map((r) => r.id)).toEqual(["h1"]);
   });
 });

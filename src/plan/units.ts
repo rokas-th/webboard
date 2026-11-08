@@ -147,12 +147,21 @@ interface Spec<T> {
 
 const codec = <T>(spec: Spec<T>, unit: string): Codec<T> => ({
   enc: (x) => {
-    const v = spec.enc(x);
+    const v = encodeChecked(spec, unit, x);
     spec.dec(v, unit);
     return v;
   },
   dec: (v) => spec.dec(v, unit),
 });
+
+const encodeChecked = <T>(spec: Spec<T>, unit: string, x: T): unknown => {
+  try {
+    return spec.enc(x);
+  } catch (e) {
+    if (e instanceof TypeError) throw fail(unit, `cannot encode ${show(x)}: ${e.message}`);
+    throw e;
+  }
+};
 
 const orNull = <T>(spec: Spec<T>): Spec<T | null> => ({
   enc: (x) => (x === null ? null : spec.enc(x)),
@@ -357,7 +366,7 @@ const CODEC_OF: Readonly<Record<UnitKind, keyof Codecs>> = {
   a: "activity",
 };
 
-export const name: Codec<string> = codec(SPECS.name, "n");
+export const name: Codec<string> = codec(SPECS.name, "name");
 export const existence: Codec<Existence> = codec(SPECS.existence, "e");
 export const sched: Codec<Schedule> = codec(SPECS.sched, "s");
 export const place: Codec<Place> = codec(SPECS.place, "p");
@@ -471,5 +480,8 @@ export function decodeUnit(u: UnitKey, v: unknown): unknown {
 
 export function validateWrite(w: Write): void {
   if (!(CAUSES as readonly string[]).includes(w.c)) throw fail(w.u, `cause is not one of ${CAUSES.join(", ")}: ${show(w.c)}`);
-  decodeUnit(w.u, w.v);
+  const value = decodeUnit(w.u, w.v);
+  if ((w.c === "push" || w.c === "recalendar") && (parseKey(w.u).kind !== "s" || (value as Schedule).start === null)) {
+    throw fail(w.u, `${w.c} cannot write this unit`);
+  }
 }
