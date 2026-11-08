@@ -29,7 +29,8 @@ describe("Graph", () => {
     expect(g.seen("a", "c")).toBe(true);
     expect(g.seen("c", "a")).toBe(false);
     expect(g.seen("b", "b")).toBe(true);
-    expect(g.has("a") && g.ready("c")).toBe(true);
+    expect(g.has("a")).toBe(true);
+    expect(g.ready("c")).toBe(true);
     expect(g.pending).toEqual([]);
   });
 
@@ -88,9 +89,11 @@ describe("Graph", () => {
     const g = graphOf([act("a1"), act("b", ["a1"]), act("c", ["a1"])]);
     expect(g.seen("b", "c")).toBe(false);
     expect(g.seen("c", "b")).toBe(false);
-    expect(g.seen("a1", "b") && g.seen("a1", "c")).toBe(true);
+    expect(g.seen("a1", "b")).toBe(true);
+    expect(g.seen("a1", "c")).toBe(true);
     g.add(act("d", ["b", "c"]));
-    expect(g.seen("b", "d") && g.seen("c", "d")).toBe(true);
+    expect(g.seen("b", "d")).toBe(true);
+    expect(g.seen("c", "d")).toBe(true);
     expect(g.heads).toEqual(["d"]);
   });
 
@@ -112,6 +115,79 @@ describe("Graph", () => {
     expect(g.pending).toEqual(["p"]);
   });
 
+  it("ignores a repeat of a pending action and releases it once", () => {
+    const g = new Graph();
+    expect(g.add(act("b", ["a"]))).toEqual([]);
+    expect(g.add(act("b", ["a"]))).toEqual([]);
+    expect(g.pending).toEqual(["b"]);
+    expect(ids(g.add(act("a")))).toEqual(["a", "b"]);
+    expect(g.add(act("b", ["a"]))).toEqual([]);
+    expect(g.order()).toEqual(["a", "b"]);
+    expect(g.pending).toEqual([]);
+  });
+
+  it("refuses a repeat that holds values other than plain JSON", () => {
+    const withV = (v: unknown): Action => ({ ...act("a1"), w: [{ u: "pn", v, c: "own" }] });
+    const notPlain = "Action a1 holds a value that is not plain JSON";
+    const mapGraph = graphOf([withV(new Map([["k", 1]]))]);
+    expect(() => mapGraph.add(withV(new Map([["k", 2]])))).toThrow(notPlain);
+    const dateGraph = graphOf([withV(new Date(0))]);
+    expect(() => dateGraph.add(withV(new Date(1)))).toThrow(notPlain);
+    const plain = graphOf([withV({ n: 1 })]);
+    expect(() => plain.add(withV({ n: Number.NaN }))).toThrow(notPlain);
+    expect(() => plain.add(withV({ n: Infinity }))).toThrow(notPlain);
+    expect(() => plain.add(withV([undefined]))).toThrow(notPlain);
+    expect(() => plain.add(withV(new Set([1])))).toThrow(notPlain);
+    expect(plain.add(withV({ n: 1, gone: undefined }))).toEqual([]);
+    expect(plain.order()).toEqual(["a1"]);
+  });
+
+  it("refuses an action that lists itself as a parent", () => {
+    const g = graphOf([act("r")]);
+    expect(() => g.add(act("a", ["a"]))).toThrow("Action a lists itself as a parent");
+    expect(() => g.add(act("b", ["r", "b"]))).toThrow("Action b lists itself as a parent");
+    expect(g.has("a")).toBe(false);
+    expect(g.has("b")).toBe(false);
+    expect(g.pending).toEqual([]);
+  });
+
+  it.each([
+    [["b", "c"], "c"],
+    [["c", "b"], "b"],
+  ])("refuses a two-member parent cycle delivered as %j", (delivery, closer) => {
+    const all: Record<string, Action> = { b: act("b", ["c"]), c: act("c", ["b"]) };
+    const g = new Graph();
+    const first = delivery[0];
+    expect(g.add(all[first])).toEqual([]);
+    expect(() => g.add(all[closer])).toThrow(`Action ${closer} closes a parent cycle`);
+    expect(g.pending).toEqual([first]);
+    expect(g.has(closer)).toBe(false);
+  });
+
+  it.each([
+    [["b", "c", "d"], "d"],
+    [["d", "c", "b"], "b"],
+    [["b", "d", "c"], "c"],
+    [["c", "b", "d"], "d"],
+  ])("refuses a three-member parent cycle delivered as %j", (delivery, closer) => {
+    const all: Record<string, Action> = { b: act("b", ["c", "r"]), c: act("c", ["d"]), d: act("d", ["b"]) };
+    const g = graphOf([act("r")]);
+    const [one, two, three] = delivery;
+    expect(g.add(all[one])).toEqual([]);
+    expect(g.add(all[two])).toEqual([]);
+    expect(() => g.add(all[three])).toThrow(`Action ${closer} closes a parent cycle`);
+    expect(g.pending).toEqual([one, two].sort());
+    expect(g.has(closer)).toBe(false);
+  });
+
+  it("does not mistake a shared missing ancestor for a cycle", () => {
+    const g = new Graph();
+    expect(g.add(act("c", ["b"]))).toEqual([]);
+    expect(g.add(act("d", ["b", "c"]))).toEqual([]);
+    expect(g.add(act("b", ["a"]))).toEqual([]);
+    expect(ids(g.add(act("a")))).toEqual(["a", "b", "c", "d"]);
+  });
+
   it("throws on questions about actions that are not ready", () => {
     const g = graphOf([act("a"), act("b", ["x"])]);
     expect(() => g.depth("b")).toThrow("Action b is not ready");
@@ -127,13 +203,22 @@ interface Dag {
 
 const SESSIONS = ["S1", "S2", "S3", "S4"];
 
+const must = <K, V>(m: ReadonlyMap<K, V>, k: K): V => {
+  const v = m.get(k);
+  if (v === undefined) throw new Error(`oracle: no entry for ${String(k)}`);
+  return v;
+};
+
 const arbDag: fc.Arbitrary<Dag> = fc
-  .array(fc.record({ ses: fc.nat(3), picks: fc.array(fc.nat(), { maxLength: 3 }), fork: fc.boolean() }), {
-    minLength: 1,
-    maxLength: 200,
-    size: "max",
+  .record({
+    specs: fc.array(fc.record({ ses: fc.nat(3), picks: fc.array(fc.nat(), { maxLength: 3 }), fork: fc.boolean() }), {
+      minLength: 1,
+      maxLength: 200,
+      size: "max",
+    }),
+    repeats: fc.array(fc.nat(), { maxLength: 30 }),
   })
-  .chain((specs) => {
+  .chain(({ specs, repeats }) => {
     const tips = new Map<string, number>();
     const actions = specs.map((s, i) => {
       const ses = SESSIONS[s.ses];
@@ -143,16 +228,22 @@ const arbDag: fc.Arbitrary<Dag> = fc
       tips.set(ses, i);
       return act("x" + i, par, ses);
     });
-    return fc.shuffledSubarray(
-      actions.map((_, i) => i),
-      { minLength: actions.length, maxLength: actions.length },
-    ).map((delivery) => ({ actions, delivery }));
+    const all = [...actions.map((_, i) => i), ...repeats.map((r) => r % actions.length)];
+    return fc
+      .shuffledSubarray(all, { minLength: all.length, maxLength: all.length })
+      .map((delivery) => ({ actions, delivery }));
   });
 
 const ancestorsOf = (actions: readonly Action[]): Map<ActionId, Set<ActionId>> => {
   const anc = new Map<ActionId, Set<ActionId>>();
-  actions.forEach((a) => anc.set(a.id, new Set([a.id, ...a.par.flatMap((p) => [...(anc.get(p) ?? [])])])));
+  actions.forEach((a) => anc.set(a.id, new Set([a.id, ...a.par.flatMap((p) => [...must(anc, p)])])));
   return anc;
+};
+
+const depthsOf = (actions: readonly Action[]): Map<ActionId, number> => {
+  const depth = new Map<ActionId, number>();
+  actions.forEach((a) => depth.set(a.id, Math.max(-1, ...a.par.map((p) => must(depth, p))) + 1));
+  return depth;
 };
 
 const PARAMS: fc.Parameters<[Dag]> = { numRuns: 200, seed: 20261108 };
@@ -161,32 +252,45 @@ describe("Graph properties", () => {
   it("seen equals brute-force ancestry and order does not depend on delivery", () => {
     fc.assert(
       fc.property(arbDag, ({ actions, delivery }) => {
+        const byId = new Map(actions.map((a) => [a.id, a]));
+        const depth = depthsOf(actions);
+        const byDepthThenId = (x: ActionId, y: ActionId) => must(depth, x) - must(depth, y) || (x < y ? -1 : x > y ? 1 : 0);
         const inOrder = graphOf(actions);
         const g = new Graph();
-        const released = delivery.flatMap((k) => ids(g.add(actions[k])));
+        const delivered = new Set<ActionId>();
+        const headMismatches: string[] = [];
+        const repeatReleases: string[] = [];
+        const released = delivery.flatMap((k) => {
+          const a = actions[k];
+          const out = ids(g.add(a));
+          if (delivered.has(a.id) && out.length > 0) repeatReleases.push(`${a.id} -> ${out.join(",")}`);
+          delivered.add(a.id);
+          const ready = g.order();
+          const named = new Set(ready.flatMap((id) => must(byId, id).par));
+          const expected = ready.filter((id) => !named.has(id)).sort(byDepthThenId);
+          if (JSON.stringify(g.heads) !== JSON.stringify(expected)) {
+            headMismatches.push(`after ${a.id}: ${g.heads.join(",")} vs ${expected.join(",")}`);
+          }
+          return out;
+        });
+        expect(repeatReleases).toEqual([]);
+        expect(headMismatches).toEqual([]);
         expect(g.pending).toEqual([]);
         expect([...released].sort()).toEqual(actions.map((a) => a.id).sort());
         expect(g.order()).toEqual(inOrder.order());
         expect(g.heads).toEqual(inOrder.heads);
         const anc = ancestorsOf(actions);
-        const step = Math.max(1, Math.floor(actions.length / 25));
-        const sample = actions.filter((_, i) => i % step === 0);
-        sample.forEach((x) =>
-          actions.forEach((y) => {
-            expect(g.seen(x.id, y.id)).toBe(anc.get(y.id)?.has(x.id) ?? false);
-            expect(g.seen(y.id, x.id)).toBe(anc.get(x.id)?.has(y.id) ?? false);
-          }),
+        const seenMismatches = actions.flatMap((x) =>
+          actions
+            .filter((y) => g.seen(x.id, y.id) !== must(anc, y.id).has(x.id))
+            .map((y) => `seen(${x.id}, ${y.id})`),
         );
+        expect(seenMismatches).toEqual([]);
         const order = g.order();
         order.slice(1).forEach((id, i) => expect(g.before(order[i], id)).toBe(true));
-        const depth = new Map<ActionId, number>();
-        actions.forEach((a) => depth.set(a.id, Math.max(-1, ...a.par.map((p) => depth.get(p) ?? NaN)) + 1));
-        actions.forEach((a) => expect(g.depth(a.id)).toBe(depth.get(a.id)));
+        actions.forEach((a) => expect(g.depth(a.id)).toBe(must(depth, a.id)));
         actions.forEach((a) => a.par.forEach((p) => expect(g.before(p, a.id)).toBe(true)));
-        const byDepthThenId = actions
-          .map((a) => a.id)
-          .sort((x, y) => (depth.get(x) ?? NaN) - (depth.get(y) ?? NaN) || (x < y ? -1 : x > y ? 1 : 0));
-        expect(order).toEqual(byDepthThenId);
+        expect(order).toEqual(actions.map((a) => a.id).sort(byDepthThenId));
       }),
       PARAMS,
     );

@@ -15,6 +15,24 @@ interface Waiting {
   missing: Set<ActionId>;
 }
 
+const isPlainObject = (v: object): boolean => {
+  const proto: unknown = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+};
+
+const assertPlain = (id: ActionId, v: unknown, inObject: boolean): void => {
+  const fail = () => {
+    throw new Error(`Action ${id} holds a value that is not plain JSON`);
+  };
+  if (v === null || typeof v === "string" || typeof v === "boolean") return;
+  if (v === undefined) return inObject ? undefined : fail();
+  if (typeof v === "number") return Number.isFinite(v) ? undefined : fail();
+  if (typeof v !== "object") return fail();
+  if (Array.isArray(v)) return v.forEach((x) => assertPlain(id, x, false));
+  if (!isPlainObject(v)) return fail();
+  Object.values(v).forEach((x) => assertPlain(id, x, true));
+};
+
 const equal = (a: unknown, b: unknown): boolean => {
   if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
@@ -24,6 +42,12 @@ const equal = (a: unknown, b: unknown): boolean => {
   const ea = defined(a);
   const mb = new Map(defined(b));
   return ea.length === mb.size && ea.every(([k, v]) => mb.has(k) && equal(v, mb.get(k)));
+};
+
+const sameRecord = (known: Action, a: Action): boolean => {
+  assertPlain(a.id, known, false);
+  assertPlain(a.id, a, false);
+  return equal(known, a);
 };
 
 export class Graph {
@@ -37,11 +61,13 @@ export class Graph {
   add(a: Action): readonly Action[] {
     const known = this.nodes.get(a.id)?.action ?? this.waiting.get(a.id)?.action;
     if (known !== undefined) {
-      if (!equal(known, a)) throw new Error(`Action ${a.id} arrived twice with different contents`);
+      if (!sameRecord(known, a)) throw new Error(`Action ${a.id} arrived twice with different contents`);
       return [];
     }
     const missing = new Set(a.par.filter((p) => !this.nodes.has(p)));
     if (missing.size > 0) {
+      if (missing.has(a.id)) throw new Error(`Action ${a.id} lists itself as a parent`);
+      if (this.closesCycle(a.id, missing)) throw new Error(`Action ${a.id} closes a parent cycle`);
       this.waiting.set(a.id, { action: a, missing });
       missing.forEach((p) => {
         const list = this.blocked.get(p);
@@ -92,6 +118,18 @@ export class Graph {
 
   before(a: ActionId, b: ActionId): boolean {
     return this.compare(a, b) < 0;
+  }
+
+  private closesCycle(id: ActionId, missing: ReadonlySet<ActionId>): boolean {
+    const visited = new Set<ActionId>();
+    const stack = [...missing];
+    for (let p = stack.pop(); p !== undefined; p = stack.pop()) {
+      if (p === id) return true;
+      if (visited.has(p)) continue;
+      visited.add(p);
+      stack.push(...(this.waiting.get(p)?.missing ?? []));
+    }
+    return false;
   }
 
   private node(id: ActionId): Node {
