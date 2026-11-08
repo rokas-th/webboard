@@ -177,7 +177,24 @@ describe("listed", () => {
 
   it("does not list off or work tuning without a fetched day", () => {
     const cal = withTuning(CH_ZH, [["2026-12-30", { kind: "off" }], ["2026-12-31", { kind: "work" }]]);
-    expect(workCalendar(cal).listed(d("2026-12-30"), d("2026-12-31"))).toEqual([]);
+    const wc = workCalendar(cal);
+    expect(wc.listed(d("2026-12-30"), d("2026-12-31"))).toEqual([]);
+    expect(wc.off(d("2026-12-30"))).toBeNull();
+    expect(wc.isWork(d("2026-12-30"))).toBe(true);
+    expect(wc.off(d("2026-12-31"))).toBeNull();
+    expect(wc.isWork(d("2026-12-31"))).toBe(true);
+  });
+
+  it("marks every off or work tuning on a fetched day, even one that changes nothing", () => {
+    const plain = workCalendar(CH_ZH);
+    const cal = withTuning(CH_ZH, [["2026-12-25", { kind: "off" }], ["2026-12-24", { kind: "work" }]]);
+    const wc = workCalendar(cal);
+    expect(wc.listed(d("2026-12-24"), d("2026-12-25")).map(row)).toEqual(["2026-12-24 half f t", "2026-12-25 public t t"]);
+    expect(wc.off(d("2026-12-25"))).toEqual(plain.off(d("2026-12-25")));
+    expect(wc.off(d("2026-12-24"))).toBeNull();
+    expect(wc.isWork(d("2026-12-24"))).toBe(true);
+    const optionalWork = workCalendar(withTuning(CH_ZH, [["2027-01-02", { kind: "work" }]]));
+    expect(optionalWork.listed(d("2027-01-02"), d("2027-01-02")).map(row)).toEqual(["2027-01-02 optional f t"]);
   });
 
   it("orders one date's entries as off() ranks them", () => {

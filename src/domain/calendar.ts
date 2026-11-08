@@ -107,8 +107,7 @@ const fetchedOrigin = (day: HolidayDay, tuning: Tuning | undefined): OffOrigin |
   return day.kind === "optional" ? "optional-on" : "half-on";
 };
 
-const tunes = (day: HolidayDay, tuning: Tuning | undefined): boolean =>
-  (day.kind === "public" && tuning?.kind === "work") || (day.kind !== "public" && tuning?.kind === "off");
+const tunes = (tuning: Tuning | undefined): boolean => tuning?.kind === "off" || tuning?.kind === "work";
 
 const closureDays = (c: Closure): IsoDate[] => {
   const from = toDay(c.from);
@@ -164,7 +163,7 @@ export function workCalendar(cal: Calendar): WorkCalendar {
       case "added":
         return { date: e.date, name: e.name, kind: "added", counted, tuned: true };
       case "fetched":
-        return { date: e.date, name: e.day.name, kind: e.day.kind, counted, tuned: tunes(e.day, cal.tuning.get(e.date)) };
+        return { date: e.date, name: e.day.name, kind: e.day.kind, counted, tuned: tunes(cal.tuning.get(e.date)) };
       case "closure":
         return { date: e.date, name: e.closure.name, kind: "closure", counted, tuned: false };
     }
