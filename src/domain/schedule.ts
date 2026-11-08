@@ -251,12 +251,16 @@ export function recalendar(view: SchedView, next: WorkCalendar): RecalResult {
       .filter((l) => !loops.has(linkKey(l.from, l.to)) && view.items.has(l.from) && view.items.has(l.to))
       .map((l) => l.to),
   );
-  const roots = items.map((s) => s.id).filter((id) => !led.has(id)).sort(byId);
-  const pushed = push(recal, roots);
-  const endsChanged = items.filter((s) => {
+  const endMoved = (s: Sched, moves: ReadonlyMap<ItemId, Day>): boolean => {
     const r = recal.items.get(s.id) as Sched;
-    const m = pushed.moves.get(s.id);
+    const m = moves.get(s.id);
     return endOf(m === undefined ? r : { ...r, start: m }, next) !== endOf(s, view.cal);
-  }).length;
+  };
+  const roots = items
+    .filter((s) => !led.has(s.id) || (s.lock !== null && endMoved(s, new Map())))
+    .map((s) => s.id)
+    .sort(byId);
+  const pushed = push(recal, roots);
+  const endsChanged = items.filter((s) => endMoved(s, pushed.moves)).length;
   return { starts, durs, pushed, endsChanged, movedLater: pushed.moves.size };
 }

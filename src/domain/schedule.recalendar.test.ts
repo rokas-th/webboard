@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { push, recalendar, type Sched, type SchedView } from "./schedule";
+import { endOf, push, recalendar, type Sched, type SchedView } from "./schedule";
 import { workCalendar, type Closure } from "./calendar";
 import { toDay, type Day } from "./dates";
 import type { ItemId } from "./model";
@@ -30,6 +30,7 @@ const days = (entries: Record<ItemId, string>): Map<ItemId, Day> =>
 const expectYearEnd = (v: SchedView): void => {
   const r = recalendar(v, NEXT);
   expect(r.durs).toEqual(new Map([["P", 4]]));
+  expect(endOf({ ...(v.items.get("P") as Sched), dur: 4 }, NEXT)).toBe(toDay("2026-12-18"));
   expect(r.starts).toEqual(days({ R: "2027-01-04" }));
   expect(r.pushed.moves).toEqual(days({ S: "2027-01-06" }));
   expect(r.pushed.stopped).toEqual([]);
@@ -48,6 +49,7 @@ describe("recalendar", () => {
     expect(r.starts).toEqual(new Map());
     expect(r.durs).toEqual(new Map());
     expect(r.pushed.moves).toEqual(new Map());
+    expect(r.pushed.stopped).toEqual([{ id: "H", reason: "held" }]);
     expect(r.endsChanged).toBe(0);
     expect(r.movedLater).toBe(0);
   });
@@ -59,5 +61,42 @@ describe("recalendar", () => {
         [ln("R", "S"), ln("X", "Y"), ln("Y", "X")],
       ),
     );
+  });
+
+  it("roots ignore loop links", () => {
+    const r = recalendar(
+      view(
+        [task("X", "2026-12-14", 1), task("Y", "2026-12-16", 1), task("Z", "2026-12-17", 1)],
+        [ln("X", "Y"), ln("Y", "X"), ln("Y", "Z")],
+      ),
+      NEXT,
+    );
+    expect(r.starts).toEqual(days({ Y: "2026-12-17" }));
+    expect(r.pushed.moves).toEqual(days({ Z: "2026-12-18" }));
+    expect(r.movedLater).toBe(1);
+  });
+
+  it("roots ignore unscheduled predecessors", () => {
+    const r = recalendar(
+      view([task("G", "2026-12-14", 3), task("T", "2026-12-17", 1)], [ln("ghost", "G"), ln("G", "T")]),
+      NEXT,
+    );
+    expect(r.starts).toEqual(new Map());
+    expect(r.pushed.moves).toEqual(days({ T: "2026-12-18" }));
+    expect(r.movedLater).toBe(1);
+  });
+
+  it("a locked item whose end moves pushes its successors", () => {
+    const r = recalendar(
+      view(
+        [task("Z", "2026-12-21", 2, "done"), task("Q", "2026-12-28", 3, "doing"), task("T", "2026-12-31", 1)],
+        [ln("Z", "Q"), ln("Q", "T")],
+      ),
+      NEXT,
+    );
+    expect(endOf(task("Q", "2026-12-28", 3, "doing"), NEXT)).toBe(toDay("2027-01-06"));
+    expect(r.pushed.moves).toEqual(days({ T: "2027-01-07" }));
+    expect(r.pushed.stopped).toEqual([]);
+    expect(r.movedLater).toBe(1);
   });
 });
