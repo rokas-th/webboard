@@ -18,6 +18,22 @@ const CH_ZH_DATES: readonly IsoDate[] = [...CH_ZH.holidays.values()].flatMap((y)
 
 const arbDay = fc.integer({ min: FIRST, max: LAST });
 
+export const itemOf = (view: SchedView, id: ItemId): Sched => {
+  const s = view.items.get(id);
+  if (s === undefined) throw new Error(`no item ${id}`);
+  return s;
+};
+
+const calendarText = (c: Calendar): string =>
+  [
+    `workdays [${c.workdays.join(",")}]`,
+    `tuning {${[...c.tuning].map(([d, t]) => `${d} ${t.kind === "add" ? `add:${t.name}` : t.kind}`).join(", ")}}`,
+    `closures [${[...c.closures.values()].map((x) => `${x.id} ${x.from}..${x.to}`).join(", ")}]`,
+  ].join("; ");
+
+const printable = <T extends object>(value: T, text: () => string): T & fc.WithToStringMethod =>
+  Object.assign(value, { [fc.toStringMethod]: text });
+
 const arbTuning: fc.Arbitrary<Tuning> = fc.oneof(
   fc.constant<Tuning>({ kind: "off" }),
   fc.constant<Tuning>({ kind: "work" }),
@@ -29,18 +45,25 @@ const arbClosure = (id: string): fc.Arbitrary<Closure> =>
     ({ from, len, name }) => ({ id, from: toIso(from), to: toIso(Math.min(LAST, from + len - 1)), name }),
   );
 
+const arbTuned = (dates: fc.Arbitrary<IsoDate[]>): fc.Arbitrary<(readonly [IsoDate, Tuning])[]> =>
+  dates.chain((ds) => fc.tuple(...ds.map((d) => arbTuning.map((t) => [d, t] as const))));
+
 export const arbCalendar: fc.Arbitrary<Calendar> = fc
   .record({
     workdays: fc.subarray([...WEEKDAYS], { minLength: 1 }),
-    tuned: fc.subarray([...CH_ZH_DATES]).chain((dates) => fc.tuple(...dates.map((d) => arbTuning.map((t) => [d, t] as const)))),
+    holidays: arbTuned(fc.subarray([...CH_ZH_DATES])),
+    ordinary: arbTuned(fc.uniqueArray(arbDay.map(toIso), { maxLength: 3 })),
     closures: fc.integer({ min: 0, max: 2 }).chain((n) => fc.tuple(...Array.from({ length: n }, (_, i) => arbClosure(`c${i}`)))),
   })
-  .map(({ workdays, tuned, closures }) => ({
-    ...CH_ZH,
-    workdays,
-    tuning: new Map(tuned),
-    closures: new Map(closures.map((c) => [c.id, c] as const)),
-  }));
+  .map(({ workdays, holidays, ordinary, closures }) => {
+    const cal: Calendar = {
+      ...CH_ZH,
+      workdays,
+      tuning: new Map([...holidays, ...ordinary]),
+      closures: new Map(closures.map((c) => [c.id, c] as const)),
+    };
+    return printable(cal, () => `Calendar(${calendarText(cal)})`);
+  });
 
 const arbLock: fc.Arbitrary<Lock | null> = fc.oneof(
   { arbitrary: fc.constant(null), weight: 12 },
@@ -59,24 +82,26 @@ const arbSched = (id: ItemId): fc.Arbitrary<Sched> =>
     })
     .map(({ task, start, dur, lock }) => ({ id, kind: task ? "task" : "milestone", start, dur: task ? dur : 0, lock }));
 
-const arbPair = (ids: readonly ItemId[]): fc.Arbitrary<readonly [ItemId, ItemId]> =>
+const arbPair = (order: readonly ItemId[]): fc.Arbitrary<readonly [ItemId, ItemId]> =>
   fc.oneof(
-    { arbitrary: fc.tuple(fc.constantFrom(...ids), fc.constantFrom(...ids)), weight: 1 },
+    { arbitrary: fc.tuple(fc.constantFrom(...order), fc.constantFrom(...order)), weight: 1 },
     {
       arbitrary: fc
-        .tuple(fc.nat({ max: ids.length - 1 }), fc.nat({ max: ids.length - 1 }))
-        .map(([a, b]) => [ids[Math.min(a, b)], ids[Math.max(a, b)]] as const),
+        .tuple(fc.nat({ max: order.length - 1 }), fc.nat({ max: order.length - 1 }))
+        .map(([a, b]) => [order[Math.min(a, b)], order[Math.max(a, b)]] as const),
       weight: 3,
     },
   );
 
-const arbLink = (ids: readonly ItemId[]): fc.Arbitrary<Link> =>
+const arbLink = (order: readonly ItemId[]): fc.Arbitrary<Link> =>
   fc
-    .record({ pair: arbPair(ids), type: fc.constantFrom(...LINK_TYPES), lag: fc.integer({ min: -5, max: 5 }) })
+    .record({ pair: arbPair(order), type: fc.constantFrom(...LINK_TYPES), lag: fc.integer({ min: -5, max: 5 }) })
     .map(({ pair: [from, to], type, lag }) => ({ from, to, type, lag }));
 
 const arbLinks = (ids: readonly ItemId[], maxLength: number): fc.Arbitrary<Link[]> =>
-  fc.uniqueArray(arbLink(ids), { maxLength, size: "max", selector: (l) => linkKey(l.from, l.to) });
+  fc
+    .shuffledSubarray([...ids], { minLength: ids.length })
+    .chain((order) => fc.uniqueArray(arbLink(order), { maxLength, size: "max", selector: (l) => linkKey(l.from, l.to) }));
 
 type Edit = { kind: "move"; by: number } | { kind: "resize"; dur: number };
 
@@ -103,14 +128,24 @@ const planOf = (
   const cal = workCalendar(calendar);
   const roots = edits.map(([i]) => items[i].id);
   const edit = new Map(edits.map(([i, e]) => [items[i].id, e] as const));
-  return {
-    view: {
-      items: new Map(items.map((s) => [s.id, edit.has(s.id) ? edited(s, edit.get(s.id) as Edit, cal) : s] as const)),
-      links,
-      cal,
-    },
-    roots,
+  const view: SchedView = {
+    items: new Map(
+      items.map((s) => {
+        const e = edit.get(s.id);
+        return [s.id, e === undefined ? s : edited(s, e, cal)] as const;
+      }),
+    ),
+    links,
+    cal,
   };
+  return printable({ view, roots }, () =>
+    [
+      `ArbPlan(${calendarText(calendar)}`,
+      `items [${[...view.items.values()].map((s) => `${s.id} ${s.kind} ${toIso(s.start)}+${s.dur} ${s.lock ?? "-"}`).join(", ")}]`,
+      `links [${links.map((l) => `${l.from}>${l.to} ${l.type}${l.lag >= 0 ? "+" : ""}${l.lag}`).join(", ")}]`,
+      `roots [${roots.join(",")}])`,
+    ].join("; "),
+  );
 };
 
 const arbEdits = (n: number): fc.Arbitrary<[number, Edit][]> =>
@@ -154,9 +189,11 @@ export const arbLoopPlan: fc.Arbitrary<ArbPlan> = arbItems.chain((items) => {
     .map(({ cycle, links, calendar, edits }) => {
       const cycleKeys = new Set(cycle.map((l) => linkKey(l.from, l.to)));
       const all = [...cycle, ...links.filter((l) => !cycleKeys.has(linkKey(l.from, l.to)))];
+      if (loopLinks(all).size === 0) {
+        throw new Error(`arbLoopPlan: no loop in ring ${cycle.map((l) => `${l.from}>${l.to}`).join(",")} over ${ids.join(",")}`);
+      }
       return planOf(items, all, calendar, edits);
-    })
-    .filter(({ view }) => loopLinks(view.links).size > 0);
+    });
 });
 
 export function downstreamOf(view: SchedView, roots: readonly ItemId[]): ReadonlySet<ItemId> {
@@ -169,7 +206,7 @@ export function downstreamOf(view: SchedView, roots: readonly ItemId[]): Readonl
   const queue: ItemId[] = [...roots];
   for (let i = 0; i < queue.length; i += 1) {
     const v = queue[i];
-    if (!rootSet.has(v) && (view.items.get(v) as Sched).lock !== null) continue;
+    if (!rootSet.has(v) && itemOf(view, v).lock !== null) continue;
     links
       .filter((l) => l.from === v && !seen.has(l.to))
       .forEach((l) => {

@@ -2,15 +2,13 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { workCalendar } from "./calendar";
 import { linkKey } from "./model";
-import { conflicts, endOf, loopLinks, push, recalendar, startOf, type Sched, type SchedView } from "./schedule";
-import { arbCalendar, arbLoopPlan, arbPlan, downstreamOf } from "../test/fixtures/arbitraries";
+import { conflicts, endOf, loopLinks, push, recalendar, startOf, type SchedView } from "./schedule";
+import { arbCalendar, arbLoopPlan, arbPlan, downstreamOf, itemOf } from "../test/fixtures/arbitraries";
 import { applyMoves, storedStarts } from "../test/fixtures/sched";
 
 const NUM_RUNS = 1000;
 const PARAMS: fc.Parameters<unknown> = { numRuns: NUM_RUNS, seed: 20261108 };
 const MIN_HITS = NUM_RUNS / 20;
-
-const item = (v: SchedView, id: string): Sched => v.items.get(id) as Sched;
 
 const incomingInView = (v: SchedView, id: string) =>
   v.links.filter((l) => l.to === id && v.items.has(l.from) && v.items.has(l.to));
@@ -65,7 +63,7 @@ describe("push properties", () => {
       fc.property(arbPlan, ({ view, roots }) => {
         const r = push(view, roots);
         if (r.moves.size > 0) hits += 1;
-        r.moves.forEach((d, id) => expect(d).toBeGreaterThan(startOf(item(view, id), view.cal)));
+        r.moves.forEach((d, id) => expect(d).toBeGreaterThan(startOf(itemOf(view, id), view.cal)));
       }),
       PARAMS,
     );
@@ -78,7 +76,7 @@ describe("push properties", () => {
       fc.property(arbPlan, ({ view, roots }) => {
         const r = push(view, roots);
         if (r.stopped.length > 0) hits += 1;
-        expect([...r.moves.keys()].filter((id) => item(view, id).lock !== null)).toEqual([]);
+        expect([...r.moves.keys()].filter((id) => itemOf(view, id).lock !== null)).toEqual([]);
       }),
       PARAMS,
     );
