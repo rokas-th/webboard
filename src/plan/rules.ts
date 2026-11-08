@@ -1,0 +1,38 @@
+import { toDay } from "../domain/dates";
+import type { Rules, UnitKey, Write } from "../log/types";
+import { decodeAs, parseKey } from "./units";
+
+const deepEqual = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => deepEqual(x, b[i]));
+  }
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  const rb = b as Record<string, unknown>;
+  return ka.length === kb.length && ka.every((k) => k in rb && deepEqual((a as Record<string, unknown>)[k], rb[k]));
+};
+
+const sameYear = (a: unknown, b: unknown): boolean => {
+  if (a === null || b === null) return a === b;
+  const ya = a as Record<string, unknown>;
+  const yb = b as Record<string, unknown>;
+  return deepEqual(ya.region, yb.region) && deepEqual(ya.days, yb.days);
+};
+
+const startOf = (u: UnitKey, w: Write): number => {
+  const start = decodeAs("sched", u, w.v).start;
+  if (start === null) throw new Error(`Derived write to ${u} has no start`);
+  return toDay(start);
+};
+
+export const planRules: Rules = {
+  same(u, a, b) {
+    return parseKey(u).kind === "ch" ? sameYear(a, b) : deepEqual(a, b);
+  },
+  mergeDerived(u, earlier, later) {
+    if (parseKey(u).kind !== "s") throw new Error(`Derived write to ${u}`);
+    return startOf(u, earlier) > startOf(u, later) ? earlier : later;
+  },
+};
