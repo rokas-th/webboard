@@ -162,6 +162,7 @@ export function push(view: SchedView, roots: readonly ItemId[]): PushResult {
       }
     });
   }
+  if (order.length !== down.size) throw new Error("push: dependency cycle among push links");
   const moves = new Map<ItemId, Day>();
   const stopped: Stop[] = [];
   const current = (id: ItemId): Sched => {

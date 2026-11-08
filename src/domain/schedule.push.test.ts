@@ -45,6 +45,23 @@ describe("push", () => {
     expect(r.stopped).toEqual([{ id: "Z", reason: lock }]);
   });
 
+  it.each<Lock>(["done", "doing", "held"])("a locked root still pushes (%s)", (lock) => {
+    const v = view([task("A", "2026-11-02", 10, lock), task("B", "2026-11-09", 2)], [ln("A", "B")]);
+    const r = push(v, ["A"]);
+    expect(isoMoves(r)).toEqual({ B: "2026-11-16" });
+    expect(r.stopped).toEqual([]);
+  });
+
+  it("es follows the latest of all incoming links", () => {
+    const v = view(
+      [task("A", "2026-11-02", 3), task("X", "2026-11-02", 8), task("B", "2026-11-05", 1)],
+      [ln("A", "B"), ln("X", "B")],
+    );
+    const r = push(v, ["A"]);
+    expect(isoMoves(r)).toEqual({ B: "2026-11-12" });
+    expect(r.stopped).toEqual([]);
+  });
+
   it("loop links are ignored", () => {
     const v = view(
       [
