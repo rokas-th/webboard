@@ -436,6 +436,20 @@ describe("choices", () => {
     expect(c.sides[1].values.get("e:S")).toEqual({ k: "group", t: false });
   });
 
+  it("two devices trashing a group apart while renaming the same item apart keep their own sides", () => {
+    const { cs } = run(
+      act("m1", ["a0"], [w("e:S", { k: "group", t: true }), w("n:A", "Alpha mac")], mac),
+      act("p1", ["a0"], [w("e:S", { k: "group", t: true }), w("n:A", "Alpha phone")], iph),
+      act("t1", ["a0"], [w("n:R", "Final review")], ipad),
+    );
+    const c = only(cs);
+    expect(c.kind).toBe("delete");
+    expect(c.units).toEqual(["e:S", "n:A", "n:R"]);
+    expect(c.sides.map((s) => s.actions)).toEqual([["m1"], ["p1"], ["t1"]]);
+    expect(labels(c)).toEqual(["Mac", "iPhone", "iPad"]);
+    expect(c.sides.map((s) => s.values.get("n:A"))).toEqual(["Alpha mac", "Alpha phone", "Alpha"]);
+  });
+
   it("one action trashing two groups while the iPhone edits a child of each is one delete choice on both", () => {
     const { cs } = run(
       act("q", ["a0"], item("C", "task", "Calc", "GA", "a0", sched("2026-11-16")), mac),

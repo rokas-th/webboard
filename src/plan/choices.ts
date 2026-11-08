@@ -227,7 +227,7 @@ const deletions = (r: Reader): Found[] => {
       {
         units: [key.e(x), ...hit.map(([u]) => u)],
         parts: [...ts, ...es],
-        lists: hit.map(([, e]) => [...ts, ...e]),
+        lists: hit.flatMap(([, e]) => ts.map((t) => [t, ...e])),
         bound: [ts],
         deletions: [{ item: x, by: ts }],
       },
@@ -308,7 +308,9 @@ const sidesOf = (r: Reader, g: Found): Side[] => {
   };
   const shares = (a: ActionId, b: ActionId) => g.lists.some((l) => l.includes(a) && l.includes(b));
   g.parts.forEach((p) => {
-    const mate = g.parts.find((q) => sideOf.has(q) && g.bound.some((b) => b.includes(q) && b.includes(p)));
+    const mate = g.parts.find(
+      (q) => sideOf.has(q) && g.bound.some((b) => b.includes(q) && b.includes(p)) && !sideAt(q).actions.some((a) => shares(a, p)),
+    );
     if (mate !== undefined) {
       join(sideAt(mate), p);
       return;
