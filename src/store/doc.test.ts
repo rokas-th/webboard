@@ -130,6 +130,37 @@ describe("encoding", () => {
   });
 });
 
+describe("append validation", () => {
+  it.each([
+    ["meta", { ...base("x1"), meta: { undo: undefined } }],
+    ["at", { ...base("x1"), at: Number.NaN }],
+    ["at", { ...base("x1"), at: Number.POSITIVE_INFINITY }],
+    ["w", base("x1", [{ u: "s:i1", v: 1, c: "bogus" as Cause }])],
+    ["w", base("x1", [{ u: "s:i1", v: 1, c: "toString" as Cause }])],
+  ])("refuses an action with a bad %s and stores nothing", (field, action) => {
+    const doc = fresh();
+    doc.append(base("x0"), []);
+    const before = Y.encodeStateAsUpdate(doc.ydoc);
+    expect(() => doc.append(action, [])).toThrow(new Error(`Action x1 has a malformed ${field}`));
+    expect(Y.encodeStateAsUpdate(doc.ydoc)).toEqual(before);
+  });
+
+  it("encodeAction refuses a cause outside the union", () => {
+    expect(() => encodeAction(base("x1", [{ u: "s:i1", v: 1, c: "bogus" as Cause }]))).toThrow(
+      new Error("Action x1 has a malformed w"),
+    );
+  });
+
+  it("refuses a second action with the same id and stores nothing", () => {
+    const doc = fresh();
+    doc.append(base("x1"), []);
+    const before = Y.encodeStateAsUpdate(doc.ydoc);
+    expect(() => doc.append({ ...base("x1"), lbl: "Other" }, [])).toThrow(new Error("Action x1 already exists"));
+    expect(Y.encodeStateAsUpdate(doc.ydoc)).toEqual(before);
+    expect([...doc.actions()]).toEqual([base("x1")]);
+  });
+});
+
 describe("notes", () => {
   const created = (): Action => base("c1", [{ u: "e:i1", v: "task", c: "own" }]);
 
@@ -180,6 +211,20 @@ describe("notes", () => {
     expect(Y.encodeStateAsUpdate(doc.ydoc)).toEqual(before);
     expect([...doc.actions()].map((x) => x.id)).toEqual(["c1"]);
   });
+
+  it("append refuses an item listed twice and stores nothing", () => {
+    const doc = fresh();
+    doc.append(base("x0"), []);
+    const before = Y.encodeStateAsUpdate(doc.ydoc);
+    expect(() => doc.append(created(), ["i1", "i1"])).toThrow(new Error("Item i1 is listed twice in newNotes"));
+    expect(Y.encodeStateAsUpdate(doc.ydoc)).toEqual(before);
+  });
+
+  it("note that is not text throws", () => {
+    const doc = fresh();
+    doc.ydoc.getMap("notes").set("i1", "plain");
+    expect(() => doc.note("i1")).toThrow(new Error("Item i1 has a note that is not text"));
+  });
 });
 
 describe("onActions", () => {
@@ -204,6 +249,21 @@ describe("onActions", () => {
     expect(origins).toEqual([LOCAL]);
     expect(doc.note("i1").toString()).toBe("");
     expect(doc.note("i2").toString()).toBe("");
+  });
+
+  it.each([
+    ["updated", (map: Y.Map<unknown>) => map.set("x1", encodeAction({ ...base("x1"), lbl: "Rewritten" }))],
+    ["deleted", (map: Y.Map<unknown>) => map.delete("x1")],
+  ])("throws when a received change says an action was %s", (verb, change) => {
+    const a = fresh();
+    const b = fresh();
+    a.append(base("x1"), []);
+    send(a, b);
+    const cb = vi.fn();
+    a.onActions(cb);
+    change(b.ydoc.getMap("actions"));
+    expect(() => send(b, a)).toThrow(new Error(`Action x1 was ${verb}; the action log is append-only`));
+    expect(cb).not.toHaveBeenCalled();
   });
 
   it("stops after unsubscribing", () => {

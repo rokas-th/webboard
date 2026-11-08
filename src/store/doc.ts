@@ -13,14 +13,20 @@ const LETTER: Readonly<Record<Cause, string>> = {
   resolution: "s",
 };
 
-const CAUSE: ReadonlyMap<unknown, Cause> = new Map(
-  (Object.entries(LETTER) as [Cause, string][]).map(([cause, letter]) => [letter, cause]),
-);
+const CAUSES: readonly Cause[] = ["own", "push", "recalendar", "undo", "revert", "resolution"];
+
+const CAUSE: ReadonlyMap<unknown, Cause> = new Map(CAUSES.map((cause) => [LETTER[cause], cause]));
 
 const META_KEYS: ReadonlySet<string> = new Set(["undo", "redo", "revert", "resolves", "imported"]);
 
+const letterOf = (id: ActionId, c: Cause): string => {
+  const letter = LETTER[c];
+  if (CAUSE.get(letter) !== c) throw new Error(`Action ${id} has a malformed w`);
+  return letter;
+};
+
 export function encodeAction(a: Action): unknown[] {
-  const tuple: unknown[] = [a.dev, a.ses, a.at, [...a.par], a.lbl, a.w.flatMap((w) => [w.u, w.v, LETTER[w.c]])];
+  const tuple: unknown[] = [a.dev, a.ses, a.at, [...a.par], a.lbl, a.w.flatMap((w) => [w.u, w.v, letterOf(a.id, w.c)])];
   return a.meta === undefined ? tuple : [...tuple, { ...a.meta }];
 }
 
@@ -33,7 +39,7 @@ const decodeWrites = (raw: unknown): Write[] | null => {
     const c = CAUSE.get(letter);
     return isString(u) && c !== undefined ? { u, v, c } : null;
   });
-  return writes.every((w) => w !== null) ? (writes as Write[]) : null;
+  return writes.every((w): w is Write => w !== null) ? writes : null;
 };
 
 const decodeMeta = (raw: unknown): Action["meta"] | null => {
@@ -71,10 +77,15 @@ export class PlanDoc {
   }
 
   append(action: Action, newNotes: readonly ItemId[]): void {
-    const taken = newNotes.find((item, n) => this.notes.has(item) || newNotes.indexOf(item) !== n);
+    if (this.actionMap.has(action.id)) throw new Error(`Action ${action.id} already exists`);
+    const taken = newNotes.find((item) => this.notes.has(item));
     if (taken !== undefined) throw new Error(`Item ${taken} already has a note`);
+    const twice = newNotes.find((item, n) => newNotes.indexOf(item) !== n);
+    if (twice !== undefined) throw new Error(`Item ${twice} is listed twice in newNotes`);
+    const tuple = encodeAction(action);
+    decodeAction(action.id, tuple);
     this.ydoc.transact(() => {
-      this.actionMap.set(action.id, encodeAction(action));
+      this.actionMap.set(action.id, tuple);
       newNotes.forEach((item) => this.notes.set(item, new Y.Text()));
     }, LOCAL);
   }
@@ -85,9 +96,12 @@ export class PlanDoc {
 
   onActions(cb: (added: readonly Action[], local: boolean) => void): () => void {
     const observer = (event: Y.YMapEvent<unknown>): void => {
-      const added = [...event.changes.keys]
-        .filter(([, change]) => change.action === "add")
-        .map(([id]) => decodeAction(id, this.actionMap.get(id)));
+      const changes = [...event.changes.keys];
+      changes.forEach(([id, change]) => {
+        if (change.action === "update") throw new Error(`Action ${id} was updated; the action log is append-only`);
+        if (change.action === "delete") throw new Error(`Action ${id} was deleted; the action log is append-only`);
+      });
+      const added = changes.map(([id]) => decodeAction(id, this.actionMap.get(id)));
       if (added.length > 0) cb(added, event.transaction.origin === LOCAL);
     };
     this.actionMap.observe(observer);
@@ -96,7 +110,8 @@ export class PlanDoc {
 
   note(item: ItemId): Y.Text {
     const text = this.notes.get(item);
-    if (!(text instanceof Y.Text)) throw new Error(`Item ${item} has no note: it was created without one`);
+    if (text === undefined) throw new Error(`Item ${item} has no note: it was created without one`);
+    if (!(text instanceof Y.Text)) throw new Error(`Item ${item} has a note that is not text`);
     return text;
   }
 }

@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { newId } from "./ids";
 
 const byteLength = (id: string): number => {
@@ -17,4 +17,18 @@ it("100,000 ids are distinct", () => {
 
 it("newId decodes to 8 bytes", () => {
   Array.from({ length: 1000 }, newId).forEach((id) => expect(byteLength(id)).toBe(8));
+});
+
+it("newId encodes fixed bytes as unpadded base64url", () => {
+  const bytes = [0xfb, 0xff, 0xbf, 0x00, 0x01, 0x02, 0x03, 0x04];
+  const spy = vi.spyOn(crypto, "getRandomValues").mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+    if (!(array instanceof Uint8Array)) throw new Error("newId must ask for a Uint8Array");
+    array.set(bytes);
+    return array;
+  });
+  try {
+    expect(newId()).toBe("-_-_AAECAwQ");
+  } finally {
+    spy.mockRestore();
+  }
 });
