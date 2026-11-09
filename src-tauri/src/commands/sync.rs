@@ -78,17 +78,17 @@ pub async fn sync_remove_device(sync: State<'_, SyncState>, id: String) -> Resul
 
 #[tauri::command]
 pub async fn sync_status(sync: State<'_, SyncState>) -> Result<SyncStatus> {
-    sync.client.status().map_err(CommandError::from)
+    sync.client.status().await.map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub async fn sync_mark_revoked(sync: State<'_, SyncState>) -> Result<()> {
-    sync.client.mark_revoked().map_err(CommandError::from)
+    sync.client.mark_revoked().await.map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub async fn sync_reset(sync: State<'_, SyncState>) -> Result<()> {
-    sync.client.reset().map_err(CommandError::from)
+    sync.client.reset().await.map_err(CommandError::from)
 }
 
 #[cfg(test)]

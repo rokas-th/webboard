@@ -5,20 +5,7 @@ pub mod settings;
 pub mod store;
 pub mod sync;
 
-use std::fs;
-use std::io::Write;
-use std::path::Path;
-
-pub(crate) fn replace_file(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
-    fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!("{name}.tmp"));
-    let mut file = fs::File::create(&tmp)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(&tmp, dir.join(name))?;
-    fs::File::open(dir)?.sync_all()
-}
+pub(crate) use webboard_core::fsutil::replace_file;
 
 pub(crate) fn app_dir(
     app: &tauri::AppHandle,

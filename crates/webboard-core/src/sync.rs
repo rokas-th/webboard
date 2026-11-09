@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{ErrorKind, Write};
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -11,16 +11,12 @@ use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 
 use crate::error::CommandError;
+use crate::fsutil::replace_file;
+use crate::net::{client_builder, innermost};
 
 const HOST: &str = "webboard.rokass.org";
 const FILE: &str = "sync.json";
-const TEMP: &str = "sync.json.tmp";
-const TIMEOUT_SECS: u64 = 10;
-const USER_AGENT: &str = concat!(
-    "WebBoard/",
-    env!("CARGO_PKG_VERSION"),
-    " (+https://webboard.rokass.org)"
-);
+const TIMEOUT: Duration = Duration::from_secs(10);
 
 const BAD_ADDRESS: &str = "The server address must start with https://";
 const OTHER_HOST: &str = "This build syncs only with webboard.rokass.org.";
@@ -168,41 +164,37 @@ struct ErrorBody {
     message: String,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Caller {
+#[derive(Clone, Copy)]
+enum Caller<'a> {
     Setup,
     Claim,
-    Member,
+    Member(&'a str),
 }
 
 struct Member {
     server: Url,
+    space_id: String,
     token: String,
 }
 
 pub fn http_client() -> Result<reqwest::Client, SyncError> {
-    reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(|e| {
-            SyncError::new(
-                "sync.http",
-                format!("Could not start the HTTP client: {}.", innermost(&e)),
-            )
-        })
-}
-
-fn innermost(e: &(dyn std::error::Error + 'static)) -> String {
-    std::iter::successors(Some(e), |cur| cur.source())
-        .last()
-        .map_or_else(|| e.to_string(), ToString::to_string)
+    client_builder().build().map_err(|e| {
+        SyncError::new(
+            "sync.http",
+            format!("Could not start the HTTP client: {}.", innermost(&e)),
+        )
+    })
 }
 
 fn http(message: impl Into<String>) -> SyncError {
     SyncError::new("sync.http", message)
 }
 
-fn save_failed(e: &std::io::Error) -> SyncError {
+fn not_joined() -> SyncError {
+    SyncError::new("sync.not_joined", NOT_JOINED)
+}
+
+fn save_failed(e: impl std::fmt::Display) -> SyncError {
     SyncError::new("sync.io", format!("Could not save the sync state: {e}"))
 }
 
@@ -210,6 +202,13 @@ fn read_failed(detail: impl std::fmt::Display) -> SyncError {
     SyncError::new(
         "sync.io",
         format!("Could not read the sync state: {detail}"),
+    )
+}
+
+fn aside_failed(detail: impl std::fmt::Display) -> SyncError {
+    SyncError::new(
+        "sync.io",
+        format!("Could not set the sync state aside: {detail}"),
     )
 }
 
@@ -256,10 +255,17 @@ fn host_of(url: &Url) -> String {
         .map_or_else(|| url.to_string(), ToString::to_string)
 }
 
-fn transport(url: &Url, e: &reqwest::Error) -> SyncError {
+fn timed_out(host: &str, timeout: Duration) -> SyncError {
+    http(format!(
+        "{host} did not answer within {} s.",
+        timeout.as_secs_f64()
+    ))
+}
+
+fn transport(url: &Url, timeout: Duration, e: &reqwest::Error) -> SyncError {
     let host = host_of(url);
     if e.is_timeout() {
-        http(format!("{host} did not answer within {TIMEOUT_SECS} s."))
+        timed_out(&host, timeout)
     } else if e.is_connect() {
         http(format!("Could not reach {host}: {}.", innermost(e)))
     } else {
@@ -288,14 +294,14 @@ fn retry_after(headers: &HeaderMap) -> Option<u64> {
 }
 
 fn rate_limited(message: Option<String>, retry: Option<u64>) -> SyncError {
-    let wait = match retry.map(|secs| secs.div_ceil(60)) {
+    let wait = match retry.map(|secs| secs.div_ceil(60).max(1)) {
         Some(1) => "Try again in 1 minute.".to_string(),
         Some(n) => format!("Try again in {n} minutes."),
         None => "Try again later.".to_string(),
     };
     SyncError::new(
         "sync.rate_limited",
-        match message {
+        match message.filter(|m| !m.trim().is_empty()) {
             Some(m) => format!("{m} {wait}"),
             None => wait,
         },
@@ -306,31 +312,16 @@ fn unix_secs() -> Result<u64, SyncError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
-        .map_err(|e| {
-            SyncError::new(
-                "sync.io",
-                format!("Could not set the sync state aside: the clock is before 1970: {e}"),
-            )
-        })
+        .map_err(|e| aside_failed(format!("the clock is before 1970: {e}")))
 }
 
-pub struct SyncClient {
+struct Local {
     dir: PathBuf,
     tokens: Arc<dyn TokenStore>,
-    http: reqwest::Client,
     writing: Mutex<()>,
 }
 
-impl SyncClient {
-    pub fn new(dir: PathBuf, tokens: Arc<dyn TokenStore>, http: reqwest::Client) -> Self {
-        Self {
-            dir,
-            tokens,
-            http,
-            writing: Mutex::new(()),
-        }
-    }
-
+impl Local {
     fn guard(&self) -> Result<std::sync::MutexGuard<'_, ()>, SyncError> {
         self.writing.lock().map_err(|_| {
             SyncError::new(
@@ -352,23 +343,11 @@ impl SyncClient {
     }
 
     fn write(&self, stored: &Stored) -> Result<(), SyncError> {
-        let json = serde_json::to_vec(stored).map_err(|e| {
-            SyncError::new("sync.io", format!("Could not save the sync state: {e}"))
-        })?;
-        let replace = || -> std::io::Result<()> {
-            fs::create_dir_all(&self.dir)?;
-            let tmp = self.dir.join(TEMP);
-            let mut file = fs::File::create(&tmp)?;
-            file.write_all(&json)?;
-            file.sync_all()?;
-            drop(file);
-            fs::rename(&tmp, self.dir.join(FILE))?;
-            fs::File::open(&self.dir)?.sync_all()
-        };
-        replace().map_err(|e| save_failed(&e))
+        let json = serde_json::to_vec(stored).map_err(save_failed)?;
+        replace_file(&self.dir, FILE, &json).map_err(save_failed)
     }
 
-    pub fn status(&self) -> Result<SyncStatus, SyncError> {
+    fn status(&self) -> Result<SyncStatus, SyncError> {
         Ok(match self.read()? {
             Some(stored) => SyncStatus {
                 space: Some(stored.space),
@@ -381,77 +360,187 @@ impl SyncClient {
         })
     }
 
-    pub fn reset(&self) -> Result<(), SyncError> {
-        let _guard = self.guard()?;
-        let aside = self.dir.join(format!("sync.bad-{}.json", unix_secs()?));
-        match fs::rename(self.dir.join(FILE), aside) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(SyncError::new(
-                "sync.io",
-                format!("Could not set the sync state aside: {e}"),
-            )),
-        }
+    fn vacant(&self, secs: u64) -> Result<PathBuf, SyncError> {
+        let names = std::iter::once(format!("sync.bad-{secs}.json"))
+            .chain((1_u64..).map(|n| format!("sync.bad-{secs}-{n}.json")));
+        names
+            .map(|name| self.dir.join(name))
+            .find_map(|path| match fs::symlink_metadata(&path) {
+                Ok(_) => None,
+                Err(e) if e.kind() == ErrorKind::NotFound => Some(Ok(path)),
+                Err(e) => Some(Err(aside_failed(e))),
+            })
+            .unwrap_or_else(|| Err(aside_failed("no free name is left")))
     }
 
-    pub fn mark_revoked(&self) -> Result<(), SyncError> {
+    fn reset(&self) -> Result<(), SyncError> {
+        let _guard = self.guard()?;
+        let current = self.dir.join(FILE);
+        match fs::symlink_metadata(&current) {
+            Ok(_) => {}
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(aside_failed(e)),
+        }
+        let aside = self.vacant(unix_secs()?)?;
+        fs::rename(current, aside).map_err(aside_failed)
+    }
+
+    fn revoke(&self, only: Option<&str>) -> Result<bool, SyncError> {
         let space_id = {
             let _guard = self.guard()?;
-            let mut stored = self
-                .read()?
-                .ok_or_else(|| SyncError::new("sync.not_joined", NOT_JOINED))?;
+            let mut stored = match (self.read()?, only) {
+                (Some(stored), Some(space)) if stored.space.space_id != space => return Ok(false),
+                (None, Some(_)) => return Ok(false),
+                (None, None) => return Err(not_joined()),
+                (Some(stored), _) => stored,
+            };
             stored.revoked = true;
             self.write(&stored)?;
             stored.space.space_id
         };
-        self.tokens.delete(&space_id)
+        self.tokens.delete(&space_id)?;
+        Ok(true)
     }
 
     fn member(&self) -> Result<Member, SyncError> {
-        let stored = self
-            .read()?
-            .ok_or_else(|| SyncError::new("sync.not_joined", NOT_JOINED))?;
+        let stored = self.read()?.ok_or_else(not_joined)?;
         if stored.revoked {
             return Err(SyncError::new("sync.revoked", REVOKED));
         }
-        let token = self
-            .tokens
-            .get(&stored.space.space_id)?
-            .ok_or_else(|| SyncError::new("keychain.missing", MISSING))?;
         let server = server_url(&stored.space.server).map_err(|e| {
             read_failed(format!(
                 "its server address {} is refused: {}",
                 stored.space.server, e.message
             ))
         })?;
-        Ok(Member { server, token })
+        let token = self
+            .tokens
+            .get(&stored.space.space_id)?
+            .ok_or_else(|| SyncError::new("keychain.missing", MISSING))?;
+        Ok(Member {
+            server,
+            space_id: stored.space.space_id,
+            token,
+        })
+    }
+
+    fn enrol(&self, space: SpaceInfo, token: &str) -> Result<SpaceInfo, SyncError> {
+        let _guard = self.guard()?;
+        let previous = match self.read() {
+            Ok(stored) => stored.map(|s| s.space.space_id),
+            Err(_unreadable) => None,
+        };
+        self.tokens.put(&space.space_id, token)?;
+        let saved = self.write(&Stored {
+            space: space.clone(),
+            revoked: false,
+        });
+        if let Err(e) = saved {
+            return Err(match self.tokens.delete(&space.space_id) {
+                Ok(()) => e,
+                Err(d) => SyncError::new(
+                    e.code,
+                    format!(
+                        "{} The device token could not be removed: {}",
+                        e.message, d.message
+                    ),
+                ),
+            });
+        }
+        if let Some(old) = previous.filter(|old| *old != space.space_id) {
+            self.tokens.delete(&old).map_err(|d| {
+                SyncError::new(
+                    "keychain.io",
+                    format!(
+                        "Joined space {}, but the device token of space {old} could not be removed: {}",
+                        space.space_id, d.message
+                    ),
+                )
+            })?;
+        }
+        Ok(space)
+    }
+}
+
+pub struct SyncClient {
+    local: Arc<Local>,
+    http: reqwest::Client,
+    timeout: Duration,
+}
+
+impl SyncClient {
+    pub fn new(dir: PathBuf, tokens: Arc<dyn TokenStore>, http: reqwest::Client) -> Self {
+        Self {
+            local: Arc::new(Local {
+                dir,
+                tokens,
+                writing: Mutex::new(()),
+            }),
+            http,
+            timeout: TIMEOUT,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_timeout(self, timeout: Duration) -> Self {
+        Self { timeout, ..self }
+    }
+
+    async fn off<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&Local) -> Result<T, SyncError> + Send + 'static,
+    ) -> Result<T, SyncError> {
+        let local = Arc::clone(&self.local);
+        tokio::task::spawn_blocking(move || work(&local))
+            .await
+            .map_err(|e| SyncError::new("sync.io", format!("The sync state task stopped: {e}")))?
+    }
+
+    pub async fn status(&self) -> Result<SyncStatus, SyncError> {
+        self.off(Local::status).await
+    }
+
+    pub async fn reset(&self) -> Result<(), SyncError> {
+        self.off(Local::reset).await
+    }
+
+    pub async fn mark_revoked(&self) -> Result<(), SyncError> {
+        self.off(|l| l.revoke(None).map(|_| ())).await
     }
 
     async fn exchange<T: DeserializeOwned>(
         &self,
         url: &Url,
         request: RequestBuilder,
-        caller: Caller,
+        caller: Caller<'_>,
     ) -> Result<T, SyncError> {
         let response = request
-            .timeout(Duration::from_secs(TIMEOUT_SECS))
+            .timeout(self.timeout)
             .send()
             .await
-            .map_err(|e| transport(url, &e))?;
+            .map_err(|e| transport(url, self.timeout, &e))?;
         let status = response.status();
         if status.is_success() {
-            let bytes = response.bytes().await.map_err(|e| transport(url, &e))?;
-            return serde_json::from_slice(&bytes).map_err(|_| unexpected(status));
+            let bytes = response
+                .bytes()
+                .await
+                .map_err(|e| transport(url, self.timeout, &e))?;
+            return serde_json::from_slice(&bytes).map_err(|e| {
+                http(format!(
+                    "Server answered {} with an unexpected response: {e}",
+                    status.as_u16()
+                ))
+            });
         }
         Err(self.refusal(url, response, caller).await)
     }
 
-    async fn refusal(&self, url: &Url, response: Response, caller: Caller) -> SyncError {
+    async fn refusal(&self, url: &Url, response: Response, caller: Caller<'_>) -> SyncError {
         let status = response.status();
         let retry = retry_after(response.headers());
         let bytes = match response.bytes().await {
             Ok(bytes) => bytes,
-            Err(e) => return transport(url, &e),
+            Err(e) => return transport(url, self.timeout, &e),
         };
         let body = serde_json::from_slice::<ErrorBody>(&bytes).ok();
         if status == StatusCode::TOO_MANY_REQUESTS {
@@ -460,24 +549,33 @@ impl SyncClient {
         let Some(body) = body else {
             return unexpected(status);
         };
-        match status.as_u16() {
-            401 => SyncError::new("sync.unauthorized", body.message),
-            403 if caller == Caller::Member => match self.mark_revoked() {
-                Ok(()) => SyncError::new("sync.revoked", body.message),
-                Err(e) => e,
-            },
-            404 if caller == Caller::Claim => SyncError::new("sync.bad_code", body.message),
-            503 if body.error == "not_configured" => {
+        let answered = |b: &ErrorBody| {
+            http(format!(
+                "Server answered {} {}: {}",
+                status.as_u16(),
+                b.error,
+                b.message
+            ))
+        };
+        match (status.as_u16(), caller) {
+            (401, _) => SyncError::new("sync.unauthorized", body.message),
+            (403, Caller::Member(space)) => {
+                let space = space.to_string();
+                match self.off(move |l| l.revoke(Some(&space))).await {
+                    Ok(true) => SyncError::new("sync.revoked", body.message),
+                    Ok(false) => answered(&body),
+                    Err(e) => e,
+                }
+            }
+            (404, Caller::Claim) => SyncError::new("sync.bad_code", body.message),
+            (503, _) if body.error == "not_configured" => {
                 SyncError::new("sync.not_configured", NOT_CONFIGURED)
             }
-            code => http(format!(
-                "Server answered {code} {}: {}",
-                body.error, body.message
-            )),
+            _ => answered(&body),
         }
     }
 
-    fn enrol(
+    async fn enrol(
         &self,
         server: &Url,
         enrolled: Enrolled,
@@ -485,21 +583,23 @@ impl SyncClient {
         device_name: &str,
     ) -> Result<SpaceInfo, SyncError> {
         if enrolled.device_id != device_id {
-            return Err(unexpected(StatusCode::OK));
+            return Err(http(format!(
+                "The server enrolled device {} instead of {device_id}.",
+                enrolled.device_id
+            )));
         }
-        self.tokens.put(&enrolled.space_id, &enrolled.token)?;
         let space = SpaceInfo {
             server: server.origin().ascii_serialization(),
             space_id: enrolled.space_id,
             device_id: device_id.to_string(),
             device_name: device_name.to_string(),
         };
-        let _guard = self.guard()?;
-        self.write(&Stored {
-            space: space.clone(),
-            revoked: false,
-        })?;
-        Ok(space)
+        let token = enrolled.token;
+        self.off(move |l| l.enrol(space, &token)).await
+    }
+
+    async fn probe(&self) -> Result<(), SyncError> {
+        self.off(|l| l.tokens.probe()).await
     }
 
     pub async fn setup(
@@ -510,7 +610,7 @@ impl SyncClient {
         device_name: &str,
     ) -> Result<SpaceInfo, SyncError> {
         let server = server_url(server)?;
-        self.tokens.probe()?;
+        self.probe().await?;
         let url = endpoint(&server, &["space"])?;
         let request = self
             .http
@@ -518,7 +618,7 @@ impl SyncClient {
             .header(AUTHORIZATION, format!("Bearer {secret}"))
             .json(&serde_json::json!({ "deviceId": device_id, "deviceName": device_name }));
         let enrolled: Enrolled = self.exchange(&url, request, Caller::Setup).await?;
-        self.enrol(&server, enrolled, device_id, device_name)
+        self.enrol(&server, enrolled, device_id, device_name).await
     }
 
     pub async fn pair_join(
@@ -529,7 +629,7 @@ impl SyncClient {
         device_name: &str,
     ) -> Result<SpaceInfo, SyncError> {
         let server = server_url(server)?;
-        self.tokens.probe()?;
+        self.probe().await?;
         let url = endpoint(&server, &["pair", "claim"])?;
         let request = self.http.post(url.clone()).json(&serde_json::json!({
             "code": code,
@@ -537,7 +637,11 @@ impl SyncClient {
             "deviceName": device_name
         }));
         let enrolled: Enrolled = self.exchange(&url, request, Caller::Claim).await?;
-        self.enrol(&server, enrolled, device_id, device_name)
+        self.enrol(&server, enrolled, device_id, device_name).await
+    }
+
+    async fn member(&self) -> Result<Member, SyncError> {
+        self.off(Local::member).await
     }
 
     fn authorised(&self, member: &Member, method: reqwest::Method, url: &Url) -> RequestBuilder {
@@ -547,34 +651,40 @@ impl SyncClient {
     }
 
     pub async fn pair_code(&self) -> Result<PairCode, SyncError> {
-        let member = self.member()?;
+        let member = self.member().await?;
         let url = endpoint(&member.server, &["pair"])?;
         let request = self.authorised(&member, reqwest::Method::POST, &url);
-        self.exchange(&url, request, Caller::Member).await
+        self.exchange(&url, request, Caller::Member(&member.space_id))
+            .await
     }
 
     pub async fn ticket(&self, doc: &str) -> Result<Ticket, SyncError> {
-        let member = self.member()?;
+        let member = self.member().await?;
         let url = endpoint(&member.server, &["ticket"])?;
         let request = self
             .authorised(&member, reqwest::Method::POST, &url)
             .json(&serde_json::json!({ "doc": doc }));
-        self.exchange(&url, request, Caller::Member).await
+        self.exchange(&url, request, Caller::Member(&member.space_id))
+            .await
     }
 
     pub async fn devices(&self) -> Result<Vec<DeviceEntry>, SyncError> {
-        let member = self.member()?;
+        let member = self.member().await?;
         let url = endpoint(&member.server, &["devices"])?;
         let request = self.authorised(&member, reqwest::Method::GET, &url);
-        let list: Devices = self.exchange(&url, request, Caller::Member).await?;
+        let list: Devices = self
+            .exchange(&url, request, Caller::Member(&member.space_id))
+            .await?;
         Ok(list.devices)
     }
 
     pub async fn remove_device(&self, id: &str) -> Result<(), SyncError> {
-        let member = self.member()?;
+        let member = self.member().await?;
         let url = endpoint(&member.server, &["devices", id])?;
         let request = self.authorised(&member, reqwest::Method::DELETE, &url);
-        let _: IgnoredAny = self.exchange(&url, request, Caller::Member).await?;
+        let _: IgnoredAny = self
+            .exchange(&url, request, Caller::Member(&member.space_id))
+            .await?;
         Ok(())
     }
 }
@@ -658,7 +768,11 @@ mod tests {
         }
 
         fn sync_json(&self) -> Option<Vec<u8>> {
-            fs::read(self.dir.path().join("sync.json")).ok()
+            match fs::read(self.dir.path().join("sync.json")) {
+                Ok(bytes) => Some(bytes),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => panic!("read sync.json: {e}"),
+            }
         }
 
         fn token(&self) -> Option<String> {
@@ -753,8 +867,13 @@ mod tests {
             .filter(|name| {
                 name.strip_prefix("sync.bad-")
                     .and_then(|rest| rest.strip_suffix(".json"))
-                    .is_some_and(|digits| {
-                        !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+                    .is_some_and(|rest| {
+                        let digits =
+                            |d: &str| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit());
+                        match rest.split_once('-') {
+                            Some((secs, n)) => digits(secs) && digits(n),
+                            None => digits(rest),
+                        }
                     })
             })
             .collect()
@@ -785,7 +904,7 @@ mod tests {
         let stored = String::from_utf8(f.sync_json().expect("sync.json")).expect("utf-8");
         assert!(!stored.contains("s3cr3t"), "{stored}");
         assert_eq!(
-            f.client().status().expect("status"),
+            f.client().status().await.expect("status"),
             SyncStatus {
                 space: Some(f.space()),
                 revoked: false
@@ -852,7 +971,7 @@ mod tests {
         let code = client.pair_code().await.expect("pair_code");
         let ticket = client.ticket("ix-sp000000000").await.expect("ticket");
         let devices = client.devices().await.expect("devices");
-        let status = client.status().expect("status");
+        let status = client.status().await.expect("status");
         assert_eq!(
             code,
             PairCode {
@@ -978,7 +1097,7 @@ mod tests {
         assert_eq!(client.remove_device("dev00000000").await, missing);
         assert_all(mocks).await;
         assert_eq!(
-            client.status(),
+            client.status().await,
             Ok(SyncStatus {
                 space: Some(f.space()),
                 revoked: false
@@ -998,10 +1117,14 @@ mod tests {
             not_joined.clone()
         );
         assert_eq!(client.devices().await.map(|_| ()), not_joined.clone());
-        assert_eq!(client.remove_device("dev00000000").await, not_joined);
+        assert_eq!(
+            client.remove_device("dev00000000").await,
+            not_joined.clone()
+        );
+        assert_eq!(client.mark_revoked().await, not_joined);
         assert_all(mocks).await;
         assert_eq!(
-            client.status(),
+            client.status().await,
             Ok(SyncStatus {
                 space: None,
                 revoked: false
@@ -1014,21 +1137,21 @@ mod tests {
         let f = Fixture::new().await;
         f.join_with_token();
         let client = f.client();
-        client.mark_revoked().expect("mark_revoked");
+        client.mark_revoked().await.expect("mark_revoked");
         let revoked = SyncStatus {
             space: Some(f.space()),
             revoked: true,
         };
-        assert_eq!(client.status(), Ok(revoked.clone()));
+        assert_eq!(client.status().await, Ok(revoked.clone()));
         assert_eq!(f.token(), None);
-        assert_eq!(f.client().status(), Ok(revoked));
+        assert_eq!(f.client().status().await, Ok(revoked));
     }
 
     #[tokio::test]
     async fn a_revoked_device_makes_no_request() {
         let mut f = Fixture::new().await;
         f.join_with_token();
-        f.client().mark_revoked().expect("mark_revoked");
+        f.client().mark_revoked().await.expect("mark_revoked");
         let mocks = f.nothing().await;
         assert_eq!(
             f.client().ticket("ix-sp000000000").await.map(|_| ()),
@@ -1042,7 +1165,7 @@ mod tests {
         let mut f = Fixture::new().await;
         fs::write(f.dir.path().join("sync.json"), "{").expect("write");
         let mocks = f.nothing().await;
-        let e = f.client().status().expect_err("a corrupt sync.json");
+        let e = f.client().status().await.expect_err("a corrupt sync.json");
         assert_eq!(e.code, "sync.io");
         assert!(
             e.message.starts_with("Could not read the sync state: "),
@@ -1059,7 +1182,7 @@ mod tests {
         f.tokens.put(SPACE, TOKEN).expect("put");
         let mocks = f.nothing().await;
         let client = f.client();
-        assert_eq!(client.reset(), Ok(()));
+        assert_eq!(client.reset().await, Ok(()));
         assert_eq!(f.sync_json(), None);
         let bad = bad_files(f.dir.path());
         assert_eq!(bad.len(), 1, "{bad:?}");
@@ -1068,14 +1191,14 @@ mod tests {
             b"{".to_vec()
         );
         assert_eq!(
-            client.status(),
+            client.status().await,
             Ok(SyncStatus {
                 space: None,
                 revoked: false
             })
         );
         assert_eq!(f.token().as_deref(), Some(TOKEN));
-        assert_eq!(client.reset(), Ok(()));
+        assert_eq!(client.reset().await, Ok(()));
         assert_eq!(bad_files(f.dir.path()).len(), 1);
         assert_all(mocks).await;
     }
@@ -1086,7 +1209,7 @@ mod tests {
         fs::write(f.dir.path().join("sync.json"), "{").expect("write");
         let e = {
             let _ro = ReadOnly::new(f.dir.path());
-            f.client().reset().expect_err("a read-only dir")
+            f.client().reset().await.expect_err("a read-only dir")
         };
         assert_eq!(e.code, "sync.io");
         assert!(
@@ -1116,7 +1239,7 @@ mod tests {
             Err(err("sync.revoked", REVOKED))
         );
         assert_eq!(
-            client.status(),
+            client.status().await,
             Ok(SyncStatus {
                 space: Some(f.space()),
                 revoked: true
@@ -1153,7 +1276,7 @@ mod tests {
         );
         assert_eq!(f.sync_json(), before);
         assert_eq!(
-            f.client().status(),
+            f.client().status().await,
             Ok(SyncStatus {
                 space: Some(f.space()),
                 revoked: false
@@ -1169,7 +1292,10 @@ mod tests {
         f.join_with_token();
         let e = {
             let _ro = ReadOnly::new(f.dir.path());
-            f.client().mark_revoked().expect_err("a read-only dir")
+            f.client()
+                .mark_revoked()
+                .await
+                .expect_err("a read-only dir")
         };
         assert_eq!(e.code, "sync.io");
         assert!(
@@ -1284,7 +1410,8 @@ mod tests {
             );
             m.remove_async().await;
         }
-        f.server
+        let html = f
+            .server
             .mock("POST", "/pair")
             .with_status(429)
             .with_header("content-type", "text/html")
@@ -1295,6 +1422,19 @@ mod tests {
             client.pair_code().await.map(|_| ()),
             Err(err("sync.rate_limited", "Try again later."))
         );
+        html.remove_async().await;
+        let empty = f
+            .server
+            .mock("POST", "/pair")
+            .with_status(429)
+            .expect(1)
+            .create_async()
+            .await;
+        assert_eq!(
+            client.pair_code().await.map(|_| ()),
+            Err(err("sync.rate_limited", "Try again later."))
+        );
+        empty.assert_async().await;
     }
 
     #[tokio::test]
@@ -1499,7 +1639,7 @@ mod tests {
     async fn joining_again_readmits_a_removed_device() {
         let mut f = Fixture::new().await;
         f.join_with_token();
-        f.client().mark_revoked().expect("mark_revoked");
+        f.client().mark_revoked().await.expect("mark_revoked");
         f.answer("POST", "/pair/claim", 200, enrolled("tok_NEW_456"))
             .await;
         let client = f.client();
@@ -1509,7 +1649,7 @@ mod tests {
             .expect("pair_join");
         assert_eq!(space, f.space());
         assert_eq!(
-            client.status(),
+            client.status().await,
             Ok(SyncStatus {
                 space: Some(f.space()),
                 revoked: false
@@ -1539,19 +1679,114 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_silent_server_times_out_after_10_s() {
+    async fn a_silent_server_times_out() {
         let f = Fixture::new().await;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();
         let started = std::time::Instant::now();
         let e = f
             .client()
+            .with_timeout(Duration::from_millis(200))
             .setup(&format!("http://127.0.0.1:{port}"), "s3cr3t", DEVICE, "Mac")
             .await
             .expect_err("the server never answers");
+        let waited = started.elapsed();
         drop(listener);
-        assert_eq!(e, err("sync.http", "127.0.0.1 did not answer within 10 s."));
-        assert!(started.elapsed() >= std::time::Duration::from_secs(10));
+        assert_eq!(
+            e,
+            err("sync.http", "127.0.0.1 did not answer within 0.2 s.")
+        );
+        assert!(waited >= Duration::from_millis(200), "{waited:?}");
+        assert!(waited < Duration::from_secs(5), "{waited:?}");
+    }
+
+    #[tokio::test]
+    async fn requests_time_out_after_10_s_by_default() {
+        let f = Fixture::new().await;
+        let timeout = f.client().timeout;
+        assert_eq!(timeout, Duration::from_secs(10));
+        assert_eq!(
+            timed_out("webboard.rokass.org", timeout),
+            err(
+                "sync.http",
+                "webboard.rokass.org did not answer within 10 s."
+            )
+        );
+    }
+
+    struct SlowTokens;
+
+    impl TokenStore for SlowTokens {
+        fn probe(&self) -> Result<(), SyncError> {
+            Ok(())
+        }
+        fn get(&self, _space: &str) -> Result<Option<String>, SyncError> {
+            std::thread::sleep(Duration::from_secs(2));
+            Ok(None)
+        }
+        fn put(&self, _space: &str, _token: &str) -> Result<(), SyncError> {
+            Ok(())
+        }
+        fn delete(&self, _space: &str) -> Result<(), SyncError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_slow_keychain_does_not_hold_up_other_commands() {
+        let f = Fixture::new().await;
+        f.join();
+        let client = SyncClient::new(
+            f.dir.path().to_path_buf(),
+            Arc::new(SlowTokens),
+            reqwest::Client::new(),
+        );
+        let started = std::time::Instant::now();
+        let (ticket, (status, status_at)) = tokio::join!(client.ticket("ix-sp000000000"), async {
+            let status = client.status().await;
+            (status, started.elapsed())
+        });
+        assert_eq!(ticket.map(|_| ()), Err(err("keychain.missing", MISSING)));
+        assert_eq!(
+            status,
+            Ok(SyncStatus {
+                space: Some(f.space()),
+                revoked: false
+            })
+        );
+        assert!(status_at < Duration::from_millis(500), "{status_at:?}");
+        assert!(started.elapsed() >= Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn sync_requests_carry_the_webboard_user_agent() {
+        let mut f = Fixture::new().await;
+        let m = f
+            .server
+            .mock("POST", "/space")
+            .match_header(
+                "user-agent",
+                format!(
+                    "WebBoard/{} (+https://webboard.rokass.org)",
+                    env!("CARGO_PKG_VERSION")
+                )
+                .as_str(),
+            )
+            .with_status(200)
+            .with_body(enrolled(TOKEN).to_string())
+            .expect(1)
+            .create_async()
+            .await;
+        let client = SyncClient::new(
+            f.dir.path().to_path_buf(),
+            f.tokens.clone(),
+            http_client().expect("http client"),
+        );
+        client
+            .setup(&f.url(), "s3cr3t", DEVICE, "Mac")
+            .await
+            .expect("setup");
+        m.assert_async().await;
     }
 
     #[tokio::test]
@@ -1567,11 +1802,366 @@ mod tests {
             f.client().setup(&f.url(), "s3cr3t", DEVICE, "Mac").await,
             Err(err(
                 "sync.http",
-                "Server answered 200 with an unexpected response."
+                "Server answered 200 with an unexpected response: expected ident at line 1 column 2"
             ))
         );
         assert_eq!(f.sync_json(), None);
         assert_eq!(f.token(), None);
+    }
+
+    const OTHER: &str = "sp111111111";
+
+    #[derive(Default)]
+    struct Counting {
+        inner: MemoryTokens,
+        gets: std::sync::atomic::AtomicUsize,
+        broken_delete: bool,
+    }
+
+    impl Counting {
+        fn breaking_delete() -> Self {
+            Self {
+                broken_delete: true,
+                ..Self::default()
+            }
+        }
+
+        fn gets(&self) -> usize {
+            self.gets.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl TokenStore for Counting {
+        fn probe(&self) -> Result<(), SyncError> {
+            self.inner.probe()
+        }
+        fn get(&self, space: &str) -> Result<Option<String>, SyncError> {
+            self.gets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.get(space)
+        }
+        fn put(&self, space: &str, token: &str) -> Result<(), SyncError> {
+            self.inner.put(space, token)
+        }
+        fn delete(&self, space: &str) -> Result<(), SyncError> {
+            if self.broken_delete {
+                return Err(err("keychain.io", "The keychain failed: delete refused"));
+            }
+            self.inner.delete(space)
+        }
+    }
+
+    fn write_space(dir: &Path, server: &str, space: &str) {
+        fs::write(
+            dir.join("sync.json"),
+            json!({ "server": server, "spaceId": space, "deviceId": DEVICE, "deviceName": "Mac", "revoked": false })
+                .to_string(),
+        )
+        .expect("write sync.json");
+    }
+
+    #[tokio::test]
+    async fn the_four_token_commands_report_an_unreadable_state() {
+        let mut f = Fixture::new().await;
+        f.tokens.put(SPACE, TOKEN).expect("put");
+        let mocks = f.nothing().await;
+        let client = f.client();
+        for contents in [
+            "{".to_string(),
+            json!({ "server": "https://example.org", "spaceId": SPACE, "deviceId": DEVICE, "deviceName": "Mac", "revoked": false }).to_string(),
+        ] {
+            fs::write(f.dir.path().join("sync.json"), &contents).expect("write");
+            let results = [
+                client.pair_code().await.map(|_| ()),
+                client.ticket("ix-sp000000000").await.map(|_| ()),
+                client.devices().await.map(|_| ()),
+                client.remove_device("dev00000000").await,
+            ];
+            results.into_iter().for_each(|r| {
+                let e = r.expect_err("an unreadable sync state");
+                assert_eq!(e.code, "sync.io", "{contents}: {}", e.message);
+                assert!(
+                    e.message.starts_with("Could not read the sync state: "),
+                    "{}",
+                    e.message
+                );
+            });
+        }
+        assert_all(mocks).await;
+    }
+
+    #[tokio::test]
+    async fn a_failed_enrol_save_removes_the_new_token() {
+        let mut f = Fixture::new().await;
+        f.answer("POST", "/space", 200, enrolled(TOKEN)).await;
+        let e = {
+            let _ro = ReadOnly::new(f.dir.path());
+            f.client()
+                .setup(&f.url(), "s3cr3t", DEVICE, "Mac")
+                .await
+                .expect_err("a read-only dir")
+        };
+        assert_eq!(e.code, "sync.io");
+        assert!(
+            e.message.starts_with("Could not save the sync state: "),
+            "{}",
+            e.message
+        );
+        assert!(!e.message.contains("could not be removed"), "{}", e.message);
+        assert_eq!(f.token(), None);
+        let tokens = Arc::new(Counting::breaking_delete());
+        let client = SyncClient::new(
+            f.dir.path().to_path_buf(),
+            tokens.clone(),
+            reqwest::Client::new(),
+        );
+        let e = {
+            let _ro = ReadOnly::new(f.dir.path());
+            client
+                .setup(&f.url(), "s3cr3t", DEVICE, "Mac")
+                .await
+                .expect_err("a read-only dir")
+        };
+        assert_eq!(e.code, "sync.io");
+        assert!(
+            e.message.starts_with("Could not save the sync state: "),
+            "{}",
+            e.message
+        );
+        assert!(
+            e.message.ends_with(
+                " The device token could not be removed: The keychain failed: delete refused"
+            ),
+            "{}",
+            e.message
+        );
+        assert_eq!(f.sync_json(), None);
+    }
+
+    #[tokio::test]
+    async fn enrolling_into_another_space_deletes_the_old_token() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        f.answer(
+            "POST",
+            "/pair/claim",
+            200,
+            json!({ "spaceId": OTHER, "deviceId": DEVICE, "token": "tok_NEW_456" }),
+        )
+        .await;
+        let client = f.client();
+        let space = client
+            .pair_join(&f.url(), "ABCD2345", DEVICE, "Mac")
+            .await
+            .expect("pair_join");
+        assert_eq!(space.space_id, OTHER);
+        assert_eq!(f.token(), None);
+        assert_eq!(
+            f.tokens.get(OTHER).expect("get").as_deref(),
+            Some("tok_NEW_456")
+        );
+        let tokens = Arc::new(Counting::breaking_delete());
+        tokens.put(OTHER, "tok_NEW_456").expect("put");
+        let client = SyncClient::new(
+            f.dir.path().to_path_buf(),
+            tokens.clone(),
+            reqwest::Client::new(),
+        );
+        f.answer("POST", "/space", 200, enrolled("tok_THIRD_789"))
+            .await;
+        assert_eq!(
+            client.setup(&f.url(), "s3cr3t", DEVICE, "Mac").await,
+            Err(err(
+                "keychain.io",
+                "Joined space sp000000000, but the device token of space sp111111111 could not be removed: The keychain failed: delete refused"
+            ))
+        );
+        assert_eq!(
+            client.status().await,
+            Ok(SyncStatus {
+                space: Some(f.space()),
+                revoked: false
+            })
+        );
+        assert_eq!(
+            tokens.get(SPACE).expect("get").as_deref(),
+            Some("tok_THIRD_789")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_late_403_leaves_a_newly_joined_space_alone() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        f.tokens.put(OTHER, "tok_OTHER").expect("put");
+        let dir = f.dir.path().to_path_buf();
+        let server = f.url();
+        let m = f
+            .server
+            .mock("POST", "/ticket")
+            .with_status(403)
+            .with_body_from_request(move |_| {
+                write_space(&dir, &server, OTHER);
+                json!({ "error": "revoked", "message": REVOKED })
+                    .to_string()
+                    .into_bytes()
+            })
+            .expect(1)
+            .create_async()
+            .await;
+        let client = f.client();
+        assert_eq!(
+            client.ticket("ix-sp000000000").await.map(|_| ()),
+            Err(err(
+                "sync.http",
+                "Server answered 403 revoked: This device was removed from the space."
+            ))
+        );
+        m.assert_async().await;
+        let status = client.status().await.expect("status");
+        assert!(!status.revoked);
+        assert_eq!(status.space.map(|s| s.space_id).as_deref(), Some(OTHER));
+        assert_eq!(f.token().as_deref(), Some(TOKEN));
+        assert_eq!(
+            f.tokens.get(OTHER).expect("get").as_deref(),
+            Some("tok_OTHER")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reset_never_overwrites_an_earlier_one() {
+        let f = Fixture::new().await;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_secs();
+        (now..now + 5).for_each(|t| {
+            fs::write(
+                f.dir.path().join(format!("sync.bad-{t}.json")),
+                t.to_string(),
+            )
+            .expect("write");
+        });
+        let client = f.client();
+        fs::write(f.dir.path().join("sync.json"), "{").expect("write");
+        assert_eq!(client.reset().await, Ok(()));
+        fs::write(f.dir.path().join("sync.json"), "[").expect("write");
+        assert_eq!(client.reset().await, Ok(()));
+        (now..now + 5).for_each(|t| {
+            assert_eq!(
+                fs::read_to_string(f.dir.path().join(format!("sync.bad-{t}.json"))).expect("read"),
+                t.to_string()
+            );
+        });
+        let mut set_aside = bad_files(f.dir.path())
+            .into_iter()
+            .filter(|n| n.contains('-') && n.matches('-').count() == 2)
+            .map(|n| fs::read_to_string(f.dir.path().join(n)).expect("read"))
+            .collect::<Vec<_>>();
+        set_aside.sort();
+        assert_eq!(set_aside, vec!["[".to_string(), "{".to_string()]);
+        assert_eq!(f.sync_json(), None);
+    }
+
+    #[tokio::test]
+    async fn a_zero_or_blank_rate_limit_still_reads_well() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        let client = f.client();
+        for (wait, body, message) in [
+            ("0", None, "Try again in 1 minute."),
+            (
+                "0",
+                Some(json!({ "error": "rate_limited", "message": "" })),
+                "Try again in 1 minute.",
+            ),
+            (
+                "120",
+                Some(json!({ "error": "rate_limited", "message": "  \n" })),
+                "Try again in 2 minutes.",
+            ),
+        ] {
+            let mut m = f
+                .server
+                .mock("POST", "/pair")
+                .with_status(429)
+                .with_header("retry-after", wait);
+            if let Some(b) = body {
+                m = m.with_body(b.to_string());
+            }
+            let m = m.create_async().await;
+            assert_eq!(
+                client.pair_code().await.map(|_| ()),
+                Err(err("sync.rate_limited", message)),
+                "{wait}"
+            );
+            m.remove_async().await;
+        }
+        let blank = f
+            .server
+            .mock("POST", "/pair")
+            .with_status(429)
+            .with_body(json!({ "error": "rate_limited", "message": " " }).to_string())
+            .create_async()
+            .await;
+        assert_eq!(
+            client.pair_code().await.map(|_| ()),
+            Err(err("sync.rate_limited", "Try again later."))
+        );
+        blank.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn a_tampered_server_is_refused_before_the_keychain() {
+        let mut f = Fixture::new().await;
+        let tokens = Arc::new(Counting::default());
+        tokens.put(SPACE, TOKEN).expect("put");
+        write_space(f.dir.path(), "https://example.org", SPACE);
+        let mocks = f.nothing().await;
+        let client = SyncClient::new(
+            f.dir.path().to_path_buf(),
+            tokens.clone(),
+            reqwest::Client::new(),
+        );
+        let e = client
+            .ticket("ix-sp000000000")
+            .await
+            .expect_err("a tampered server");
+        assert_eq!(e.code, "sync.io");
+        assert_eq!(
+            e.message,
+            "Could not read the sync state: its server address https://example.org is refused: This build syncs only with webboard.rokass.org."
+        );
+        assert_eq!(tokens.gets(), 0);
+        assert_all(mocks).await;
+    }
+
+    #[tokio::test]
+    async fn a_server_enrolling_another_device_is_sync_http() {
+        let mut f = Fixture::new().await;
+        f.answer(
+            "POST",
+            "/space",
+            200,
+            json!({ "spaceId": SPACE, "deviceId": "devB0000000", "token": TOKEN }),
+        )
+        .await;
+        assert_eq!(
+            f.client().setup(&f.url(), "s3cr3t", DEVICE, "Mac").await,
+            Err(err(
+                "sync.http",
+                "The server enrolled device devB0000000 instead of devA0000000."
+            ))
+        );
+        assert_eq!(f.sync_json(), None);
+        assert_eq!(f.token(), None);
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "read sync.json")]
+    async fn the_sync_json_helper_panics_on_a_real_read_error() {
+        let f = Fixture::new().await;
+        fs::create_dir(f.dir.path().join("sync.json")).expect("mkdir");
+        f.sync_json();
     }
 
     #[test]

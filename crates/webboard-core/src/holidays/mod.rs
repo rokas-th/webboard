@@ -13,15 +13,11 @@ use reqwest::{StatusCode, Url};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CommandError, Result};
+use crate::net::{client_builder, innermost};
 use cache::Cache;
 
 pub use ics::{consumer_calendar_host, ics_days};
 
-const WEBBOARD_UA: &str = concat!(
-    "WebBoard/",
-    env!("CARGO_PKG_VERSION"),
-    " (+https://webboard.rokass.org)"
-);
 const BROWSER_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15";
 const TIMEOUT_SECS: u64 = 20;
 const YEARS: (i32, i32) = (1900, 2200);
@@ -135,14 +131,6 @@ fn host_of(url: &str) -> String {
         Ok(u) => u.host_str().map_or_else(|| url.to_string(), str::to_string),
         Err(_) => url.to_string(),
     }
-}
-
-fn innermost(e: &(dyn std::error::Error + 'static)) -> String {
-    let mut cur = e;
-    while let Some(next) = cur.source() {
-        cur = next;
-    }
-    cur.to_string()
 }
 
 fn chain<'a>(
@@ -325,9 +313,8 @@ const GOVUK_DIVISIONS: [(&str, &str); 3] = [
 impl Holidays {
     pub fn new(cache_dir: PathBuf, s: Sources) -> Result<Self> {
         let cache = Cache::new(cache_dir)?;
-        let client = reqwest::Client::builder()
+        let client = client_builder()
             .timeout(Duration::from_secs(TIMEOUT_SECS))
-            .user_agent(WEBBOARD_UA)
             .build()
             .map_err(|e| {
                 CommandError::new(

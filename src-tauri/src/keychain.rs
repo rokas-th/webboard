@@ -52,22 +52,48 @@ fn delete_at(account: &str) -> Result<(), SyncError> {
     }
 }
 
+fn probe_with(
+    put: impl FnOnce() -> Result<(), SyncError>,
+    get: impl FnOnce() -> Result<Option<String>, SyncError>,
+    delete: impl FnOnce() -> Result<(), SyncError>,
+) -> Result<(), SyncError> {
+    put()?;
+    let read = get();
+    let deleted = delete();
+    let read = match (read, deleted) {
+        (Err(r), Err(d)) => {
+            return Err(SyncError::new(
+                r.code,
+                format!(
+                    "{} The probe entry could not be removed: {}",
+                    r.message, d.message
+                ),
+            ))
+        }
+        (Err(r), Ok(())) => return Err(r),
+        (Ok(_), Err(d)) => return Err(d),
+        (Ok(read), Ok(())) => read,
+    };
+    match read.as_deref() {
+        Some(PROBE) => Ok(()),
+        Some(_) => Err(SyncError::new(
+            "keychain.io",
+            "The keychain returned a different value than WebBoard stored.",
+        )),
+        None => Err(SyncError::new(
+            "keychain.io",
+            "The keychain lost a value WebBoard had just stored.",
+        )),
+    }
+}
+
 impl TokenStore for OsKeychain {
     fn probe(&self) -> Result<(), SyncError> {
-        put_at(PROBE, PROBE)?;
-        let read = get_at(PROBE)?;
-        delete_at(PROBE)?;
-        match read.as_deref() {
-            Some(PROBE) => Ok(()),
-            Some(_) => Err(SyncError::new(
-                "keychain.io",
-                "The keychain returned a different value than WebBoard stored.",
-            )),
-            None => Err(SyncError::new(
-                "keychain.io",
-                "The keychain lost a value WebBoard had just stored.",
-            )),
-        }
+        probe_with(
+            || put_at(PROBE, PROBE),
+            || get_at(PROBE),
+            || delete_at(PROBE),
+        )
     }
 
     fn get(&self, space: &str) -> Result<Option<String>, SyncError> {
@@ -116,6 +142,53 @@ mod tests {
             e.message.starts_with("The keychain failed: "),
             "{}",
             e.message
+        );
+    }
+
+    #[test]
+    fn the_probe_always_removes_its_entry() {
+        let deleted = std::cell::Cell::new(0);
+        let failed_read = || Err(SyncError::new("keychain.io", "The keychain failed: read"));
+        let delete_ok = || {
+            deleted.set(deleted.get() + 1);
+            Ok(())
+        };
+        assert_eq!(
+            probe_with(|| Ok(()), failed_read, delete_ok),
+            Err(SyncError::new("keychain.io", "The keychain failed: read"))
+        );
+        assert_eq!(deleted.get(), 1);
+        assert_eq!(
+            probe_with(
+                || Ok(()),
+                failed_read,
+                || Err(SyncError::new("keychain.io", "The keychain failed: delete")),
+            ),
+            Err(SyncError::new(
+                "keychain.io",
+                "The keychain failed: read The probe entry could not be removed: The keychain failed: delete"
+            ))
+        );
+        assert_eq!(
+            probe_with(
+                || Ok(()),
+                || Ok(Some(PROBE.to_string())),
+                || Err(SyncError::new("keychain.io", "The keychain failed: delete")),
+            ),
+            Err(SyncError::new("keychain.io", "The keychain failed: delete"))
+        );
+        assert_eq!(
+            probe_with(|| Ok(()), || Ok(Some(PROBE.to_string())), delete_ok),
+            Ok(())
+        );
+        assert_eq!(deleted.get(), 2);
+        assert_eq!(
+            probe_with(
+                || Err(SyncError::new("keychain.unavailable", UNAVAILABLE)),
+                || panic!("no read after a failed write"),
+                || panic!("no delete after a failed write"),
+            ),
+            Err(SyncError::new("keychain.unavailable", UNAVAILABLE))
         );
     }
 
