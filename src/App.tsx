@@ -9,6 +9,9 @@ import { Shell } from "./ui/shell/Shell";
 export const RESET_SETTINGS_LINE = "Plan names and the last region are rebuilt; the old file is kept.";
 export const REBUILD_LIST_LINE = "Plans on this device are listed again; trashed plans come back; the old list is kept.";
 
+export const closeFailedLine = (message: string): string =>
+  `WebBoard could not save everything before closing: ${message} Close the window again to quit.`;
+
 type Recovery = "reset" | "rebuild" | null;
 
 type Start = { k: "opening" } | { k: "open"; registry: Registry } | { k: "failed"; message: string; recovery: Recovery };
@@ -26,11 +29,15 @@ export default function App() {
   const [start, setStart] = useState<Start>({ k: "opening" });
   const started = useRef(false);
   const warmed = useRef<Registry | null>(null);
+  const live = useRef<Registry | null>(null);
 
   const open = (): void => {
     setStart({ k: "opening" });
     Registry.open({ clock: systemClock }).then(
-      (registry) => setStart({ k: "open", registry }),
+      (registry) => {
+        live.current = registry;
+        setStart({ k: "open", registry });
+      },
       (e: unknown) => {
         console.error(e);
         setStart({ k: "failed", message: messageOf(e), recovery: recoveryOf(e) });
@@ -56,22 +63,27 @@ export default function App() {
   }, [registry]);
 
   useEffect(() => {
-    if (registry === null) return;
-    const failed = (e: unknown): void => {
+    const unguarded = (e: unknown): void => {
       console.error(e);
       toast(messageOf(e), "bad");
     };
+    const closeFailed = (e: unknown): void => {
+      console.error(e);
+      toast(messageOf(e), "bad");
+      live.current = null;
+      setStart({ k: "failed", message: closeFailedLine(messageOf(e)), recovery: null });
+    };
     let off: (() => void) | null = null;
     let gone = false;
-    guardWindowClose(registry, failed).then((unlisten) => {
+    guardWindowClose(() => live.current, closeFailed).then((unlisten) => {
       if (gone) unlisten();
       else off = unlisten;
-    }, failed);
+    }, unguarded);
     return () => {
       gone = true;
       off?.();
     };
-  }, [registry]);
+  }, []);
 
   if (start.k === "opening") return null;
   if (start.k === "open") return <Shell registry={start.registry} clock={systemClock} />;

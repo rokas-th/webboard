@@ -34,6 +34,8 @@ const DIALOG = [
   [820, 1180],
 ];
 
+const SMALLEST = [[1024, 700]];
+
 const FULL_MIN_WIDTH = 1024;
 const READY_MS = 5000;
 const QUIET_MS = 4000;
@@ -136,6 +138,10 @@ function states() {
     dialog: true,
     actions: [key("k", "KeyK", 4), expect('.palette[role="dialog"]'), expect(".palette-item .palette-label")],
   });
+  add("linux-toolbar", "mesa-linux", {
+    sizes: "smallest",
+    actions: [viewExpect("timeline"), expect("header.toolbar .wordmark", "WebBoard"), count(".toolbar-mac", 0)],
+  });
   add("history", "mesa", { actions: [reveal(".slot-panel .panel h2", "History"), count(".slot-panel .history li", 40)] });
   add("revert-preview", "mesa", {
     dialog: true,
@@ -154,7 +160,13 @@ function states() {
   return out;
 }
 
-const sizesOf = (s) => (s.sizes === "desktop" ? DESKTOP : s.sizes === "dialog" ? DIALOG : [...DESKTOP, ...DIALOG]);
+const SIZES = { desktop: DESKTOP, dialog: DIALOG, both: [...DESKTOP, ...DIALOG], smallest: SMALLEST };
+
+const sizesOf = (s) => {
+  const sizes = SIZES[s.sizes];
+  if (sizes === undefined) throw new Error(`layout-probe: state ${s.name} names no known sizes: ${s.sizes}`);
+  return sizes;
+};
 
 const SHIM = String.raw`
 (function () {

@@ -37,6 +37,9 @@
   "bundle": {
     "active": true,
     "category": "Productivity",
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "targets": [
       "app",
       "dmg"

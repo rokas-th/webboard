@@ -174,7 +174,15 @@ const linksOf = (plan: ReturnType<typeof projectPlan>): string[] => [...plan.lin
 
 describe("layout fixtures", () => {
   it("names the fixtures the probe states use", () => {
-    expect(Object.keys(FIXTURES).sort()).toEqual(["blank-plan", "choices", "empty", "long-names", "mesa", "scale", "two-choices", "unreadable"]);
+    expect(Object.keys(FIXTURES).sort()).toEqual(["blank-plan", "choices", "empty", "long-names", "mesa", "mesa-linux", "scale", "two-choices", "unreadable"]);
+  });
+
+  it("mesa-linux is the mesa plan on a Linux device", () => {
+    const mac = fixture("mesa");
+    const linux = fixture("mesa-linux");
+    expect(linux.docs).toEqual(mac.docs);
+    expect(linux.ipc).toEqual({ ...mac.ipc, device_info: { deviceId: "linux", platform: "linux" } });
+    expect(mac.ipc.device_info).toEqual({ deviceId: "mac", platform: "macos" });
   });
 
   it("frames every doc as store_load with flags 0 and lastSeq the entry count", () => {
@@ -327,11 +335,11 @@ describe("layout fixtures", () => {
   });
 
   it("opens every plan through the Registry with the fixture's answers, the plan names cached", async () => {
-    for (const f of Object.values(FIXTURES)) {
+    for (const [name, f] of Object.entries(FIXTURES)) {
       resetTauri(answersOf(f));
       const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
       try {
-        expect(registry.device.name).toBe("Mac");
+        expect(registry.device.name).toBe(name === "mesa-linux" ? "Linux" : "Mac");
         expect(registry.plans().map((p) => p.id).sort()).toEqual(planDocs(f).sort());
         for (const doc of planDocs(f)) {
           const session = await registry.session(doc);

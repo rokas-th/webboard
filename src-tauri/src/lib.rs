@@ -20,6 +20,20 @@ fn single_instance_guard() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     })
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ExitRequest {
+    PreventAndClose,
+    Allow,
+}
+
+fn exit_request(open_windows: usize) -> ExitRequest {
+    if open_windows == 0 {
+        ExitRequest::Allow
+    } else {
+        ExitRequest::PreventAndClose
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -59,8 +73,22 @@ pub fn run() {
             commands::settings::settings_write,
             commands::settings::settings_reset
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running WebBoard");
+        .build(tauri::generate_context!())
+        .expect("error while building WebBoard")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                use tauri::Manager;
+                let windows = app.webview_windows();
+                if exit_request(windows.len()) == ExitRequest::PreventAndClose {
+                    api.prevent_exit();
+                    windows.values().for_each(|window| {
+                        if let Err(e) = window.close() {
+                            eprintln!("webboard: could not ask {} to close: {e}", window.label());
+                        }
+                    });
+                }
+            }
+        });
 }
 
 #[cfg(all(test, not(target_os = "ios")))]
@@ -128,6 +156,56 @@ mod tests {
             named, 1,
             "the plugin is named {named} times in lib.rs. It may be named once, inside \
              single_instance_guard, which is the single place carrying the release-only cfg."
+        );
+    }
+
+    #[test]
+    fn an_exit_request_closes_every_open_window_first() {
+        use super::{exit_request, ExitRequest};
+        assert_eq!(exit_request(1), ExitRequest::PreventAndClose);
+        assert_eq!(exit_request(3), ExitRequest::PreventAndClose);
+        assert_eq!(exit_request(0), ExitRequest::Allow);
+    }
+
+    #[test]
+    fn run_routes_exit_requests_through_the_decision() {
+        let body = run_body();
+        assert!(
+            body.contains("tauri::RunEvent::ExitRequested { api, .. }"),
+            "run() does not handle RunEvent::ExitRequested, so an app-level quit skips the window close guard"
+        );
+        assert!(
+            body.contains("exit_request(windows.len())"),
+            "run() handles ExitRequested without asking exit_request with the open-window count"
+        );
+    }
+
+    #[test]
+    fn the_capabilities_let_the_close_guard_destroy_the_window() {
+        let caps: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json"))
+                .expect("capabilities/default.json is JSON");
+        let permissions = caps["permissions"]
+            .as_array()
+            .expect("capabilities/default.json has a permissions array");
+        assert!(
+            permissions
+                .iter()
+                .any(|p| p.as_str() == Some("core:window:allow-destroy")),
+            "capabilities/default.json does not grant core:window:allow-destroy, so the close \
+             guard's destroy() is refused and the window never closes: {permissions:?}"
+        );
+    }
+
+    #[test]
+    fn the_mac_bundle_is_sealed_ad_hoc() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("tauri.conf.json is JSON");
+        assert_eq!(
+            conf["bundle"]["macOS"]["signingIdentity"].as_str(),
+            Some("-"),
+            "bundle.macOS.signingIdentity is not \"-\", so the bundle is only linker-signed \
+             and `codesign --verify --deep --strict` reports a broken seal"
         );
     }
 

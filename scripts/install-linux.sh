@@ -6,7 +6,7 @@ BIN_SRC="$REPO_DIR/target/release/webboard"
 ICON_SRC="$REPO_DIR/src-tauri/icons/128x128@2x.png"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
-ICON_DIR="$HOME/.local/share/icons/hicolor/512x512/apps"
+ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
 
 if [[ ! -x "$BIN_SRC" ]]; then
   echo "error: no release binary at $BIN_SRC" >&2
@@ -53,8 +53,16 @@ if ! command -v pgrep >/dev/null 2>&1; then
   echo
   echo "note: pgrep is not installed, so this script cannot say whether WebBoard is"
   echo "      already running — if it is, quit and relaunch it."
-elif RUNNING=$(pgrep -x webboard) && [[ -n "$RUNNING" ]]; then
-  echo
-  echo "WebBoard is already running (pid $(echo "$RUNNING" | tr '\n' ' ')) and is STILL THE OLD BINARY."
-  echo "Quit it and start it again — this install does not touch a running process."
+else
+  PGREP_STATUS=0
+  RUNNING=$(pgrep -x webboard) || PGREP_STATUS=$?
+  if [[ $PGREP_STATUS -eq 0 ]]; then
+    echo
+    echo "WebBoard is already running (pid $(echo "$RUNNING" | tr '\n' ' ')) and is STILL THE OLD BINARY."
+    echo "Quit it and start it again — this install does not touch a running process."
+  elif [[ $PGREP_STATUS -ne 1 ]]; then
+    echo >&2
+    echo "pgrep failed ($PGREP_STATUS); check by hand whether an old WebBoard is running." >&2
+    exit 1
+  fi
 fi

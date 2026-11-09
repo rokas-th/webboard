@@ -7,7 +7,7 @@ import { Registry } from "./store/registry";
 import { seededStore } from "./test/shell";
 import { closeListenerCount, requestWindowClose, resetTauri, tauri, windowState } from "./test/tauriMock";
 import { Dialog } from "./ui/common/Dialog";
-import { clearToasts } from "./ui/common/Toast";
+import { clearToasts, Toasts } from "./ui/common/Toast";
 import { PLACE_KEY } from "./ui/state";
 
 vi.mock("@tauri-apps/api/core", () => import("./test/tauriMock"));
@@ -179,38 +179,90 @@ it("toasts a warm rejection", async () => {
 });
 
 describe("closing the window", () => {
-  it("closes the registry before the window goes", async () => {
+  const closeFailed = (message: string): string => `WebBoard could not save everything before closing: ${message} Close the window again to quit.`;
+
+  const requestClose = async (): Promise<void> => {
+    await act(async () => {
+      await requestWindowClose();
+    });
+  };
+
+  it("closes the registry, then destroys the window", async () => {
     await seededStore(["Alpha"]);
     spyOpen();
     render(<App />);
     await settle();
     expect(closeListenerCount()).toBe(1);
-    const close = vi.spyOn(Registry.prototype, "close");
-    let result: { prevented: boolean } | null = null;
-    await act(async () => {
-      result = await requestWindowClose();
+    const order: string[] = [];
+    const real = Registry.prototype.close;
+    const close = vi.spyOn(Registry.prototype, "close").mockImplementation(async function (this: Registry) {
+      await real.call(this);
+      order.push(`closed with ${windowState.destroyed} destroyed`);
     });
-    expect(result).toEqual({ prevented: false });
+    await requestClose();
     expect(close).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["closed with 0 destroyed"]);
     expect(windowState.destroyed).toBe(1);
   });
 
-  it("keeps the window open and toasts the failure when the registry fails to close", async () => {
+  it("shows the failure screen when the registry fails to close, and lets the next close through", async () => {
     await seededStore(["Alpha"]);
     const failure = new AppError("store.io", "Could not save “Alpha”: disk full.");
     const log = logged();
     spyOpen();
-    render(<App />);
+    render(
+      <>
+        <App />
+        <Toasts />
+      </>,
+    );
     await settle();
-    vi.spyOn(Registry.prototype, "close").mockRejectedValueOnce(failure);
-    let result: { prevented: boolean } | null = null;
-    await act(async () => {
-      result = await requestWindowClose();
-    });
-    expect(result).toEqual({ prevented: true });
+    const close = vi.spyOn(Registry.prototype, "close").mockRejectedValueOnce(failure);
+    await requestClose();
     expect(windowState.destroyed).toBe(0);
+    expect(screen.getByText(closeFailed("Could not save “Alpha”: disk full.")).className).toBe("start-bad");
+    expect(toolbar()).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reset settings" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rebuild the plan list" })).toBeNull();
     expect(screen.getAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([["Could not save “Alpha”: disk full.", "toast bad"]]);
     expect(log.mock.calls).toEqual([[failure]]);
+    await requestClose();
+    expect(windowState.destroyed).toBe(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the failure screen when the window cannot be destroyed, and lets the next close through", async () => {
+    await seededStore(["Alpha"]);
+    const failure = new Error("window not found");
+    const log = logged();
+    spyOpen();
+    render(<App />);
+    await settle();
+    windowState.destroyFailure = failure;
+    await requestClose();
+    expect(screen.getByText(closeFailed("window not found")).className).toBe("start-bad");
+    expect(toolbar()).toBeNull();
+    expect(log.mock.calls).toEqual([[failure]]);
+    windowState.destroyFailure = null;
+    await requestClose();
+    expect(windowState.destroyed).toBe(1);
+  });
+
+  it("guards the registry Try again opens after a failed close", async () => {
+    await seededStore(["Alpha"]);
+    logged();
+    const open = spyOpen();
+    render(<App />);
+    await settle();
+    const close = vi.spyOn(Registry.prototype, "close").mockRejectedValueOnce(new Error("disk full"));
+    await requestClose();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(toolbar()).not.toBeNull();
+    await requestClose();
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(windowState.destroyed).toBe(1);
   });
 
   it("stops listening when the app unmounts", async () => {

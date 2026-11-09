@@ -451,11 +451,15 @@ function fixtureOf(plans) {
 
 const mesa = (log) => ({ id: PLAN_IDS.mesa, name: "MESA 1.0", log });
 
+const onLinux = (f) => ({ ...f, ipc: { ...f.ipc, device_info: { deviceId: "linux", platform: "linux" } } });
+
 export function buildFixtures() {
+  const mesaOnMac = fixtureOf([mesa(mesaLog("mesaM"))]);
   return {
     empty: fixtureOf([]),
     "blank-plan": fixtureOf([{ id: PLAN_IDS.blank, name: "Blank plan", log: blankLog() }]),
-    mesa: fixtureOf([mesa(mesaLog("mesaM"))]),
+    mesa: mesaOnMac,
+    "mesa-linux": onLinux(mesaOnMac),
     scale: fixtureOf([{ id: PLAN_IDS.scale, name: "Scale: 1,000 items", log: scaleLog() }]),
     choices: fixtureOf([mesa(choicesLog())]),
     "long-names": fixtureOf([
