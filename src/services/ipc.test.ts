@@ -1,5 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { call, AppError } from "./ipc";
+import {
+  call,
+  AppError,
+  syncSetup,
+  syncPairCode,
+  syncPairJoin,
+  syncTicket,
+  syncDevices,
+  syncRemoveDevice,
+  syncStatus,
+  syncMarkRevoked,
+  syncReset,
+  type SpaceInfo,
+} from "./ipc";
 import { resetTauri, commandsSince, hold, tauri } from "../test/tauriMock";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
@@ -80,5 +93,54 @@ describe("call", () => {
       .filter(([, text]) => CORE_IMPORT.test(text))
       .map(([path]) => path);
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("sync commands", () => {
+  const space: SpaceInfo = { server: "https://webboard.rokass.org", spaceId: "sp000000000", deviceId: "devA0000000", deviceName: "Mac" };
+
+  it("each sync wrapper calls its command with the Rust argument names", async () => {
+    resetTauri({
+      sync_setup: () => space,
+      sync_pair_join: () => space,
+      sync_pair_code: () => ({ code: "ABCD2345", expiresAt: 5 }),
+      sync_ticket: () => ({ ticket: "tk_1", expiresAt: 6 }),
+      sync_devices: () => [{ id: "devA0000000", name: "Mac", createdAt: 1, lastSeenAt: 2, current: true }],
+      sync_remove_device: () => null,
+      sync_status: () => ({ space, revoked: false }),
+      sync_mark_revoked: () => null,
+      sync_reset: () => null,
+    });
+    await expect(syncSetup("https://webboard.rokass.org", "s3cr3t", "Mac")).resolves.toEqual(space);
+    await expect(syncPairJoin("https://webboard.rokass.org", "ABCD2345", "Mac")).resolves.toEqual(space);
+    await expect(syncPairCode()).resolves.toEqual({ code: "ABCD2345", expiresAt: 5 });
+    await expect(syncTicket("ix-sp000000000")).resolves.toEqual({ ticket: "tk_1", expiresAt: 6 });
+    await expect(syncDevices()).resolves.toEqual([{ id: "devA0000000", name: "Mac", createdAt: 1, lastSeenAt: 2, current: true }]);
+    await expect(syncRemoveDevice("dev00000000")).resolves.toBeUndefined();
+    await expect(syncStatus()).resolves.toEqual({ space, revoked: false });
+    await expect(syncMarkRevoked()).resolves.toBeUndefined();
+    await expect(syncReset()).resolves.toBeUndefined();
+    expect(tauri.calls.map((c) => [c.cmd, c.args])).toEqual([
+      ["sync_setup", { server: "https://webboard.rokass.org", secret: "s3cr3t", deviceName: "Mac" }],
+      ["sync_pair_join", { server: "https://webboard.rokass.org", code: "ABCD2345", deviceName: "Mac" }],
+      ["sync_pair_code", undefined],
+      ["sync_ticket", { doc: "ix-sp000000000" }],
+      ["sync_devices", undefined],
+      ["sync_remove_device", { id: "dev00000000" }],
+      ["sync_status", undefined],
+      ["sync_mark_revoked", undefined],
+      ["sync_reset", undefined],
+    ]);
+  });
+
+  it("a sync error keeps its code", async () => {
+    resetTauri({
+      sync_ticket: () => {
+        throw { code: "keychain.missing", message: "This device has no sync key. Join the space again with a pairing code." };
+      },
+    });
+    const e = await syncTicket("ix-sp000000000").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(AppError);
+    expect(e).toMatchObject({ code: "keychain.missing" });
   });
 });

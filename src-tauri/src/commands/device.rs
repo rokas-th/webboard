@@ -12,7 +12,7 @@ use webboard_core::CommandError;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
-    pub device_id: String,
+    pub(crate) device_id: String,
     pub platform: String,
 }
 
@@ -73,7 +73,7 @@ fn make(dir: &Path) -> Result<String> {
     Ok(device_id)
 }
 
-pub fn device_info_in(dir: &Path) -> Result<DeviceInfo> {
+pub(crate) fn device_info_in(dir: &Path) -> Result<DeviceInfo> {
     let _guard = MAKING.lock().map_err(|_| {
         io("The device id is unusable after an earlier panic; restart WebBoard.".to_string())
     })?;

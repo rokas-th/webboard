@@ -1,4 +1,5 @@
 mod commands;
+mod keychain;
 #[cfg(target_os = "macos")]
 pub mod menu;
 
@@ -71,6 +72,15 @@ pub fn run() {
             )
             .map_err(|e| format!("{}: {}", e.code, e.message))?;
             app.manage(holidays);
+            let http = webboard_core::sync::http_client()
+                .map_err(|e| format!("{}: {}", e.code, e.message))?;
+            let dir = app.path().app_data_dir()?;
+            let client = webboard_core::sync::SyncClient::new(
+                dir.clone(),
+                std::sync::Arc::new(keychain::OsKeychain),
+                http,
+            );
+            app.manage(commands::sync::SyncState::new(dir, client));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -88,7 +98,16 @@ pub fn run() {
             commands::file::file_read,
             commands::settings::settings_read,
             commands::settings::settings_write,
-            commands::settings::settings_reset
+            commands::settings::settings_reset,
+            commands::sync::sync_setup,
+            commands::sync::sync_pair_code,
+            commands::sync::sync_pair_join,
+            commands::sync::sync_ticket,
+            commands::sync::sync_devices,
+            commands::sync::sync_remove_device,
+            commands::sync::sync_status,
+            commands::sync::sync_mark_revoked,
+            commands::sync::sync_reset
         ])
         .build(tauri::generate_context!())
         .expect("error while building WebBoard")

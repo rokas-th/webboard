@@ -3,6 +3,7 @@ pub mod file;
 pub mod holidays;
 pub mod settings;
 pub mod store;
+pub mod sync;
 
 use std::fs;
 use std::io::Write;
