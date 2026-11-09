@@ -471,14 +471,15 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
   }
 };
 
-const newHolidayYears = (ctx: Ctx, ownWrites: readonly Write[], writes: readonly Write[]): Write[] => {
-  const plan = ctx.view.plan;
-  const after = applyWrites(plan, writes);
+const newHolidayYears = (ctx: Ctx, ownWrites: readonly Write[], after: PlanState, next: Derived): Write[] => {
   const region = after.calendar.region;
   if (region === null) return [];
-  const before = new Set(derive(applyWrites(plan, ownWrites.filter(isCalendarWrite)), ctx.view.held, ctx.view.today).missingYears);
-  return derive(after, ctx.view.held, ctx.view.today)
-    .missingYears.filter((y) => !before.has(y) && !ownWrites.some((x) => x.u === key.ch(y)))
+  const calendarWrites = ownWrites.filter(isCalendarWrite);
+  const beforeYears =
+    calendarWrites.length === 0 ? ctx.view.derived.missingYears : derive(applyWrites(ctx.view.plan, calendarWrites), ctx.view.held, ctx.view.today).missingYears;
+  const before = new Set(beforeYears);
+  return next.missingYears
+    .filter((y) => !before.has(y) && !ownWrites.some((x) => x.u === key.ch(y)))
     .flatMap((y) => {
       const cached = ctx.cachedHolidays(regionKey(region), y);
       return cached === null ? [] : [own(key.ch(y), codec.holidayYear.enc(cached))];
@@ -499,15 +500,65 @@ const lockedBefore = (ctx: Ctx, view: SchedView, held: ReadonlySet<ItemId>): Sch
   return { ...view, items: new Map([...view.items].map(([id, s]): [ItemId, Sched] => [id, s.lock !== null ? s : { ...s, lock: before(id) }])) };
 };
 
+const startsOnly = (plan: PlanState, ownWrites: readonly Write[]): ReadonlyMap<ItemId, Schedule> | null => {
+  const moved = new Map<ItemId, Schedule>();
+  const ok = ownWrites.every((x) => {
+    const k = codec.parseKey(x.u);
+    if (k.kind !== "s" || moved.has(k.arg)) return false;
+    const it = plan.items.get(k.arg);
+    if (it === undefined || it.schedule === null || it.schedule.start === null) return false;
+    validateWrite(x);
+    const next = codec.decodeAs("sched", x.u, x.v);
+    if (next.start === null || next.status !== it.schedule.status || (it.kind === "task" && next.dur < 1)) return false;
+    moved.set(it.id, next);
+    return true;
+  });
+  return ok ? moved : null;
+};
+
+const movedView = (plan: PlanState, held: ReadonlySet<ItemId>, moved: ReadonlyMap<ItemId, Schedule>): SchedView => {
+  const base = schedView(plan, held);
+  return {
+    ...base,
+    items: new Map(
+      [...base.items].map(([id, s]): [ItemId, Sched] => {
+        const next = moved.get(id);
+        if (next === undefined) return [id, s];
+        if (next.start === null) throw new Error(`Moved item ${id} has no start`);
+        return [id, { ...s, start: toDay(next.start), dur: s.kind === "milestone" ? 0 : next.dur }];
+      }),
+    ),
+  };
+};
+
+const withSchedules = (plan: PlanState, moved: ReadonlyMap<ItemId, Schedule>): PlanState => ({
+  ...plan,
+  items: new Map(
+    [...plan.items].map(([id, it]): [ItemId, Item] => {
+      const next = moved.get(id);
+      return [id, next === undefined ? it : { ...it, schedule: next }];
+    }),
+  ),
+});
+
+const afterAll = (plan: PlanState, writes: readonly Write[]): PlanState => {
+  const moved = startsOnly(plan, writes);
+  return moved === null ? applyWrites(plan, writes) : withSchedules(plan, moved);
+};
+
 export function withDerived(ctx: Ctx, ownWrites: readonly Write[], roots: readonly ItemId[], held: ReadonlySet<ItemId>): Derivation {
   const plan = ctx.view.plan;
-  const after = applyWrites(plan, ownWrites);
+  const moved = startsOnly(plan, ownWrites);
+  const applied: { moved: ReadonlyMap<ItemId, Schedule> } | { after: PlanState } = moved === null ? { after: applyWrites(plan, ownWrites) } : { moved };
   const ownUnits = new Map(ownWrites.map((x): [UnitKey, Write] => [x.u, x]));
-  const recal = ownWrites.some(isCalendarWrite) ? recalendar(schedView(plan, held), workCalendar(after.calendar)) : null;
-  const pushResult = roots.length > 0 ? push(lockedBefore(ctx, schedView(after, held), held), roots) : null;
+  const recal = "after" in applied && ownWrites.some(isCalendarWrite) ? recalendar(schedView(plan, held), workCalendar(applied.after.calendar)) : null;
+  const pushView = (): SchedView => ("after" in applied ? schedView(applied.after, held) : movedView(plan, held, applied.moved));
+  const pushResult = roots.length > 0 ? push(lockedBefore(ctx, pushView(), held), roots) : null;
+  const scheduleAfter = (id: ItemId): Schedule =>
+    "after" in applied ? scheduleOf(itemOf(applied.after, id)) : (applied.moved.get(id) ?? scheduleOf(itemOf(plan, id)));
   const derivedWrite = (id: ItemId, start: Day | undefined, dur: number | undefined, c: Write["c"]): Write => {
     const u = key.s(id);
-    const sc = scheduleOf(itemOf(after, id));
+    const sc = scheduleAfter(id);
     if (sc.start === null) {
       throw new Error(ownUnits.has(u) ? `Derived write to ${u}, which this action unschedules` : `Derived write to unscheduled ${id}`);
     }
@@ -544,10 +595,15 @@ const itemState = (plan: PlanState, dv: Derived, id: ItemId): string => {
   return JSON.stringify([!it.trashed, dv.start.get(id) ?? null, dv.end.get(id) ?? null, dv.status.get(id) ?? null, it.name, it.place.parent, it.place.order]);
 };
 
-export function previewOf(ctx: Ctx, after: PlanState, d: { push: PushResult | null; recal: RecalResult | null }, kept: readonly string[]): Preview {
+export function previewOf(
+  ctx: Ctx,
+  after: PlanState,
+  d: { push: PushResult | null; recal: RecalResult | null },
+  kept: readonly string[],
+  next: Derived = derive(after, ctx.view.held, ctx.view.today),
+): Preview {
   const beforePlan = ctx.view.plan;
   const before = ctx.view.derived;
-  const next = derive(after, ctx.view.held, ctx.view.today);
   const ids = unique([...beforePlan.items.values(), ...after.items.values()].filter((i) => i.kind !== "group").map((i) => i.id));
   return {
     itemsChanged: ids.filter((id) => itemState(beforePlan, before, id) !== itemState(after, next, id)).length,
@@ -563,12 +619,18 @@ export function buildAction(ctx: Ctx, intent: Intent): Built {
   const plan = ctx.view.plan;
   const draft = draftOf(ctx, intent);
   if (draft.own.every((x) => sameAsCurrent(ctx, x))) throw new Refused(refusal.nothing);
-  const years = newHolidayYears(ctx, draft.own, withDerived(ctx, draft.own, draft.roots, ctx.view.held).writes);
-  const cal = workCalendar(applyWrites(plan, [...draft.own.filter(isCalendarWrite), ...years]).calendar);
+  const first = withDerived(ctx, draft.own, draft.roots, ctx.view.held);
+  const firstAfter = afterAll(plan, first.writes);
+  const firstNext = derive(firstAfter, ctx.view.held, ctx.view.today);
+  const years = newHolidayYears(ctx, draft.own, firstAfter, firstNext);
+  const calendarWrites = [...draft.own.filter(isCalendarWrite), ...years];
+  const cal = workCalendar(calendarWrites.length === 0 ? plan.calendar : applyWrites(plan, calendarWrites).calendar);
   const starts = new Set(draft.ownStarts ?? []);
   const snapped = draft.own.map((x) => (starts.has(x.u) ? resnapped(x, cal) : x));
-  const d = withDerived(ctx, [...snapped, ...years], draft.roots, ctx.view.held);
-  const preview = previewOf(ctx, applyWrites(plan, d.writes), d, []);
+  const unchanged = years.length === 0 && snapped.every((x, i) => planRules.same(x.u, x.v, draft.own[i].v));
+  const d = unchanged ? first : withDerived(ctx, [...snapped, ...years], draft.roots, ctx.view.held);
+  const after = unchanged ? firstAfter : applyWrites(plan, d.writes);
+  const preview = previewOf(ctx, after, d, [], unchanged ? firstNext : derive(after, ctx.view.held, ctx.view.today));
   const lbl = draft.label(d, preview);
   const action: Action = { id: newId(), dev: ctx.dev, ses: ctx.ses, at: ctx.now, par: [...ctx.log.heads], lbl, w: d.writes };
   const settled = settleText(ctx, d.writes);
