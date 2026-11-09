@@ -52,6 +52,10 @@ describe("dates", () => {
     expect(localToday(new Date(2026, 0, 31, 23, 59))).toBe("2026-01-31");
   });
 
+  it("localToday rejects an invalid Date", () => {
+    expect(() => localToday(new Date(NaN))).toThrow(new RangeError("not a date: Invalid Date"));
+  });
+
   it("fmtShort is day and English month", () => {
     expect(fmtShort("2026-11-25")).toBe("25 Nov");
     expect(fmtShort("2026-01-05")).toBe("5 Jan");

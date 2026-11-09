@@ -1,0 +1,33 @@
+import { Refused } from "../../actions/intents";
+import { AppError } from "../../services/ipc";
+import type { Registry } from "../../store/registry";
+import { Dialog } from "../common/Dialog";
+import { toast } from "../common/Toast";
+
+export const RELOAD_LABEL = "Load again from the server";
+export const RELOAD_TEXT = "Changes this device had not sent to the server are not loaded again; the damaged files stay on this device.";
+
+export function ReloadConfirm(p: { registry: Registry; docId: string; onClose(): void }) {
+  const load = (): void => {
+    p.registry.reloadFromServer(p.docId).then(
+      () => p.onClose(),
+      (e: unknown) => {
+        if (!(e instanceof AppError || e instanceof Refused)) throw e;
+        toast(e.message, "bad");
+      },
+    );
+  };
+  return (
+    <Dialog label={RELOAD_LABEL} onClose={p.onClose}>
+      <p>{RELOAD_TEXT}</p>
+      <div className="modal-actions">
+        <button type="button" onClick={p.onClose}>
+          Cancel
+        </button>
+        <button type="button" className="button-primary" onClick={load}>
+          Load again
+        </button>
+      </div>
+    </Dialog>
+  );
+}

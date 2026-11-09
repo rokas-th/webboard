@@ -231,7 +231,7 @@ export class Registry {
     if (this.closed) throw new Error("The registry is closed");
   }
 
-  private notify(): void {
+  private emit(): void {
     notifyEach(this.subscribers);
   }
 
@@ -286,7 +286,7 @@ export class Registry {
     if (this.memo.get(id) === p) this.memo.delete(id);
     if (record && e instanceof AppError) {
       this.record(id, e);
-      this.notify();
+      this.emit();
     }
     throw collected([e, ...also], "failures while loading " + id);
   }
@@ -298,7 +298,7 @@ export class Registry {
     offs.push(
       d.onError((e) => {
         if (!isIndexDoc(id)) this.failed.set(id, e);
-        this.notify();
+        this.emit();
       }),
     );
     if (!isIndexDoc(id)) this.track(id, d, offs);
@@ -333,7 +333,7 @@ export class Registry {
     const first = !tracker.projected;
     tracker.projected = true;
     const named = this.cacheName(id, plan.name);
-    if (first || named) this.notify();
+    if (first || named) this.emit();
   }
 
   private cacheName(id: PlanId, name: string): boolean {
@@ -344,7 +344,7 @@ export class Registry {
       (e: unknown) => {
         if (!(e instanceof AppError)) throw e;
         this.settingsFailure = e;
-        this.notify();
+        this.emit();
       },
     );
     return true;
@@ -356,7 +356,7 @@ export class Registry {
     return run.then(() => {
       if (this.settingsFailure === null) return false;
       this.settingsFailure = null;
-      this.notify();
+      this.emit();
       return true;
     });
   }
@@ -375,7 +375,7 @@ export class Registry {
         };
       },
       onName: (id, name) => {
-        if (this.cacheName(id, name)) this.notify();
+        if (this.cacheName(id, name)) this.emit();
       },
     };
   }
@@ -469,7 +469,7 @@ export class Registry {
     new PlanDoc(doc.ydoc).append(action, []);
     this.local.addPlan(id);
     await this.session(id);
-    if (this.cacheName(id, normalizeName(name))) this.notify();
+    if (this.cacheName(id, normalizeName(name))) this.emit();
     return id;
   }
 
@@ -490,7 +490,7 @@ export class Registry {
     }, LOCAL);
     this.local.addPlan(id);
     const session = await this.session(id);
-    if (this.cacheName(id, session.view().plan.name)) this.notify();
+    if (this.cacheName(id, session.view().plan.name)) this.emit();
     return id;
   }
 
@@ -543,7 +543,7 @@ export class Registry {
     this.usable();
     const d = this.loaded.get(id);
     this.failed.delete(id);
-    this.notify();
+    this.emit();
     const attempt = d === undefined ? this.doc(id).then(afterEither) : d.retry();
     await attempt.then(afterEither, (e: unknown) => {
       if (!(e instanceof AppError) || this.failed.get(id) !== e) throw e;
@@ -566,7 +566,7 @@ export class Registry {
     this.usable();
     const failing = this.indexStates().flatMap(([id, e]) => (e === null ? [] : [id]));
     const results = await Promise.allSettled(failing.map((id) => this.retryIndexDoc(id)));
-    this.notify();
+    this.emit();
     const thrown = results.flatMap((r, i) => (r.status === "rejected" && !this.indexRecorded(failing[i], r.reason) ? [r.reason] : []));
     if (thrown.length > 0) throw collected(thrown, "plan-list retries failed");
   }
@@ -614,7 +614,7 @@ export class Registry {
     this.memo.set(docId, p);
     await p;
     if (docId.startsWith(SPACE_PREFIX)) this.spaces.set(docId, await this.openIndex(docId));
-    this.notify();
+    this.emit();
   }
 
   private async setAside(id: string): Promise<void> {
@@ -624,7 +624,7 @@ export class Registry {
     } catch (e) {
       if (e instanceof AppError) {
         this.record(id, e);
-        this.notify();
+        this.emit();
       }
       throw e;
     }
@@ -674,10 +674,10 @@ export class Registry {
     } catch (e) {
       if (!(e instanceof AppError)) throw e;
       this.settingsFailure = e;
-      this.notify();
+      this.emit();
       return;
     }
-    if (!notified) this.notify();
+    if (!notified) this.emit();
   }
 
   takeIndexRepairNotice(): string | null {

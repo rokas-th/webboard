@@ -37,6 +37,7 @@ export function yearOf(d: Day): number {
 }
 
 export function localToday(now: Date = new Date()): IsoDate {
+  if (Number.isNaN(now.getTime())) throw new RangeError("not a date: Invalid Date");
   return `${pad(now.getFullYear(), 4)}-${pad(now.getMonth() + 1, 2)}-${pad(now.getDate(), 2)}`;
 }
 

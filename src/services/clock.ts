@@ -26,37 +26,48 @@ export function collected(thrown: readonly unknown[], what: string): unknown {
   return Object.assign(new Error(`${thrown.length} ${what}; the first: ${first instanceof Error ? first.message : String(first)}`), { cause: first });
 }
 
-function makeSystemClock(): Clock {
+export function createClock(opts?: { now?: () => Date; tickMs?: number; target?: Window }): Clock {
+  const read = opts?.now ?? (() => new Date());
+  const tickMs = opts?.tickMs ?? CLOCK_CHECK_MS;
+  const target = opts?.target ?? window;
   const subscribers = new Set<() => void>();
   let timer: ReturnType<typeof setInterval> | null = null;
-  let last = localToday();
-  const tick = (): void => {
-    const t = localToday();
+  let last = localToday(read());
+  const check = (): void => {
+    const t = localToday(read());
     if (t === last) return;
     last = t;
     notifyEach(subscribers);
   };
+  const start = (): void => {
+    last = localToday(read());
+    timer = setInterval(check, tickMs);
+    target.document.addEventListener("visibilitychange", check);
+    target.addEventListener("focus", check);
+    target.addEventListener("online", check);
+  };
+  const stop = (): void => {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+    target.document.removeEventListener("visibilitychange", check);
+    target.removeEventListener("focus", check);
+    target.removeEventListener("online", check);
+  };
   return {
-    today: () => localToday(),
-    now: () => Date.now(),
+    today: () => localToday(read()),
+    now: () => read().getTime(),
     subscribe(cb) {
       subscribers.add(cb);
-      if (timer === null) {
-        last = localToday();
-        timer = setInterval(tick, CLOCK_CHECK_MS);
-      }
+      if (timer === null) start();
       return () => {
         subscribers.delete(cb);
-        if (subscribers.size === 0 && timer !== null) {
-          clearInterval(timer);
-          timer = null;
-        }
+        if (subscribers.size === 0 && timer !== null) stop();
       };
     },
   };
 }
 
-export const systemClock: Clock = makeSystemClock();
+export const systemClock: Clock = createClock();
 
 const noonOf = (d: IsoDate): number => new Date(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)), 12).getTime();
 
