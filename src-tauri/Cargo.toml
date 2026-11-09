@@ -12,6 +12,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "~2.12", features = [] }
+chrono = "0.4"
 webboard-core = { path = "../crates/webboard-core" }
 
 [dev-dependencies]

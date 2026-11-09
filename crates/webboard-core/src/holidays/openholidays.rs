@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{Datelike, NaiveDate};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -26,7 +28,13 @@ struct OhCountry {
 struct OhSubdivision {
     code: String,
     name: Vec<Text>,
+    category: Option<Vec<Text>>,
     children: Option<Vec<OhSubdivision>>,
+}
+
+struct Tree {
+    list: Vec<Subdivision>,
+    scopes: HashMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -77,16 +85,57 @@ fn name_of(texts: &[Text], what: &str) -> Result<String> {
         })
 }
 
-fn tree(list: Vec<OhSubdivision>) -> Result<Vec<Subdivision>> {
+fn capitalised(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+fn scope_label(name: &str, category: Option<&[Text]>, ancestors: &[String]) -> String {
+    match category.filter(|c| !c.is_empty()) {
+        Some(category) if ancestors.iter().any(|a| a == name) => {
+            match category.iter().find(|t| t.language == "EN") {
+                Some(en) => format!("{} of {name}", capitalised(&en.text)),
+                None => format!("{name} ({})", category[0].text),
+            }
+        }
+        _ => name.to_string(),
+    }
+}
+
+fn build(
+    list: Vec<OhSubdivision>,
+    ancestors: &mut Vec<String>,
+    scopes: &mut HashMap<String, String>,
+) -> Result<Vec<Subdivision>> {
     list.into_iter()
         .map(|s| {
+            let name = name_of(&s.name, &format!("the subdivision {}", s.code))?;
+            scopes.insert(
+                s.code.clone(),
+                scope_label(&name, s.category.as_deref(), ancestors),
+            );
+            ancestors.push(name.clone());
+            let children = build(
+                s.children.into_iter().flatten().collect(),
+                ancestors,
+                scopes,
+            );
+            ancestors.pop();
             Ok(Subdivision {
-                name: name_of(&s.name, &format!("the subdivision {}", s.code))?,
-                children: tree(s.children.into_iter().flatten().collect())?,
+                name,
+                children: children?,
                 code: s.code,
             })
         })
         .collect()
+}
+
+fn tree(list: Vec<OhSubdivision>) -> Result<Tree> {
+    let mut scopes = HashMap::new();
+    let list = build(list, &mut Vec::new(), &mut scopes)?;
+    Ok(Tree { list, scopes })
 }
 
 fn find<'a>(list: &'a [Subdivision], code: &str) -> Option<&'a Subdivision> {
@@ -106,7 +155,7 @@ fn listed(list: &[(String, String)], country: &str) -> bool {
 fn days_of(
     rows: Vec<Row>,
     subdivision: Option<&str>,
-    names: &[Subdivision],
+    scopes: &HashMap<String, String>,
     year: i32,
 ) -> Result<Vec<HolidayDay>> {
     let nested = subdivision.map(|s| format!("{s}-"));
@@ -121,8 +170,8 @@ fn days_of(
             .flatten()
             .map(|s| s.code.as_str())
             .collect();
-        let scope_code = match (codes.is_empty(), subdivision, &nested) {
-            (true, _, _) => None,
+        let scope_codes: Vec<&str> = match (codes.is_empty(), subdivision, &nested) {
+            (true, _, _) => vec![],
             (false, Some(region), Some(prefix)) => {
                 let matching: Vec<&str> = codes
                     .iter()
@@ -131,15 +180,16 @@ fn days_of(
                     .collect();
                 match matching.as_slice() {
                     [] => continue,
-                    m if m.contains(&region) => None,
-                    [first, ..] => Some(*first),
+                    m if m.contains(&region) => vec![],
+                    m => m.to_vec(),
                 }
             }
             (false, _, _) => continue,
         };
-        let scope = scope_code
+        let labels = scope_codes
+            .iter()
             .map(|code| {
-                find(names, code).map(|s| s.name.clone()).ok_or_else(|| {
+                scopes.get(*code).cloned().ok_or_else(|| {
                     CommandError::new(
                         "holidays.parse",
                         format!(
@@ -148,7 +198,27 @@ fn days_of(
                     )
                 })
             })
-            .transpose()?;
+            .collect::<Result<Vec<_>>>()?;
+        let scope = (!labels.is_empty()).then(|| {
+            labels
+                .iter()
+                .fold(Vec::<&str>::new(), |mut kept, l| {
+                    if !kept.contains(&l.as_str()) {
+                        kept.push(l);
+                    }
+                    kept
+                })
+                .join(", ")
+        });
+        if row.end_date < row.start_date {
+            return Err(CommandError::new(
+                "holidays.parse",
+                format!(
+                    "OpenHolidays sent the holiday {} ending {} before it starts {}.",
+                    row.id, row.end_date, row.start_date
+                ),
+            ));
+        }
         let kind = match (row.temporal_scope.as_str(), row.kind.as_str()) {
             ("HalfDay", _) => HolidayKind::Half,
             (_, "Public") => HolidayKind::Public,
@@ -213,7 +283,7 @@ impl Holidays {
         }
     }
 
-    async fn oh_tree(&self, country: &str, fresh: bool) -> Result<(Vec<Subdivision>, bool)> {
+    async fn oh_tree(&self, country: &str, fresh: bool) -> Result<(Tree, bool)> {
         let url = format!("{}/Subdivisions", self.sources.openholidays);
         let key = format!("subdivisions-{country}");
         let req = Req {
@@ -230,17 +300,17 @@ impl Holidays {
 
     pub(super) async fn oh_subdivisions(&self, country: &str) -> Result<Vec<Subdivision>> {
         self.require_country(country).await?;
-        Ok(self.oh_tree(country, false).await?.0)
+        Ok(self.oh_tree(country, false).await?.0.list)
     }
 
-    async fn require_subdivision(&self, country: &str, code: &str) -> Result<Vec<Subdivision>> {
-        let (list, from_cache) = self.oh_tree(country, false).await?;
-        if find(&list, code).is_some() {
-            return Ok(list);
+    async fn require_subdivision(&self, country: &str, code: &str) -> Result<Tree> {
+        let (tree, from_cache) = self.oh_tree(country, false).await?;
+        if find(&tree.list, code).is_some() {
+            return Ok(tree);
         }
         if from_cache {
             let again = self.oh_tree(country, true).await?.0;
-            if find(&again, code).is_some() {
+            if find(&again.list, code).is_some() {
                 return Ok(again);
             }
         }
@@ -295,9 +365,9 @@ impl Holidays {
         fresh: bool,
     ) -> Result<YearOut> {
         self.require_country(country).await?;
-        let names = match subdivision {
-            Some(code) => self.require_subdivision(country, code).await?,
-            None => vec![],
+        let scopes = match subdivision {
+            Some(code) => self.require_subdivision(country, code).await?.scopes,
+            None => HashMap::new(),
         };
         let coverage = self.oh_coverage(country, year).await?;
         let region = subdivision.unwrap_or(country);
@@ -319,7 +389,7 @@ impl Holidays {
         };
         let (days, meta) = self
             .load(&req, fresh, |text| {
-                let days = days_of(parse("holidays", text)?, subdivision, &names, year)?;
+                let days = days_of(parse("holidays", text)?, subdivision, &scopes, year)?;
                 if days.is_empty() {
                     return Err(CommandError::new(
                         "holidays.parse",

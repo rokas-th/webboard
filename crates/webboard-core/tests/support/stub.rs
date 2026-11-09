@@ -110,7 +110,11 @@ fn read_request(stream: &TcpStream) -> std::io::Result<(String, String, String)>
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
     reader.read_line(&mut line)?;
-    let target = line.split_whitespace().nth(1).unwrap_or("").to_string();
+    let target = line
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or_else(|| panic!("the stub got a request line without a target: {line:?}"))
+        .to_string();
     let mut ua = String::new();
     loop {
         let mut header = String::new();
@@ -238,14 +242,23 @@ impl Stub {
         self.seen().iter().filter(|s| s.path == path).count()
     }
 
-    pub fn stop(mut self) -> SocketAddr {
+    fn halt(&mut self) -> std::thread::Result<()> {
+        let Some(thread) = self.thread.take() else {
+            return Ok(());
+        };
         self.stop.store(true, Ordering::SeqCst);
-        TcpStream::connect(self.addr).expect("wake the stub's accept loop");
-        self.thread
-            .take()
-            .expect("the stub runs")
-            .join()
-            .expect("the stub thread ends cleanly");
+        let woken = TcpStream::connect(self.addr);
+        match (thread.join(), woken) {
+            (Err(panic), _) => Err(panic),
+            (Ok(()), Ok(_)) => Ok(()),
+            (Ok(()), Err(e)) => panic!("the stub on {} ended without being woken ({e})", self.addr),
+        }
+    }
+
+    pub fn stop(mut self) -> SocketAddr {
+        if let Err(panic) = self.halt() {
+            std::panic::resume_unwind(panic);
+        }
         let deadline = Instant::now() + Duration::from_secs(1);
         while TcpStream::connect(self.addr).is_ok() {
             assert!(
@@ -256,5 +269,29 @@ impl Stub {
             std::thread::sleep(Duration::from_millis(5));
         }
         self.addr
+    }
+}
+
+fn panic_text(panic: &(dyn std::any::Any + Send)) -> String {
+    panic
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
+        .unwrap_or_else(|| "a panic without a message".to_string())
+}
+
+impl Drop for Stub {
+    fn drop(&mut self) {
+        if let Err(panic) = self.halt() {
+            if std::thread::panicking() {
+                eprintln!(
+                    "the stub on {} failed as well: {}",
+                    self.addr,
+                    panic_text(panic.as_ref())
+                );
+            } else {
+                std::panic::resume_unwind(panic);
+            }
+        }
     }
 }

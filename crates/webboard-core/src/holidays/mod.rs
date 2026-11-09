@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use chrono::{Datelike, NaiveDate};
-use reqwest::header::{HeaderMap, RETRY_AFTER, USER_AGENT};
+use reqwest::header::{HeaderMap, CONTENT_TYPE, RETRY_AFTER, USER_AGENT};
 use reqwest::{StatusCode, Url};
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +24,7 @@ const WEBBOARD_UA: &str = concat!(
 );
 const BROWSER_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15";
 const TIMEOUT_SECS: u64 = 20;
+const YEARS: (i32, i32) = (1900, 2200);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "src", rename_all = "lowercase")]
@@ -144,6 +145,30 @@ fn innermost(e: &(dyn std::error::Error + 'static)) -> String {
     cur.to_string()
 }
 
+fn chain<'a>(
+    e: &'a (dyn std::error::Error + 'static),
+) -> Vec<&'a (dyn std::error::Error + 'static)> {
+    std::iter::successors(Some(e), |cur| cur.source())
+        .flat_map(|cur| {
+            let wrapped = cur
+                .downcast_ref::<std::io::Error>()
+                .and_then(|io| io.get_ref())
+                .map(|inner| inner as &(dyn std::error::Error + 'static));
+            std::iter::once(cur).chain(wrapped)
+        })
+        .collect()
+}
+
+#[cfg(target_vendor = "apple")]
+fn is_tls_error(e: &(dyn std::error::Error + 'static)) -> bool {
+    e.is::<native_tls::Error>()
+}
+
+#[cfg(not(target_vendor = "apple"))]
+fn is_tls_error(e: &(dyn std::error::Error + 'static)) -> bool {
+    e.is::<rustls::Error>()
+}
+
 fn transport_error(url: &str, e: &reqwest::Error) -> CommandError {
     let host = host_of(url);
     if e.is_timeout() {
@@ -151,10 +176,23 @@ fn transport_error(url: &str, e: &reqwest::Error) -> CommandError {
             "holidays.offline",
             format!("{host} did not answer within {TIMEOUT_SECS} s."),
         )
-    } else if e.is_connect() || e.is_request() || e.is_body() {
+    } else if chain(e).into_iter().any(is_tls_error) {
+        CommandError::new(
+            "holidays.http",
+            format!(
+                "Could not make a secure connection to {host}: {}.",
+                innermost(e)
+            ),
+        )
+    } else if e.is_connect() {
         CommandError::new(
             "holidays.offline",
             format!("Could not reach {host}: {}.", innermost(e)),
+        )
+    } else if e.is_request() || e.is_body() {
+        CommandError::new(
+            "holidays.http",
+            format!("The exchange with {host} failed: {}.", innermost(e)),
         )
     } else if e.is_decode() {
         CommandError::new(
@@ -172,15 +210,77 @@ fn transport_error(url: &str, e: &reqwest::Error) -> CommandError {
     }
 }
 
+fn hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn wait_of(headers: &HeaderMap) -> String {
     let Some(value) = headers.get(RETRY_AFTER) else {
         return "wait".to_string();
     };
-    let text = String::from_utf8_lossy(value.as_bytes()).trim().to_string();
-    match text.parse::<u64>() {
-        Ok(secs) => format!("wait {secs} s"),
-        Err(_) => format!("wait until {text}"),
+    match value.to_str().map(str::trim) {
+        Ok(text) => match text.parse::<u64>() {
+            Ok(secs) => format!("wait {secs} s"),
+            Err(_) => format!("wait until {text}"),
+        },
+        Err(_) => format!(
+            "wait (its Retry-After header is not text: {})",
+            hex(value.as_bytes())
+        ),
     }
+}
+
+fn charset_of(headers: &HeaderMap) -> std::result::Result<Option<String>, String> {
+    let Some(value) = headers.get(CONTENT_TYPE) else {
+        return Ok(None);
+    };
+    let text = value.to_str().map_err(|_| {
+        format!(
+            "a Content-Type header that is not text: {}",
+            hex(value.as_bytes())
+        )
+    })?;
+    Ok(text.split(';').skip(1).find_map(|param| {
+        let (name, value) = param.split_once('=')?;
+        name.trim()
+            .eq_ignore_ascii_case("charset")
+            .then(|| value.trim().trim_matches('"').to_ascii_lowercase())
+    }))
+}
+
+fn decode_text(url: &str, headers: &HeaderMap, bytes: Vec<u8>) -> Result<String> {
+    let host = host_of(url);
+    let parse = |what: String| CommandError::new("holidays.parse", format!("{host} sent {what}."));
+    let charset = charset_of(headers).map_err(parse)?;
+    match charset.as_deref() {
+        None | Some("utf-8" | "utf8") => {}
+        Some("us-ascii") if bytes.is_ascii() => {}
+        Some("us-ascii") => {
+            return Err(parse(
+                "text it calls us-ascii that holds bytes outside ASCII".to_string(),
+            ))
+        }
+        Some(other) => {
+            return Err(parse(format!(
+                "text in the charset {other}; WebBoard reads only UTF-8"
+            )))
+        }
+    }
+    String::from_utf8(bytes).map_err(|e| {
+        let at = e.utf8_error().valid_up_to();
+        let len = e
+            .utf8_error()
+            .error_len()
+            .unwrap_or(e.as_bytes().len() - at);
+        let bad = hex(&e.as_bytes()[at..at + len]);
+        parse(format!(
+            "text that is not UTF-8: the bytes {bad} at offset {at}"
+        ))
+    })
 }
 
 fn status_error(url: &str, status: StatusCode, headers: &HeaderMap) -> CommandError {
@@ -233,7 +333,7 @@ impl Holidays {
             .build()
             .map_err(|e| {
                 CommandError::new(
-                    "holidays.http",
+                    "holidays.io",
                     format!("Could not start the HTTP client: {}.", innermost(&e)),
                 )
             })?;
@@ -257,7 +357,12 @@ impl Holidays {
         if !status.is_success() {
             return Err(status_error(url, status, response.headers()));
         }
-        response.text().await.map_err(|e| transport_error(url, &e))
+        let headers = response.headers().clone();
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| transport_error(url, &e))?;
+        decode_text(url, &headers, bytes.to_vec())
     }
 
     async fn load<T>(
@@ -294,6 +399,7 @@ impl Holidays {
         let listed = self.oh_country_list().await?;
         Ok(listed
             .into_iter()
+            .filter(|(code, _)| code != "GB" && code != "US")
             .map(|(code, name)| Country {
                 code,
                 name,
@@ -330,6 +436,9 @@ impl Holidays {
     }
 
     pub async fn year(&self, region: &RegionRef, year: i32, fresh: bool) -> Result<YearOut> {
+        if !covers(Some(YEARS), year) {
+            return Err(out_of_range("WebBoard shows holidays", YEARS, year));
+        }
         match region {
             RegionRef::Openholidays {
                 country,
@@ -354,7 +463,7 @@ impl Holidays {
             who: &who,
         };
         let feed = self.ics_feed(&at, true).await?.0;
-        let consumer = consumer_calendar_host(url);
+        let consumer = consumer_calendar_host(url)?;
         let first = today.year();
         let mut days = [first, first + 1]
             .into_iter()

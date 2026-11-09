@@ -4809,6 +4809,7 @@ dependencies = [
 name = "webboard"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "serde_json",
  "tauri",
  "tauri-build",
@@ -4824,7 +4825,9 @@ dependencies = [
  "chrono",
  "crc32fast",
  "icalendar",
+ "native-tls",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.11.1",

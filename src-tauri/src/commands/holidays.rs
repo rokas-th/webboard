@@ -1,5 +1,5 @@
+use chrono::Local;
 use tauri::State;
-use webboard_core::chrono::Local;
 use webboard_core::error::Result;
 use webboard_core::holidays::{Country, Holidays, PreviewDay, RegionRef, Subdivision, YearOut};
 
@@ -38,8 +38,6 @@ pub async fn holidays_ics_preview(
 mod tests {
     use super::*;
     use serde_json::{json, Value};
-    use std::net::{SocketAddr, TcpListener, TcpStream};
-    use std::time::{Duration, Instant};
     use tauri::ipc::InvokeBody;
     use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
     use tauri::webview::InvokeRequest;
@@ -53,24 +51,9 @@ mod tests {
         _tmp: TempDir,
     }
 
-    fn closed_port() -> SocketAddr {
-        let addr = TcpListener::bind("127.0.0.1:0")
-            .and_then(|l| l.local_addr())
-            .expect("bind a port to close");
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while TcpStream::connect(addr).is_ok() {
-            assert!(
-                Instant::now() < deadline,
-                "{addr} still accepts connections 1 s after its listener closed"
-            );
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        addr
-    }
-
     fn harness() -> Harness {
         let tmp = TempDir::new().expect("temp dir");
-        let base = format!("http://{}", closed_port());
+        let base = "http://127.0.0.1:0".to_string();
         let sources = Sources {
             openholidays: base.clone(),
             govuk: format!("{base}/bank-holidays.json"),
@@ -153,5 +136,27 @@ mod tests {
         )
         .expect_err("a malformed URL");
         assert_eq!(preview["code"], "holidays.http", "{preview}");
+    }
+
+    #[test]
+    fn year_outside_the_shown_range_is_out_of_range() {
+        let h = harness();
+        let answer = invoke(
+            &h,
+            "holidays_year",
+            json!({
+                "region": { "src": "opm" },
+                "year": i32::MAX,
+                "fresh": true
+            }),
+        )
+        .expect_err("a year far outside the range");
+        assert_eq!(
+            answer,
+            json!({
+                "code": "holidays.out_of_range",
+                "message": "WebBoard shows holidays for 1900–2200, not 2147483647."
+            })
+        );
     }
 }

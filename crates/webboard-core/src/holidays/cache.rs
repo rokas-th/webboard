@@ -37,6 +37,21 @@ pub fn url_key(url: &str) -> String {
         .collect()
 }
 
+fn discard(tmp: &Path, failure: CommandError) -> CommandError {
+    match fs::remove_file(tmp) {
+        Ok(()) => failure,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => failure,
+        Err(e) => CommandError::new(
+            &failure.code,
+            format!(
+                "{}; the temporary file {} could not be removed either: {e}",
+                failure.message,
+                tmp.display()
+            ),
+        ),
+    }
+}
+
 fn sync_dir(dir: &Path) -> Result<()> {
     File::open(dir)
         .and_then(|d| d.sync_all())
@@ -89,8 +104,11 @@ impl Cache {
         })?;
         File::create(&tmp)
             .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all()))
-            .map_err(|e| io_error("Could not write", &tmp, e))?;
-        fs::rename(&tmp, &path).map_err(|e| io_error("Could not rename into", &path, e))?;
+            .map_err(|e| io_error("Could not write", &tmp, e))
+            .and_then(|()| {
+                fs::rename(&tmp, &path).map_err(|e| io_error("Could not rename into", &path, e))
+            })
+            .map_err(|e| discard(&tmp, e))?;
         sync_dir(&dir)?;
         Ok(entry)
     }
