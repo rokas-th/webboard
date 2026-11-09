@@ -5,8 +5,13 @@ import type { Clock } from "../../services/clock";
 import { AppError } from "../../services/ipc";
 import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
+import { About } from "../common/About";
 import { toast, Toasts } from "../common/Toast";
-import { OpenChoice } from "../run";
+import { revealPatch } from "../choices/HeadCounts";
+import { commands, type CommandCtx } from "../palette/commands";
+import { keyToCommand, looksLikeMac } from "../palette/keymap";
+import { Palette } from "../palette/Palette";
+import { OpenChoice, runWith } from "../run";
 import { pickPlan, UiContext, useUi } from "../state";
 import { Board } from "../board/Board";
 import { CalendarDialog } from "../calendar/CalendarDialog";
@@ -257,6 +262,8 @@ export function Shell(p: ShellProps) {
 
   const closeDialog = useCallback(() => setUi({ dialog: null }), [setUi]);
 
+  const clearNaming = useCallback(() => setUi({ naming: null }), [setUi]);
+
   const newPlan = (): void => {
     if (creatingRef.current) return;
     creatingRef.current = true;
@@ -307,6 +314,63 @@ export function Shell(p: ShellProps) {
   const indexError = registry.indexError();
   const settingsError = registry.settingsError();
   const readOnly = session?.readOnly ?? false;
+  const mac = looksLikeMac() || registry.device.platform === "macos";
+
+  const runner = useMemo(() => (session === null ? null : runWith(session, openChoice)), [session, openChoice]);
+
+  const reveal = (target: ItemId | "today"): void => {
+    if (target === "today") {
+      setUi({ view: "timeline", reveal: "today" });
+      return;
+    }
+    if (session === null) throw new Error("Shell: nothing to reveal without an open plan");
+    setUi(revealPatch(session.view(), ui.collapsed, target));
+  };
+
+  const ctx: CommandCtx = {
+    session,
+    registry,
+    ui,
+    setUi,
+    run: runner === null ? null : runner.run,
+    undo: runner === null ? null : runner.undo,
+    redo: runner === null ? null : runner.redo,
+    readOnly,
+    mac,
+    clock: p.clock,
+    newPlan,
+    reveal,
+  };
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx;
+
+  const runCommand = useCallback((id: string): void => {
+    const cmd = commands(ctxRef.current).find((c) => c.id === id);
+    if (cmd === undefined) throw new Error(`Shell: no command ${id} here`);
+    cmd.run();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.defaultPrevented) return;
+      const c = ctxRef.current;
+      const target = e.target instanceof Element ? e.target : null;
+      const typing = target !== null && target.closest('input, textarea, select, [contenteditable="true"]') !== null;
+      const dialog = c.ui.dialog !== null || (target !== null && target.closest('[aria-modal="true"]') !== null);
+      const id = keyToCommand(e, { mac: c.mac, typing, dialog, selected: c.ui.selected !== null });
+      if (id === null) return;
+      if (id === "close-dialog" || id === "deselect") {
+        c.setUi(id === "close-dialog" ? { dialog: null } : { selected: null });
+        return;
+      }
+      const cmd = commands(c).find((x) => x.id === id);
+      if (cmd === undefined) return;
+      e.preventDefault();
+      cmd.run();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const content = (() => {
     if (sel === null) {
@@ -358,7 +422,7 @@ export function Shell(p: ShellProps) {
     <UiContext.Provider value={uiValue}>
       <OpenChoice.Provider value={openChoice}>
         <div className="app">
-          <Toolbar session={session} readOnly={readOnly} ui={ui} setUi={setUi} mac={registry.device.platform === "macos"} />
+          <Toolbar session={session} readOnly={readOnly} ui={ui} setUi={setUi} mac={mac} onCommand={runCommand} />
           <div className="app-body">
             <Sidebar
               registry={registry}
@@ -389,7 +453,16 @@ export function Shell(p: ShellProps) {
             {session !== null && (
               <div className="slot slot-panel" data-slot="panel">
                 {ui.selected !== null && session.view().plan.items.has(ui.selected) ? (
-                  <ItemPanel key={ui.selected} session={session} item={ui.selected} local={registry.device.name} readOnly={readOnly} />
+                  <ItemPanel
+                    key={ui.selected}
+                    session={session}
+                    item={ui.selected}
+                    local={registry.device.name}
+                    mac={mac}
+                    readOnly={readOnly}
+                    naming={ui.naming === ui.selected}
+                    onNamed={clearNaming}
+                  />
                 ) : (
                   <PlanPanel session={session} readOnly={readOnly} />
                 )}
@@ -412,6 +485,8 @@ export function Shell(p: ShellProps) {
           {session !== null && ui.dialog !== null && ui.dialog.t === "revert" && (
             <RevertDialog key={ui.dialog.id} session={session} id={ui.dialog.id} onClose={() => setUi({ dialog: null })} />
           )}
+          {ui.dialog !== null && ui.dialog.t === "palette" && <Palette commands={commands(ctx)} onClose={closeDialog} />}
+          {ui.dialog !== null && ui.dialog.t === "about" && <About onClose={closeDialog} />}
           <Toasts />
         </div>
       </OpenChoice.Provider>

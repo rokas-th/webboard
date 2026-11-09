@@ -21,7 +21,8 @@ export interface UiState {
   collapsed: ReadonlySet<ItemId>;
   baseline: BaselineId | null;
   dialog: DialogState | null;
-  reveal: ItemId | null;
+  reveal: ItemId | "today" | null;
+  naming: ItemId | null;
 }
 
 export const PLACE_KEY = "webboard.place";
@@ -43,6 +44,7 @@ const DEFAULTS: UiState = {
   baseline: null,
   dialog: null,
   reveal: null,
+  naming: null,
 };
 
 type Place = Pick<UiState, "plan" | "view" | "zoom" | "collapsed">;

@@ -24,6 +24,7 @@ if (Element.prototype.setPointerCapture === undefined) {
     return false;
   };
 }
+if (Element.prototype.scrollIntoView === undefined) Element.prototype.scrollIntoView = function scrollIntoView(): void {};
 if (Document.prototype.elementFromPoint === undefined) {
   Document.prototype.elementFromPoint = function elementFromPoint(): Element | null {
     throw new Error("elementFromPoint is not stubbed in this test");

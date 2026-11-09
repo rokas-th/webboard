@@ -387,6 +387,31 @@ describe("the note", () => {
     expect(note.value).toBe("abcd");
     expect(undo).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["linux", "abcd"],
+    ["macos", "abc"],
+  ] as const)("on %s, Ctrl+Y in the focused note leaves the note at %s", async (platform, after) => {
+    const t = await made([{ name: "A", start: "2026-11-10", note: "abc" }]);
+    render(shellFor(t, { device: { deviceId: "mac", name: "Mac", platform } }).ui);
+    await settle();
+    select("A");
+    const note = inPanel().getByLabelText("Notes");
+    if (!(note instanceof HTMLTextAreaElement)) throw new Error("no note");
+    const redo = vi.spyOn(t.session, "redo");
+    act(() => note.focus());
+    typeInto(note, "abcd");
+    act(() => {
+      fireEvent.keyDown(note, { key: "z", ctrlKey: true });
+    });
+    expect(note.value).toBe("abc");
+    act(() => {
+      fireEvent.keyDown(note, { key: "y", ctrlKey: true });
+    });
+    expect(note.value).toBe(after);
+    expect(t.session.note("A").toString()).toBe(after);
+    expect(redo).not.toHaveBeenCalled();
+  });
 });
 
 describe("no-op edits (refinement 36)", () => {

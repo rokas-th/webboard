@@ -17,6 +17,7 @@ interface ToolbarProps {
   ui: UiState;
   setUi(patch: Partial<UiState>): void;
   mac: boolean;
+  onCommand(id: string): void;
 }
 
 function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState; setUi(patch: Partial<UiState>): void }) {
@@ -72,9 +73,19 @@ export function Toolbar(p: ToolbarProps) {
       ) : (
         <PlanControls session={p.session} readOnly={p.readOnly} ui={p.ui} setUi={p.setUi} />
       )}
-      <button type="button" className="kbd-button" onClick={() => p.setUi({ dialog: { t: "palette" } })}>
+      <button type="button" className="kbd-button" title="Command palette" onClick={() => p.onCommand("palette")}>
         {p.mac ? "⌘K" : "Ctrl K"}
       </button>
+      {p.session !== null && (
+        <>
+          <button type="button" className="button-primary" aria-label="New task" disabled={p.readOnly} onClick={() => p.onCommand("new-task")}>
+            + Task
+          </button>
+          <button type="button" aria-label="New group" disabled={p.readOnly} onClick={() => p.onCommand("new-group")}>
+            + Group
+          </button>
+        </>
+      )}
       <SyncChip />
     </header>
   );

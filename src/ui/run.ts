@@ -59,14 +59,16 @@ export function useExec(session: PlanSession): Exec {
   return useMemo(() => execWith(session, open), [session, open]);
 }
 
+export function runWith(session: PlanSession, open: OpenChoiceFn): Run {
+  const exec = execWith(session, open);
+  return {
+    run: (i: Intent) => exec(() => session.apply(i)),
+    undo: () => exec(() => requestUndo(session, (o) => open(o.choice, o.side))),
+    redo: () => exec(() => session.redo()),
+  };
+}
+
 export function useRun(session: PlanSession): Run {
   const open = useOpenChoice();
-  return useMemo(() => {
-    const exec = execWith(session, open);
-    return {
-      run: (i: Intent) => exec(() => session.apply(i)),
-      undo: () => exec(() => requestUndo(session, (o) => open(o.choice, o.side))),
-      redo: () => exec(() => session.redo()),
-    };
-  }, [session, open]);
+  return useMemo(() => runWith(session, open), [session, open]);
 }

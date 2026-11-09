@@ -2,7 +2,7 @@ import { useContext } from "react";
 import type { ItemId, PlanState } from "../../domain/model";
 import type { Conflict } from "../../domain/schedule";
 import type { PlanView } from "../../store/doc";
-import { UiContext } from "../state";
+import { UiContext, type UiState } from "../state";
 import { heldChoice } from "./describe";
 
 export type Broken = Exclude<Conflict, { kind: "dayoff" }>;
@@ -22,11 +22,17 @@ const ancestors = (plan: PlanState, id: ItemId): ItemId[] => {
   return it.place.parent === null ? [] : [it.place.parent, ...ancestors(plan, it.place.parent)];
 };
 
-const hasStart = (plan: PlanState, id: ItemId): boolean => {
+const hasRow = (plan: PlanState, id: ItemId): boolean => {
   const it = plan.items.get(id);
   if (it === undefined) throw new Error(`No item ${id}`);
-  return it.schedule !== null && it.schedule.start !== null;
+  return it.kind === "group" || (it.schedule !== null && it.schedule.start !== null);
 };
+
+export function revealPatch(view: PlanView, collapsed: ReadonlySet<ItemId>, id: ItemId): Pick<UiState, "view" | "collapsed" | "reveal"> {
+  const up = new Set(ancestors(view.plan, id));
+  const open = [...collapsed].some((c) => up.has(c)) ? new Set([...collapsed].filter((c) => !up.has(c))) : collapsed;
+  return { view: "timeline", collapsed: open, reveal: hasRow(view.plan, id) ? id : null };
+}
 
 export function HeadCounts(p: { view: PlanView; onChoose(choice: string): void }) {
   const view = p.view;
@@ -38,9 +44,7 @@ export function HeadCounts(p: { view: PlanView; onChoose(choice: string): void }
     const first = conflicts[0];
     if (first === undefined) throw new Error("Go to first conflict: there is no conflict");
     const succ = conflictSuccessor(view, first);
-    const up = new Set(ancestors(view.plan, succ));
-    const collapsed = [...uiValue.ui.collapsed].some((id) => up.has(id)) ? new Set([...uiValue.ui.collapsed].filter((id) => !up.has(id))) : uiValue.ui.collapsed;
-    uiValue.setUi({ view: "timeline", selected: succ, collapsed, reveal: hasStart(view.plan, succ) ? succ : null });
+    uiValue.setUi({ selected: succ, ...revealPatch(view, uiValue.ui.collapsed, succ) });
   };
 
   const openHeld = (): void => {

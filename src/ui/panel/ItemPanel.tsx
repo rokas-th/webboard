@@ -240,7 +240,14 @@ function PlaceFields(p: { plan: PlanState; item: Item; readOnly: boolean; run: R
   );
 }
 
-function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean }) {
+function noteKey(e: ReactKeyboardEvent<HTMLTextAreaElement>, mac: boolean): "undo" | "redo" | null {
+  const key = e.key.toLowerCase();
+  if ((e.metaKey || e.ctrlKey) && key === "z") return e.shiftKey ? "redo" : "undo";
+  if (!mac && e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && key === "y") return "redo";
+  return null;
+}
+
+function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean; mac: boolean }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const binding = useRef<NoteBinding | null>(null);
   const readOnly = useRef(p.readOnly);
@@ -256,7 +263,8 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean }) {
     };
   }, [p.session, p.item]);
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
-    if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+    const k = noteKey(e, p.mac);
+    if (k === null) return;
     e.preventDefault();
     e.stopPropagation();
     if (readOnly.current) {
@@ -265,7 +273,7 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean }) {
     }
     const b = binding.current;
     if (b === null) throw new Error("Note keys arrived before its binding");
-    if (e.shiftKey) b.redo();
+    if (k === "redo") b.redo();
     else b.undo();
   };
   return <textarea ref={ref} aria-label="Notes" placeholder="Anything worth knowing about this item" readOnly={p.readOnly} onKeyDown={onKeyDown} />;
@@ -286,14 +294,24 @@ function ChoiceBanner(p: { view: PlanView; item: ItemId; local: string }) {
   );
 }
 
-export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string; readOnly?: boolean }) {
+export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string; mac: boolean; readOnly?: boolean; naming: boolean; onNamed(): void }) {
   const view = usePlanView(p.session);
   const run = useRun(p.session);
+  const root = useRef<HTMLDivElement>(null);
+  const { naming, onNamed } = p;
+  useEffect(() => {
+    if (!naming) return;
+    const input = root.current?.querySelector(".title-input");
+    if (!(input instanceof HTMLInputElement)) throw new Error(`ItemPanel: no name field to focus for ${p.item}`);
+    input.focus();
+    input.select();
+    onNamed();
+  }, [naming, onNamed, p.item]);
   const it = view.plan.items.get(p.item);
   if (it === undefined) throw new Error(`ItemPanel: no item ${p.item}`);
   const readOnly = p.readOnly === true || it.trashed;
   return (
-    <div className="panel">
+    <div className="panel" ref={root}>
       <span className="kind">{KIND[it.kind]}</span>
       <ChoiceBanner view={view} item={it.id} local={p.local} />
       <TextField
@@ -308,7 +326,7 @@ export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string
       <PlaceFields plan={view.plan} item={it} readOnly={readOnly} run={run} />
       {it.kind !== "group" && <LinksEditor view={view} item={it} readOnly={readOnly} run={run} />}
       <h2>Notes</h2>
-      <Note session={p.session} item={it.id} readOnly={readOnly} />
+      <Note session={p.session} item={it.id} readOnly={readOnly} mac={p.mac} />
       {!readOnly && (
         <div className="actions">
           <button type="button" className="button-small button-danger" onClick={() => run.run({ t: "trash", items: [it.id] })}>

@@ -151,7 +151,7 @@ const styled = new Set(sheet.rules.flatMap((r) => (r.selector.match(/\.[A-Za-z][
 
 describe("every class the stylesheets style", () => {
   it("reads the sources and sheets it is asserting against", () => {
-    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./list.css", "./panel.css", "./shell.css", "./timeline.css", "./tokens.css"]);
+    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./list.css", "./palette.css", "./panel.css", "./shell.css", "./timeline.css", "./tokens.css"]);
     expect(Object.keys(SOURCES).length).toBeGreaterThan(40);
     expect(CODE.length).toBeGreaterThan(100000);
     expect(styled.size).toBeGreaterThan(60);
@@ -245,7 +245,7 @@ describe("the Cyberdeck look", () => {
   });
 
   it("clips every name to one line", () => {
-    [".entry-name", ".plan-head h1", ".toolbar-plan", ".choice-row", ".tl-row .name", ".card-name", ".list-name"].forEach((sel) => {
+    [".entry-name", ".plan-head h1", ".toolbar-plan", ".choice-row", ".tl-row .name", ".card-name", ".list-name", ".palette-label"].forEach((sel) => {
       const decls = Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
       expect([sel, decls["overflow"], decls["text-overflow"], decls["white-space"]]).toEqual([sel, "hidden", "ellipsis", "nowrap"]);
     });

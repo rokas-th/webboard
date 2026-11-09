@@ -107,13 +107,18 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     if (reveal === null) return;
     const el = scroller.current;
     if (el === null) throw new Error("Timeline: no scroller");
+    if (reveal === "today") {
+      el.scrollLeft = Math.max(0, geo.x(today) - LEAD);
+      setUi({ reveal: null });
+      return;
+    }
     const index = rows.findIndex((r) => r.id === reveal);
     if (index < 0) throw new Error(`Timeline: no row for ${reveal} to reveal`);
     el.scrollTop = index * ROW;
     const span = geo.span(reveal);
     if (span !== null) el.scrollLeft = Math.max(0, geo.x(span.start) - LEAD);
     setUi({ reveal: null });
-  }, [reveal, rows, geo, setUi]);
+  }, [reveal, rows, geo, today, setUi]);
 
   const cancel = (): void => {
     drag.current = null;
