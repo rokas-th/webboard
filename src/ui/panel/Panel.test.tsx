@@ -6,6 +6,7 @@ import type { HistoryEntry, PlanSession } from "../../store/session";
 import { deleteClash } from "../../test/fixtures/deleteClash";
 import { fs, MESA_SEED, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { shellFor } from "../../test/shell";
+import { CHOICE_TITLE } from "../choices/ChoiceDialog";
 import { clearToasts } from "../common/Toast";
 import { READ_ONLY } from "../run";
 import { useUi, type UiState } from "../state";
@@ -579,7 +580,7 @@ describe("ItemPanel on a trashed item", () => {
     select("A");
     expect(uiNow()[0].selected).toBe("A");
     expect(panel().querySelectorAll("input, select")).toHaveLength(0);
-    expect(all("button", panel())).toEqual([]);
+    expect(all("button", panel()).map((b) => b.textContent)).toEqual(["Choose"]);
     expect(inPanel().getByLabelText("Name").textContent).toBe("Renamed");
     const note = inPanel().getByLabelText("Notes");
     expect(note instanceof HTMLTextAreaElement && note.readOnly).toBe(true);
@@ -861,7 +862,7 @@ describe("History", () => {
     const offer = t.session.undoOffer();
     if (offer === null) throw new Error("no offer");
     expect(uiNow()[0].dialog).toEqual({ t: "choice", id: t.session.view().choices[0].id, side: offer.side });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(within(screen.getByRole("dialog", { name: CHOICE_TITLE })).getByRole("button", { name: "Keep the other version" })).toBeTruthy();
     expect([apply.mock.calls.length, revert.mock.calls.length, resolve.mock.calls.length]).toEqual([0, 0, 0]);
     expect(toastTexts()).toEqual([]);
   });
@@ -883,7 +884,7 @@ describe("History", () => {
     const offer = t.session.undoOffer();
     if (offer === null) throw new Error("no offer");
     expect(uiNow()[0].dialog).toEqual({ t: "choice", id: t.session.view().choices[0].id, side: offer.side });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual([CHOICE_TITLE]);
   });
 });
 

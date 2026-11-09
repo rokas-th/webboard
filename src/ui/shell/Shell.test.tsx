@@ -432,7 +432,9 @@ describe("PlanHead", () => {
     const onChoose = vi.fn();
     render(<PlanHead session={t.session} onChoose={onChoose} />);
     expect(chip()).toBe("2 open choices · Choose…");
-    fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    const chips = document.querySelector(".chips");
+    if (!(chips instanceof HTMLElement)) throw new Error("no chips");
+    fireEvent.click(within(chips).getByRole("button", { name: "Choose…" }));
     const view = t.session.view();
     expect(view.choices.map((c) => c.kind).sort()).toEqual(["calendar", "items"]);
     const rows = within(screen.getByRole("list", { name: "Open choices" })).getAllByRole("button");

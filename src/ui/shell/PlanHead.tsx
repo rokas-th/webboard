@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { sideText } from "../../plan/choices";
 import { usePlanView, type PlanSession } from "../../store/session";
+import { CalendarBanner } from "../choices/CalendarBanner";
+import { HeadCounts } from "../choices/HeadCounts";
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
@@ -16,11 +18,6 @@ export function PlanHead(p: { session: PlanSession; onChoose(choice: string): vo
     setListOpen(false);
     p.onChoose(id);
   };
-  const openHeld = (): void => {
-    const c = view.choices.find((x) => x.items.some((i) => view.held.has(i)));
-    if (c === undefined) throw new Error("No open choice holds the held items");
-    p.onChoose(c.id);
-  };
   return (
     <div className="plan-head">
       <div className="plan-head-main">
@@ -31,6 +28,7 @@ export function PlanHead(p: { session: PlanSession; onChoose(choice: string): vo
           </p>
         ))}
         {p.children}
+        <CalendarBanner view={view} onChoose={choose} />
         <div className="chips">
           {view.pending > 0 && (
             <span className="chip chip-cyan">Receiving… · {plural(view.pending, "change waiting", "changes waiting")}</span>
@@ -43,11 +41,7 @@ export function PlanHead(p: { session: PlanSession; onChoose(choice: string): vo
               </button>
             </span>
           )}
-          {view.held.size > 0 && (
-            <button type="button" className="chip chip-amber" onClick={openHeld}>
-              {view.held.size} held
-            </button>
-          )}
+          <HeadCounts view={view} onChoose={choose} />
         </div>
       </div>
       {listOpen && view.choices.length > 0 && (

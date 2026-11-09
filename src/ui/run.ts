@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo } from "react";
 import { HeldRefused, Refused, type Built, type Intent } from "../actions/intents";
 import { OfferRefused } from "../actions/undo";
 import type { PlanSession } from "../store/session";
+import { requestUndo } from "./choices/undo";
 import { toast } from "./common/Toast";
 
 export const READ_ONLY = "This device was removed from the space; its plans are read-only.";
@@ -52,12 +53,14 @@ export function useExec(session: PlanSession): (write: () => Built | null) => Bu
 
 export function useRun(session: PlanSession): Run {
   const exec = useExec(session);
+  const open = useContext(OpenChoice);
+  if (open === null) throw new Error("useRun needs an OpenChoice provider");
   return useMemo(
     () => ({
       run: (i: Intent) => exec(() => session.apply(i)),
-      undo: () => exec(() => session.undo()),
+      undo: () => exec(() => requestUndo(session, (o) => open(o.choice, o.side))),
       redo: () => exec(() => session.redo()),
     }),
-    [exec, session],
+    [exec, session, open],
   );
 }

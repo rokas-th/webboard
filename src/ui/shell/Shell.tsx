@@ -10,6 +10,7 @@ import { OpenChoice } from "../run";
 import { pickPlan, UiContext, useUi } from "../state";
 import { Board } from "../board/Board";
 import { CalendarDialog } from "../calendar/CalendarDialog";
+import { ChoiceDialog } from "../choices/ChoiceDialog";
 import { ghostIds } from "../ghosts";
 import { List } from "../list/List";
 import { RevertDialog } from "../panel/History";
@@ -254,6 +255,8 @@ export function Shell(p: ShellProps) {
     [setUi],
   );
 
+  const closeDialog = useCallback(() => setUi({ dialog: null }), [setUi]);
+
   const newPlan = (): void => {
     if (creatingRef.current) return;
     creatingRef.current = true;
@@ -395,6 +398,9 @@ export function Shell(p: ShellProps) {
           </div>
           {session !== null && ui.dialog !== null && ui.dialog.t === "calendar" && (
             <CalendarDialog key={session.view().plan.id} session={session} registry={registry} clock={p.clock} onClose={() => setUi({ dialog: null })} />
+          )}
+          {session !== null && ui.dialog !== null && ui.dialog.t === "choice" && (
+            <ChoiceDialog key={`${ui.dialog.id}:${ui.dialog.side ?? ""}`} session={session} id={ui.dialog.id} side={ui.dialog.side} onClose={closeDialog} />
           )}
           {session !== null && ui.dialog !== null && ui.dialog.t === "revert" && (
             <RevertDialog key={ui.dialog.id} session={session} id={ui.dialog.id} onClose={() => setUi({ dialog: null })} />

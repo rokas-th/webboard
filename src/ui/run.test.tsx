@@ -1,5 +1,6 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { OfferRefused } from "../actions/undo";
 import type { Conflict } from "../domain/schedule";
 import type { PlanSession } from "../store/session";
 import { fs, testSession, type TestSession } from "../test/session";
@@ -154,6 +155,21 @@ describe("useRun", () => {
     const offer = t.session.undoOffer();
     if (offer === null) throw new Error("fixture: no undo offer");
     vi.mocked(toast).mockClear();
+    const undo = vi.spyOn(t.session, "undo");
+    expect(now(() => p.run().undo())).toBeNull();
+    expect(p.open.mock.calls).toEqual([[offer.choice, offer.side]]);
+    expect(undo).not.toHaveBeenCalled();
+    expect(toasts()).toEqual([]);
+  });
+
+  it("opens the offer an undo refuses with", async () => {
+    const t = await made([{ name: "A", start: "2026-11-10", dur: 3 }]);
+    const p = probe(t.session);
+    const offer = { choice: "c1", side: "s2" };
+    vi.spyOn(t.session, "undoOffer").mockReturnValue(null);
+    vi.spyOn(t.session, "undo").mockImplementation(() => {
+      throw new OfferRefused(offer);
+    });
     expect(now(() => p.run().undo())).toBeNull();
     expect(p.open.mock.calls).toEqual([[offer.choice, offer.side]]);
     expect(toasts()).toEqual([]);

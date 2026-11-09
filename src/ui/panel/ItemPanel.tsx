@@ -1,12 +1,14 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { fmtShort, isCalendarDate, toIso, type Day } from "../../domain/dates";
 import type { Item, ItemId, PlanState, Schedule, Status } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
+import { bannerText, itemChoices } from "../choices/describe";
+import { FixActions } from "../choices/FixActions";
 import { toast } from "../common/Toast";
 import { planGroupPath } from "../list/groups";
-import { READ_ONLY, useRun, type Run } from "../run";
+import { OpenChoice, READ_ONLY, useRun, type Run } from "../run";
 import { derivedStatus } from "../status";
 import { LinksEditor } from "./LinksEditor";
 import { bindTextarea, type NoteBinding } from "./noteBinding";
@@ -269,6 +271,21 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean }) {
   return <textarea ref={ref} aria-label="Notes" placeholder="Anything worth knowing about this item" readOnly={p.readOnly} onKeyDown={onKeyDown} />;
 }
 
+function ChoiceBanner(p: { view: PlanView; item: ItemId }) {
+  const open = useContext(OpenChoice);
+  if (open === null) throw new Error("ItemPanel needs an OpenChoice provider");
+  const c = itemChoices(p.view, p.item)[0];
+  if (c === undefined) return null;
+  return (
+    <div className="choice-banner">
+      <span className="banner-text">{bannerText(c)}</span>
+      <button type="button" className="button-small" onClick={() => open(c.id)}>
+        Choose
+      </button>
+    </div>
+  );
+}
+
 export function ItemPanel(p: { session: PlanSession; item: ItemId; readOnly?: boolean }) {
   const view = usePlanView(p.session);
   const run = useRun(p.session);
@@ -278,6 +295,7 @@ export function ItemPanel(p: { session: PlanSession; item: ItemId; readOnly?: bo
   return (
     <div className="panel">
       <span className="kind">{KIND[it.kind]}</span>
+      <ChoiceBanner view={view} item={it.id} />
       <TextField
         className="title-input"
         label="Name"
@@ -286,6 +304,7 @@ export function ItemPanel(p: { session: PlanSession; item: ItemId; readOnly?: bo
         onCommit={(next) => run.run({ t: "rename", item: it.id, name: next }) !== null}
       />
       {it.kind === "group" ? <GroupFields view={view} item={it} /> : <ScheduleFields view={view} item={it} readOnly={readOnly} run={run} />}
+      <FixActions view={view} item={it.id} readOnly={readOnly} run={run} />
       <PlaceFields plan={view.plan} item={it} readOnly={readOnly} run={run} />
       {it.kind !== "group" && <LinksEditor view={view} item={it} readOnly={readOnly} run={run} />}
       <h2>Notes</h2>
