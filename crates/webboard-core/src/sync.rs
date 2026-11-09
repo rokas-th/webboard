@@ -426,10 +426,7 @@ impl Local {
 
     fn enrol(&self, space: SpaceInfo, token: &str) -> Result<SpaceInfo, SyncError> {
         let _guard = self.guard()?;
-        let previous = match self.read() {
-            Ok(stored) => stored.map(|s| s.space.space_id),
-            Err(_unreadable) => None,
-        };
+        let previous = self.read()?.map(|s| s.space.space_id);
         self.tokens.put(&space.space_id, token)?;
         let saved = self.write(&Stored {
             space: space.clone(),
@@ -602,6 +599,10 @@ impl SyncClient {
         self.off(|l| l.tokens.probe()).await
     }
 
+    async fn readable(&self) -> Result<(), SyncError> {
+        self.off(|l| l.read().map(|_| ())).await
+    }
+
     pub async fn setup(
         &self,
         server: &str,
@@ -610,6 +611,7 @@ impl SyncClient {
         device_name: &str,
     ) -> Result<SpaceInfo, SyncError> {
         let server = server_url(server)?;
+        self.readable().await?;
         self.probe().await?;
         let url = endpoint(&server, &["space"])?;
         let request = self
@@ -629,6 +631,7 @@ impl SyncClient {
         device_name: &str,
     ) -> Result<SpaceInfo, SyncError> {
         let server = server_url(server)?;
+        self.readable().await?;
         self.probe().await?;
         let url = endpoint(&server, &["pair", "claim"])?;
         let request = self.http.post(url.clone()).json(&serde_json::json!({
@@ -1886,6 +1889,30 @@ mod tests {
                 );
             });
         }
+        assert_all(mocks).await;
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_state_stops_setup_and_join_before_any_request() {
+        let mut f = Fixture::new().await;
+        let mocks = f.nothing().await;
+        let client = f.client();
+        fs::write(f.dir.path().join("sync.json"), "{").expect("write");
+        let results = [
+            client.setup(&f.url(), "s3cr3t", DEVICE, "Mac").await,
+            client.pair_join(&f.url(), "ABCD-EFGH", DEVICE, "Mac").await,
+        ];
+        results.into_iter().for_each(|r| {
+            let e = r.expect_err("an unreadable sync state");
+            assert_eq!(e.code, "sync.io", "{}", e.message);
+            assert!(
+                e.message.starts_with("Could not read the sync state: "),
+                "{}",
+                e.message
+            );
+        });
+        assert_eq!(f.sync_json(), Some(b"{".to_vec()));
+        assert_eq!(f.token(), None);
         assert_all(mocks).await;
     }
 

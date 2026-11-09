@@ -58,23 +58,7 @@ fn probe_with(
     delete: impl FnOnce() -> Result<(), SyncError>,
 ) -> Result<(), SyncError> {
     put()?;
-    let read = get();
-    let deleted = delete();
-    let read = match (read, deleted) {
-        (Err(r), Err(d)) => {
-            return Err(SyncError::new(
-                r.code,
-                format!(
-                    "{} The probe entry could not be removed: {}",
-                    r.message, d.message
-                ),
-            ))
-        }
-        (Err(r), Ok(())) => return Err(r),
-        (Ok(_), Err(d)) => return Err(d),
-        (Ok(read), Ok(())) => read,
-    };
-    match read.as_deref() {
+    let read = get().and_then(|value| match value.as_deref() {
         Some(PROBE) => Ok(()),
         Some(_) => Err(SyncError::new(
             "keychain.io",
@@ -84,6 +68,18 @@ fn probe_with(
             "keychain.io",
             "The keychain lost a value WebBoard had just stored.",
         )),
+    });
+    match (read, delete()) {
+        (Err(r), Err(d)) => Err(SyncError::new(
+            r.code,
+            format!(
+                "{} The probe entry could not be removed: {}",
+                r.message, d.message
+            ),
+        )),
+        (Err(r), Ok(())) => Err(r),
+        (Ok(()), Err(d)) => Err(d),
+        (Ok(()), Ok(())) => Ok(()),
     }
 }
 
@@ -176,6 +172,28 @@ mod tests {
                 || Err(SyncError::new("keychain.io", "The keychain failed: delete")),
             ),
             Err(SyncError::new("keychain.io", "The keychain failed: delete"))
+        );
+        assert_eq!(
+            probe_with(
+                || Ok(()),
+                || Ok(Some("other".to_string())),
+                || Err(SyncError::new("keychain.io", "The keychain failed: delete")),
+            ),
+            Err(SyncError::new(
+                "keychain.io",
+                "The keychain returned a different value than WebBoard stored. The probe entry could not be removed: The keychain failed: delete"
+            ))
+        );
+        assert_eq!(
+            probe_with(
+                || Ok(()),
+                || Ok(None),
+                || Err(SyncError::new("keychain.io", "The keychain failed: delete")),
+            ),
+            Err(SyncError::new(
+                "keychain.io",
+                "The keychain lost a value WebBoard had just stored. The probe entry could not be removed: The keychain failed: delete"
+            ))
         );
         assert_eq!(
             probe_with(|| Ok(()), || Ok(Some(PROBE.to_string())), delete_ok),
