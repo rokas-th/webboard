@@ -26,6 +26,6 @@ if (Element.prototype.setPointerCapture === undefined) {
 }
 if (Document.prototype.elementFromPoint === undefined) {
   Document.prototype.elementFromPoint = function elementFromPoint(): Element | null {
-    return null;
+    throw new Error("elementFromPoint is not stubbed in this test");
   };
 }

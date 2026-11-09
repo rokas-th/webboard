@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { toDay, toIso, weekday, yearOf, type Day } from "../../domain/dates";
 import type { Zoom } from "../state";
 import type { Geometry } from "./geometry";
@@ -24,7 +25,7 @@ interface Month {
   m: number;
 }
 
-export function Scale(p: { geo: Geometry; zoom: Zoom; today: Day; missing: readonly number[] }) {
+export const Scale = memo(function Scale(p: { geo: Geometry; zoom: Zoom; today: Day; missing: readonly number[] }) {
   const { geo } = p;
   const last = geo.origin + geo.days;
   const days = Array.from({ length: geo.days }, (_, i) => geo.origin + i);
@@ -80,4 +81,4 @@ export function Scale(p: { geo: Geometry; zoom: Zoom; today: Day; missing: reado
       </div>
     </div>
   );
-}
+});

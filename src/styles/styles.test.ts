@@ -205,6 +205,11 @@ describe("the Cyberdeck look", () => {
     expect(users.filter((r) => !allowed(r.selector)).map((r) => r.selector)).toEqual([]);
   });
 
+  it("keeps the amber day-off edge on a bar that is also a conflict", () => {
+    const both = sheet.rules.find((r) => r.selector === ".bar.dayoff.conflict" && r.conditions.length === 0);
+    expect(both?.decls["border-left-color"]).toBe("var(--amber)");
+  });
+
   it("anchors every absolute box to a positioned box in its pane", () => {
     const anchors: Record<string, string> = {
       ".seg-modes": ".toolbar",
@@ -230,7 +235,7 @@ describe("the Cyberdeck look", () => {
       ".gbar::after": ".gbar",
       ".ms::before": ".ms",
     };
-    const positioned = ["relative", "absolute", "sticky"];
+    const positioned = ["relative", "absolute"];
     const absolute = sheet.rules.filter((r) => r.decls["position"] === "absolute" && r.conditions.length === 0).map((r) => r.selector);
     expect(absolute.sort()).toEqual(Object.keys(anchors).sort());
     Object.values(anchors).forEach((anchor) => {

@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Refused, type Intent } from "../../actions/intents";
 import { toDay, type Day } from "../../domain/dates";
-import type { ItemId } from "../../domain/model";
+import type { ItemId, LinkType } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { useRun } from "../run";
 import { useUiValue } from "../state";
-import { Chart, type DropGhost, type TempLink } from "./Chart";
+import { Chart, itemOf, type DropGhost, type TempLink } from "./Chart";
 import { geometry, ROW, type Geometry } from "./geometry";
 import { gestureIntent, isClick, startIntent } from "./gesture";
 import { Grid, type Marks, type Placed } from "./Grid";
@@ -25,7 +25,7 @@ interface Drag {
 }
 
 const marksOf = (view: PlanView): Marks => {
-  const early = new Map<ItemId, { pred: ItemId; doneOrDoing: boolean }>();
+  const early = new Map<ItemId, { pred: ItemId; type: LinkType; doneOrDoing: boolean }>();
   const badLinks = new Set<string>();
   const dayoff = new Map<ItemId, number>();
   view.derived.conflicts.forEach((c) => {
@@ -34,7 +34,10 @@ const marksOf = (view: PlanView): Marks => {
       return;
     }
     badLinks.add(c.link);
-    if (c.kind === "early" && !early.has(c.succ)) early.set(c.succ, { pred: c.pred, doneOrDoing: c.succLock === "done" || c.succLock === "doing" });
+    if (c.kind !== "early" || early.has(c.succ)) return;
+    const link = view.plan.links.get(c.link);
+    if (link === undefined) throw new Error(`Conflict link ${c.link} is not in the plan`);
+    early.set(c.succ, { pred: c.pred, type: link.type, doneOrDoing: c.succLock === "done" || c.succLock === "doing" });
   });
   return { early, badLinks, dayoff };
 };
@@ -48,19 +51,18 @@ function intentOf(geo: Geometry, d: Drag, dxPx: number): Intent | null {
   return null;
 }
 
-function landing(geo: Geometry, view: PlanView, intent: Intent): { start: Day; end: Day } | null {
-  const id = intent.t === "move" ? intent.items[0] : intent.t === "resize" || intent.t === "schedule" ? intent.item : null;
-  const span = id === null ? null : geo.span(id);
-  if (id === null || span === null) return null;
+function landing(geo: Geometry, view: PlanView, item: ItemId, intent: Intent): { start: Day; end: Day } {
+  const span = geo.span(item);
+  if (span === null) throw new Error(`Timeline row ${item} has no dates`);
   const cal = geo.cal;
   if (intent.t === "move") {
     const start = intent.days >= 0 ? cal.addWork(span.start, intent.days) : cal.subWork(span.start, -intent.days);
-    const milestone = view.plan.items.get(id)?.kind === "milestone";
+    const milestone = itemOf(view, item).kind === "milestone";
     return { start, end: milestone ? start : cal.addWork(start, cal.workBetween(span.start, span.end) - 1) };
   }
   if (intent.t === "resize") return { start: span.start, end: cal.addWork(span.start, intent.dur - 1) };
   if (intent.t === "schedule" && intent.set.start !== undefined && intent.set.start !== null) return { start: toDay(intent.set.start), end: span.end };
-  return null;
+  throw new Error(`Timeline: a ${intent.t} drag has no landing`);
 }
 
 export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
@@ -74,6 +76,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   const scroller = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   const scrolledFor = useRef<string | null>(null);
+  const previewed = useRef<{ key: string; view: PlanView; label: string } | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(0);
   const [ghost, setGhost] = useState<DropGhost | null>(null);
@@ -94,13 +97,15 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   const scrollKey = `${view.plan.id}:${ui.zoom}`;
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el === null || empty || scrolledFor.current === scrollKey) return;
+    if (el === null) throw new Error("Timeline: no scroller");
+    if (empty || scrolledFor.current === scrollKey) return;
     scrolledFor.current = scrollKey;
     el.scrollLeft = Math.max(0, geo.x(today) - 160);
   }, [scrollKey, empty, geo, today]);
 
   const cancel = (): void => {
     drag.current = null;
+    previewed.current = null;
     setGhost(null);
     setTemp(null);
     setDragging(null);
@@ -135,7 +140,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
       return;
     }
     const id = nub instanceof HTMLElement ? nub.dataset.nub : bar instanceof HTMLElement ? bar.dataset.bar : undefined;
-    if (id === undefined) return;
+    if (id === undefined) throw new Error("Timeline: a bar or nub without an item id");
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     const handle = e.target.closest("[data-h]");
@@ -145,34 +150,45 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   };
 
   const previewLabel = (intent: Intent): string => {
-    try {
-      return `moves ${p.session.preview(intent).itemsChanged}`;
-    } catch (e) {
-      if (e instanceof Refused) return e.message;
-      throw e;
-    }
+    const key = JSON.stringify(intent);
+    if (previewed.current !== null && previewed.current.key === key && previewed.current.view === view) return previewed.current.label;
+    const label = ((): string => {
+      try {
+        return `moves ${p.session.preview(intent).itemsChanged}`;
+      } catch (e) {
+        if (e instanceof Refused) return e.message;
+        throw e;
+      }
+    })();
+    previewed.current = { key, view, label };
+    return label;
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
     const d = drag.current;
     if (d === null || d.item === null || d.mode === "select" || d.mode === "blank") return;
+    const index = indexOf(d.item);
+    if (index < 0) {
+      cancel();
+      return;
+    }
     if (d.mode === "link") {
       const pt = chartPoint(e);
       setTemp({ x0: d.from.x, y0: d.from.y, x1: pt.x, y1: pt.y });
       return;
     }
     const dx = e.clientX - d.down.x;
-    if (Math.abs(dx) >= 4) setDragging(d.item);
+    setDragging(Math.abs(dx) >= 4 ? d.item : null);
     const intent = intentOf(geo, d, dx);
-    const span = intent === null ? null : landing(geo, view, intent);
-    if (intent === null || span === null) {
+    if (intent === null) {
       setGhost(null);
       return;
     }
-    const milestone = view.plan.items.get(d.item)?.kind === "milestone";
+    const span = landing(geo, view, d.item, intent);
+    const milestone = itemOf(view, d.item).kind === "milestone";
     const left = milestone ? geo.x(span.start) + geo.ppd / 2 - 7 : geo.x(span.start);
     const width = milestone ? 14 : geo.x(span.end) - geo.x(span.start) + geo.ppd;
-    setGhost({ item: d.item, left, width, top: indexOf(d.item) * ROW + 8, label: previewLabel(intent) });
+    setGhost({ item: d.item, left, width, top: index * ROW + 8, label: previewLabel(intent) });
   };
 
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>): void => {
@@ -185,7 +201,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
       if (click) setUi({ selected: null });
       return;
     }
-    if (d.item === null) return;
+    if (d.item === null || indexOf(d.item) < 0) return;
     if (d.mode === "link") {
       const hit = document.elementFromPoint(up.x, up.y);
       const target = hit === null ? null : hit.closest("[data-bar],[data-row]");
@@ -225,6 +241,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
               geo={geo}
               zoom={ui.zoom}
               ui={ui}
+              setUi={setUi}
               mounted={mounted}
               count={rows.length}
               marks={marks}

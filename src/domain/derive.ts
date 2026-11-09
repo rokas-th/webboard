@@ -22,7 +22,7 @@ interface Basis {
   view: SchedView;
 }
 
-const goneSet = (plan: PlanState): ReadonlySet<ItemId> => {
+export const goneSet = (plan: PlanState): ReadonlySet<ItemId> => {
   const gone = new Map<ItemId, boolean>();
   plan.items.forEach((_, id) => {
     const path: ItemId[] = [];

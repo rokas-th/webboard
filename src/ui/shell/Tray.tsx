@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { toIso } from "../../domain/dates";
 import type { ItemId } from "../../domain/model";
 import type { PlanSession } from "../../store/session";
@@ -41,6 +41,12 @@ export function Tray(p: { session: PlanSession; readOnly: boolean }) {
     setFloating({ name, x: e.clientX + 12, y: e.clientY + 10 });
   };
 
+  const onKey = (e: ReactKeyboardEvent<HTMLSpanElement>, id: ItemId): void => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    setUi({ selected: id });
+  };
+
   const onUp = (e: ReactPointerEvent<HTMLSpanElement>): void => {
     const d = end();
     if (d === null) return;
@@ -69,6 +75,7 @@ export function Tray(p: { session: PlanSession; readOnly: boolean }) {
           onPointerMove={(e) => onMove(e, i.name)}
           onPointerUp={onUp}
           onPointerCancel={() => void end()}
+          onKeyDown={(e) => onKey(e, i.id)}
         >
           {i.name}
         </span>

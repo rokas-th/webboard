@@ -1,10 +1,10 @@
-import type { ReactNode } from "react";
+import { memo, useEffect, type ReactNode } from "react";
 import { q, workingDays } from "../../actions/copy";
 import { fmtShort, toDay, toIso, weekday, type Day } from "../../domain/dates";
-import { linkKey, type Item, type ItemId } from "../../domain/model";
+import { linkKey, type Item, type ItemId, type LinkType } from "../../domain/model";
 import { liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
-import type { UiState, Zoom } from "../state";
+import type { SetUi, UiState, Zoom } from "../state";
 import { ROW, type Geometry } from "./geometry";
 import type { Marks, Placed } from "./Grid";
 import { linkPath, type End } from "./linkPath";
@@ -33,9 +33,27 @@ const fmt = (d: Day): string => fmtShort(toIso(d));
 
 const classes = (...names: readonly (string | false)[]): string => names.filter((n): n is string => n !== false).join(" ");
 
-function endOf(geo: Geometry, item: Item, y: number): End | null {
-  const span = geo.span(item.id);
-  if (span === null) return null;
+export const itemOf = (view: PlanView, id: ItemId): Item => {
+  const item = view.plan.items.get(id);
+  if (item === undefined) throw new Error(`Timeline row ${id} is not in the plan`);
+  return item;
+};
+
+const spanOf = (geo: Geometry, id: ItemId): { start: Day; end: Day } => {
+  const span = geo.span(id);
+  if (span === null) throw new Error(`Timeline row ${id} has no dates`);
+  return span;
+};
+
+const EARLY: Readonly<Record<LinkType, (pred: string) => string>> = {
+  FS: (pred) => `Started before ${pred} finished`,
+  SS: (pred) => `Started before ${pred} started`,
+  FF: (pred) => `Finished before ${pred} finished`,
+  SF: (pred) => `Finished before ${pred} started`,
+};
+
+function endOf(geo: Geometry, item: Item, y: number): End {
+  const span = spanOf(geo, item.id);
   if (item.kind === "milestone") {
     const c = geo.x(span.start) + geo.ppd / 2;
     return { x0: c - MS_HALF, x1: c + MS_HALF, y };
@@ -48,6 +66,7 @@ interface ChartProps {
   geo: Geometry;
   zoom: Zoom;
   ui: UiState;
+  setUi: SetUi;
   mounted: readonly Placed[];
   count: number;
   marks: Marks;
@@ -57,7 +76,7 @@ interface ChartProps {
   temp: TempLink | null;
 }
 
-function Shading(p: { geo: Geometry; zoom: Zoom }) {
+const Shading = memo(function Shading(p: { geo: Geometry; zoom: Zoom }) {
   const { geo } = p;
   return (
     <>
@@ -71,15 +90,15 @@ function Shading(p: { geo: Geometry; zoom: Zoom }) {
       })}
     </>
   );
-}
+});
 
 function Links(p: ChartProps & { height: number }) {
   const { geo, view } = p;
   const at = new Map(p.mounted.map((m) => [m.row.id, m.index] as const));
   const ends = (id: ItemId): End | null => {
     const index = at.get(id);
-    const item = view.plan.items.get(id);
-    return index === undefined || item === undefined ? null : endOf(geo, item, index * ROW + ROW / 2);
+    const item = itemOf(view, id);
+    return index === undefined ? null : endOf(geo, item, index * ROW + ROW / 2);
   };
   const paths = liveLinks(view.plan).flatMap((l) => {
     const pred = ends(l.from);
@@ -122,7 +141,7 @@ function titleOf(p: ChartProps, item: Item, start: Day, end: Day): string {
   if (early !== undefined && early.doneOrDoing) {
     const pred = p.view.plan.items.get(early.pred);
     if (pred === undefined) throw new Error(`Conflict predecessor ${early.pred} is not in the plan`);
-    return `Started before ${q(pred.name)} finished`;
+    return EARLY[early.type](q(pred.name));
   }
   if (item.kind === "milestone") return `${item.name} · ${dayLabel(start)}`;
   return `${item.name} · ${fmt(start)} – ${fmt(end)} · ${workingDays(p.geo.cal.workBetween(start, end))}`;
@@ -132,13 +151,14 @@ function Bar(p: ChartProps & { placed: Placed; slip: ReadonlyMap<ItemId, number>
   const { geo, view } = p;
   const { row, index } = p.placed;
   const y = index * ROW;
-  const span = geo.span(row.id);
-  const item = view.plan.items.get(row.id);
-  if (item === undefined) throw new Error(`Timeline row ${row.id} is not in the plan`);
-  if (row.kind === "ghost" || span === null) return null;
+  const item = itemOf(view, row.id);
+  if (row.kind === "ghost") return null;
   if (row.kind === "group") {
-    return <div className="gbar" style={{ left: geo.x(span.start), width: geo.x(span.end) - geo.x(span.start) + geo.ppd, top: y + 14 }} />;
+    const group = geo.span(row.id);
+    if (group === null) return null;
+    return <div className="gbar" style={{ left: geo.x(group.start), width: geo.x(group.end) - geo.x(group.start) + geo.ppd, top: y + 14 }} />;
   }
+  const span = spanOf(geo, row.id);
   const status = view.derived.status.get(row.id);
   const done = status === "done";
   const late = view.derived.late.has(row.id);
@@ -188,7 +208,8 @@ function Bar(p: ChartProps & { placed: Placed; slip: ReadonlyMap<ItemId, number>
   }
   const x = geo.x(span.start);
   const w = geo.x(span.end) - x + geo.ppd;
-  const progress = item.schedule === null ? 0 : item.schedule.progress;
+  if (item.schedule === null) throw new Error(`Timeline row ${row.id} has no schedule`);
+  const progress = item.schedule.progress;
   const meta = done ? "done" : progress > 0 ? `${progress}%` : "";
   return (
     <>
@@ -212,7 +233,7 @@ function Ghost(p: { geo: Geometry; placed: Placed; item: Item; dates: { start: s
   const y = p.placed.index * ROW;
   const bs = geo.cal.snapF(toDay(p.dates.start));
   if (p.item.kind === "milestone") return <div className="ghost ms-ghost" style={{ left: geo.x(bs) + geo.ppd / 2, top: y + 22 }} />;
-  const be = geo.cal.addWork(bs, Math.max(1, p.dates.dur) - 1);
+  const be = geo.cal.addWork(bs, p.dates.dur - 1);
   return <div className="ghost" style={{ left: geo.x(bs), width: geo.x(be) - geo.x(bs) + geo.ppd, top: y + 28 }} />;
 }
 
@@ -220,6 +241,11 @@ export function Chart(p: ChartProps) {
   const { geo, view } = p;
   const height = Math.max(p.count * ROW, 200);
   const baseline = p.ui.baseline === null ? undefined : view.plan.baselines.get(p.ui.baseline);
+  const lost = p.ui.baseline !== null && baseline === undefined;
+  const { setUi } = p;
+  useEffect(() => {
+    if (lost) setUi({ baseline: null });
+  }, [lost, setUi]);
   const slip = baseline === undefined ? null : view.derived.slip(baseline.id);
   const today = toDay(view.today);
   const live = p.mounted.filter((m) => m.row.kind === "task" || m.row.kind === "milestone");
@@ -233,8 +259,8 @@ export function Chart(p: ChartProps) {
       {baseline !== undefined &&
         live.flatMap((m) => {
           const dates = baseline.dates[m.row.id];
-          const item = view.plan.items.get(m.row.id);
-          return dates === undefined || item === undefined ? [] : [<Ghost key={m.row.id} geo={geo} placed={m} item={item} dates={dates} />];
+          const item = itemOf(view, m.row.id);
+          return dates === undefined ? [] : [<Ghost key={m.row.id} geo={geo} placed={m} item={item} dates={dates} />];
         })}
       <Links {...p} height={height} />
       {p.mounted.map((m) => (

@@ -2,13 +2,16 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Calendar, HolidayYear, RegionRef } from "../../domain/calendar";
 import { toDay, toIso, weekday } from "../../domain/dates";
+import { derive } from "../../domain/derive";
+import { linkKey, type LinkType } from "../../domain/model";
 import type { PlanSession } from "../../store/session";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { emptyYear, shellFor } from "../../test/shell";
 import { clearToasts } from "../common/Toast";
-import { useUi, type UiState } from "../state";
+import { OpenChoice } from "../run";
+import { UiContext, useUi, type UiState } from "../state";
 import { geometry } from "./geometry";
-import { EMPTY_PLAN } from "./Timeline";
+import { EMPTY_PLAN, Timeline } from "./Timeline";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -94,6 +97,21 @@ const pointer = (el: Element, kind: "down" | "move" | "up", x: number, o: { y?: 
   });
 };
 
+const noChoice = (): void => {
+  throw new Error("Bare: no choice dialog");
+};
+
+function Bare(p: { session: PlanSession }) {
+  const [ui, setUi] = useUi();
+  return (
+    <UiContext.Provider value={{ ui, setUi }}>
+      <OpenChoice.Provider value={noChoice}>
+        <Timeline session={p.session} />
+      </OpenChoice.Provider>
+    </UiContext.Provider>
+  );
+}
+
 const drag = (el: Element, xs: readonly number[]): void => {
   pointer(el, "down", xs[0]);
   xs.slice(1, -1).forEach((x) => pointer(el, "move", x));
@@ -143,6 +161,19 @@ describe("empty plan", () => {
     expect(scroll.textContent).toBe(EMPTY_PLAN);
     expect(one('[data-slot="timeline"]').textContent).toBe(EMPTY_PLAN);
     expect(EMPTY_PLAN).toBe("No items yet. Add one with + Task.");
+    expect(all(".tl-row")).toHaveLength(0);
+  });
+
+  it("says so when every item is trashed and none is a ghost", async () => {
+    const t = await shown([
+      { id: "a", name: "A", start: "2026-11-10", dur: 3 },
+      { id: "b", name: "B", start: "2026-11-11", dur: 1 },
+    ]);
+    act(() => {
+      t.session.apply({ t: "trash", items: ["a", "b"] });
+    });
+    expect(t.session.view().choices).toEqual([]);
+    expect(one('[data-slot="timeline"] .tl-scroll').textContent).toBe(EMPTY_PLAN);
     expect(all(".tl-row")).toHaveLength(0);
   });
 
@@ -215,6 +246,50 @@ describe("links and marks", () => {
     expect(barOf("Sat").classList.contains("dayoff")).toBe(true);
     expect(barOf("Sat").title).toBe("Starts on a day off — shown from Mon 16 Nov");
     expect(one(".plan-head").textContent).not.toMatch(/conflict/i);
+  });
+
+  it.each<[LinkType, string]>([
+    ["FS", "Started before “Build” finished"],
+    ["SS", "Started before “Build” started"],
+    ["FF", "Finished before “Build” finished"],
+    ["SF", "Finished before “Build” started"],
+  ])("titles an early %s successor that is under way", async (type, title) => {
+    await shown([
+      { id: "build", name: "Build", start: "2026-11-10", dur: 3 },
+      { id: "review", name: "Review", start: "2026-11-09", dur: 1, status: "doing", deps: [{ from: "build", type, lag: 0 }] },
+    ]);
+    expect(barOf("review").classList.contains("conflict")).toBe(true);
+    expect(barOf("review").title).toBe(title);
+  });
+
+  it("hides a trashed group's children until it is restored", async () => {
+    const t = await shown([
+      { id: "g", name: "G", kind: "group" },
+      { id: "a", name: "A", parent: "g", start: "2026-11-10", dur: 2 },
+      { id: "b", name: "B", parent: "g", start: "2026-11-12", dur: 1 },
+      { id: "c", name: "C", start: "2026-11-10", dur: 1 },
+    ]);
+    const rows = (): (string | undefined)[] => all(".tl-row").map((e) => e.dataset.row);
+    const bars = (): (string | undefined)[] => all("[data-bar]").map((e) => e.dataset.bar);
+    expect(rows()).toEqual(["g", "a", "b", "c"]);
+    act(() => {
+      t.session.apply({ t: "trash", items: ["g"] });
+    });
+    expect(rows()).toEqual(["c"]);
+    expect(bars()).toEqual(["c"]);
+    act(() => {
+      t.session.apply({ t: "restore", items: ["g"] });
+    });
+    expect(rows()).toEqual(["g", "a", "b", "c"]);
+    expect(bars()).toEqual(["a", "b", "c"]);
+    cleanup();
+    const v = t.session.view();
+    const plan = { ...v.plan, items: new Map([...v.plan.items].map(([id, i]) => [id, id === "g" ? { ...i, trashed: true } : i])) };
+    vi.spyOn(t.session, "view").mockReturnValue({ ...v, plan, derived: derive(plan, v.held, v.today) });
+    render(<Bare session={t.session} />);
+    await settle();
+    expect(rows()).toEqual(["c"]);
+    expect(bars()).toEqual(["c"]);
   });
 
   it("collapses and expands a group by its caret", async () => {
@@ -309,6 +384,44 @@ describe("today and baselines", () => {
     expect(scroll.scrollLeft).toBe(Math.max(0, geometry(t.session.view(), "M").x(toDay("2026-12-07")) - 160));
   });
 
+  it("scrolls to today when the plan changes", async () => {
+    const one1 = await made([{ name: "A", start: "2026-11-10", dur: 3 }], { today: "2026-12-07" });
+    const two = await made([{ name: "B", start: "2026-10-01", dur: 3 }], { today: "2026-12-07", plan: "plan0000002" });
+    const { rerender } = render(<Bare session={one1.session} />);
+    await settle();
+    const scroll = one(".tl-scroll");
+    expect(scroll.scrollLeft).toBe(geometry(one1.session.view(), "W").x(toDay("2026-12-07")) - 160);
+    act(() => {
+      scroll.scrollLeft = 0;
+    });
+    rerender(<Bare session={two.session} />);
+    await settle();
+    const g = geometry(two.session.view(), "W");
+    expect(g.x(toDay("2026-12-07")) - 160).toBeGreaterThan(0);
+    expect(scroll.scrollLeft).toBe(g.x(toDay("2026-12-07")) - 160);
+  });
+
+  it("clears a shown baseline that another device removed", async () => {
+    const t = await made([{ name: "A", start: "2026-11-10", dur: 3 }]);
+    t.session.apply({ t: "baseline", op: "save", name: "B1" });
+    const p = await t.peer("iphone");
+    sessions.push(p.session);
+    render(shellFor(t).ui);
+    await settle();
+    const [id] = [...t.session.view().plan.baselines.keys()];
+    act(() => uiNow()[1]({ baseline: id }));
+    expect(uiNow()[0].baseline).toBe(id);
+    expect(all(".ghost")).toHaveLength(1);
+    act(() => {
+      p.session.apply({ t: "baseline", op: "remove", id });
+      p.sync();
+    });
+    await settle();
+    expect(t.session.view().plan.baselines.size).toBe(0);
+    expect(uiNow()[0].baseline).toBeNull();
+    expect(all(".ghost")).toHaveLength(0);
+  });
+
   it("draws a shown baseline's spans and the slip", async () => {
     const t = await made([
       { name: "A", start: "2026-11-10", dur: 3 },
@@ -364,12 +477,88 @@ describe("gestures", () => {
   it("issues nothing for a drag that ends where it began (refinement 36)", async () => {
     const t = await shown(SEED);
     const apply = vi.spyOn(t.session, "apply");
-    drag(barOf("a"), [0, 25, 50, 10]);
+    pointer(barOf("a"), "down", 0);
+    [25, 50].forEach((x) => pointer(barOf("a"), "move", x));
+    expect(all(".drop-ghost")).toHaveLength(1);
+    pointer(barOf("a"), "move", 10);
+    expect(all(".drop-ghost")).toHaveLength(0);
+    pointer(barOf("a"), "up", 10);
     expect(apply).not.toHaveBeenCalled();
     expect(toastTexts()).toEqual([]);
-    expect(all(".drop-ghost")).toHaveLength(0);
     expect(uiNow()[0].selected).toBeNull();
-    drag(one(".h.r", barOf("a")), [0, 25, 50, 10]);
+    const handle = one(".h.r", barOf("a"));
+    pointer(handle, "down", 0);
+    [25, 50].forEach((x) => pointer(handle, "move", x));
+    expect(all(".drop-ghost")).toHaveLength(1);
+    pointer(handle, "move", 10);
+    expect(all(".drop-ghost")).toHaveLength(0);
+    pointer(handle, "up", 10);
+    expect(apply).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual([]);
+  });
+
+  it("previews once per intent, not once per move", async () => {
+    const t = await shown(SEED);
+    const preview = vi.spyOn(t.session, "preview");
+    pointer(barOf("a"), "down", 0);
+    [45, 50, 55].forEach((x) => pointer(barOf("a"), "move", x));
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(all(".drop-ghost").map((e) => e.textContent)).toEqual(["moves 2"]);
+    pointer(barOf("a"), "move", 85);
+    expect(preview).toHaveBeenCalledTimes(2);
+    act(() => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+  });
+
+  it("stops marking the bar as dragged when the pointer comes back", async () => {
+    await shown(SEED);
+    pointer(barOf("a"), "down", 0);
+    pointer(barOf("a"), "move", 10);
+    expect(all(".dragging").map((e) => e.dataset.bar)).toEqual(["a"]);
+    pointer(barOf("a"), "move", 2);
+    expect(all(".dragging")).toHaveLength(0);
+    pointer(barOf("a"), "up", 2);
+  });
+
+  it("cancels a drag whose item loses its row", async () => {
+    const t = await shown([
+      { id: "g", name: "G", kind: "group" },
+      { id: "a", name: "A", parent: "g", start: "2026-11-09", dur: 2 },
+      { id: "c", name: "C", start: "2026-11-16", dur: 1 },
+    ]);
+    const p = await t.peer("iphone");
+    sessions.push(p.session);
+    const apply = vi.spyOn(t.session, "apply");
+    const scroll = one(".tl-scroll");
+    const collapse = (ids: readonly string[]): void => {
+      act(() => uiNow()[1]({ collapsed: new Set(ids) }));
+    };
+    pointer(barOf("a"), "down", 0);
+    pointer(barOf("a"), "move", 80);
+    expect(all(".drop-ghost")).toHaveLength(1);
+    collapse(["g"]);
+    expect(document.querySelector('[data-row="a"]')).toBeNull();
+    pointer(scroll, "move", 120);
+    expect(all(".drop-ghost")).toHaveLength(0);
+    pointer(scroll, "up", 120);
+    collapse([]);
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(barOf("c"));
+    pointer(one(".nub", barOf("a")), "down", 100);
+    collapse(["g"]);
+    pointer(scroll, "up", 300);
+    expect(document.querySelector(".tl-links .temp")).toBeNull();
+    pointer(barOf("c"), "down", 0);
+    pointer(barOf("c"), "move", 80);
+    expect(all(".drop-ghost")).toHaveLength(1);
+    act(() => {
+      p.session.apply({ t: "trash", items: ["c"] });
+      p.sync();
+    });
+    expect(document.querySelector('[data-row="c"]')).toBeNull();
+    pointer(scroll, "move", 120);
+    expect(all(".drop-ghost")).toHaveLength(0);
+    pointer(scroll, "up", 120);
     expect(apply).not.toHaveBeenCalled();
     expect(toastTexts()).toEqual([]);
   });
@@ -506,6 +695,18 @@ describe("tray", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
+  it.each(["Enter", " "])("selects a chip by the %j key", async (key) => {
+    const t = await shown(SEED);
+    const apply = vi.spyOn(t.session, "apply");
+    act(() => {
+      chip().focus();
+      fireEvent.keyDown(chip(), { key });
+    });
+    expect(document.activeElement).toBe(chip());
+    expect(uiNow()[0].selected).toBe("u");
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("selects nothing for a chip dragged back onto the tray", async () => {
     const t = await shown(SEED);
     const apply = vi.spyOn(t.session, "apply");
@@ -541,5 +742,62 @@ describe("tray", () => {
     expect(t.session.view().plan.items.get("u")?.schedule?.start).toBe("2026-11-16");
     expect(barOf("u").classList.contains("dayoff")).toBe(false);
     expect(toastTexts()).toEqual(["Scheduled “u” from 16 Nov."]);
+  });
+});
+
+describe("the render path", () => {
+  const quiet = (): void => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  };
+
+  it("throws for a task row with no dates", async () => {
+    const t = await made([{ id: "a", name: "A", start: "2026-11-10", dur: 2 }]);
+    const v = t.session.view();
+    const start = new Map(v.derived.start);
+    const end = new Map(v.derived.end);
+    start.delete("a");
+    end.delete("a");
+    vi.spyOn(t.session, "view").mockReturnValue({ ...v, derived: { ...v.derived, start, end } });
+    quiet();
+    expect(() => render(<Bare session={t.session} />)).toThrow("Timeline row a has no dates");
+  });
+
+  it("throws for a conflict whose link is not in the plan", async () => {
+    const t = await made([
+      { id: "a", name: "A", start: "2026-11-10", dur: 2 },
+      { id: "b", name: "B", start: "2026-11-10", dur: 2 },
+    ]);
+    const v = t.session.view();
+    const conflicts = [...v.derived.conflicts, { kind: "early" as const, link: linkKey("a", "b"), pred: "a", succ: "b", need: toDay("2026-11-12"), succLock: null }];
+    vi.spyOn(t.session, "view").mockReturnValue({ ...v, derived: { ...v.derived, conflicts } });
+    quiet();
+    expect(() => render(<Bare session={t.session} />)).toThrow("Conflict link a>b is not in the plan");
+  });
+
+  it("keeps rendering a group with no dates, a link to an unmounted row and an item newer than the baseline", async () => {
+    const t = await made([
+      { id: "g", name: "G", kind: "group" },
+      { id: "u", name: "U", parent: "g" },
+      { id: "h", name: "H", kind: "group" },
+      ...Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, name: `T${i}`, start: "2026-11-10", dur: 1, deps: i === 39 ? [fs("t0")] : [] })),
+    ]);
+    t.session.apply({ t: "baseline", op: "save", name: "B1" });
+    t.session.apply({ t: "create", kind: "task", name: "Late", parent: "h", after: null, start: "2026-11-11", dur: 1 });
+    render(shellFor(t).ui);
+    await settle();
+    const [id] = [...t.session.view().plan.baselines.keys()];
+    act(() => uiNow()[1]({ baseline: id }));
+    const late = [...t.session.view().plan.items.values()].find((i) => i.name === "Late");
+    if (late === undefined) throw new Error("no Late");
+    expect(all(".tl-row").map((e) => e.dataset.row).slice(0, 3)).toEqual(["g", "h", late.id]);
+    expect(all(".gbar")).toHaveLength(1);
+    expect(document.querySelector('[data-row="t39"]')).toBeNull();
+    expect(paths(".tl-links > path")).toHaveLength(0);
+    expect(barOf(late.id).classList.contains("bar")).toBe(true);
+    expect(all(".ghost")).toHaveLength(all(".bar").length - 1);
+  });
+
+  it("has no elementFromPoint unless the test stubs it", () => {
+    expect(() => document.elementFromPoint(0, 0)).toThrow("elementFromPoint is not stubbed in this test");
   });
 });

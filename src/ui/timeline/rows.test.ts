@@ -66,6 +66,19 @@ describe("timelineRows", () => {
   });
 });
 
+describe("timelineRows and gone items", () => {
+  it("hides a trashed group's whole subtree", async () => {
+    const t = await made(SEED);
+    const v = t.session.view();
+    const items = new Map([...v.plan.items].map(([id, i]) => [id, id === "g1" ? { ...i, trashed: true } : i]));
+    expect(timelineRows({ ...v, plan: { ...v.plan, items } }, new Set()).map((r) => r.id)).toEqual(["b", "x"]);
+    t.session.apply({ t: "trash", items: ["g1"] });
+    expect(timelineRows(t.session.view(), new Set()).map((r) => r.id)).toEqual(["b", "x"]);
+    t.session.apply({ t: "restore", items: ["g1"] });
+    expect(timelineRows(t.session.view(), new Set()).map((r) => r.id)).toEqual(["g1", "a", "g2", "m", "b", "x"]);
+  });
+});
+
 describe("visibleRange", () => {
   it("mounts the rows in view plus the overscan", () => {
     expect(visibleRange(17000, 700, 1000)).toEqual([492, 529]);

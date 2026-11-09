@@ -104,6 +104,7 @@ export interface TestSessionOpts {
   clashes?: readonly Clash[];
   raw?: Record<ActionId, unknown>;
   answers?: Record<string, Answer>;
+  plan?: PlanId;
 }
 
 export interface TestSession {
@@ -179,6 +180,7 @@ export function memoryDoc(id: string, ydoc: Y.Doc): PersistedDoc {
 }
 
 export async function testSession(seed: readonly SeedItem[], opts: TestSessionOpts = {}): Promise<TestSession> {
+  const plan = opts.plan ?? TEST_PLAN;
   const mem = memoryStore();
   resetTauri({ ...mem.answers, ...opts.answers });
   const clock = fixedClock(opts.today ?? "2026-11-09");
@@ -197,11 +199,11 @@ export async function testSession(seed: readonly SeedItem[], opts: TestSessionOp
   (opts.clashes ?? []).flatMap(clashActions).forEach((a) => pd.append(a, []));
   const actions = ydoc.getMap("actions");
   ydoc.transact(() => Object.entries(opts.raw ?? {}).forEach(([id, raw]) => actions.set(id, raw)), "raw");
-  mem.seed(TEST_PLAN, Y.encodeStateAsUpdate(ydoc));
-  const doc = await openPersisted(TEST_PLAN);
+  mem.seed(plan, Y.encodeStateAsUpdate(ydoc));
+  const doc = await openPersisted(plan);
   const deps = (device: DeviceId, persisted: PersistedDoc, h: HolidayService): SessionDeps => ({
     persist: async (id) => {
-      if (id !== TEST_PLAN) throw new Error(`testSession: no document ${id}`);
+      if (id !== plan) throw new Error(`testSession: no document ${id}`);
       return persisted;
     },
     holidays: h,
@@ -211,11 +213,11 @@ export async function testSession(seed: readonly SeedItem[], opts: TestSessionOp
     onDevices: () => () => undefined,
     onName: () => undefined,
   });
-  const session = await PlanSession.open(TEST_PLAN, deps("mac", doc, holidays));
+  const session = await PlanSession.open(plan, deps("mac", doc, holidays));
   const peer = async (device: DeviceId): Promise<{ session: PlanSession; sync(): void }> => {
     const other = new Y.Doc();
     Y.applyUpdate(other, Y.encodeStateAsUpdate(doc.ydoc));
-    const s = await PlanSession.open(TEST_PLAN, deps(device, memoryDoc(TEST_PLAN, other), new HolidayService(() => clock.now())));
+    const s = await PlanSession.open(plan, deps(device, memoryDoc(plan, other), new HolidayService(() => clock.now())));
     const sync = (): void => {
       Y.applyUpdate(doc.ydoc, Y.encodeStateAsUpdate(other, Y.encodeStateVector(doc.ydoc)));
       Y.applyUpdate(other, Y.encodeStateAsUpdate(doc.ydoc, Y.encodeStateVector(other)));

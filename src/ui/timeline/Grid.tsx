@@ -1,4 +1,4 @@
-import type { ItemId } from "../../domain/model";
+import type { ItemId, LinkType } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import type { SetUi, UiState } from "../state";
 import type { Geometry } from "./geometry";
@@ -11,7 +11,7 @@ export interface Placed {
 }
 
 export interface Marks {
-  early: ReadonlyMap<ItemId, { pred: ItemId; doneOrDoing: boolean }>;
+  early: ReadonlyMap<ItemId, { pred: ItemId; type: LinkType; doneOrDoing: boolean }>;
   badLinks: ReadonlySet<string>;
   dayoff: ReadonlyMap<ItemId, number>;
 }
@@ -69,7 +69,8 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
       </div>
     );
   }
-  const dur = item.schedule === null ? 0 : item.schedule.dur;
+  if (item.schedule === null) throw new Error(`Timeline row ${row.id} has no schedule`);
+  const dur = item.schedule.dur;
   return (
     <div className={`tl-row ${row.kind}${selected ? " selected" : ""}`} {...common}>
       <span className={dotOf(p.view, p.marks, row.id)} />
