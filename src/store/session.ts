@@ -1,11 +1,11 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import * as Y from "yjs";
 import { buildAction } from "../actions/build";
 import { deviceName } from "../actions/copy";
 import { Refused, type Built, type Ctx, type Intent, type Preview } from "../actions/intents";
 import { buildResolve, previewResolve, type Pick, type ResolveOptions, type ResolvePreview } from "../actions/resolve";
 import { buildRevert, buildUndo, OfferRefused, undoOffer, type Offer } from "../actions/undo";
-import { yearOf, toDay } from "../domain/dates";
+import { yearOf, toDay, type IsoDate } from "../domain/dates";
 import { derive } from "../domain/derive";
 import type { ItemId, PlanId } from "../domain/model";
 import { newId } from "../log/ids";
@@ -15,7 +15,7 @@ import { choices, heldItems, type Choice } from "../plan/choices";
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { validateWrite } from "../plan/units";
-import type { Clock } from "../services/clock";
+import { notifyEach, type Clock } from "../services/clock";
 import type { HolidayHost, HolidayService } from "../services/holidays";
 import type { AppError } from "../services/ipc";
 import { LOCAL, PlanDoc, type PlanView } from "./doc";
@@ -66,6 +66,7 @@ export class PlanSession implements HolidayHost {
   private readonly offs: (() => void)[] = [];
   private devices: ReadonlyMap<DeviceId, string>;
   private current: PlanView;
+  private day: IsoDate;
   private seenMissing: ReadonlySet<number> = new Set();
   private lastName = "";
   private repairPending: boolean;
@@ -81,8 +82,9 @@ export class PlanSession implements HolidayHost {
     this.actionMap = doc.ydoc.getMap("actions");
     this.devices = new Map(deps.devices());
     this.repairPending = doc.repairedTornTail;
-    this.ingest([...this.actionMap.keys()], false);
+    this.ingest([...this.actionMap.keys()]);
     this.current = this.build();
+    this.day = this.current.today;
     this.lastName = this.current.plan.name;
   }
 
@@ -110,9 +112,24 @@ export class PlanSession implements HolidayHost {
     const year = yearOf(toDay(this.current.today));
     const years = [...new Set([...cal.holidays.keys(), year, year + 1])].sort((a, b) => a - b);
     const holidays = this.deps.holidays;
-    void holidays.warm(region, years).then(() => {
-      if (!this.closed) return holidays.refresh(this.id, this);
+    void holidays.warm(region, years).then(
+      () => {
+        if (!this.closed) return this.refreshHolidays();
+      },
+      (e: unknown) => {
+        throw this.holidayFailure("warm", e);
+      },
+    );
+  }
+
+  private refreshHolidays(): Promise<void> {
+    return this.deps.holidays.refresh(this.id, this).catch((e: unknown) => {
+      throw this.holidayFailure("refresh", e);
     });
+  }
+
+  private holidayFailure(what: "warm" | "refresh", e: unknown): Error {
+    return Object.assign(new Error(`Holiday ${what} for plan ${this.id} failed: ${e instanceof Error ? e.message : String(e)}`), { cause: e });
   }
 
   private readonly observer = (event: Y.YMapEvent<unknown>): void => {
@@ -122,17 +139,18 @@ export class PlanSession implements HolidayHost {
       if (change.action === "delete") throw new Error(`Action ${id} was deleted; the action log is append-only`);
     });
     const local = event.transaction.origin === LOCAL;
-    this.ingest(
-      changes.map(([id]) => id),
-      local,
-    );
+    const bad = this.ingest(changes.map(([id]) => id));
     this.recompute(local ? "own" : "merge");
+    if (local && bad.length > 0) throw new Error(`This device wrote an action it cannot read: ${bad.map((b) => b.error).join("; ")}`);
   };
 
   private readonly onClock = (): void => {
-    if (this.closed || this.deps.clock.today() === this.current.today) return;
+    if (this.closed) return;
+    const today = this.deps.clock.today();
+    if (today === this.day) return;
+    this.day = today;
     this.recompute("merge");
-    void this.deps.holidays.refresh(this.id, this);
+    void this.refreshHolidays();
   };
 
   private readonly onDevices = (): void => {
@@ -141,7 +159,7 @@ export class PlanSession implements HolidayHost {
     this.recompute("merge");
   };
 
-  private ingest(ids: readonly ActionId[], local: boolean): void {
+  private ingest(ids: readonly ActionId[]): readonly Bad[] {
     const { ok, unreadable } = readActions(
       ids.map((id): readonly [string, unknown] => [id, this.actionMap.get(id)]),
       validateWrite,
@@ -154,8 +172,8 @@ export class PlanSession implements HolidayHost {
       return [r.id, { dev, error: r.message }];
     });
     const bad = [...unreadable.map((u): [ActionId, Bad] => [u.id, { dev: u.dev, error: u.error }]), ...refused];
-    if (local && bad.length > 0) throw new Error(`This device wrote an action it cannot read: ${bad.map(([, b]) => b.error).join("; ")}`);
     bad.forEach(([id, b]) => this.bad.set(id, b));
+    return bad.map(([, b]) => b);
   }
 
   private build(): PlanView {
@@ -193,7 +211,7 @@ export class PlanSession implements HolidayHost {
   }
 
   private notify(): void {
-    [...this.subscribers].forEach((cb) => cb());
+    notifyEach(this.subscribers);
   }
 
   private ctx(): Ctx {
@@ -209,8 +227,12 @@ export class PlanSession implements HolidayHost {
     };
   }
 
-  private writable(): void {
+  private usable(): void {
     if (this.closed) throw new Error(`Plan session ${this.id} is closed`);
+  }
+
+  private writable(): void {
+    this.usable();
     if (this.ro) throw new Refused(READ_ONLY);
   }
 
@@ -219,11 +241,32 @@ export class PlanSession implements HolidayHost {
     try {
       this.planDoc.append(built.action, built.newNotes);
       stacks();
-    } finally {
+    } catch (e) {
       this.quiet = false;
-      this.notify();
+      this.notifyDespite(e);
+      throw e;
     }
+    this.quiet = false;
+    this.notify();
     return built;
+  }
+
+  private notifyDespite(failure: unknown): void {
+    try {
+      this.notify();
+    } catch (n) {
+      throw Object.assign(new Error(failure instanceof Error ? failure.message : String(failure)), { cause: failure, suppressed: n });
+    }
+  }
+
+  private liveTop(stack: readonly ActionId[]): ActionId | null {
+    return [...stack].reverse().find((id) => this.log.active(id)) ?? null;
+  }
+
+  private prune(stack: ActionId[]): ActionId | null {
+    const top = this.liveTop(stack);
+    stack.length = top === null ? 0 : stack.lastIndexOf(top) + 1;
+    return top;
   }
 
   private pushed(built: Built): Built {
@@ -261,12 +304,13 @@ export class PlanSession implements HolidayHost {
   }
 
   preview(intent: Intent): Preview {
+    this.usable();
     return buildAction(this.ctx(), intent).preview;
   }
 
   undo(): Built | null {
     this.writable();
-    const target = this.nextUndo();
+    const target = this.prune(this.undoStack);
     if (target === null) return null;
     this.offerFor(target);
     const built = buildUndo(this.ctx(), target);
@@ -278,8 +322,9 @@ export class PlanSession implements HolidayHost {
 
   redo(): Built | null {
     this.writable();
-    const target = this.redoStack.length > 0 ? this.redoStack[this.redoStack.length - 1] : null;
+    const target = this.prune(this.redoStack);
     if (target === null) return null;
+    this.offerFor(target);
     const built = buildUndo(this.ctx(), target);
     return this.commit(built, () => {
       this.redoStack.pop();
@@ -288,11 +333,11 @@ export class PlanSession implements HolidayHost {
   }
 
   canUndo(): boolean {
-    return this.undoStack.length > 0;
+    return this.nextUndo() !== null;
   }
 
   canRedo(): boolean {
-    return this.redoStack.length > 0;
+    return this.liveTop(this.redoStack) !== null;
   }
 
   revert(id: ActionId): Built {
@@ -302,6 +347,7 @@ export class PlanSession implements HolidayHost {
   }
 
   previewRevert(id: ActionId): Preview {
+    this.usable();
     this.offerFor(id);
     return buildRevert(this.ctx(), id).preview;
   }
@@ -313,15 +359,17 @@ export class PlanSession implements HolidayHost {
   }
 
   previewResolve(choice: string, pick: Pick, opts: ResolveOptions): ResolvePreview {
+    this.usable();
     const c = this.choice(choice);
     return previewResolve(this.ctx(), c, pick, opts);
   }
 
   nextUndo(): ActionId | null {
-    return this.undoStack.length > 0 ? this.undoStack[this.undoStack.length - 1] : null;
+    return this.liveTop(this.undoStack);
   }
 
   undoOffer(): Offer | null {
+    this.usable();
     const target = this.nextUndo();
     return target === null ? null : undoOffer(this.ctx(), target);
   }
@@ -377,8 +425,7 @@ export class PlanSession implements HolidayHost {
 }
 
 export function usePlanView(session: PlanSession): PlanView {
-  return useSyncExternalStore(
-    (cb) => session.subscribe(cb),
-    () => session.view(),
-  );
+  const subscribe = useCallback((cb: () => void) => session.subscribe(cb), [session]);
+  const snapshot = useCallback(() => session.view(), [session]);
+  return useSyncExternalStore(subscribe, snapshot);
 }

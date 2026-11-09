@@ -8,7 +8,20 @@ export interface Clock {
 
 export const CLOCK_CHECK_MS = 30_000;
 
-const notifyAll = (subscribers: ReadonlySet<() => void>): void => [...subscribers].forEach((cb) => cb());
+export function notifyEach(subscribers: Iterable<() => void>): void {
+  const thrown = [...subscribers].flatMap((cb): unknown[] => {
+    try {
+      cb();
+      return [];
+    } catch (e) {
+      return [e];
+    }
+  });
+  if (thrown.length === 0) return;
+  if (thrown.length === 1) throw thrown[0];
+  const first = thrown[0];
+  throw Object.assign(new Error(`${thrown.length} subscribers threw; the first: ${first instanceof Error ? first.message : String(first)}`), { cause: first });
+}
 
 function makeSystemClock(): Clock {
   const subscribers = new Set<() => void>();
@@ -18,7 +31,7 @@ function makeSystemClock(): Clock {
     const t = localToday();
     if (t === last) return;
     last = t;
-    notifyAll(subscribers);
+    notifyEach(subscribers);
   };
   return {
     today: () => localToday(),
@@ -61,7 +74,7 @@ export function fixedClock(today: IsoDate, now?: number): Clock & { set(today: I
       toDay(next);
       if (next === current) return;
       current = next;
-      notifyAll(subscribers);
+      notifyEach(subscribers);
     },
   };
 }

@@ -1,6 +1,6 @@
 import { act as reactAct, render, screen } from "@testing-library/react";
 import { createElement } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { buildAction, initialAction } from "../actions/build";
 import { Refused, type Built, type Intent } from "../actions/intents";
@@ -13,8 +13,9 @@ import { LogState } from "../log/state";
 import type { Action, ActionId, DeviceId } from "../log/types";
 import { planRules } from "../plan/rules";
 import { key, sched, validateWrite } from "../plan/units";
-import { CLOCK_CHECK_MS, fixedClock, systemClock, type Clock } from "../services/clock";
+import { CLOCK_CHECK_MS, fixedClock, notifyEach, systemClock, type Clock } from "../services/clock";
 import { HolidayService, noticeText } from "../services/holidays";
+import { AppError } from "../services/ipc";
 import { act } from "../test/act";
 import { CH_ZH, CH_ZH_2026, CH_ZH_2027, FETCHED_AT, holidayDay } from "../test/fixtures/calendars";
 import { encodeLoad, memoryStore, type MemoryStore } from "../test/fixtures/store";
@@ -68,6 +69,14 @@ interface Seed {
   link?: boolean;
 }
 
+const ROOTS = new WeakMap<Y.Doc, ActionId>();
+
+const rootOf = (d: Y.Doc): ActionId => {
+  const id = ROOTS.get(d);
+  if (id === undefined) throw new Error("not a seeded doc");
+  return id;
+};
+
 function seedDoc(o: Seed = {}): Y.Doc {
   const ydoc = new Y.Doc();
   const pd = new PlanDoc(ydoc);
@@ -76,7 +85,9 @@ function seedDoc(o: Seed = {}): Y.Doc {
     pd.append(a, notes);
     log.add([a]);
   };
-  add(initialAction({ dev: "dev-A", ses: "seed", now: 0, name: "Plan", calendar: o.calendar ?? PLAIN }), []);
+  const root = initialAction({ dev: "dev-A", ses: "seed", now: 0, name: "Plan", calendar: o.calendar ?? PLAIN });
+  ROOTS.set(ydoc, root.id);
+  add(root, []);
   const build = (i: Intent): Built => {
     const b = buildAction(ctxOf(log, "dev-A", TODAY, DEVICES, { ses: "seed" }), i);
     add(b.action, b.newNotes);
@@ -92,7 +103,7 @@ interface Env {
   mem: MemoryStore;
   docs: PersistedDoc[];
   holidays: HolidayService;
-  clock: Clock & { set(today: string): void };
+  clock: TestClock;
   devices: Map<DeviceId, string>;
   deviceCbs: (() => void)[];
   offDevices: ReturnType<typeof vi.fn>;
@@ -100,12 +111,57 @@ interface Env {
   deps: SessionDeps;
 }
 
-function env(o: { holidays?: HolidayService; devices?: Map<DeviceId, string>; answers?: Record<string, Answer> } = {}): Env {
+type TestClock = Clock & { set(today: string): void };
+
+function silentClock(): TestClock & { shift(today: string): void } {
+  const base = fixedClock(TODAY);
+  let day = TODAY;
+  return {
+    today: () => day,
+    now: () => base.now(),
+    subscribe: (cb) => base.subscribe(cb),
+    set(next) {
+      day = next;
+      base.set(next);
+    },
+    shift(next) {
+      day = next;
+    },
+  };
+}
+
+type RejectionListener = (reason: unknown) => void;
+
+declare const process: {
+  listeners(event: "unhandledRejection"): RejectionListener[];
+  removeAllListeners(event: "unhandledRejection"): void;
+  on(event: "unhandledRejection", l: RejectionListener): void;
+  once(event: "unhandledRejection", l: RejectionListener): void;
+};
+
+let restoreUnhandled: (() => void) | null = null;
+
+const nextUnhandled = (): Promise<unknown> => {
+  const saved = process.listeners("unhandledRejection");
+  process.removeAllListeners("unhandledRejection");
+  restoreUnhandled = () => {
+    process.removeAllListeners("unhandledRejection");
+    saved.forEach((l) => process.on("unhandledRejection", l));
+  };
+  return new Promise((resolve) => process.once("unhandledRejection", resolve));
+};
+
+afterEach(() => {
+  restoreUnhandled?.();
+  restoreUnhandled = null;
+});
+
+function env(o: { holidays?: HolidayService; devices?: Map<DeviceId, string>; answers?: Record<string, Answer>; clock?: TestClock } = {}): Env {
   const mem = memoryStore();
   resetTauri({ ...mem.answers, holidays_year: yearAnswer(), ...o.answers });
   const docs: PersistedDoc[] = [];
   const holidays = o.holidays ?? new HolidayService(() => NOON(9));
-  const clock = fixedClock(TODAY);
+  const clock = o.clock ?? fixedClock(TODAY);
   const devices = o.devices ?? new Map(DEVICES);
   const deviceCbs: (() => void)[] = [];
   const offDevices = vi.fn();
@@ -535,12 +591,13 @@ describe("PlanSession", () => {
     const undone = s.undo();
     if (undone === null) throw new Error("nothing to undo");
     expect(undone.preview.kept).toEqual([line]);
-    expect(undone.toast).toMatch(new RegExp(` ${line}\\.$`));
+    expect(undone.toast.endsWith(` ${line}.`)).toBe(true);
   });
 
   it("history", async () => {
     const e = env();
-    const s = await open(e);
+    const seed = seedDoc();
+    const s = await open(e, seed);
     const a = itemId(s, "A");
     const b = itemId(s, "B");
     const n1 = s.apply({ t: "rename", item: a, name: "X" }).action.id;
@@ -571,9 +628,10 @@ describe("PlanSession", () => {
     const h = s.history();
     expect(h[0].id).toBe(res);
     const roots = h.filter((x) => x.root);
-    expect(roots).toHaveLength(1);
-    expect(roots[0].id).toBe(h[h.length - 1].id);
-    expect(h.filter((x) => !x.root).every((x) => x.root === false)).toBe(true);
+    expect(roots.map((x) => x.id)).toEqual([rootOf(seed)]);
+    const others = h.filter((x) => x.id !== rootOf(seed));
+    expect(others.length).toBeGreaterThan(0);
+    expect(others.every((x) => x.root === false)).toBe(true);
     expect(entry(s, n1).device).toBe("Mac");
     await settle(e);
     const before = appends();
@@ -883,6 +941,170 @@ describe("PlanSession", () => {
     expect(s.note(built.newNotes[0]).doc).toBe(lastDoc(e).ydoc);
   });
 
+  it("a recompute before the tick still refreshes holidays on the date change", async () => {
+    const clock = silentClock();
+    const e = env({ clock });
+    const refresh = vi.spyOn(e.holidays, "refresh");
+    const s = await open(e, seedDoc({ calendar: CH_ZH }));
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    clock.shift("2026-11-10");
+    const r = remoteOf(s);
+    remoteBuild(r, { t: "rename", item: itemId(s, "A"), name: "A2" });
+    deliver(r, e);
+    expect(s.view().today).toBe("2026-11-10");
+    clock.set("2026-11-10");
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenLastCalledWith(ID, s);
+  });
+
+  it("a failed refresh names the plan", async () => {
+    const e = env();
+    const s = await open(e, seedDoc({ calendar: CH_ZH }));
+    await flush();
+    const boom = new Error("boom");
+    vi.spyOn(e.holidays, "refresh").mockRejectedValue(boom);
+    const rejected = nextUnhandled();
+    e.clock.set("2026-11-10");
+    const reason = await rejected;
+    expect(reason instanceof Error && reason.message).toBe(`Holiday refresh for plan ${ID} failed: boom`);
+    expect(reason).toHaveProperty("cause", boom);
+    await s.close();
+  });
+
+  it("a failed warm names the plan", async () => {
+    const e = env();
+    const boom = new Error("warm broke");
+    vi.spyOn(e.holidays, "warm").mockRejectedValue(boom);
+    const rejected = nextUnhandled();
+    const s = await open(e, seedDoc({ calendar: CH_ZH }));
+    const reason = await rejected;
+    expect(reason instanceof Error && reason.message).toBe(`Holiday warm for plan ${ID} failed: warm broke`);
+    expect(reason).toHaveProperty("cause", boom);
+    await s.close();
+  });
+
+  it("a throwing subscriber does not stop the rest", async () => {
+    const s = await open(env());
+    const boom = new Error("first");
+    const second = vi.fn();
+    s.subscribe(() => {
+      throw boom;
+    });
+    s.subscribe(second);
+    expect(thrown(() => s.setReadOnly(true))).toBe(boom);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it("a subscriber throw does not hide an append failure", async () => {
+    const e = env();
+    const s = await open(e);
+    const a = itemId(s, "A");
+    await lastDoc(e).close();
+    const boom = new Error("subscriber");
+    s.subscribe(() => {
+      throw boom;
+    });
+    const err = thrown(() => s.apply({ t: "rename", item: a, name: "A2" }));
+    expect(err instanceof Error && err.message).toBe(`Document ${ID} was edited after close`);
+    expect(err).toHaveProperty("cause", expect.any(AppError));
+    expect(err).toHaveProperty("cause.code", "store.closed");
+    expect(err).toHaveProperty("suppressed", boom);
+  });
+
+  it("a local action this device cannot read is listed before the throw", async () => {
+    const e = env();
+    const s = await open(e);
+    const cb = vi.fn();
+    s.subscribe(cb);
+    const bad = act(newId(), [...logOf(remoteOf(s)).heads], [{ u: key.s(itemId(s, "A")), v: "x", c: "own" }], { dev: "dev-A" });
+    const err = thrown(() => new PlanDoc(lastDoc(e).ydoc).append(bad, []));
+    expect(err instanceof Error && err.message.startsWith("This device wrote an action it cannot read: ")).toBe(true);
+    expect(s.view().unreadable.map((u) => u.id)).toEqual([bad.id]);
+    expect(cb).toHaveBeenCalled();
+  });
+
+  it("a closed session refuses previews", async () => {
+    const e = env();
+    const { s, a, north, choice, macKey } = await clash(e);
+    await s.close();
+    const closed = `Plan session ${ID} is closed`;
+    [
+      () => s.preview({ t: "rename", item: a, name: "X" }),
+      () => s.previewRevert(north.action.id),
+      () => s.previewResolve(choice.id, { side: macKey }, OPTS),
+      () => s.undoOffer(),
+    ].forEach((f) => {
+      const err = thrown(f);
+      expect(err instanceof Error && err.message).toBe(closed);
+    });
+    expect(s.view().plan.items.size).toBe(2);
+    expect(s.history().length).toBeGreaterThan(0);
+    expect(s.authorOf(key.n(itemId(s, "B")))).toEqual({ dev: "dev-A", device: "Mac" });
+  });
+
+  it("undo skips an action another device reverted", async () => {
+    const e = env();
+    const s = await open(e);
+    const a = itemId(s, "A");
+    const b = itemId(s, "B");
+    const n1 = s.apply({ t: "rename", item: a, name: "A2" }).action.id;
+    const n2 = s.apply({ t: "rename", item: b, name: "B2" }).action.id;
+    const r = remoteOf(s);
+    new PlanDoc(r).append(buildRevert(ctxOf(logOf(r), "dev-B", TODAY, DEVICES), n2).action, []);
+    deliver(r, e);
+    expect(nameOf(s, b)).toBe("B");
+    expect(s.canUndo()).toBe(true);
+    expect(s.nextUndo()).toBe(n1);
+    const undone = s.undo();
+    expect(undone?.action.meta?.undo).toBe(n1);
+    expect(nameOf(s, a)).toBe("A");
+    expect(s.canUndo()).toBe(false);
+    const r2 = remoteOf(s);
+    const u = undone?.action.id;
+    if (u === undefined) throw new Error("nothing undone");
+    new PlanDoc(r2).append(buildRevert(ctxOf(logOf(r2), "dev-B", TODAY, DEVICES), u).action, []);
+    deliver(r2, e);
+    expect(s.canRedo()).toBe(false);
+    expect(s.redo()).toBeNull();
+  });
+
+  it("redo refuses an offer", async () => {
+    const e = env();
+    const s = await open(e);
+    const n = s.apply({ t: "rename", item: itemId(s, "A"), name: "North" }).action.id;
+    const r = remoteOf(s);
+    const undone = s.undo();
+    if (undone === null) throw new Error("nothing undone");
+    new PlanDoc(r).append(act(newId(), [...logOf(r).heads], [{ u: key.a(n), v: true, c: "revert" }], { dev: "dev-B" }), []);
+    deliver(r, e);
+    const choice = s.view().choices.find((c) => c.sides.some((x) => x.actions.includes(undone.action.id)));
+    if (choice === undefined) throw new Error("no choice holds the undo");
+    const other = choice.sides.find((x) => !x.actions.includes(undone.action.id));
+    await settle(e);
+    const before = appends();
+    expect(s.canRedo()).toBe(true);
+    const err = thrown(() => s.redo());
+    expect(err).toBeInstanceOf(OfferRefused);
+    expect(err instanceof OfferRefused && err.offer).toEqual({ choice: choice.id, side: other?.key });
+    expect(err instanceof Error && err.message).toBe(OFFER_MESSAGE);
+    await settle(e);
+    expect(appends()).toBe(before);
+    expect(s.canRedo()).toBe(true);
+  });
+
+  it("usePlanView subscribes once per session", async () => {
+    const s = await open(env());
+    const sub = vi.spyOn(s, "subscribe");
+    const Probe = () => createElement("span", { "data-testid": "name" }, usePlanView(s).plan.name);
+    const view = render(createElement(Probe));
+    view.rerender(createElement(Probe));
+    view.rerender(createElement(Probe));
+    expect(sub).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+
   it("usePlanView", async () => {
     const s = await open(env());
     const Probe = () => createElement("span", { "data-testid": "count" }, String(usePlanView(s).plan.items.size));
@@ -911,6 +1133,19 @@ describe("fixedClock", () => {
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
+  it("a throwing subscriber does not stop the rest", () => {
+    const c = fixedClock("2026-11-09");
+    const boom = new Error("first");
+    const second = vi.fn();
+    c.subscribe(() => {
+      throw boom;
+    });
+    c.subscribe(second);
+    expect(thrown(() => c.set("2026-11-10"))).toBe(boom);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(c.today()).toBe("2026-11-10");
+  });
+
   it("refuses a malformed date", () => {
     expect(() => fixedClock("2026-13-01")).toThrow(RangeError);
   });
@@ -936,5 +1171,26 @@ describe("systemClock", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("notifyEach", () => {
+  it("names the count and keeps the first throw", () => {
+    const one = new Error("one");
+    const third = vi.fn();
+    const err = thrown(() =>
+      notifyEach([
+        () => {
+          throw one;
+        },
+        () => {
+          throw new Error("two");
+        },
+        third,
+      ]),
+    );
+    expect(third).toHaveBeenCalledTimes(1);
+    expect(err instanceof Error && err.message).toBe("2 subscribers threw; the first: one");
+    expect(err).toHaveProperty("cause", one);
   });
 });
