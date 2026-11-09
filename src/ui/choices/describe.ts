@@ -8,6 +8,7 @@ import { decodeAs, key, parseKey } from "../../plan/units";
 import type { PlanView } from "../../store/doc";
 import { planGroupPath } from "../list/groups";
 import { regionText, weekdaysText } from "../panel/calendarText";
+import { orderedSides } from "./side";
 
 const nameOf = (plan: PlanState, id: ItemId): string => {
   const it = plan.items.get(id);
@@ -144,8 +145,8 @@ export function heldChoice(view: PlanView): Choice | null {
   return view.choices.find((c) => c.items.some((i) => view.held.has(i))) ?? null;
 }
 
-export function bannerText(choice: Choice): string {
-  const labels = choice.sides.map((s) => s.label);
+export function bannerText(choice: Choice, local: string): string {
+  const labels = orderedSides(choice, local).map((s) => s.label);
   const names = labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
   return `Changed on ${names}. Choose which to keep.`;
 }

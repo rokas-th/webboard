@@ -271,14 +271,14 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean }) {
   return <textarea ref={ref} aria-label="Notes" placeholder="Anything worth knowing about this item" readOnly={p.readOnly} onKeyDown={onKeyDown} />;
 }
 
-function ChoiceBanner(p: { view: PlanView; item: ItemId }) {
+function ChoiceBanner(p: { view: PlanView; item: ItemId; local: string }) {
   const open = useContext(OpenChoice);
   if (open === null) throw new Error("ItemPanel needs an OpenChoice provider");
   const c = itemChoices(p.view, p.item)[0];
   if (c === undefined) return null;
   return (
     <div className="choice-banner">
-      <span className="banner-text">{bannerText(c)}</span>
+      <span className="banner-text">{bannerText(c, p.local)}</span>
       <button type="button" className="button-small" onClick={() => open(c.id)}>
         Choose
       </button>
@@ -286,7 +286,7 @@ function ChoiceBanner(p: { view: PlanView; item: ItemId }) {
   );
 }
 
-export function ItemPanel(p: { session: PlanSession; item: ItemId; readOnly?: boolean }) {
+export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string; readOnly?: boolean }) {
   const view = usePlanView(p.session);
   const run = useRun(p.session);
   const it = view.plan.items.get(p.item);
@@ -295,7 +295,7 @@ export function ItemPanel(p: { session: PlanSession; item: ItemId; readOnly?: bo
   return (
     <div className="panel">
       <span className="kind">{KIND[it.kind]}</span>
-      <ChoiceBanner view={view} item={it.id} />
+      <ChoiceBanner view={view} item={it.id} local={p.local} />
       <TextField
         className="title-input"
         label="Name"

@@ -119,7 +119,7 @@ export function Shell(p: ShellProps) {
       }
       selected.current = id;
       selectedItem.current = null;
-      setUi({ plan: id, selected: null });
+      setUi({ plan: id, selected: null, dialog: null });
     },
     [setUi],
   );
@@ -389,7 +389,7 @@ export function Shell(p: ShellProps) {
             {session !== null && (
               <div className="slot slot-panel" data-slot="panel">
                 {ui.selected !== null && session.view().plan.items.has(ui.selected) ? (
-                  <ItemPanel key={ui.selected} session={session} item={ui.selected} readOnly={readOnly} />
+                  <ItemPanel key={ui.selected} session={session} item={ui.selected} local={registry.device.name} readOnly={readOnly} />
                 ) : (
                   <PlanPanel session={session} readOnly={readOnly} />
                 )}
@@ -400,7 +400,14 @@ export function Shell(p: ShellProps) {
             <CalendarDialog key={session.view().plan.id} session={session} registry={registry} clock={p.clock} onClose={() => setUi({ dialog: null })} />
           )}
           {session !== null && ui.dialog !== null && ui.dialog.t === "choice" && (
-            <ChoiceDialog key={`${ui.dialog.id}:${ui.dialog.side ?? ""}`} session={session} id={ui.dialog.id} side={ui.dialog.side} onClose={closeDialog} />
+            <ChoiceDialog
+              key={`${session.view().plan.id}:${ui.dialog.id}:${ui.dialog.side ?? ""}`}
+              session={session}
+              id={ui.dialog.id}
+              side={ui.dialog.side}
+              local={registry.device.name}
+              onClose={closeDialog}
+            />
           )}
           {session !== null && ui.dialog !== null && ui.dialog.t === "revert" && (
             <RevertDialog key={ui.dialog.id} session={session} id={ui.dialog.id} onClose={() => setUi({ dialog: null })} />

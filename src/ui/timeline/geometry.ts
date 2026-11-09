@@ -6,6 +6,7 @@ import type { Zoom } from "../state";
 
 export const PPD: Readonly<Record<Zoom, number>> = { W: 40, M: 16, Q: 6 };
 export const ROW = 34;
+export const LEAD = 160;
 
 export interface Geometry {
   origin: Day;

@@ -8,7 +8,7 @@ import { EMPTY_PLAN } from "../copy";
 import { useRun } from "../run";
 import { useUiValue } from "../state";
 import { Chart, itemOf, type DropGhost, type TempLink } from "./Chart";
-import { geometry, ROW, type Geometry } from "./geometry";
+import { geometry, LEAD, ROW, type Geometry } from "./geometry";
 import { gestureIntent, isClick, startIntent } from "./gesture";
 import { Grid, type Marks, type Placed } from "./Grid";
 import { timelineRows, visibleRange } from "./rows";
@@ -99,8 +99,21 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     if (el === null) throw new Error("Timeline: no scroller");
     if (empty || scrolledFor.current === scrollKey) return;
     scrolledFor.current = scrollKey;
-    el.scrollLeft = Math.max(0, geo.x(today) - 160);
+    el.scrollLeft = Math.max(0, geo.x(today) - LEAD);
   }, [scrollKey, empty, geo, today]);
+
+  const reveal = ui.reveal;
+  useLayoutEffect(() => {
+    if (reveal === null) return;
+    const el = scroller.current;
+    if (el === null) throw new Error("Timeline: no scroller");
+    const index = rows.findIndex((r) => r.id === reveal);
+    if (index < 0) throw new Error(`Timeline: no row for ${reveal} to reveal`);
+    el.scrollTop = index * ROW;
+    const span = geo.span(reveal);
+    if (span !== null) el.scrollLeft = Math.max(0, geo.x(span.start) - LEAD);
+    setUi({ reveal: null });
+  }, [reveal, rows, geo, setUi]);
 
   const cancel = (): void => {
     drag.current = null;

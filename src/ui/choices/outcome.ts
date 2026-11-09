@@ -4,7 +4,7 @@ import type { Day } from "../../domain/dates";
 import type { ItemId, PlanState } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
 import { planGroupPath } from "../list/groups";
-import { dayLabel } from "../timeline/Chart";
+import { dayLabel } from "../timeline/dayText";
 
 export interface RowSection {
   group: ItemId | null;
@@ -57,6 +57,10 @@ export function groupRows(rows: readonly OutcomeRow[], plan: PlanState): RowSect
   return keys.map((group) => ({
     group,
     title: group === null ? NOT_IN_A_GROUP : planGroupPath(plan, group),
-    rows: rows.filter((r) => r.group === group).sort((a, b) => at(a.item) - at(b.item)),
+    rows: rows
+      .filter((r) => r.group === group)
+      .map((r) => ({ r, n: at(r.item) }))
+      .sort((a, b) => a.n - b.n)
+      .map((x) => x.r),
   }));
 }

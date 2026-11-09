@@ -1,7 +1,7 @@
 import { q } from "../../actions/copy";
 import type { OutcomeRow, Pick, ResolveOptions } from "../../actions/resolve";
 import type { Lock } from "../../domain/schedule";
-import type { Choice } from "../../plan/choices";
+import type { Choice, ChoiceSide } from "../../plan/choices";
 import type { PlanSession } from "../../store/session";
 import { impactText } from "../calendar/impact";
 import { describeUnit, unitSubject } from "./describe";
@@ -17,6 +17,11 @@ export interface SideContent {
 }
 
 const REASON: Readonly<Record<Lock, string>> = { held: "held", done: "done", doing: "in progress" };
+
+export function orderedSides(choice: Choice, local: string): ChoiceSide[] {
+  const rank = (s: ChoiceSide): number => (s.label === local ? 0 : 1);
+  return [...choice.sides].sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label, "en"));
+}
 
 export function sideContent(session: PlanSession, choice: Choice, pick: Pick, opts: ResolveOptions): SideContent {
   const rp = session.previewResolve(choice.id, pick, opts);

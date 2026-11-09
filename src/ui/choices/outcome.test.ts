@@ -80,5 +80,7 @@ describe("groupRows", () => {
     expect(sections.map((s) => s.rows.map((r) => r.item))).toEqual([["y2", "y1"], ["x"], ["z"]]);
     expect(groupRows([], plan)).toEqual([]);
     expect(() => groupRows([row("x", null, null, 0, "gone")], plan)).toThrow(new Error("No item gone"));
+    expect(() => groupRows([row("lost", null, null, 0, "Q")], plan)).toThrow(new Error("No item lost"));
+    expect(() => groupRows([row("lost", null, null)], plan)).toThrow(new Error("No item lost"));
   });
 });

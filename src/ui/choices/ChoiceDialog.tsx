@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Built } from "../../actions/intents";
 import type { Pick, ResolveOptions } from "../../actions/resolve";
 import type { PlanState } from "../../domain/model";
@@ -10,7 +10,7 @@ import { toast } from "../common/Toast";
 import { useExec } from "../run";
 import { unitSubject } from "./describe";
 import { groupRows, outcomeLine } from "./outcome";
-import { sideContent, type SideContent } from "./side";
+import { orderedSides, sideContent, type SideContent } from "./side";
 import { UndoOffer } from "./UndoOffer";
 
 export const SETTLED = "This choice was settled meanwhile.";
@@ -22,26 +22,31 @@ const NO_PICKS: ReadonlyMap<UnitKey, string> = new Map();
 
 const pickOf = (side: string, perUnit: ReadonlyMap<UnitKey, string>): Pick => (perUnit.size === 0 ? { side } : { side, perUnit });
 
+const livePicks = (choice: Choice, perUnit: ReadonlyMap<UnitKey, string>): ReadonlyMap<UnitKey, string> => {
+  const live = [...perUnit].filter(([u, side]) => choice.units.includes(u) && choice.sides.some((s) => s.key === side && s.values.has(u)));
+  return live.length === perUnit.size ? perUnit : new Map(live);
+};
+
 function Column(p: { plan: PlanState; choice: Choice; side: string; label: string; content: SideContent; picked: boolean; readOnly: boolean; onKeep(): void }) {
   const plan = p.plan;
   const c = p.content;
   return (
     <section className={p.picked ? "choice-col picked" : "choice-col"}>
       <p className="choice-side">{sideText(p.choice, p.side, plan)}</p>
-      {c.values.map((v) => (
-        <p key={v} className="choice-value">
+      {c.values.map((v, i) => (
+        <p key={i} className="choice-value">
           {v}
         </p>
       ))}
       {c.impact !== null && <p className="recal">{c.impact}</p>}
       <p className="choice-summary">{c.summary}</p>
-      {c.stopped.map((s) => (
-        <p key={s} className="choice-stopped">
+      {c.stopped.map((s, i) => (
+        <p key={i} className="choice-stopped">
           {s}
         </p>
       ))}
-      {c.kept.map((k) => (
-        <p key={k} className="choice-kept">
+      {c.kept.map((k, i) => (
+        <p key={i} className="choice-kept">
           {k}
         </p>
       ))}
@@ -65,20 +70,22 @@ function Column(p: { plan: PlanState; choice: Choice; side: string; label: strin
   );
 }
 
-function Body(p: { session: PlanSession; choice: Choice; side: string | undefined; onKeep(write: () => Built): void }) {
+function Body(p: { session: PlanSession; choice: Choice; side: string | undefined; local: string; onKeep(write: () => Built): void }) {
   const view = usePlanView(p.session);
   const plan = view.plan;
   const choice = p.choice;
+  const sides = useMemo(() => orderedSides(choice, p.local), [choice, p.local]);
   const [opts, setOpts] = useState<ResolveOptions>(DEFAULTS);
   const [perItem, setPerItem] = useState(false);
   const [perUnit, setPerUnit] = useState<ReadonlyMap<UnitKey, string>>(new Map());
-  const picks = perItem ? perUnit : NO_PICKS;
+  const live = livePicks(choice, perUnit);
+  const picks = perItem ? live : NO_PICKS;
   const contents = useMemo(
-    () => choice.sides.map((s) => sideContent(p.session, choice, pickOf(s.key, picks), opts)),
-    [p.session, choice, picks, opts, view],
+    () => sides.map((s) => sideContent(p.session, choice, pickOf(s.key, picks), opts)),
+    [p.session, choice, sides, picks, opts, view],
   );
   const pickUnit = (u: UnitKey, side: string): void => {
-    const next = new Map(perUnit);
+    const next = new Map(live);
     if (side === "") next.delete(u);
     else next.set(u, side);
     setPerUnit(next);
@@ -110,9 +117,9 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
             return (
               <li key={u} className="pick-row">
                 <span className="pick-subject">{subject}</span>
-                <select aria-label={subject} value={perUnit.get(u) ?? ""} onChange={(e) => pickUnit(u, e.target.value)}>
+                <select aria-label={subject} value={live.get(u) ?? ""} onChange={(e) => pickUnit(u, e.target.value)}>
                   <option value="">As the kept side</option>
-                  {choice.sides
+                  {sides
                     .filter((s) => s.values.has(u))
                     .map((s) => (
                       <option key={s.key} value={s.key}>
@@ -126,7 +133,7 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
         </ul>
       )}
       <div className="choice-cols">
-        {choice.sides.map((s, i) => (
+        {sides.map((s, i) => (
           <Column
             key={s.key}
             plan={plan}
@@ -144,15 +151,22 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
   );
 }
 
-export function ChoiceDialog(p: { session: PlanSession; id: string; side?: string; onClose(): void }) {
+export function ChoiceDialog(p: { session: PlanSession; id: string; side?: string; local: string; onClose(): void }) {
   const view = usePlanView(p.session);
   const exec = useExec(p.session);
   const choice = view.choices.find((c) => c.id === p.id) ?? null;
   const gone = choice === null;
+  const seen = useRef(false);
   const onClose = p.onClose;
   useEffect(() => {
-    if (!gone) return;
-    toast(SETTLED);
+    if (!gone) {
+      seen.current = true;
+      return;
+    }
+    if (seen.current) {
+      seen.current = false;
+      toast(SETTLED);
+    }
     onClose();
   }, [gone, onClose]);
   if (choice === null) return null;
@@ -161,7 +175,7 @@ export function ChoiceDialog(p: { session: PlanSession; id: string; side?: strin
   };
   return (
     <Dialog label={CHOICE_TITLE} wide onClose={onClose}>
-      <Body session={p.session} choice={choice} side={p.side} onKeep={keep} />
+      <Body session={p.session} choice={choice} side={p.side} local={p.local} onKeep={keep} />
     </Dialog>
   );
 }

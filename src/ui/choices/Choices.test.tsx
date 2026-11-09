@@ -4,6 +4,7 @@ import { Refused } from "../../actions/intents";
 import type { Pick, ResolveOptions } from "../../actions/resolve";
 import { OfferRefused } from "../../actions/undo";
 import { schedView } from "../../domain/derive";
+import { toDay } from "../../domain/dates";
 import { lagThatHolds, type Conflict } from "../../domain/schedule";
 import { sideText, type Choice } from "../../plan/choices";
 import type { PlanSession } from "../../store/session";
@@ -13,9 +14,10 @@ import { shellFor } from "../../test/shell";
 import { impactText } from "../calendar/impact";
 import { clearToasts } from "../common/Toast";
 import { useUi, type UiState } from "../state";
-import { ROW } from "../timeline/geometry";
+import { geometry, ROW } from "../timeline/geometry";
 import { timelineRows } from "../timeline/rows";
 import { bannerText, heldChoice, itemChoices, unitSubject } from "./describe";
+import { conflictSuccessor } from "./HeadCounts";
 import { groupRows, outcomeLine } from "./outcome";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -191,7 +193,39 @@ describe("head counts", () => {
     expect(uiNow()[0].view).toBe("timeline");
     const index = timelineRows(view, new Set()).findIndex((r) => r.id === first.succ);
     expect(index).toBeGreaterThan(20);
-    expect(one(".tl-scroll").scrollTop).toBe(index * ROW);
+    const scroll = one(".tl-scroll");
+    expect(scroll.scrollTop).toBe(index * ROW);
+    const geo = geometry(view, uiNow()[0].zoom);
+    const span = geo.span(first.succ);
+    if (span === null) throw new Error("fixture: successor has no dates");
+    expect(scroll.scrollLeft).toBe(Math.max(0, geo.x(span.start) - 160));
+    expect(scroll.scrollLeft).not.toBe(Math.max(0, geo.x(toDay(view.today)) - 160));
+    expect(uiNow()[0].reveal).toBeNull();
+  });
+
+  it("selects an unscheduled successor without scrolling", async () => {
+    const t = await made([
+      { name: "L1", start: "2026-11-10", dur: 2, deps: [fs("L2")] },
+      { name: "L2", start: null, dur: 2, deps: [fs("L1")] },
+    ]);
+    const view = t.session.view();
+    const first = counted(view.derived.conflicts)[0];
+    if (first === undefined || first.kind === "dayoff") throw new Error("fixture: no counted conflict");
+    expect(conflictSuccessor(view, first)).toBe("L2");
+    await shown(t);
+    setUi({ view: "board" });
+    click(buttonIn(head(), "Go to first conflict"));
+    await settle();
+    expect([uiNow()[0].view, uiNow()[0].selected, uiNow()[0].reveal]).toEqual(["timeline", "L2", null]);
+    expect(one(".tl-scroll").scrollTop).toBe(0);
+    expect(within(panel()).getByLabelText("Name")).toBeTruthy();
+  });
+
+  it("throws by name when a revealed item has no row", async () => {
+    const t = await made(AB);
+    await shown(t);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() => setUi({ reveal: "zz" })).toThrow(new Error("Timeline: no row for zz to reveal"));
   });
 
   it("shows no conflict count without conflicts", async () => {
@@ -259,6 +293,70 @@ describe("fix actions", () => {
     expect(toastTexts()).toEqual([]);
   });
 
+  it("opens the choice of a held successor while read-only, without a write", async () => {
+    const t = await made(
+      [
+        { name: "Build", start: "2026-11-16", dur: 5 },
+        { name: "Review", start: "2026-11-17", dur: 2, deps: [fs("Build")] },
+      ],
+      { clashes: [{ unit: "s:Review", mac: ["2026-11-17", 2, "todo", 0, "now"], iphone: ["2026-11-18", 2, "todo", 0, "now"] }] },
+    );
+    const c = only(t);
+    await shown(t);
+    act(() => t.session.setReadOnly(true));
+    const apply = vi.spyOn(t.session, "apply");
+    setUi({ selected: "Review" });
+    click(buttonIn(panel(), "Open the choice"));
+    expect(uiNow()[0].dialog).toEqual({ t: "choice", id: c.id });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(apply).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual([]);
+  });
+
+  it("opens the choice when a push meets a successor held meanwhile", async () => {
+    const t = await made([
+      { name: "Build", start: "2026-11-16", dur: 5 },
+      { name: "Review", start: "2026-11-17", dur: 2, deps: [fs("Build")] },
+    ]);
+    const p = await peerOf(t);
+    t.session.apply({ t: "schedule", item: "Review", set: { dur: 3 } });
+    p.session.apply({ t: "schedule", item: "Review", set: { dur: 4 } });
+    await shown(t);
+    setUi({ selected: "Review" });
+    const push = buttonIn(panel(), "Push “Review” to Mon 23 Nov");
+    const apply = vi.spyOn(t.session, "apply");
+    act(() => {
+      p.sync();
+      click(push);
+    });
+    const c = only(t);
+    expect(t.session.view().held.has("Review")).toBe(true);
+    expect(apply.mock.calls.map((x) => x[0].t)).toEqual(["fix"]);
+    expect(apply.mock.results.map((r) => r.type)).toEqual(["throw"]);
+    expect(uiNow()[0].dialog).toEqual({ t: "choice", id: c.id });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(startOf(t, "Review")).toBe("2026-11-17");
+  });
+
+  it("offers a shorter lag or no link on a done item, and removes the link", async () => {
+    const t = await made([
+      { name: "Build", start: "2026-11-16", dur: 2 },
+      { name: "Review", start: "2026-11-19", dur: 2, status: "done", progress: 100, deps: [fs("Build", 3)] },
+    ]);
+    const early = t.session.view().derived.conflicts.find((c) => c.kind === "early");
+    if (early === undefined || early.kind !== "early") throw new Error("fixture: no early conflict");
+    expect(early.succLock).toBe("done");
+    await shown(t);
+    setUi({ selected: "Review" });
+    expect(within(panel()).getByText("Started before “Build” finished")).toBeTruthy();
+    expect(within(panel()).queryByRole("button", { name: /^Push/ })).toBeNull();
+    expect(buttonIn(panel(), "Shorten the lag to 1")).toBeTruthy();
+    const apply = vi.spyOn(t.session, "apply");
+    click(buttonIn(panel(), "Remove the link"));
+    expect(apply.mock.calls).toEqual([[{ t: "fix", conflict: early, how: "remove" }]]);
+    expect(t.session.view().plan.links.has("Build>Review")).toBe(false);
+  });
+
   it("removes a link in a loop", async () => {
     const t = await made([
       { name: "L1", start: "2026-11-10", dur: 2, deps: [fs("L2")] },
@@ -313,6 +411,17 @@ describe("calendar banner", () => {
     expect(within(banner).getByText("The calendar was changed on two devices. Nothing moves until you choose.")).toBeTruthy();
     click(buttonIn(banner, "Choose…"));
     expect(uiNow()[0].dialog).toEqual({ t: "choice", id: c.id });
+  });
+
+  it("tells its Choose… apart from the open-choices Choose… by its description", async () => {
+    const t = await made(AB, { clashes: [{ unit: "ct:2026-11-17", mac: { kind: "add", name: "Away" }, iphone: null }] });
+    await shown(t);
+    const chooses = within(head()).getAllByRole("button", { name: "Choose…" });
+    expect(chooses).toHaveLength(2);
+    expect(within(head()).getByRole("button", { name: "Choose…", description: "The calendar was changed on two devices. Nothing moves until you choose." })).toBe(
+      buttonIn(one(".calendar-banner", head()), "Choose…"),
+    );
+    expect(buttonIn(one(".chips", head()), "Choose…").getAttribute("aria-describedby")).toBeNull();
   });
 
   it("is absent without a calendar choice", async () => {
@@ -421,7 +530,7 @@ describe("choice dialog", () => {
     preview.mockClear();
     click(push);
     const off: ResolveOptions = { pushFromPredecessors: false, returnPushed: true };
-    expect(preview.mock.calls.map((x) => [x[0], x[1], x[2]])).toEqual(c.sides.map((s) => [c.id, { side: s.key }, off]));
+    expect(preview.mock.calls.map((x) => [x[0], x[1], x[2]])).toEqual(["Mac", "iPhone"].map((l) => [c.id, { side: keyOf(c, l) }, off]));
     preview.mockClear();
     click(back);
     expect(lastPreviewArgs(preview)[2]).toEqual({ pushFromPredecessors: false, returnPushed: false });
@@ -452,11 +561,66 @@ describe("choice dialog", () => {
     if (!(pickA instanceof HTMLSelectElement)) throw new Error("no pick for A");
     fireEvent.change(pickA, { target: { value: keyOf(c, "iPhone") } });
     const perUnit = new Map([["n:A", keyOf(c, "iPhone")]]);
-    const picks: Pick[] = c.sides.map((s) => ({ side: s.key, perUnit }));
+    const picks: Pick[] = ["Mac", "iPhone"].map((l) => ({ side: keyOf(c, l), perUnit }));
     expect(preview.mock.calls.map((x) => x[1])).toEqual(picks);
     click(buttonIn(dialog(), "Keep Mac"));
     expect(resolve.mock.calls).toEqual([[c.id, { side: keyOf(c, "Mac"), perUnit }, DEFAULTS]]);
     expect([nameOf(t, "A"), nameOf(t, "B")]).toEqual(["South", "East"]);
+  });
+
+  it("puts this device's side first even when the iPhone's replays first", async () => {
+    const t = await made(AB);
+    const p = await peerOf(t);
+    t.session.apply({ t: "rename", item: "A", name: "Draft" });
+    t.session.apply({ t: "rename", item: "A", name: "Alpha" });
+    p.session.apply({ t: "rename", item: "A", name: "Beta" });
+    p.sync();
+    const c = only(t);
+    expect(c.sides.map((s) => s.label)).toEqual(["iPhone", "Mac"]);
+    await shown(t);
+    setUi({ selected: "A" });
+    expect(one(".choice-banner .banner-text", panel()).textContent).toBe("Changed on Mac and iPhone. Choose which to keep.");
+    click(buttonIn(one(".choice-banner", panel()), "Choose"));
+    expect(all(".choice-side", dialog()).map((e) => e.textContent)).toEqual(["Mac", "iPhone"]);
+    expect(within(dialog()).getAllByRole("button", { name: /^Keep / }).map((b) => b.textContent)).toEqual(["Keep Mac", "Keep iPhone"]);
+  });
+
+  it("lists two stopped items of the same name without a key clash", async () => {
+    const errors = vi.spyOn(console, "error");
+    const t = await made(
+      [
+        { name: "P", start: "2026-11-10", dur: 3 },
+        { name: "A", start: "2026-11-13", dur: 3, deps: [fs("P")] },
+        { id: "B1", name: "Same", start: "2026-11-16", dur: 2, status: "doing", progress: 10, deps: [fs("A")] },
+        { id: "B2", name: "Same", start: "2026-11-16", dur: 2, status: "doing", progress: 10, deps: [fs("A")] },
+      ],
+      { clashes: [{ unit: "s:A", mac: ["2026-11-10", 3, "todo", 0, "now"], iphone: ["2026-11-11", 3, "todo", 0, "now"] }] },
+    );
+    const c = only(t);
+    await shown(t);
+    setUi({ dialog: { t: "choice", id: c.id } });
+    expect(all(".choice-stopped", dialog()).map((e) => e.textContent)).toEqual(Array.from({ length: 4 }, () => "stopped at in progress “Same”"));
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it("drops a per-item pick whose unit left the open choice", async () => {
+    const t = await made(AB, { clashes: [{ unit: ["n:A", "n:B"], mac: ["North", "East"], iphone: ["South", "West"] }] });
+    const c = only(t);
+    await shown(t);
+    setUi({ dialog: { t: "choice", id: c.id } });
+    click(within(dialog()).getByRole("checkbox", { name: "Pick per item" }));
+    const pickB = all(".pick-row select", dialog())[1];
+    fireEvent.change(pickB, { target: { value: keyOf(c, "iPhone") } });
+    const preview = vi.spyOn(t.session, "previewResolve");
+    const shrunk: Choice = {
+      ...c,
+      units: c.units.filter((u) => u !== "n:B"),
+      sides: c.sides.map((s) => ({ ...s, values: new Map([...s.values].filter(([u]) => u !== "n:B")) })),
+    };
+    vi.spyOn(t.session, "view").mockReturnValue({ ...t.session.view(), choices: [shrunk] });
+    act(() => t.session.setReadOnly(false));
+    expect(all(".pick-row", dialog())).toHaveLength(1);
+    expect(preview.mock.calls.map((x) => x[1])).toEqual([{ side: keyOf(c, "Mac") }, { side: keyOf(c, "iPhone") }]);
   });
 
   it("offers the other version on Undo, and resolves only when it is pressed", async () => {
@@ -536,6 +700,45 @@ describe("a choice settled meanwhile", () => {
     expect(resolve).not.toHaveBeenCalled();
   });
 
+  it("says nothing when the plan goes to the Trash elsewhere and another plan opens", async () => {
+    const t = await made(AB, { clashes: [NAME] });
+    const other = await made(AB, { plan: "p-other" });
+    const c = only(t);
+    const id = t.session.view().plan.id;
+    let trashed = false;
+    const pick = <T,>(x: string, mine: T, theirs: T): Promise<T> =>
+      x === id ? Promise.resolve(mine) : x === "p-other" ? Promise.resolve(theirs) : Promise.reject(new Error("no plan " + x));
+    const { ui, registry } = shellFor(t, {
+      plans: () => [
+        { id, name: "One", trashed, loaded: true, space: null },
+        { id: "p-other", name: "Two", trashed: false, loaded: true, space: null },
+      ],
+      session: (x) => pick(x, t.session, other.session),
+      doc: (x) => pick(x, t.doc, other.doc),
+    });
+    render(ui);
+    await settle();
+    openChoiceFromHead(t, c);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    trashed = true;
+    act(() => registry.notify());
+    expect(uiNow()[0].dialog).toBeNull();
+    await settle();
+    expect(uiNow()[0].plan).toBe("p-other");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toastTexts()).toEqual(["“One” was moved to the Trash on another device. Restore it from the Trash."]);
+  });
+
+  it("says nothing when a dialog opens on a choice that is already gone", async () => {
+    const t = await made(AB);
+    await shown(t);
+    setUi({ dialog: { t: "choice", id: "gone" } });
+    await settle();
+    expect(uiNow()[0].dialog).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toastTexts()).toEqual([]);
+  });
+
   const offered = async (): Promise<{ t: TestSession; p: { session: PlanSession; sync(): void }; c: Choice; offer: { choice: string; side: string } }> => {
     const t = await made(AB);
     const p = await peerOf(t);
@@ -596,7 +799,7 @@ describe("a read-only choice dialog", () => {
     const resolve = vi.spyOn(t.session, "resolve");
     const preview = vi.spyOn(t.session, "previewResolve");
     const keeps = within(dialog()).getAllByRole("button", { name: /^Keep / });
-    expect(keeps.map((b) => b.textContent)).toEqual(["Keep the other version", ...only(t).sides.map((s) => `Keep ${s.label}`)]);
+    expect(keeps.map((b) => b.textContent)).toEqual(["Keep the other version", "Keep Mac", "Keep iPhone"]);
     expect(keeps.every((b) => b instanceof HTMLButtonElement && b.disabled)).toBe(true);
     click(within(dialog()).getByRole("checkbox", { name: "Push from predecessors" }));
     expect(preview.mock.calls.length).toBeGreaterThan(0);
@@ -643,7 +846,7 @@ describe("every open choice is reachable", () => {
     setUi({ selected: "A" });
     const bannerNow = (): HTMLElement[] => all(".choice-banner", panel());
     const first = itemChoices(t.session.view(), "A")[0];
-    expect(bannerNow().map((b) => one(".banner-text", b).textContent)).toEqual([bannerText(first)]);
+    expect(bannerNow().map((b) => one(".banner-text", b).textContent)).toEqual([bannerText(first, "Mac")]);
     const name = within(panel()).getByLabelText("Name");
     expect(bannerNow()[0].compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     click(buttonIn(bannerNow()[0], "Choose"));
@@ -691,8 +894,8 @@ describe("every open choice is reachable", () => {
     expect(c.units.some((u) => u.startsWith("s:"))).toBe(false);
     await shown(t);
     setUi({ selected: "A" });
-    const text = bannerText(c);
-    expect(text).toMatch(/^Changed on (Mac and iPhone|iPhone and Mac)\. Choose which to keep\.$/);
+    const text = "Changed on Mac and iPhone. Choose which to keep.";
+    expect(bannerText(c, "Mac")).toBe(text);
     expect(one(".choice-banner .banner-text", panel()).textContent).toBe(text);
     setUi({ selected: null, view: "list" });
     const ghost = one("tr.ghost-row");

@@ -1,11 +1,10 @@
 import { memo } from "react";
 import { toDay, toIso, weekday, yearOf, type Day } from "../../domain/dates";
 import type { Zoom } from "../state";
+import { WEEKDAYS } from "./dayText";
 import type { Geometry } from "./geometry";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
-
-export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
 export const nodataTitle = (year: number): string => `No holiday data for ${year} — dates use weekdays and closures`;
 

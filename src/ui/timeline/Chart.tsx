@@ -1,14 +1,15 @@
 import { memo, useEffect, type ReactNode } from "react";
 import { q, workingDays } from "../../actions/copy";
-import { fmtShort, toDay, toIso, weekday, type Day } from "../../domain/dates";
-import { linkKey, type Item, type ItemId, type LinkType } from "../../domain/model";
+import { fmtShort, toDay, toIso, type Day } from "../../domain/dates";
+import { linkKey, type Item, type ItemId } from "../../domain/model";
 import { liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import type { SetUi, UiState, Zoom } from "../state";
 import { ROW, type Geometry } from "./geometry";
 import type { Marks, Placed } from "./Grid";
 import { linkPath, type End } from "./linkPath";
-import { WEEKDAYS } from "./Scale";
+import { dayLabel } from "./dayText";
+import { EARLY } from "./earlyText";
 
 export interface DropGhost {
   item: ItemId;
@@ -24,8 +25,6 @@ export interface TempLink {
   x1: number;
   y1: number;
 }
-
-export const dayLabel = (d: Day): string => `${WEEKDAYS[weekday(d) - 1]} ${fmtShort(toIso(d))}`;
 
 const MS_HALF = 7;
 
@@ -43,13 +42,6 @@ const spanOf = (geo: Geometry, id: ItemId): { start: Day; end: Day } => {
   const span = geo.span(id);
   if (span === null) throw new Error(`Timeline row ${id} has no dates`);
   return span;
-};
-
-const EARLY: Readonly<Record<LinkType, (pred: string) => string>> = {
-  FS: (pred) => `Started before ${pred} finished`,
-  SS: (pred) => `Started before ${pred} started`,
-  FF: (pred) => `Finished before ${pred} finished`,
-  SF: (pred) => `Finished before ${pred} started`,
 };
 
 function endOf(geo: Geometry, item: Item, y: number): End {

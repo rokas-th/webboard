@@ -180,7 +180,7 @@ describe("reachability helpers", () => {
     expect(heldChoice(view)).toBe(view.choices[0]);
   });
 
-  it("names the sides in the banner", async () => {
+  it("names the sides in the banner, this device first, then by label", async () => {
     const t = await made(AB, { clashes: [{ unit: "n:A", mac: "North", iphone: "South" }] });
     const found = t.session.view().choices[0];
     const side = (label: string) => {
@@ -188,9 +188,10 @@ describe("reachability helpers", () => {
       if (s === undefined) throw new Error(`fixture: no side ${label}`);
       return s;
     };
-    const c = { ...found, sides: [side("Mac"), side("iPhone")] };
-    expect(bannerText(c)).toBe("Changed on Mac and iPhone. Choose which to keep.");
-    const three = { ...c, sides: [...c.sides, { key: "x", label: "Mac — earlier copy", actions: [], values: new Map() }] };
-    expect(bannerText(three)).toBe("Changed on Mac, iPhone and Mac — earlier copy. Choose which to keep.");
+    const c = { ...found, sides: [side("iPhone"), side("Mac")] };
+    expect(bannerText(c, "Mac")).toBe("Changed on Mac and iPhone. Choose which to keep.");
+    expect(bannerText(c, "iPhone")).toBe("Changed on iPhone and Mac. Choose which to keep.");
+    const three = { ...c, sides: [{ key: "x", label: "Mac — earlier copy", actions: [], values: new Map() }, ...c.sides] };
+    expect(bannerText(three, "Mac")).toBe("Changed on Mac, iPhone and Mac — earlier copy. Choose which to keep.");
   });
 });
