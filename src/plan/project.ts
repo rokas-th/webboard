@@ -29,7 +29,7 @@ const tables = new WeakMap<PlanState, Table>();
 
 const ITEM_UNITS: readonly UnitKind[] = ["e", "n", "s", "p"];
 
-const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+export const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const byOrder = (a: Item, b: Item): number => cmp(a.place.order, b.place.order) || cmp(a.id, b.id);
 

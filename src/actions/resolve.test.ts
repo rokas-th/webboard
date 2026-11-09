@@ -9,7 +9,7 @@ import { ctxOf } from "../test/planCtx";
 import { buildAction } from "./build";
 import type { Built, Ctx } from "./intents";
 import { buildResolve, previewResolve, settleText, type ResolveOptions, type ResolvePreview } from "./resolve";
-import { buildUndo } from "./undo";
+import { buildRevert, buildUndo } from "./undo";
 
 const TODAY = "2026-11-09";
 
@@ -42,11 +42,17 @@ const logOf = (...actions: Action[]): LogState => {
 
 const ctxFrom = (root: readonly Write[], ...rest: Action[]): Ctx => ctxOf(logOf(act("a0", [], [...ROOT, ...root]), ...rest), "d1", TODAY);
 
-const applied = (ctx: Ctx, b: Built): Ctx => {
-  const delta = ctx.log.add([b.action]);
+const add = (ctx: Ctx, ...actions: Action[]): Ctx => {
+  const delta = ctx.log.add(actions);
   expect(delta.refused).toEqual([]);
+  actions.forEach((a) => expect(delta.added).toContain(a.id));
+  expect(ctx.log.pending).toEqual([]);
   return ctxOf(ctx.log, ctx.dev, TODAY, ctx.devices);
 };
+
+const applied = (ctx: Ctx, b: Built): Ctx => add(ctx, b.action);
+
+const on = (ctx: Ctx, dev: string): Ctx => ctxOf(ctx.log, dev, TODAY, ctx.devices);
 
 const only = (ctx: Ctx): Choice => {
   expect(ctx.view.choices).toHaveLength(1);
@@ -138,6 +144,19 @@ describe("buildResolve", () => {
     expect([...writes(b).keys()]).toEqual(["s:A"]);
   });
 
+  it("returns an item only the iPhone pushed to its base value", () => {
+    const early = act("m1", ["a0"], [w("s:A", sched("2026-11-10", 2))], mac);
+    const ctx = ctxFrom(PUSHED, early, pp);
+    expect(valueOf(ctx, "s:D")).toEqual(sched("2026-11-25", 2));
+    const c = only(ctx);
+    expect(c.units).toEqual(["s:A"]);
+    const b = buildResolve(ctx, c, { side: sideKey(c, "Mac") }, ON);
+    expect(b.action.w).toEqual([w("s:A", sched("2026-11-10", 2), "resolution"), w("s:D", sched("2026-11-18", 2), "resolution")]);
+    const after = applied(ctx, b);
+    expect(valueOf(after, "s:D")).toEqual(sched("2026-11-18", 2));
+    expect(after.view.choices).toEqual([]);
+  });
+
   it("does not return an item the owner moved since", () => {
     const moved = act("o1", ["m1", "p1"], [w("s:D", sched("2026-11-30", 2))], mac);
     const ctx = ctxFrom(PUSHED, mp, pp, moved);
@@ -172,18 +191,28 @@ describe("buildResolve", () => {
   it("previews each side differently with and without the push", () => {
     const ctx = ctxFrom(FS, fm, fp);
     const c = only(ctx);
-    const sides = ["Mac", "iPhone"].map((l) => sideKey(c, l));
-    sides.forEach((s) => {
-      const on = previewResolve(ctx, c, { side: s }, ON);
-      const off = previewResolve(ctx, c, { side: s }, OFF);
-      expect(on.preview.conflictsAfter).toBe(0);
-      expect(off.preview.conflictsAfter).toBe(1);
-      expect(on.rows).not.toEqual(off.rows);
-    });
-    const [macOff, iphOff] = sides.map((s) => previewResolve(ctx, c, { side: s }, OFF));
-    expect(macOff.rows).not.toEqual(iphOff.rows);
-    expect(macOff.rows[0].after).toEqual({ start: toDay("2026-11-17"), end: toDay("2026-11-18") });
-    expect(iphOff.rows[0].after).toEqual({ start: toDay("2026-11-18"), end: toDay("2026-11-19") });
+    const was = { start: toDay("2026-11-18"), end: toDay("2026-11-19") };
+    const rowsOf = (label: string, opts: ResolveOptions): ResolvePreview => previewResolve(ctx, c, { side: sideKey(c, label) }, opts);
+    const macOn = rowsOf("Mac", ON);
+    const macOff = rowsOf("Mac", OFF);
+    const iphOn = rowsOf("iPhone", ON);
+    const iphOff = rowsOf("iPhone", OFF);
+    expect(macOn.rows).toEqual([{ item: "B", group: null, before: was, after: { start: toDay("2026-11-19"), end: toDay("2026-11-20") }, shift: 1 }]);
+    expect(macOff.rows).toEqual([{ item: "B", group: null, before: was, after: { start: toDay("2026-11-17"), end: toDay("2026-11-18") }, shift: -1 }]);
+    expect(iphOn.rows).toEqual([{ item: "B", group: null, before: was, after: { start: toDay("2026-11-19"), end: toDay("2026-11-20") }, shift: 1 }]);
+    expect(iphOff.rows).toEqual([{ item: "B", group: null, before: was, after: was, shift: 0 }]);
+    [macOn, iphOn].forEach((rp) => expect(rp.preview.conflictsAfter).toBe(0));
+    [macOff, iphOff].forEach((rp) => expect(rp.preview.conflictsAfter).toBe(1));
+  });
+
+  it("counts every pushed item in the toast", () => {
+    const CHAIN: Write[] = [...FS, ...item("C", "task", "C", null, "a2", sched("2026-11-20", 2)), w("l:B>C", ["FS", 0])];
+    const ctx = ctxFrom(CHAIN, fm, fp);
+    const c = only(ctx);
+    const b = buildResolve(ctx, c, { side: sideKey(c, "Mac") }, ON);
+    expect(b.action.w).toEqual([w("s:B", sched("2026-11-19", 2), "resolution"), w("s:C", sched("2026-11-23", 2), "push")]);
+    expect(b.preview.movedLater).toBe(2);
+    expect(b.toast).toBe("Kept the Mac version of “B”. 2 items moved.");
   });
 
   it("names sides from ctx.devices, unknown devices by their id", () => {
@@ -208,6 +237,8 @@ describe("buildResolve", () => {
     expect(c.kind).toBe("delete");
     const b = buildResolve(ctx, c, { side: sideKey(c, "Mac") }, ON);
     expect(b.action.w).toEqual([w("e:S", { k: "group", t: true }, "resolution"), w("n:R", "Retro", "resolution")]);
+    expect(b.action.lbl).toBe("Kept the Mac version of 2 items");
+    expect(b.toast).toBe("Kept the Mac version of 2 items.");
     const after = applied(ctx, b);
     expect(after.view.plan.items.get("S")?.trashed).toBe(true);
     expect(valueOf(after, "n:R")).toBe("Retro");
@@ -219,6 +250,8 @@ describe("buildResolve", () => {
     const c = only(ctx);
     const b = buildResolve(ctx, c, { side: sideKey(c, "iPhone") }, ON);
     expect(b.action.w).toEqual([w("e:S", { k: "group", t: false }, "resolution"), w("n:R", "Retro notes", "resolution")]);
+    expect(b.action.lbl).toBe("Kept the iPhone version of 2 items");
+    expect(b.toast).toBe("Kept the iPhone version of 2 items.");
     const after = applied(ctx, b);
     expect(after.view.plan.items.get("S")?.trashed).toBe(false);
     expect(after.view.plan.items.get("R")?.name).toBe("Retro notes");
@@ -374,6 +407,8 @@ describe("two resolutions made apart", () => {
       w("s:Ship", s("2026-12-14", 1), "resolution"),
     ]);
     expect(b.action.meta).toEqual({ resolves: c.id });
+    expect(b.action.lbl).toBe("Kept the version where “Plan file format” starts 25 Nov, 4 items move");
+    expect(b.toast).toBe("Kept the version where “Plan file format” starts 25 Nov, 4 items move.");
     expect(applied(ctx, b).view.choices).toEqual([]);
   });
 
@@ -382,9 +417,78 @@ describe("two resolutions made apart", () => {
     const c = only(ctx);
     const b = buildResolve(ctx, c, { side: sideKey(c, "“Plan file format” starts 19 Nov") }, ON);
     expect(b.action.w).toEqual([w("s:PFF", s("2026-11-19", 3), "resolution")]);
+    expect(b.action.lbl).toBe("Kept the version where “Plan file format” starts 19 Nov");
+    expect(b.toast).toBe("Kept the version where “Plan file format” starts 19 Nov.");
     const after = applied(ctx, b);
     expect(after.view.choices).toEqual([]);
     expect(valueOf(after, "s:Spec")).toEqual(s("2026-11-19", 3));
+  });
+
+  it("refuses to pick a side that has no value for a unit the other side created", () => {
+    const first = only(ctxFrom(BASE, m1, p1));
+    const resolves = { resolves: first.id };
+    const r1 = act("R1", ["m1", "p1"], [w("s:PFF", s("2026-11-25", 3), "resolution")], { dev: "d1", meta: resolves });
+    const r2 = act("R2", ["m1", "p1"], [
+      w("s:PFF", s("2026-11-19", 3), "resolution"),
+      ...item("X", "task", "Extra", null, "a5", s("2026-11-16", 1)).map((x) => ({ ...x, c: "resolution" as const })),
+    ], { dev: "d2", meta: resolves });
+    const ctx = ctxFrom(BASE, m1, p1, r1, r2);
+    const c = only(ctx);
+    expect(c.kind).toBe("resolutions");
+    const side = c.sides.find((x) => x.actions.includes("R1"));
+    if (side === undefined) throw new Error("No side holds R1");
+    expect(() => buildResolve(ctx, c, { side: side.key }, ON)).toThrow(`Unit e:X of choice ${c.id} has no value on side ${side.key}`);
+  });
+});
+
+describe("resolving an activity choice", () => {
+  const clash = (): Ctx => {
+    let ctx = ctxFrom(item("A", "task", "Alpha", null, "a0", sched("2026-11-16", 2)));
+    const b = buildAction(ctx, { t: "rename", item: "A", name: "Beta" });
+    ctx = applied(ctx, b);
+    const revert = buildRevert(ctx, b.action.id);
+    let phone = on(ctx, "d2");
+    const u = buildUndo(phone, b.action.id);
+    phone = applied(phone, u);
+    const redo = buildUndo(phone, u.action.id);
+    const both = add(on(phone, "d1"), redo.action, revert.action);
+    expect(both.view.choices.map((c) => [c.kind, c.units])).toEqual([["activity", [`a:${b.action.id}`]]]);
+    return both;
+  };
+  const row = { item: "A", group: null, before: { start: toDay("2026-11-16"), end: toDay("2026-11-17") }, after: { start: toDay("2026-11-16"), end: toDay("2026-11-17") }, shift: 0 };
+
+  it("keeping the revert undoes the change", () => {
+    const ctx = clash();
+    const c = only(ctx);
+    const u = c.units[0];
+    const b = buildResolve(ctx, c, { side: sideKey(c, "Mac") }, ON);
+    expect(b.action.w).toEqual([w(u, false, "resolution")]);
+    expect(b.action.lbl).toBe("Kept the Mac version, so Renamed “Alpha” to “Beta” is undone");
+    expect(b.toast).toBe("Kept the Mac version, so Renamed “Alpha” to “Beta” is undone.");
+    const rp = previewResolve(ctx, c, { side: sideKey(c, "Mac") }, ON);
+    expect(rp.rows).toEqual([row]);
+    expect(rp.preview.itemsChanged).toBe(1);
+    const after = applied(ctx, b);
+    expect(valueOf(after, u)).toBe(false);
+    expect(after.view.plan.items.get("A")?.name).toBe("Alpha");
+    expect(after.view.choices).toEqual([]);
+  });
+
+  it("keeping the redo keeps the change", () => {
+    const ctx = clash();
+    const c = only(ctx);
+    const u = c.units[0];
+    const b = buildResolve(ctx, c, { side: sideKey(c, "iPhone") }, ON);
+    expect(b.action.w).toEqual([w(u, true, "resolution")]);
+    expect(b.action.lbl).toBe("Kept the iPhone version, so Renamed “Alpha” to “Beta” stays");
+    expect(b.toast).toBe("Kept the iPhone version, so Renamed “Alpha” to “Beta” stays.");
+    const rp = previewResolve(ctx, c, { side: sideKey(c, "iPhone") }, ON);
+    expect(rp.rows).toEqual([row]);
+    expect(rp.preview.itemsChanged).toBe(0);
+    const after = applied(ctx, b);
+    expect(valueOf(after, u)).toBe(true);
+    expect(after.view.plan.items.get("A")?.name).toBe("Beta");
+    expect(after.view.choices).toEqual([]);
   });
 });
 
@@ -431,6 +535,38 @@ describe("settling by edit", () => {
     const b = buildAction(ctx, { t: "rename", item: "R", name: "Third name" });
     expect(b.toast).toBe("Renamed “R phone” to “Third name”. “Third name” is settled; no items remain.");
     expect(applied(ctx, b).view.choices).toEqual([]);
+  });
+
+  it("does not settle an item while another of its units still clashes", () => {
+    const ctx = ctxFrom(
+      FOUR,
+      act("m1", ["a0"], [...renames(["P", "R", "B", "S"], "mac"), w("s:R", sched("2026-11-17", 2))], mac),
+      act("p1", ["a0"], [...renames(["P", "R", "B", "S"], "phone"), w("s:R", sched("2026-11-18", 2))], iph),
+    );
+    const b = buildAction(ctx, { t: "rename", item: "R", name: "Final review" });
+    expect(settleText(ctx, b.action.w)).toBeNull();
+    expect(b.toast).toBe("Renamed “R phone” to “Final review”.");
+    expect(only(applied(ctx, b)).units).toEqual(["n:B", "n:P", "n:S", "s:R"]);
+  });
+
+  it("settles the calendar only when the whole calendar choice is gone", () => {
+    const clashing = (): Ctx =>
+      ctxFrom(
+        [],
+        act("m1", ["a0"], [w("cw", [1, 2, 3, 4]), w("cr", { src: "opm" })], mac),
+        act("p1", ["a0"], [w("cw", [1, 2, 3, 4, 5, 6]), w("cr", { src: "govuk", division: "scotland" })], iph),
+      );
+    const ctx = clashing();
+    expect(only(ctx).kind).toBe("calendar");
+    expect(only(ctx).units).toEqual(["cr", "cw"]);
+    const cw = buildAction(ctx, { t: "calendar", next: { ...ctx.view.plan.calendar, workdays: [1, 2, 3] } });
+    expect(settleText(ctx, cw.action.w)).toBeNull();
+    expect(cw.toast).not.toContain("settled");
+    const fresh = clashing();
+    const both = buildAction(fresh, { t: "calendar", next: { ...fresh.view.plan.calendar, workdays: [1, 2, 3], region: { src: "opm" } } });
+    expect(settleText(fresh, both.action.w)).toBe("The calendar is settled.");
+    expect(both.toast.endsWith(" The calendar is settled.")).toBe(true);
+    expect(applied(fresh, both).view.choices).toEqual([]);
   });
 
   it("settles a schedule clash by a direct move", () => {

@@ -4,14 +4,17 @@ import { derive, schedView, type Derived } from "../domain/derive";
 import type { ItemId, PlanState } from "../domain/model";
 import { newId } from "../log/ids";
 import type { LogState } from "../log/state";
-import { OWNER_CAUSES, type Action, type ActionId, type UnitKey, type Write } from "../log/types";
-import { choices, heldItems, type Choice, type ChoiceSide } from "../plan/choices";
-import { applyWrites, liveLinks, projectPlan } from "../plan/project";
+import type { Action, ActionId, UnitKey, Write } from "../log/types";
+import { heldItems, type Choice, type ChoiceSide } from "../plan/choices";
+import { applyWrites, cmp, liveLinks, projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
-import { parseKey, validateWrite, type UnitKind } from "../plan/units";
+import { decodeAs, parseKey, validateWrite } from "../plan/units";
 import { previewOf, withDerived, type Derivation } from "./build";
-import { calendarSuffix, items, q, toastOf } from "./copy";
+import { calendarSuffix, items, toastOf } from "./copy";
 import type { Built, Ctx, Preview } from "./intents";
+import { forkWith, subjectOf, unique } from "./settle";
+
+export { settleText } from "./settle";
 
 export interface Pick {
   side: string;
@@ -36,24 +39,9 @@ export interface ResolvePreview {
   rows: readonly OutcomeRow[];
 }
 
-const ITEM_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["e", "n", "s", "p", "r"]);
-const CALENDAR_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["cr", "cw", "cc", "ct", "ch"]);
-
-const unique = <T>(xs: readonly T[]): T[] => [...new Set(xs)];
-
-const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
 const resolution = (u: UnitKey, v: unknown): Write => ({ u, v, c: "resolution" });
 
-const itemOfUnit = (u: UnitKey): ItemId | null => {
-  const k = parseKey(u);
-  if (ITEM_KINDS.has(k.kind)) return k.arg;
-  if (k.kind === "l") {
-    if (k.to === undefined) throw new Error(`Link ${u} has no successor`);
-    return k.to;
-  }
-  return null;
-};
+const isActivity = (u: UnitKey): boolean => parseKey(u).kind === "a";
 
 const actionOf = (log: LogState, id: ActionId): Action => {
   const a = log.get(id);
@@ -67,34 +55,39 @@ const sideOf = (choice: Choice, side: string): ChoiceSide => {
   return s;
 };
 
-const valueOn = (choice: Choice, side: ChoiceSide, u: UnitKey): unknown => {
+const othersOf = (choice: Choice, side: ChoiceSide): ReadonlySet<ActionId> =>
+  new Set(choice.sides.filter((s) => s.key !== side.key).flatMap((s) => s.actions));
+
+const valueOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): unknown => {
   if (side.values.has(u)) return side.values.get(u);
-  if (parseKey(u).kind === "a") return true;
+  const without = ctx.log.valueWithout(u, othersOf(choice, side));
+  if (without !== undefined) return without.value;
+  if (isActivity(u)) return true;
   throw new Error(`Side ${side.key} of choice ${choice.id} has no value for ${u}`);
 };
 
-const nameIn = (plans: readonly PlanState[], id: ItemId): string => {
-  const it = plans.map((p) => p.items.get(id)).find((x) => x !== undefined);
-  if (it === undefined) throw new Error(`No item ${id}`);
-  return it.name;
+const latestOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): unknown => {
+  const mine = [...side.actions]
+    .reverse()
+    .map((a) => actionOf(ctx.log, a).w.find((x) => x.u === u))
+    .find((x) => x !== undefined);
+  if (mine !== undefined) return mine.v;
+  const without = ctx.log.valueWithout(u, othersOf(choice, side));
+  if (without === undefined) throw new Error(`Unit ${u} of choice ${choice.id} has no value on side ${side.key}`);
+  return without.value;
 };
 
-const unitSubject = (plans: readonly PlanState[], u: UnitKey): string => {
-  const k = parseKey(u);
-  if (CALENDAR_KINDS.has(k.kind)) return "the calendar";
-  if (k.kind === "pn") return "the plan name";
-  if (k.kind === "a") return "the change";
-  if (k.kind === "b") {
-    const b = plans.map((p) => p.baselines.get(k.arg)).find((x) => x !== undefined);
-    return b === undefined ? "a removed baseline" : `baseline ${q(b.name)}`;
-  }
-  throw new Error(`No subject for ${u}`);
-};
-
-const subjectOf = (plans: readonly PlanState[], ids: readonly ItemId[], units: readonly UnitKey[]): string => {
-  if (ids.length === 1) return q(nameIn(plans, ids[0]));
-  if (ids.length > 1) return items(ids.length);
-  return unique(units.map((u) => unitSubject(plans, u))).join(" and ");
+const combined = (chosen: readonly Write[], rest: readonly Write[]): Write[] => {
+  const taken = new Set(chosen.map((x) => x.u));
+  const kept = rest
+    .filter((x) => !taken.has(x.u))
+    .reduce((m, x) => {
+      const earlier = m.get(x.u);
+      if (earlier === undefined) return m.set(x.u, x);
+      if (!planRules.same(x.u, earlier.v, x.v)) throw new Error(`Unit ${x.u} gets two different values in one resolution`);
+      return m;
+    }, new Map<UnitKey, Write>());
+  return [...chosen, ...kept.values()];
 };
 
 const ownWrites = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): Write[] => {
@@ -104,21 +97,14 @@ const ownWrites = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): 
     if (!choice.units.includes(u)) throw new Error(`Unit ${u} is not in choice ${choice.id}`);
     sideOf(choice, s);
   });
-  const chosen = choice.units.map((u) => resolution(u, valueOn(choice, sideOf(choice, perUnit.get(u) ?? picked.key), u)));
-  const others = new Set(choice.sides.filter((s) => s.key !== picked.key).flatMap((s) => s.actions));
+  const chosen = choice.units.map((u) => resolution(u, valueOn(ctx, choice, sideOf(choice, perUnit.get(u) ?? picked.key), u)));
   const extras =
     choice.kind !== "resolutions"
       ? []
       : unique(choice.sides.flatMap((s) => s.actions).flatMap((a) => actionOf(ctx.log, a).w.map((x) => x.u)))
           .filter((u) => !choice.units.includes(u))
           .flatMap((u): Write[] => {
-            const mine = [...picked.actions]
-              .reverse()
-              .map((a) => actionOf(ctx.log, a).w.find((x) => x.u === u))
-              .find((x) => x !== undefined);
-            const without = mine === undefined ? ctx.log.valueWithout(u, others) : undefined;
-            if (mine === undefined && without === undefined) return [];
-            const v = mine === undefined ? without?.value : mine.v;
+            const v = latestOn(ctx, choice, picked, u);
             const current = ctx.log.unit(u);
             return current !== undefined && planRules.same(u, v, current.value) ? [] : [resolution(u, v)];
           });
@@ -132,13 +118,14 @@ const ownWrites = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): 
           return s.actions.flatMap((a) =>
             actionOf(ctx.log, a)
               .w.filter((x) => x.c === "push" && ctx.log.unit(x.u)?.from === a)
-              .flatMap((x): Write[] => {
+              .map((x) => {
                 const before = ctx.log.valueWithout(x.u, theirs);
-                return before === undefined ? [] : [resolution(x.u, before.value)];
+                if (before === undefined) throw new Error(`Pushed unit ${x.u} of action ${a} has no value without side ${s.key}`);
+                return resolution(x.u, before.value);
               }),
           );
         });
-  return [...chosen, ...extras, ...returns].filter((x, i, all) => all.findIndex((y) => y.u === x.u) === i);
+  return combined(chosen, [...extras, ...returns]);
 };
 
 interface Resolved {
@@ -146,34 +133,42 @@ interface Resolved {
   after: PlanState;
 }
 
-const added = (log: LogState, a: Action): LogState => {
-  const fork = log.fork();
-  const delta = fork.add([a]);
-  if (delta.refused.length > 0) throw new Error(delta.refused.map((r) => r.message).join("; "));
-  return fork;
+const activityLabel = (ctx: Ctx, choice: Choice, side: ChoiceSide, w: readonly Write[]): string => {
+  const units = choice.units.filter(isActivity);
+  if (units.length !== 1) return `Kept the ${side.label} version of ${units.length} changes`;
+  const u = units[0];
+  const x = w.find((y) => y.u === u);
+  if (x === undefined) throw new Error(`Resolution of choice ${choice.id} writes no ${u}`);
+  const target = actionOf(ctx.log, parseKey(u).arg);
+  return `Kept the ${side.label} version, so ${target.lbl} ${decodeAs("activity", u, x.v) ? "stays" : "is undone"}`;
 };
 
-const labelOf = (ctx: Ctx, choice: Choice, side: ChoiceSide, after: PlanState, preview: Preview): string => {
+const labelOf = (ctx: Ctx, choice: Choice, side: ChoiceSide, w: readonly Write[], after: PlanState, preview: Preview): string => {
+  if (choice.kind === "resolutions") return `Kept the version where ${side.label}`;
+  if (choice.kind === "activity") return activityLabel(ctx, choice, side, w);
   const head = `Kept the ${side.label} version of`;
   if (choice.kind === "calendar") return `${head} the calendar${calendarSuffix(preview.endsChanged, preview.movedLater)}`;
-  return `${head} ${subjectOf([after, ctx.view.plan], choice.items, choice.units)}`;
+  return `${head} ${subjectOf(ctx.log, [after, ctx.view.plan], choice.items, choice.units)}`;
 };
 
 const resolved = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): Resolved => {
   const plan = ctx.view.plan;
   const own = ownWrites(ctx, choice, pick, opts);
+  const planWrites = own.filter((x) => !isActivity(x.u));
+  const activity = own.filter((x) => isActivity(x.u));
   const held = heldItems(
     ctx.view.choices.filter((c) => c.id !== choice.id),
     plan,
   );
-  const placed = applyWrites(plan, own);
+  const placed = applyWrites(plan, planWrites);
   const scheduled = schedView(placed, held).items;
   const targets = new Set(choice.items);
   const roots = opts.pushFromPredecessors
     ? unique(liveLinks(placed).filter((l) => targets.has(l.to) && scheduled.has(l.from)).map((l) => l.from))
     : [];
-  const d: Derivation = withDerived(ctx, own, roots, held);
-  d.writes.forEach(validateWrite);
+  const d: Derivation = withDerived(ctx, planWrites, roots, held);
+  const w = [...d.writes, ...activity];
+  w.forEach(validateWrite);
   const draft: Action = {
     id: newId(),
     dev: ctx.dev,
@@ -181,12 +176,12 @@ const resolved = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): R
     at: ctx.now,
     par: [...ctx.log.heads],
     lbl: "",
-    w: d.writes,
+    w,
     meta: { resolves: choice.id },
   };
-  const after = projectPlan(plan.id, added(ctx.log, draft));
+  const after = projectPlan(plan.id, forkWith(ctx.log, draft));
   const preview = previewOf(ctx, after, d, []);
-  const lbl = labelOf(ctx, choice, sideOf(choice, pick.side), after, preview);
+  const lbl = labelOf(ctx, choice, sideOf(choice, pick.side), w, after, preview);
   const moved = d.push?.moves.size ?? 0;
   const action: Action = { ...draft, lbl };
   return { built: { action, newNotes: [], toast: toastOf(lbl, moved === 0 ? [] : [`${items(moved)} moved.`]), preview }, after };
@@ -199,7 +194,10 @@ export function buildResolve(ctx: Ctx, choice: Choice, pick: Pick, opts: Resolve
 const span = (dv: Derived, id: ItemId): { start: Day; end: Day } | null => {
   const start = dv.start.get(id);
   const end = dv.end.get(id);
-  return start === undefined || end === undefined ? null : { start, end };
+  if (start === undefined && end === undefined) return null;
+  if (end === undefined) throw new Error(`Item ${id} has a start without an end`);
+  if (start === undefined) throw new Error(`Item ${id} has an end without a start`);
+  return { start, end };
 };
 
 const shiftOf = (cal: WorkCalendar, before: Day, after: Day): number =>
@@ -211,7 +209,7 @@ const groupOf = (plans: readonly PlanState[], id: ItemId): ItemId | null => {
   const up = (at: ItemId | null): ItemId | null => {
     if (at === null) return null;
     const p = plan.items.get(at);
-    if (p === undefined) return null;
+    if (p === undefined) throw new Error(`Item ${id} has an ancestor ${at} that is not in the plan`);
     return p.kind === "group" ? p.id : up(p.place.parent);
   };
   const it = plan.items.get(id);
@@ -237,31 +235,4 @@ export function previewResolve(ctx: Ctx, choice: Choice, pick: Pick, opts: Resol
     .filter((id) => !listed.has(id) && !same(span(before, id), span(next, id)))
     .sort(cmp);
   return { preview: built.preview, rows: [...choice.items, ...others].map(row) };
-}
-
-const remainText = (n: number): string =>
-  n === 0 ? "no items remain." : n === 1 ? "1 item in this choice remains." : `${n} items in this choice remain.`;
-
-export function settleText(ctx: Ctx, w: readonly Write[]): string | null {
-  const touched = new Set(w.filter((x) => OWNER_CAUSES.has(x.c)).map((x) => x.u));
-  const hit = ctx.view.choices.filter((c) => c.units.some((u) => touched.has(u)));
-  if (hit.length === 0) return null;
-  const probe: Action = { id: newId(), dev: ctx.dev, ses: ctx.ses, at: ctx.now, par: [...ctx.log.heads], lbl: "", w };
-  const fork = added(ctx.log, probe);
-  const open = choices(fork, projectPlan(ctx.view.plan.id, fork), ctx.devices);
-  const named = [applyWrites(ctx.view.plan, w), ctx.view.plan];
-  return hit
-    .map((c) => {
-      const units = c.units.filter((u) => touched.has(u));
-      const settled = unique(units.flatMap((u) => {
-        const id = itemOfUnit(u);
-        return id === null ? [] : [id];
-      }));
-      const parts = new Set(c.sides.flatMap((s) => s.actions));
-      const remain = c.items.filter((id) => open.some((o) => o.items.includes(id) && o.sides.some((s) => s.actions.some((a) => parts.has(a)))));
-      const subject = subjectOf(named, settled, units);
-      const lead = settled.length > 1 ? `${subject} are settled` : `${subject.charAt(0).toUpperCase()}${subject.slice(1)} is settled`;
-      return `${lead}; ${remainText(remain.length)}`;
-    })
-    .join(" ");
 }

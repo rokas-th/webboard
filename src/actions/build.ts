@@ -10,10 +10,10 @@ import { heldItems } from "../plan/choices";
 import { applyWrites, childrenOf, liveLinks } from "../plan/project";
 import { planRules } from "../plan/rules";
 import * as codec from "../plan/units";
-import { key, parseKey, validateWrite, type UnitKind } from "../plan/units";
+import { key, validateWrite } from "../plan/units";
 import { fmtShort, items, label, pushSuffix, q, refusal, sentence, toastOf } from "./copy";
 import { HeldRefused, Refused, type Built, type Ctx, type Intent, type Preview } from "./intents";
-import { settleText } from "./resolve";
+import { isCalendarWrite, settleText, unique } from "./settle";
 
 export interface Derivation {
   writes: readonly Write[];
@@ -30,11 +30,7 @@ interface Draft {
   sentences: readonly string[];
 }
 
-const CALENDAR_UNITS: ReadonlySet<UnitKind> = new Set<UnitKind>(["cr", "cw", "cc", "ct", "ch"]);
-
 const own = (u: UnitKey, v: unknown): Write => ({ u, v, c: "own" });
-
-const unique = <T>(xs: readonly T[]): T[] => [...new Set(xs)];
 
 export function normalizeName(raw: string): string {
   const name = raw.replace(/\s+/g, (run) => (/[\n\r\t]/.test(run) ? " " : run)).trim();
@@ -474,8 +470,6 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
     }
   }
 };
-
-const isCalendarWrite = (x: Write): boolean => CALENDAR_UNITS.has(parseKey(x.u).kind);
 
 const newHolidayYears = (ctx: Ctx, ownWrites: readonly Write[], writes: readonly Write[]): Write[] => {
   const plan = ctx.view.plan;
