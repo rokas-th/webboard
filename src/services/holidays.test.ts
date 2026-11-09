@@ -494,6 +494,21 @@ describe("refresh", () => {
     expect(sub).toHaveBeenCalledTimes(1);
   });
 
+  it("a refresh during a forced retry keeps the retry's result", async () => {
+    const { svc, host, sub } = await refreshFailedNotice();
+    const before = svc.notices(PLAN_ID);
+    const h = hold("holidays_year");
+    const p = svc.load(PLAN_ID, host, 2027);
+    await svc.refresh(PLAN_ID, host);
+    expect(svc.notices(PLAN_ID)).toBe(before);
+    expect(sub).toHaveBeenCalledTimes(0);
+    h.resolve(NEW_ANSWER);
+    await p;
+    const n = only(svc.notices(PLAN_ID));
+    expect(n.k).toBe("changed");
+    expect(sub).toHaveBeenCalledTimes(1);
+  });
+
   it("preview throws on a forced retry", async () => {
     const { svc, host, sub } = await refreshFailedNotice(() => {
       throw new Error("boom");

@@ -90,6 +90,7 @@ const sameYear = (year: number, a: HolidayYear | null, b: HolidayYear | null): b
 const unchanged = (a: HolidayNotice | undefined, b: HolidayNotice): boolean => {
   if (a === undefined || a.k !== b.k || a.year !== b.year) return false;
   if (a.k === "failed" && b.k === "failed") return a.error === b.error && a.at === b.at;
+  if (a.k === "refreshFailed" && b.k === "refreshFailed") return a.error === b.error && a.at === b.at && a.fetchedAt === b.fetchedAt;
   return a.k === "loading" || a.k === "notLoaded";
 };
 
@@ -322,8 +323,7 @@ export class HolidayService {
         return;
       }
       if (!r.ok) {
-        this.put(plan, { k: "refreshFailed", year, error: r.error, at: r.at, fetchedAt: planYear.fetchedAt });
-        this.notify();
+        if (this.write(plan, { k: "refreshFailed", year, error: r.error, at: r.at, fetchedAt: planYear.fetchedAt })) this.notify();
         return;
       }
       if (sameYear(year, r.year, planYear)) {
