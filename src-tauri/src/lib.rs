@@ -1,4 +1,6 @@
 mod commands;
+#[cfg(target_os = "macos")]
+pub mod menu;
 
 #[cfg(all(not(debug_assertions), any(target_os = "macos", target_os = "linux")))]
 fn raise_running_window(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -21,17 +23,27 @@ fn single_instance_guard() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum ExitRequest {
-    PreventAndClose,
-    Allow,
+enum Quit {
+    CloseEveryWindow,
+    Exit,
 }
 
-fn exit_request(open_windows: usize) -> ExitRequest {
+fn exit_request(open_windows: usize) -> Quit {
     if open_windows == 0 {
-        ExitRequest::Allow
+        Quit::Exit
     } else {
-        ExitRequest::PreventAndClose
+        Quit::CloseEveryWindow
     }
+}
+
+fn close_every_window<R: tauri::Runtime>(
+    windows: &std::collections::HashMap<String, tauri::WebviewWindow<R>>,
+) {
+    windows.values().for_each(|window| {
+        if let Err(e) = window.close() {
+            eprintln!("webboard: could not ask {} to close: {e}", window.label());
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -40,6 +52,11 @@ pub fn run() {
 
     #[cfg(all(not(debug_assertions), any(target_os = "macos", target_os = "linux")))]
     let builder = builder.plugin(single_instance_guard());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .menu(menu::app_menu)
+        .on_menu_event(menu::on_menu_event);
 
     builder
         .plugin(tauri_plugin_dialog::init())
@@ -79,13 +96,9 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 use tauri::Manager;
                 let windows = app.webview_windows();
-                if exit_request(windows.len()) == ExitRequest::PreventAndClose {
+                if exit_request(windows.len()) == Quit::CloseEveryWindow {
                     api.prevent_exit();
-                    windows.values().for_each(|window| {
-                        if let Err(e) = window.close() {
-                            eprintln!("webboard: could not ask {} to close: {e}", window.label());
-                        }
-                    });
+                    close_every_window(&windows);
                 }
             }
         });
@@ -161,10 +174,44 @@ mod tests {
 
     #[test]
     fn an_exit_request_closes_every_open_window_first() {
-        use super::{exit_request, ExitRequest};
-        assert_eq!(exit_request(1), ExitRequest::PreventAndClose);
-        assert_eq!(exit_request(3), ExitRequest::PreventAndClose);
-        assert_eq!(exit_request(0), ExitRequest::Allow);
+        use super::{exit_request, Quit};
+        assert_eq!(exit_request(1), Quit::CloseEveryWindow);
+        assert_eq!(exit_request(3), Quit::CloseEveryWindow);
+        assert_eq!(exit_request(0), Quit::Exit);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_quit_menu_item_closes_every_window_first() {
+        use super::menu::{menu_quit, QUIT_MENU_ID};
+        use super::Quit;
+        assert_eq!(menu_quit(QUIT_MENU_ID, 1), Some(Quit::CloseEveryWindow));
+        assert_eq!(menu_quit(QUIT_MENU_ID, 3), Some(Quit::CloseEveryWindow));
+        assert_eq!(menu_quit(QUIT_MENU_ID, 0), Some(Quit::Exit));
+        assert_eq!(menu_quit("webboard-other", 1), None);
+        assert_eq!(menu_quit("", 0), None);
+    }
+
+    #[test]
+    fn run_sets_the_mac_app_menu_and_routes_its_events() {
+        let body = run_body();
+        let menu = body
+            .find(".menu(menu::app_menu)")
+            .expect("run() does not set WebBoard's app menu, so ⌘Q stays tauri's predefined Quit and skips the window close guard");
+        let attr = body[..menu]
+            .lines()
+            .rev()
+            .find(|line| line.trim_start().starts_with("#["))
+            .expect("the app menu is set without a cfg");
+        assert!(
+            attr.contains("target_os = \"macos\""),
+            "the app menu is set outside a macOS-only cfg, so Linux would gain a menu bar: {attr}"
+        );
+        let statement = body[menu..].split_once(';').map_or("", |(head, _)| head);
+        assert!(
+            statement.contains(".on_menu_event(menu::on_menu_event)"),
+            "run() sets the app menu without routing its events to menu::on_menu_event"
+        );
     }
 
     #[test]
