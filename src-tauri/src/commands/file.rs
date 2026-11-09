@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use percent_encoding::percent_decode_str;
@@ -9,6 +8,7 @@ use webboard_core::CommandError;
 
 const CODE: &str = "file.io";
 const FILE_URL: &str = "file://";
+const LOCALHOST: &str = "localhost";
 
 fn io(message: impl Into<String>) -> CommandError {
     CommandError::new(CODE, message)
@@ -30,10 +30,10 @@ fn path_of(request: &Request<'_>) -> Result<PathBuf> {
         .to_str()
         .map_err(|_| io("header x-path is not percent-encoded ASCII"))?;
     let path = decoded(raw, "x-path")?;
-    let path = match path.strip_prefix(FILE_URL) {
+    let path = match strip_ignoring_case(&path, FILE_URL) {
         None => path,
         Some(rest) => {
-            let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+            let rest = strip_ignoring_case(rest, LOCALHOST).unwrap_or(rest);
             if !rest.starts_with('/') {
                 return Err(io(format!("{path} names a file on another host")));
             }
@@ -43,14 +43,31 @@ fn path_of(request: &Request<'_>) -> Result<PathBuf> {
     if path.is_empty() {
         return Err(io("x-path names no file"));
     }
-    Ok(PathBuf::from(path))
+    let path = PathBuf::from(path);
+    if !path.is_absolute() {
+        return Err(io(format!("{} is not an absolute path", path.display())));
+    }
+    Ok(path)
+}
+
+fn strip_ignoring_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = text.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix)
+        .then(|| &text[prefix.len()..])
 }
 
 fn write_file(path: &Path, bytes: &[u8]) -> Result<()> {
     let fail = |e: std::io::Error| io(format!("Could not write {}: {e}.", path.display()));
-    let mut file = fs::File::create(path).map_err(fail)?;
-    file.write_all(bytes).map_err(fail)?;
-    file.sync_all().map_err(fail)
+    let (dir, name) = match (path.parent(), path.file_name().and_then(|n| n.to_str())) {
+        (Some(dir), Some(name)) => (dir, name),
+        _ => {
+            return Err(io(format!(
+                "Could not write {}: it names no file.",
+                path.display()
+            )))
+        }
+    };
+    super::replace_file(dir, name, bytes).map_err(fail)
 }
 
 fn read_file(path: &Path) -> Result<Vec<u8>> {
@@ -188,6 +205,87 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"bytes");
+    }
+
+    #[test]
+    fn file_write_keeps_the_old_file_when_it_fails() {
+        let h = harness();
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("Plan.webboard");
+        fs::write(&path, b"old plan").unwrap();
+        fs::create_dir(tmp.path().join("Plan.webboard.tmp")).unwrap();
+        let e = invoke(
+            &h,
+            "file_write",
+            InvokeBody::Raw(b"new plan".to_vec()),
+            Some(&encode(path.to_str().unwrap())),
+        )
+        .unwrap_err();
+        assert_eq!(e["code"], "file.io");
+        let message = e["message"].as_str().unwrap();
+        assert!(
+            message.starts_with(&format!("Could not write {}: ", path.display())),
+            "{message}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"old plan");
+
+        fs::remove_dir(tmp.path().join("Plan.webboard.tmp")).unwrap();
+        invoke(
+            &h,
+            "file_write",
+            InvokeBody::Raw(b"new plan".to_vec()),
+            Some(&encode(path.to_str().unwrap())),
+        )
+        .unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new plan");
+        assert!(!tmp.path().join("Plan.webboard.tmp").exists());
+    }
+
+    #[test]
+    fn file_url_prefix_ignores_case() {
+        let h = harness();
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("x.webboard");
+        let url = format!("FILE://{}", path.to_str().unwrap());
+        invoke(
+            &h,
+            "file_write",
+            InvokeBody::Raw(b"bytes".to_vec()),
+            Some(&encode(&url)),
+        )
+        .unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"bytes");
+        assert_eq!(read(&h, &encode(&url)).unwrap(), b"bytes");
+        let host = format!("File://LocalHost{}", path.to_str().unwrap());
+        assert_eq!(read(&h, &encode(&host)).unwrap(), b"bytes");
+    }
+
+    #[test]
+    fn relative_path_refused() {
+        let h = harness();
+        let expected =
+            json!({ "code": "file.io", "message": "a.webboard is not an absolute path" });
+        assert_eq!(
+            invoke(
+                &h,
+                "file_read",
+                InvokeBody::Json(json!({})),
+                Some("a.webboard")
+            )
+            .unwrap_err(),
+            expected
+        );
+        assert_eq!(
+            invoke(
+                &h,
+                "file_write",
+                InvokeBody::Raw(b"x".to_vec()),
+                Some("a.webboard")
+            )
+            .unwrap_err(),
+            expected
+        );
+        assert!(!Path::new("a.webboard").exists());
     }
 
     #[test]

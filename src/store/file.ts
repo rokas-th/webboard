@@ -8,7 +8,7 @@ import { LogState } from "../log/state";
 import type { Action, DeviceId, SessionId, Write } from "../log/types";
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
-import { key, parseKey, stateWrites, validateWrite } from "../plan/units";
+import { existence, key, parseKey, stateWrites, validateWrite } from "../plan/units";
 import { AppError, call, callBytes } from "../services/ipc";
 import { decodeAction } from "./doc";
 import type { Registry } from "./registry";
@@ -43,8 +43,12 @@ const truncated = (n: number, m: number): AppError =>
 const newer = (v: number): AppError =>
   new AppError("import.newer", `This file comes from a newer WebBoard (format ${v}); update WebBoard to open it.`);
 const corrupt = (reason: string): AppError => new AppError("import.corrupt", `This file is damaged: ${reason}`);
-const unknownUnits = (keys: readonly string[]): AppError =>
-  new AppError("import.unknown_units", `This plan uses data this WebBoard does not know (${keys.join(", ")}); update WebBoard to open it.`);
+const unknownUnits = (keys: readonly string[], damage: string | undefined): AppError =>
+  new AppError(
+    "import.unknown_units",
+    `This plan uses data this WebBoard does not know (${keys.join(", ")}); update WebBoard to open it.` +
+      (damage === undefined ? "" : ` It is also damaged: ${damage}`),
+  );
 
 export function encodeWbx(h: WbxHeader, update: Uint8Array): Uint8Array {
   if (h.updateLength !== update.length) throw new Error(`updateLength ${h.updateLength} does not match the update's ${update.length} bytes`);
@@ -120,7 +124,7 @@ function readLog(doc: Y.Doc): Action[] {
     a.w.forEach((w) => checkWrite(w, unknown, damage));
     return [a];
   });
-  if (unknown.size > 0) throw unknownUnits([...unknown].sort().slice(0, 3));
+  if (unknown.size > 0) throw unknownUnits([...unknown].sort().slice(0, 3), damage[0]);
   if (damage.length > 0) throw corrupt(damage[0]);
   return actions;
 }
@@ -140,7 +144,18 @@ function checkWrite(w: Write, unknown: Set<string>, damage: string[]): void {
   }
 }
 
-function readPlan(id: PlanId, update: Uint8Array): { plan: PlanState; notes: ReadonlyMap<ItemId, string> } {
+function ownTrashOf(log: LogState, item: ItemId): boolean {
+  const u = key.e(item);
+  const state = log.unit(u);
+  if (state !== undefined) return existence.dec(state.value).t;
+  if (log.writers(u).length === 0) throw new Error(`Item ${item} has no existence unit`);
+  return true;
+}
+
+function readPlan(
+  id: PlanId,
+  update: Uint8Array,
+): { plan: PlanState; notes: ReadonlyMap<ItemId, string>; ownTrashed: ReadonlyMap<ItemId, boolean> } {
   const doc = new Y.Doc();
   try {
     Y.applyUpdate(doc, update);
@@ -165,7 +180,8 @@ function readPlan(id: PlanId, update: Uint8Array): { plan: PlanState; notes: Rea
       return [item, text.toString()];
     }),
   );
-  return { plan, notes };
+  const ownTrashed = new Map([...plan.items.keys()].map((item): [ItemId, boolean] => [item, ownTrashOf(log, item)]));
+  return { plan, notes, ownTrashed };
 }
 
 function remap(plan: PlanState, planId: PlanId): { plan: PlanState; idMap: ReadonlyMap<string, string> } {
@@ -210,7 +226,13 @@ export function buildImport(bytes: Uint8Array, fileName: string, dev: DeviceId, 
   const source = readPlan(header.planId, update);
   const planId = newId();
   const { plan, idMap } = remap(source.plan, planId);
-  const notes = new Map([...source.notes].map(([item, text]): [ItemId, string] => [idMap.get(item) ?? missingId(item), text]));
+  const notes = new Map([...source.notes].map(([item, text]): [ItemId, string] => [idMap.get(item) ?? missingId(item, "a note"), text]));
+  const ownTrashed = new Map([...source.ownTrashed].map(([item, t]): [ItemId, boolean] => [idMap.get(item) ?? missingId(item, "an existence unit"), t]));
+  const ownOf = (item: ItemId): boolean => {
+    const t = ownTrashed.get(item);
+    if (t === undefined) throw new Error(`Item ${item} has no existence unit`);
+    return t;
+  };
   const action: Action = {
     id: newId(),
     dev,
@@ -218,20 +240,20 @@ export function buildImport(bytes: Uint8Array, fileName: string, dev: DeviceId, 
     at: now,
     par: [],
     lbl: `Imported from ${fileName}`,
-    w: stateWrites(plan, "own"),
+    w: stateWrites(plan, "own", ownOf),
     meta: { imported: fileName },
   };
   return { planId, action, newNotes: [...notes.keys()], notes, idMap };
 }
 
-function missingId(item: ItemId): never {
-  throw new Error(`Item ${item} has a note but no new id`);
+function missingId(item: ItemId, what: string): never {
+  throw new Error(`Item ${item} has ${what} but no new id`);
 }
 
 export async function exportPlan(session: PlanSession): Promise<string | null> {
-  const { id, name } = session.view().plan;
-  const path = await save({ defaultPath: name + ".webboard", filters: FILTERS });
+  const path = await save({ defaultPath: session.view().plan.name + ".webboard", filters: FILTERS });
   if (path === null) return null;
+  const { id, name } = session.view().plan;
   const u = session.encodeState();
   const body = encodeWbx({ planId: id, name, exportedAt: new Date(Date.now()).toISOString(), updateLength: u.length }, u);
   await call<null>("file_write", body, { headers: { "x-path": encodeURIComponent(path) } });

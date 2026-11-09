@@ -483,8 +483,9 @@ export class Registry {
     });
     const doc = await this.load(id, false);
     const planDoc = new PlanDoc(doc.ydoc);
+    const action = { ...r.action, at: this.clock.now() };
     doc.ydoc.transact(() => {
-      planDoc.append(r.action, r.newNotes);
+      planDoc.append(action, r.newNotes);
       texts.forEach(([item, text]) => planDoc.note(item).insert(0, text));
     }, LOCAL);
     this.local.addPlan(id);

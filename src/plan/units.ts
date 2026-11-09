@@ -1,6 +1,6 @@
 import type { HolidayDay, HolidayKind, HolidayYear, RegionRef, Tuning } from "../domain/calendar";
 import { toDay, type IsoDate, type Weekday } from "../domain/dates";
-import type { BaselineId, Horizon, Item, ItemId, ItemKind, LinkType, PlanState, Place, Schedule, Status } from "../domain/model";
+import type { BaselineId, Horizon, ItemId, ItemKind, LinkType, PlanState, Place, Schedule, Status } from "../domain/model";
 import type { ActionId, Cause, UnitKey, Write } from "../log/types";
 
 export type UnitKind = "pn" | "cr" | "cw" | "e" | "n" | "s" | "p" | "r" | "l" | "cc" | "ct" | "ch" | "b" | "a";
@@ -486,10 +486,9 @@ export function validateWrite(w: Write): void {
   }
 }
 
-export function stateWrites(plan: PlanState, cause: Cause): Write[] {
+export function stateWrites(plan: PlanState, cause: Cause, ownTrashed: (id: ItemId) => boolean): Write[] {
   const w = (u: UnitKey, v: unknown): Write => ({ u, v, c: cause });
   const cal = plan.calendar;
-  const insideTrash = (i: Item): boolean => i.place.parent !== null && plan.items.get(i.place.parent)?.trashed === true;
   const writes: Write[] = [
     w(key.pn, name.enc(plan.name)),
     w(key.cr, region.enc(cal.region)),
@@ -498,7 +497,7 @@ export function stateWrites(plan: PlanState, cause: Cause): Write[] {
     ...[...cal.tuning].map(([date, t]) => w(key.ct(date), tuning.enc(t))),
     ...[...cal.holidays].map(([year, h]) => w(key.ch(year), holidayYear.enc(h))),
     ...[...plan.items.values()].flatMap((i) => [
-      w(key.e(i.id), existence.enc({ k: i.kind, t: i.trashed && !insideTrash(i) })),
+      w(key.e(i.id), existence.enc({ k: i.kind, t: ownTrashed(i.id) })),
       w(key.n(i.id), name.enc(i.name)),
       ...(i.schedule === null ? [] : [w(key.s(i.id), sched.enc(i.schedule))]),
       w(key.p(i.id), place.enc(i.place)),

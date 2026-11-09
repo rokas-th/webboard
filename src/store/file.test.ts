@@ -209,6 +209,29 @@ describe("export", () => {
     expect(projectPlan(id, logOf(new PlanDoc(fresh).actions()))).toEqual(session.view().plan);
   });
 
+  it("names the plan as it is once the save dialog closes", async () => {
+    const reg = await registry();
+    const id = await reg.createPlan("Bridge");
+    const session = await reg.session(id);
+    let pick: (path: string) => void = () => {
+      throw new Error("save was not called");
+    };
+    vi.mocked(save).mockReturnValue(new Promise<string>((resolve) => (pick = resolve)));
+    const from = tauri.calls.length;
+    const saved = exportPlan(session);
+    await flush();
+    session.apply({ t: "planName", name: "Viaduct" });
+    pick("/Users/a/Bridge.webboard");
+    expect(await saved).toBe("/Users/a/Bridge.webboard");
+    const body = callsOf(from, "file_write")[0].args;
+    if (!(body instanceof Uint8Array)) throw new Error("file_write carried no bytes");
+    const { header, update } = decodeWbx(body);
+    expect(header.name).toBe("Viaduct");
+    const fresh = new Y.Doc();
+    Y.applyUpdate(fresh, update);
+    expect(projectPlan(id, logOf(new PlanDoc(fresh).actions())).name).toBe("Viaduct");
+  });
+
   it("writes nothing on cancel", async () => {
     const reg = await registry();
     const session = await reg.session(await reg.createPlan("Bridge"));
@@ -264,6 +287,56 @@ describe("fresh ids", () => {
     expect(() => session.previewRevert(history[0].id)).toThrow(new Refused(message));
     await flush();
     expect(appendsAfter(from).filter((c) => xdoc(c) === id)).toHaveLength(0);
+  });
+
+  it("keeps each item's own trash under a trashed group", async () => {
+    const source: Action[] = [
+      ...FRESH_SOURCE,
+      act("a1", ["a0"], [own("e:T1", { k: "task", t: true })], { dev: "dev-A" }),
+      act("a2", ["a1"], [own("e:G", { k: "group", t: true })], { dev: "dev-A" }),
+    ];
+    const r = importOf(fileOf(source));
+    const g = r.idMap.get("G");
+    const t1 = r.idMap.get("T1");
+    const t2 = r.idMap.get("T2");
+    if (g === undefined || t1 === undefined || t2 === undefined) throw new Error("G, T1 or T2 has no new id");
+    const existenceOf = (id: string): unknown => r.action.w.find((w) => w.u === `e:${id}`)?.v;
+    expect(existenceOf(g)).toEqual({ k: "group", t: true });
+    expect(existenceOf(t1)).toEqual({ k: "task", t: true });
+    expect(existenceOf(t2)).toEqual({ k: "task", t: false });
+    const reg = await registry();
+    const id = await reg.createPlanFrom(r);
+    const session = await reg.session(id);
+    expect([...session.view().plan.items.values()].every((i) => i.trashed)).toBe(true);
+    session.apply({ t: "restore", items: [g] });
+    const items = session.view().plan.items;
+    expect(items.get(g)?.trashed).toBe(false);
+    expect(items.get(t1)?.trashed).toBe(true);
+    expect(items.get(t2)?.trashed).toBe(false);
+  });
+
+  it("an item whose creation was reverted imports trashed on its own", () => {
+    const source: Action[] = [
+      act("a0", [], [...planHead("Bridge"), ...task("T1", "Survey", null, "a0")], { dev: "dev-A" }),
+      act("a1", ["a0"], task("T2", "Build", null, "a1"), { dev: "dev-A" }),
+      act("a2", ["a1"], [own("n:T2", "Build again")], { dev: "dev-A" }),
+      act("a3", ["a2"], [{ u: "a:a1", v: false, c: "revert" }], { dev: "dev-A" }),
+    ];
+    expect(projectPlan(SOURCE_ID, logOf(source)).items.get("T2")?.trashed).toBe(true);
+    const r = importOf(fileOf(source));
+    const t2 = r.idMap.get("T2");
+    if (t2 === undefined) throw new Error("T2 has no new id");
+    expect(r.action.w.find((w) => w.u === `e:${t2}`)?.v).toEqual({ k: "task", t: true });
+    expect(importedPlan(r).items.get(t2)).toMatchObject({ name: "Build again", trashed: true });
+  });
+
+  it("stamps the import action with the registry clock", async () => {
+    const clock = fixedClock(TODAY);
+    const reg = await Registry.open({ clock });
+    opened.push(reg);
+    const id = await reg.createPlanFrom(importOf(freshFile()));
+    const actions = new PlanDoc((await reg.doc(id)).ydoc).actions();
+    expect([...actions].map((a) => a.at)).toEqual([clock.now()]);
   });
 
   it("createPlanFrom lists and caches", async () => {
@@ -346,6 +419,7 @@ describe("malformed refused", () => {
   const version2 = valid.slice();
   new DataView(version2.buffer).setUint32(4, 2, true);
   const zz = fileOf([act("a0", [], [...planHead("Bridge"), own("zz:1", 1)], { dev: "dev-A" })]);
+  const zzDamaged = fileOf([act("a0", [], [...planHead("Bridge"), own("zz:1", 1), own("n:T1", 7)], { dev: "dev-A" })]);
   const truncatedText = (n: number, m: number) => `This file is incomplete (${n} of ${m} bytes); export it again.`;
   const cases: [string, Uint8Array, string, string | RegExp][] = [
     ["PNG", Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52]), "import.foreign", "This file is not a WebBoard plan."],
@@ -361,6 +435,12 @@ describe("malformed refused", () => {
     ["random update", withHeader(JSON.stringify({ ...decodeWbx(valid).header }), seededBytes(update.length, 20261109)), "import.corrupt", /^This file is damaged: \S/],
     ["extra bytes", Uint8Array.from([...valid, 0, 0]), "import.corrupt", "This file is damaged: 2 bytes follow the plan"],
     ["zz:1", zz, "import.unknown_units", "This plan uses data this WebBoard does not know (zz:1); update WebBoard to open it."],
+    [
+      "zz:1 and damage",
+      zzDamaged,
+      "import.unknown_units",
+      "This plan uses data this WebBoard does not know (zz:1); update WebBoard to open it. It is also damaged: n:T1: name is not a string: 7",
+    ],
   ];
 
   it.each(cases)("%s", async (_name, bytes, code, message) => {
