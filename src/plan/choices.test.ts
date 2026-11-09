@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { choiceOf, choices, fnv1a64, heldItems, sideText, type Choice } from "./choices";
+import { choiceHolding, choiceOf, choices, fnv1a64, heldItems, sideText, type Choice } from "./choices";
 import { projectPlan } from "./project";
 import { planRules } from "./rules";
 import { LogState } from "../log/state";
@@ -535,6 +535,22 @@ describe("choices", () => {
       act("R3", par, [w("s:B", sched("2026-11-24"), "resolution")], { dev: "d3", meta }),
     );
     expect(() => choices(log, projectPlan("P", log), FIXTURE_DEVICES)).toThrow("Side R3 has no value for s:A2");
+  });
+});
+
+describe("choiceHolding", () => {
+  it("names the choice that holds an item, and throws for an item no choice holds", () => {
+    const { cs, plan } = run(
+      act("m1", ["a0"], [w("n:A", "Alpha one")], mac),
+      act("p1", ["a0"], [w("n:A", "Alpha two")], iph),
+      act("m2", ["a0"], [w("l:A>B", ["FS", 0])], mac),
+      act("p2", ["a0"], [w("l:A>B", ["FS", 2])], iph),
+    );
+    expect(cs).toHaveLength(2);
+    const link = choiceOf(cs, "l:A>B");
+    if (link === null) throw new Error("fixture: no link choice");
+    expect(choiceHolding(cs, plan, "B")).toBe(link.id);
+    expect(() => choiceHolding(cs, plan, "A")).toThrow("Item A is held by no open choice");
   });
 });
 

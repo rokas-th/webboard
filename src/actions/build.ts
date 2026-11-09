@@ -6,7 +6,7 @@ import { linkKey, type Item, type ItemId, type Link, type PlanState, type Schedu
 import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type PushResult, type RecalResult, type Sched, type SchedView, type Stop } from "../domain/schedule";
 import { newId } from "../log/ids";
 import type { Action, DeviceId, SessionId, UnitKey, Write } from "../log/types";
-import { heldItems } from "../plan/choices";
+import { choiceHolding } from "../plan/choices";
 import { applySchedules, applyWrites, childrenOf, liveLinks } from "../plan/project";
 import { planRules } from "../plan/rules";
 import * as codec from "../plan/units";
@@ -172,12 +172,6 @@ const checkedCalendar = (cal: Calendar): Calendar => {
   return { ...cal, closures, tuning };
 };
 
-const choiceHolding = (ctx: Ctx, id: ItemId): string => {
-  const c = ctx.view.choices.find((x) => heldItems([x], ctx.view.plan).has(id));
-  if (c === undefined) throw new Error(`Item ${id} is held by no open choice`);
-  return c.id;
-};
-
 const linkOf = (plan: PlanState, k: string): Link => {
   const l = plan.links.get(k);
   if (l === undefined) throw new Error(`Link ${k} is not in this plan`);
@@ -216,12 +210,12 @@ const fixDraft = (ctx: Ctx, conflict: Conflict, how: "push" | "shorten" | "remov
   if (current.kind === "dayoff") {
     if (how !== "push") throw new Error(`A day-off start is fixed by push, not ${how}`);
     const it = itemOf(plan, current.item);
-    if (ctx.view.held.has(it.id)) throw new HeldRefused(refusal.heldFix(it.name), choiceHolding(ctx, it.id));
+    if (ctx.view.held.has(it.id)) throw new HeldRefused(refusal.heldFix(it.name), choiceHolding(ctx.view.choices, ctx.view.plan, it.id));
     return snapDraft(ctx, it);
   }
   const succ = itemOf(plan, current.succ);
   const l = linkOf(plan, current.link);
-  if (current.succLock === "held") throw new HeldRefused(refusal.heldFix(succ.name), choiceHolding(ctx, succ.id));
+  if (current.succLock === "held") throw new HeldRefused(refusal.heldFix(succ.name), choiceHolding(ctx.view.choices, ctx.view.plan, succ.id));
   if (how === "remove") return removeLink(ctx, l);
   if (how === "push") {
     if (current.succLock === "done" || current.succLock === "doing") throw new Refused(refusal.lockedFix(succ.name, current.succLock));

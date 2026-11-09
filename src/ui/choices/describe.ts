@@ -8,7 +8,7 @@ import { decodeAs, key, parseKey } from "../../plan/units";
 import type { PlanView } from "../../store/doc";
 import { planGroupPath } from "../list/groups";
 import { regionText, weekdaysText } from "../panel/calendarText";
-import { orderedSides } from "./side";
+import { orderedSides } from "./order";
 
 const nameOf = (plan: PlanState, id: ItemId): string => {
   const it = plan.items.get(id);

@@ -16,6 +16,7 @@ import { memoryStore } from "../../test/fixtures/store";
 import { MESA_SEED, memoryDoc, testSession, type SeedItem, type TestSession } from "../../test/session";
 import { seededStore as store, shellFor } from "../../test/shell";
 import { hold, resetTauri, tauri, type Call } from "../../test/tauriMock";
+import { orderedSides } from "../choices/order";
 import { clearToasts } from "../common/Toast";
 import { PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
 import { PlanHead } from "./PlanHead";
@@ -395,10 +396,10 @@ describe("PlanHead", () => {
       { id: "x1", message: messages[0] },
       { id: "x3", message: messages[1] },
     ]);
-    const view = render(<PlanHead session={t.session} onChoose={vi.fn()} />);
+    const view = render(<PlanHead session={t.session} local="Mac" onChoose={vi.fn()} />);
     const bad = (): (string | null)[] => [...view.container.querySelectorAll(".bad")].map((e) => e.textContent);
     expect(bad()).toEqual(messages);
-    view.rerender(<PlanHead session={t.session} onChoose={vi.fn()} />);
+    view.rerender(<PlanHead session={t.session} local="Mac" onChoose={vi.fn()} />);
     expect(bad()).toEqual(messages);
     expect(screen.getByText("Receiving… · 1 change waiting")).toBeTruthy();
   });
@@ -407,7 +408,7 @@ describe("PlanHead", () => {
     const t = await made([{ name: "A", start: "2026-11-10", dur: 3 }], {
       raw: { x1: RAW_X1, x2: child("x2", "One"), x4: child("x4", "Two"), x5: child("x5", "Three") },
     });
-    render(<PlanHead session={t.session} onChoose={vi.fn()} />);
+    render(<PlanHead session={t.session} local="Mac" onChoose={vi.fn()} />);
     expect(screen.getByText("Receiving… · 3 changes waiting")).toBeTruthy();
   });
 
@@ -418,11 +419,11 @@ describe("PlanHead", () => {
 
   it("counts open choices", async () => {
     const one = await made(A, { clashes: [NAME_CLASH] });
-    const first = render(<PlanHead session={one.session} onChoose={vi.fn()} />);
+    const first = render(<PlanHead session={one.session} local="Mac" onChoose={vi.fn()} />);
     expect(chip()).toBe("1 open choice · Choose…");
     first.unmount();
     const none = await made(A);
-    const empty = render(<PlanHead session={none.session} onChoose={vi.fn()} />);
+    const empty = render(<PlanHead session={none.session} local="Mac" onChoose={vi.fn()} />);
     expect(empty.container.textContent).not.toMatch(/open choice/);
     empty.unmount();
   });
@@ -430,7 +431,7 @@ describe("PlanHead", () => {
   it("lists every choice, calendar ones included, and opens the picked one", async () => {
     const t = await made(A, { clashes: [NAME_CLASH, DAY_CLASH] });
     const onChoose = vi.fn();
-    render(<PlanHead session={t.session} onChoose={onChoose} />);
+    render(<PlanHead session={t.session} local="Mac" onChoose={onChoose} />);
     expect(chip()).toBe("2 open choices · Choose…");
     const chips = document.querySelector(".chips");
     if (!(chips instanceof HTMLElement)) throw new Error("no chips");
@@ -438,15 +439,30 @@ describe("PlanHead", () => {
     const view = t.session.view();
     expect(view.choices.map((c) => c.kind).sort()).toEqual(["calendar", "items"]);
     const rows = within(screen.getByRole("list", { name: "Open choices" })).getAllByRole("button");
-    expect(rows.map((r) => r.textContent)).toEqual(view.choices.map((c) => c.sides.map((s) => sideText(c, s.key, view.plan)).join(" or ")));
+    expect(rows.map((r) => r.textContent)).toEqual(view.choices.map((c) => orderedSides(c, "Mac").map((s) => sideText(c, s.key, view.plan)).join(" or ")));
     fireEvent.click(rows[1]);
     expect(onChoose.mock.calls).toEqual([[view.choices[1].id]]);
     expect(screen.queryByRole("list", { name: "Open choices" })).toBeNull();
   });
 
+  it("lists this device's side first even when the iPhone's replays first", async () => {
+    const t = await made(A);
+    const p = await t.peer("iphone");
+    t.session.apply({ t: "rename", item: "A", name: "Draft" });
+    t.session.apply({ t: "rename", item: "A", name: "Alpha" });
+    p.session.apply({ t: "rename", item: "A", name: "Beta" });
+    p.sync();
+    expect(t.session.view().choices.map((c) => c.sides.map((s) => s.label))).toEqual([["iPhone", "Mac"]]);
+    render(<PlanHead session={t.session} local="Mac" onChoose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    const rows = within(screen.getByRole("list", { name: "Open choices" })).getAllByRole("button");
+    expect(rows.map((r) => r.textContent)).toEqual(["Mac or iPhone"]);
+    await p.session.close();
+  });
+
   it("closes the list when the last choice is resolved", async () => {
     const t = await made(A, { clashes: [NAME_CLASH] });
-    render(<PlanHead session={t.session} onChoose={vi.fn()} />);
+    render(<PlanHead session={t.session} local="Mac" onChoose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
     expect(screen.queryByRole("list", { name: "Open choices" })).not.toBeNull();
     act(() => {
@@ -468,7 +484,7 @@ describe("PlanHead", () => {
   it("opens the choice holding the held items", async () => {
     const t = await made(A, { clashes: [{ unit: "s:A", mac: ["2026-11-16", 3, "todo", 0, "now"], iphone: ["2026-11-18", 3, "todo", 0, "now"] }] });
     const onChoose = vi.fn();
-    const view = render(<PlanHead session={t.session} onChoose={onChoose} />);
+    const view = render(<PlanHead session={t.session} local="Mac" onChoose={onChoose} />);
     fireEvent.click(screen.getByRole("button", { name: "1 held" }));
     expect(onChoose.mock.calls).toEqual([[t.session.view().choices[0].id]]);
     view.unmount();

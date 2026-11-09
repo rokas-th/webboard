@@ -3,10 +3,11 @@ import { sideText } from "../../plan/choices";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { CalendarBanner } from "../choices/CalendarBanner";
 import { HeadCounts } from "../choices/HeadCounts";
+import { orderedSides } from "../choices/order";
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-export function PlanHead(p: { session: PlanSession; onChoose(choice: string): void; children?: ReactNode }) {
+export function PlanHead(p: { session: PlanSession; local: string; onChoose(choice: string): void; children?: ReactNode }) {
   const view = usePlanView(p.session);
   const [listOpen, setListOpen] = useState(false);
   const plan = view.plan;
@@ -49,7 +50,7 @@ export function PlanHead(p: { session: PlanSession; onChoose(choice: string): vo
           {view.choices.map((c) => (
             <li key={c.id}>
               <button type="button" className="choice-row" onClick={() => choose(c.id)}>
-                {c.sides.map((s) => sideText(c, s.key, plan)).join(" or ")}
+                {orderedSides(c, p.local).map((s) => sideText(c, s.key, plan)).join(" or ")}
               </button>
             </li>
           ))}

@@ -463,6 +463,12 @@ export function heldItems(choices: readonly Choice[], plan: PlanState): Readonly
   );
 }
 
+export function choiceHolding(choices: readonly Choice[], plan: PlanState, item: ItemId): string {
+  const c = choices.find((x) => heldItems([x], plan).has(item));
+  if (c === undefined) throw new Error(`Item ${item} is held by no open choice`);
+  return c.id;
+}
+
 export function sideText(choice: Choice, side: string, plan: PlanState): string {
   const s = choice.sides.find((x) => x.key === side);
   if (s === undefined) throw new Error(`Choice ${choice.id} has no side ${side}`);

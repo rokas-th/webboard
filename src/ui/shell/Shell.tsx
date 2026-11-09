@@ -339,7 +339,7 @@ export function Shell(p: ShellProps) {
             </button>
           </Banner>
         )}
-        <PlanHead session={session} onChoose={(choice) => openChoice(choice)}>
+        <PlanHead session={session} local={registry.device.name} onChoose={(choice) => openChoice(choice)}>
           <HolidayState session={session} registry={registry} clock={p.clock} />
         </PlanHead>
         <div className="view">

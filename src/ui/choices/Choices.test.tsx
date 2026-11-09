@@ -621,6 +621,15 @@ describe("choice dialog", () => {
     act(() => t.session.setReadOnly(false));
     expect(all(".pick-row", dialog())).toHaveLength(1);
     expect(preview.mock.calls.map((x) => x[1])).toEqual([{ side: keyOf(c, "Mac") }, { side: keyOf(c, "iPhone") }]);
+    preview.mockClear();
+    setUi({ dialog: { t: "choice", id: c.id } });
+    setUi({ dialog: { t: "choice", id: c.id } });
+    expect(preview).not.toHaveBeenCalled();
+    vi.mocked(t.session.view).mockReturnValue({ ...t.session.view(), choices: [c] });
+    act(() => t.session.setReadOnly(false));
+    const rejoined = all(".pick-row select", dialog());
+    expect(rejoined).toHaveLength(2);
+    expect(rejoined.map((s) => (s instanceof HTMLSelectElement ? s.value : null))).toEqual(["", ""]);
   });
 
   it("offers the other version on Undo, and resolves only when it is pressed", async () => {

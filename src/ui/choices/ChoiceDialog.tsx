@@ -10,7 +10,8 @@ import { toast } from "../common/Toast";
 import { useExec } from "../run";
 import { unitSubject } from "./describe";
 import { groupRows, outcomeLine } from "./outcome";
-import { orderedSides, sideContent, type SideContent } from "./side";
+import { orderedSides } from "./order";
+import { sideContent, type SideContent } from "./side";
 import { UndoOffer } from "./UndoOffer";
 
 export const SETTLED = "This choice was settled meanwhile.";
@@ -79,6 +80,7 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
   const [perItem, setPerItem] = useState(false);
   const [perUnit, setPerUnit] = useState<ReadonlyMap<UnitKey, string>>(new Map());
   const live = livePicks(choice, perUnit);
+  if (live !== perUnit) setPerUnit(live);
   const picks = perItem ? live : NO_PICKS;
   const contents = useMemo(
     () => sides.map((s) => sideContent(p.session, choice, pickOf(s.key, picks), opts)),

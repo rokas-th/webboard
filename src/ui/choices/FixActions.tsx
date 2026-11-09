@@ -3,7 +3,7 @@ import { q } from "../../actions/copy";
 import { schedView } from "../../domain/derive";
 import type { ItemId } from "../../domain/model";
 import { lagThatHolds, type Conflict, type SchedView } from "../../domain/schedule";
-import { heldItems } from "../../plan/choices";
+import { choiceHolding } from "../../plan/choices";
 import type { PlanView } from "../../store/doc";
 import { OpenChoice, type Run } from "../run";
 import { dayLabel } from "../timeline/dayText";
@@ -38,12 +38,6 @@ function holdingLag(view: PlanView, sv: SchedView, c: Early): number {
   const pred = sv.items.get(c.pred);
   if (succ === undefined || pred === undefined) throw new Error(`Conflict on ${c.link} has an end with no schedule`);
   return lagThatHolds(succ, linkOf(view, c.link), pred, sv.cal);
-}
-
-function holdingChoice(view: PlanView, item: ItemId): string {
-  const c = view.choices.find((x) => heldItems([x], view.plan).has(item));
-  if (c === undefined) throw new Error(`Item ${item} is held by no open choice`);
-  return c.id;
 }
 
 type Button = readonly [string, () => void];
@@ -87,7 +81,7 @@ function Fix(p: { view: PlanView; conflict: Conflict; sv: SchedView | null; read
     ]);
   }
   const text = `Starts earlier than the link from ${pred} allows.`;
-  if (c.succLock === "held") return line(text, "conflict-text", [], [["Open the choice", () => open(holdingChoice(p.view, c.succ))]]);
+  if (c.succLock === "held") return line(text, "conflict-text", [], [["Open the choice", () => open(choiceHolding(p.view.choices, p.view.plan, c.succ))]]);
   return line(text, "conflict-text", [[`Push ${q(nameOf(p.view, c.succ))} to ${dayLabel(c.need)}`, () => fix("push")]]);
 }
 
