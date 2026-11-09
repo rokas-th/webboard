@@ -1,0 +1,626 @@
+import type * as Y from "yjs";
+import { initialAction, normalizeName } from "../actions/build";
+import { Refused } from "../actions/intents";
+import { regionKey, type HolidayYear, type RegionRef } from "../domain/calendar";
+import { toDay, yearOf } from "../domain/dates";
+import type { PlanId, PlanState } from "../domain/model";
+import { newId } from "../log/ids";
+import { LogState } from "../log/state";
+import type { ActionId, DeviceId } from "../log/types";
+import { PlanIncomplete, projectPlan } from "../plan/project";
+import { planRules } from "../plan/rules";
+import { region as regionCodec, validateWrite } from "../plan/units";
+import { notifyEach, systemClock, type Clock } from "../services/clock";
+import { HolidayService } from "../services/holidays";
+import { AppError, call } from "../services/ipc";
+import { PlanDoc } from "./doc";
+import { IndexDoc } from "./index-doc";
+import { openPersisted, type PersistedDoc } from "./persist";
+import { readActions } from "./read-actions";
+import { PlanSession, type SessionDeps } from "./session";
+
+export interface Settings {
+  v: 1;
+  lastRegion: RegionRef | null;
+  names: Record<PlanId, string>;
+  syncedHeads?: Record<string, readonly ActionId[]>;
+}
+
+export interface DeviceInfo {
+  deviceId: DeviceId;
+  name: string;
+  platform: "macos" | "linux" | "ios";
+}
+
+export interface PlanListing {
+  id: PlanId;
+  name: string | null;
+  trashed: boolean;
+  loaded: boolean;
+  space: string | null;
+}
+
+const READ_ONLY = "This device was removed from the space; its plans are read-only.";
+const INCOMPLETE = "This plan has not arrived yet; it opens once it syncs.";
+const INDEX_REPAIRED = "The last change to the plan list before WebBoard closed was not saved.";
+const LOCAL_INDEX = "local";
+const SPACE_PREFIX = "ix-";
+const PROBE = "probe";
+
+const isIndexDoc = (id: string): boolean => id === LOCAL_INDEX || id.startsWith(SPACE_PREFIX);
+
+const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+export function defaultDeviceName(platform: DeviceInfo["platform"], shortSide: number): string {
+  switch (platform) {
+    case "ios":
+      return shortSide >= 600 ? "iPad" : "iPhone";
+    case "macos":
+      return "Mac";
+    case "linux":
+      return "Linux";
+  }
+}
+
+function parseSettings(raw: unknown): Settings {
+  if (raw === null) return { v: 1, lastRegion: null, names: {} };
+  const bad = (what: string): AppError => new AppError("settings.corrupt", `settings.json does not hold WebBoard settings: ${what}.`);
+  if (typeof raw !== "object" || Array.isArray(raw)) throw bad("it is not an object");
+  if (!("v" in raw) || raw.v !== 1) throw bad("its version is not 1");
+  if (!("names" in raw) || typeof raw.names !== "object" || raw.names === null || Array.isArray(raw.names)) throw bad("names is not an object");
+  const names = Object.fromEntries(
+    Object.entries(raw.names).map(([id, name]): [string, string] => {
+      if (typeof name !== "string") throw bad(`the name of plan ${id} is not text`);
+      return [id, name];
+    }),
+  );
+  if (!("lastRegion" in raw)) throw bad("lastRegion is missing");
+  let lastRegion: RegionRef | null;
+  try {
+    lastRegion = regionCodec.dec(raw.lastRegion);
+  } catch (e) {
+    throw bad(`lastRegion is not a region: ${messageOf(e)}`);
+  }
+  const base: Settings = { ...raw, v: 1, lastRegion, names };
+  if (!("syncedHeads" in raw)) return base;
+  const heads = raw.syncedHeads;
+  if (typeof heads !== "object" || heads === null || Array.isArray(heads)) throw bad("syncedHeads is not an object");
+  const syncedHeads = Object.fromEntries(
+    Object.entries(heads).map(([doc, ids]): [string, readonly ActionId[]] => {
+      if (!Array.isArray(ids) || !ids.every((x): x is string => typeof x === "string")) throw bad(`the synced heads of ${doc} are not a list of ids`);
+      return [doc, ids];
+    }),
+  );
+  return { ...base, syncedHeads };
+}
+
+function parseDevice(raw: unknown): { deviceId: DeviceId; platform: DeviceInfo["platform"] } {
+  if (
+    typeof raw === "object" &&
+    raw !== null &&
+    "deviceId" in raw &&
+    typeof raw.deviceId === "string" &&
+    "platform" in raw &&
+    (raw.platform === "macos" || raw.platform === "linux" || raw.platform === "ios")
+  ) {
+    return { deviceId: raw.deviceId, platform: raw.platform };
+  }
+  throw new AppError("ipc.shape", "device_info answered an unexpected shape");
+}
+
+function parseList(raw: unknown): string[] {
+  if (Array.isArray(raw) && raw.every((x): x is string => typeof x === "string")) return raw;
+  throw new AppError("ipc.shape", "store_list answered an unexpected shape");
+}
+
+const sameDevices = (a: ReadonlyMap<DeviceId, string>, b: ReadonlyMap<DeviceId, string>): boolean =>
+  a.size === b.size && [...a].every(([id, name]) => b.get(id) === name);
+
+const afterEither = (): void => undefined;
+
+interface Tracker {
+  log: LogState;
+  projected: boolean;
+  off(): void;
+}
+
+export class Registry {
+  readonly holidays: HolidayService;
+  private readonly clock: Clock;
+  private readonly deviceId: DeviceId;
+  private readonly platform: DeviceInfo["platform"];
+  private settings: Settings;
+  private localIx: IndexDoc | null = null;
+  private offLocal: (() => void) | null = null;
+  private spaceIds: readonly string[] = [];
+  private readonly spaces = new Map<string, IndexDoc>();
+  private readonly memo = new Map<string, Promise<PersistedDoc>>();
+  private readonly loaded = new Map<string, PersistedDoc>();
+  private readonly docOffs = new Map<string, () => void>();
+  private readonly trackers = new Map<PlanId, Tracker>();
+  private readonly failed = new Map<PlanId, AppError>();
+  private readonly indexFailed = new Map<string, AppError>();
+  private readonly sessionMemo = new Map<PlanId, Promise<PlanSession>>();
+  private readonly sessions = new Map<PlanId, PlanSession>();
+  private readonly deviceCbs = new Set<() => void>();
+  private readonly subscribers = new Set<() => void>();
+  private lastDevices: ReadonlyMap<DeviceId, string> = new Map();
+  private settingsFailure: AppError | null = null;
+  private settingsQueue: Promise<void> = Promise.resolve();
+  private indexRepairPending = false;
+  private closed = false;
+
+  private constructor(clock: Clock, settings: Settings, device: { deviceId: DeviceId; platform: DeviceInfo["platform"] }) {
+    this.clock = clock;
+    this.holidays = new HolidayService(() => clock.now());
+    this.settings = settings;
+    this.deviceId = device.deviceId;
+    this.platform = device.platform;
+  }
+
+  static async open(opts?: { clock?: Clock }): Promise<Registry> {
+    const clock = opts?.clock ?? systemClock;
+    const settings = parseSettings(await call<unknown>("settings_read"));
+    const device = parseDevice(await call<unknown>("device_info"));
+    const r = new Registry(clock, settings, device);
+    try {
+      await r.start();
+    } catch (e) {
+      await r.close().catch((c: unknown) => {
+        throw Object.assign(new Error(`${messageOf(e)} (closing the plan list afterwards failed too: ${messageOf(c)})`), { cause: e, suppressed: c });
+      });
+      throw e;
+    }
+    return r;
+  }
+
+  private async start(): Promise<void> {
+    const local = await IndexDoc.open(LOCAL_INDEX, this.deviceId, (id) => this.doc(id));
+    this.localIx = local;
+    this.indexRepairPending = this.loadedDoc(LOCAL_INDEX).repairedTornTail;
+    if (!local.devices().has(this.deviceId)) {
+      local.nameDevice(this.deviceId, defaultDeviceName(this.platform, Math.min(window.screen.width, window.screen.height)));
+    }
+    this.lastDevices = local.devices();
+    this.offLocal = local.subscribe(() => this.onIndexChange());
+    const ids = parseList(await call<unknown>("store_list"));
+    this.spaceIds = ids.filter((id) => id.startsWith(SPACE_PREFIX));
+    const spaces = await Promise.all(this.spaceIds.map((id) => this.openSpace(id)));
+    if (spaces.some((ix) => ix === null)) return;
+    const listed = new Set([local, ...spaces].flatMap((ix) => (ix === null ? [] : ix.plans().map((p) => p.id))));
+    ids.filter((id) => !isIndexDoc(id) && id !== PROBE && !listed.has(id)).forEach((id) => local.addPlan(id));
+  }
+
+  private async openSpace(id: string): Promise<IndexDoc | null> {
+    try {
+      const ix = await IndexDoc.open(id, this.deviceId, (d) => this.doc(d));
+      this.spaces.set(id, ix);
+      return ix;
+    } catch (e) {
+      if (e instanceof AppError && this.indexFailed.get(id) === e) return null;
+      throw e;
+    }
+  }
+
+  private get local(): IndexDoc {
+    if (this.localIx === null) throw new Error("The local plan list is not open");
+    return this.localIx;
+  }
+
+  private loadedDoc(id: string): PersistedDoc {
+    const d = this.loaded.get(id);
+    if (d === undefined) throw new Error(`Document ${id} is not loaded`);
+    return d;
+  }
+
+  private usable(): void {
+    if (this.closed) throw new Error("The registry is closed");
+  }
+
+  private notify(): void {
+    notifyEach(this.subscribers);
+  }
+
+  private onIndexChange(): void {
+    const devices = this.local.devices();
+    const changed = !sameDevices(devices, this.lastDevices);
+    this.lastDevices = devices;
+    notifyEach([...(changed ? this.deviceCbs : []), ...this.subscribers]);
+  }
+
+  private record(id: string, e: AppError): void {
+    if (isIndexDoc(id)) this.indexFailed.set(id, e);
+    else this.failed.set(id, e);
+  }
+
+  doc(id: string): Promise<PersistedDoc> {
+    return this.load(id, true);
+  }
+
+  private load(id: string, record: boolean): Promise<PersistedDoc> {
+    this.usable();
+    const memo = this.memo.get(id);
+    if (memo !== undefined) return memo;
+    const p: Promise<PersistedDoc> = openPersisted(id).then(
+      async (d) => {
+        if (this.closed) {
+          await d.close();
+          throw new Error(`The registry closed while ${id} was loading`);
+        }
+        this.attach(id, d);
+        return d;
+      },
+      (e: unknown) => {
+        if (this.memo.get(id) === p) this.memo.delete(id);
+        if (record && e instanceof AppError) {
+          this.record(id, e);
+          this.notify();
+        }
+        throw e;
+      },
+    );
+    this.memo.set(id, p);
+    return p;
+  }
+
+  private attach(id: string, d: PersistedDoc): void {
+    this.loaded.set(id, d);
+    const offError = d.onError((e) => {
+      if (!isIndexDoc(id)) this.failed.set(id, e);
+      this.notify();
+    });
+    if (isIndexDoc(id)) {
+      this.docOffs.set(id, offError);
+      return;
+    }
+    const offTracker = this.track(id, d);
+    this.docOffs.set(id, () => {
+      offError();
+      offTracker();
+    });
+  }
+
+  private track(id: PlanId, d: PersistedDoc): () => void {
+    const map = d.ydoc.getMap("actions");
+    const tracker: Tracker = { log: new LogState(planRules), projected: false, off: () => map.unobserve(observer) };
+    const feed = (ids: readonly string[]): void => {
+      tracker.log.add(readActions(ids.map((k): readonly [string, unknown] => [k, map.get(k)]), validateWrite).ok);
+      this.project(id, tracker);
+    };
+    const observer = (event: Y.YMapEvent<unknown>): void => feed([...event.keysChanged]);
+    this.trackers.set(id, tracker);
+    map.observe(observer);
+    feed([...map.keys()]);
+    return () => {
+      tracker.off();
+      if (this.trackers.get(id) === tracker) this.trackers.delete(id);
+    };
+  }
+
+  private project(id: PlanId, tracker: Tracker): void {
+    let plan: PlanState;
+    try {
+      plan = projectPlan(id, tracker.log);
+    } catch (e) {
+      if (!(e instanceof PlanIncomplete)) throw e;
+      tracker.projected = false;
+      return;
+    }
+    const first = !tracker.projected;
+    tracker.projected = true;
+    const named = this.cacheName(id, plan.name);
+    if (first || named) this.notify();
+  }
+
+  private cacheName(id: PlanId, name: string): boolean {
+    if (this.settings.names[id] === name) return false;
+    this.settings = { ...this.settings, names: { ...this.settings.names, [id]: name } };
+    void this.writeSettings().then(
+      () => {
+        if (this.settingsFailure === null) return;
+        this.settingsFailure = null;
+        this.notify();
+      },
+      (e: unknown) => {
+        if (!(e instanceof AppError)) throw e;
+        this.settingsFailure = e;
+        this.notify();
+      },
+    );
+    return true;
+  }
+
+  private writeSettings(): Promise<void> {
+    const run = this.settingsQueue.then(() => call<null>("settings_write", { settings: this.settings }));
+    this.settingsQueue = run.then(afterEither, afterEither);
+    return run.then(afterEither);
+  }
+
+  private deps(): SessionDeps {
+    return {
+      persist: (id) => this.doc(id),
+      holidays: this.holidays,
+      clock: this.clock,
+      device: this.deviceId,
+      devices: () => this.devices(),
+      onDevices: (cb) => {
+        this.deviceCbs.add(cb);
+        return () => {
+          this.deviceCbs.delete(cb);
+        };
+      },
+      onName: (id, name) => {
+        if (this.cacheName(id, name)) this.notify();
+      },
+    };
+  }
+
+  get device(): DeviceInfo {
+    const name = this.local.devices().get(this.deviceId);
+    if (name === undefined) throw new Error(`Device ${this.deviceId} has no name in the local plan list`);
+    return { deviceId: this.deviceId, name, platform: this.platform };
+  }
+
+  plans(): readonly PlanListing[] {
+    return this.local.plans().map((p) => ({
+      id: p.id,
+      name: this.settings.names[p.id] ?? null,
+      trashed: p.trashed,
+      loaded: this.trackers.get(p.id)?.projected ?? false,
+      space: null,
+    }));
+  }
+
+  session(id: PlanId): Promise<PlanSession> {
+    this.usable();
+    const memo = this.sessionMemo.get(id);
+    if (memo !== undefined) return memo;
+    const p: Promise<PlanSession> = this.openSession(id).then(
+      (s) => {
+        const close = s.close.bind(s);
+        s.close = async () => {
+          await close();
+          if (this.sessions.get(id) === s) this.sessions.delete(id);
+          if (this.sessionMemo.get(id) === p) this.sessionMemo.delete(id);
+        };
+        this.sessions.set(id, s);
+        return s;
+      },
+      (e: unknown) => {
+        if (this.sessionMemo.get(id) === p) this.sessionMemo.delete(id);
+        throw e;
+      },
+    );
+    this.sessionMemo.set(id, p);
+    return p;
+  }
+
+  private async openSession(id: PlanId): Promise<PlanSession> {
+    await this.doc(id);
+    const tracker = this.trackers.get(id);
+    if (tracker === undefined) throw new Error(`Plan ${id} is loaded without a name tracker`);
+    if (!tracker.projected) throw new AppError("plan.incomplete", INCOMPLETE);
+    return PlanSession.open(id, this.deps());
+  }
+
+  openSessions(): readonly PlanSession[] {
+    return [...this.sessions.values()];
+  }
+
+  localSpaces(): readonly string[] {
+    return this.spaceIds.map((id) => id.slice(SPACE_PREFIX.length));
+  }
+
+  devices(): ReadonlyMap<DeviceId, string> {
+    return this.local.devices();
+  }
+
+  indexUnreadable(): readonly string[] {
+    return this.local.unreadable().map((u) => u.message);
+  }
+
+  async createPlan(name: string): Promise<PlanId> {
+    this.usable();
+    const region = this.settings.lastRegion;
+    const y = yearOf(toDay(this.clock.today()));
+    const years = [y, y + 1];
+    if (region !== null) await this.holidays.warm(region, years);
+    const rk = region === null ? null : regionKey(region);
+    const holidays = new Map(
+      years.flatMap((year): [number, HolidayYear][] => {
+        const h = rk === null ? null : this.holidays.cached(rk, year);
+        return h === null ? [] : [[year, h]];
+      }),
+    );
+    const action = initialAction({
+      dev: this.deviceId,
+      ses: newId(),
+      now: this.clock.now(),
+      name,
+      calendar: { region, workdays: [1, 2, 3, 4, 5], closures: new Map(), tuning: new Map(), holidays },
+    });
+    const id = newId();
+    const doc = await this.load(id, false);
+    new PlanDoc(doc.ydoc).append(action, []);
+    this.local.addPlan(id);
+    await this.session(id);
+    if (this.cacheName(id, normalizeName(name))) this.notify();
+    return id;
+  }
+
+  trashPlan(id: PlanId): void {
+    this.usable();
+    this.local.trashPlan(id);
+  }
+
+  restorePlan(id: PlanId): void {
+    this.usable();
+    this.local.restorePlan(id);
+  }
+
+  async setLastRegion(r: RegionRef): Promise<void> {
+    this.usable();
+    this.settings = { ...this.settings, lastRegion: r };
+    await this.writeSettings();
+  }
+
+  async warm(): Promise<void> {
+    for (const { id } of this.plans()) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (this.closed) return;
+      if (this.memo.has(id) || this.failed.has(id)) continue;
+      await this.doc(id).then(afterEither, (e: unknown) => {
+        if (!(e instanceof AppError) || this.failed.get(id) !== e) throw e;
+      });
+    }
+  }
+
+  failures(): ReadonlyMap<PlanId, AppError> {
+    return this.failed;
+  }
+
+  subscribe(cb: () => void): () => void {
+    this.subscribers.add(cb);
+    return () => {
+      this.subscribers.delete(cb);
+    };
+  }
+
+  async retryPlan(id: PlanId): Promise<void> {
+    this.usable();
+    const d = this.loaded.get(id);
+    this.failed.delete(id);
+    this.notify();
+    if (d !== undefined) {
+      await d.retry();
+      return;
+    }
+    await this.doc(id);
+  }
+
+  private indexStates(): [string, AppError | null][] {
+    return [LOCAL_INDEX, ...this.spaceIds].map((id) => [id, this.indexFailed.get(id) ?? this.loaded.get(id)?.error() ?? null]);
+  }
+
+  indexError(): AppError | null {
+    return this.indexStates().find(([, e]) => e !== null)?.[1] ?? null;
+  }
+
+  indexErrorDoc(): string | null {
+    return this.indexStates().find(([, e]) => e !== null)?.[0] ?? null;
+  }
+
+  async retryIndex(): Promise<void> {
+    this.usable();
+    const failing = this.indexStates().flatMap(([id, e]) => (e === null ? [] : [id]));
+    const results = await Promise.allSettled(failing.map((id) => this.retryIndexDoc(id)));
+    this.notify();
+    const rejected = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (rejected !== undefined) throw rejected.reason;
+  }
+
+  private async retryIndexDoc(id: string): Promise<void> {
+    const d = this.loaded.get(id);
+    if (d !== undefined && d.error() !== null) {
+      await d.retry();
+      return;
+    }
+    this.indexFailed.delete(id);
+    if (id === LOCAL_INDEX) throw new Error("The local plan list failed without a loaded document");
+    this.spaces.set(id, await IndexDoc.open(id, this.deviceId, (x) => this.doc(x)));
+  }
+
+  spaceReadOnly(): boolean {
+    return false;
+  }
+
+  async reloadFromServer(docId: string): Promise<void> {
+    this.usable();
+    if (this.spaceReadOnly()) throw new Refused(READ_ONLY);
+    if (docId === LOCAL_INDEX) throw new Error("The local plan list is not loaded from the server");
+    await this.release(docId);
+    try {
+      await call<null>("store_set_aside", { doc: docId });
+    } catch (e) {
+      if (e instanceof AppError) {
+        this.record(docId, e);
+        this.notify();
+      }
+      throw e;
+    }
+    this.failed.delete(docId);
+    this.indexFailed.delete(docId);
+    if (docId.startsWith(SPACE_PREFIX)) {
+      this.spaces.set(docId, await IndexDoc.open(docId, this.deviceId, (id) => this.doc(id)));
+    } else {
+      await this.doc(docId);
+    }
+    this.notify();
+  }
+
+  private async release(id: string): Promise<void> {
+    const session = this.sessions.get(id);
+    if (session !== undefined) await session.close();
+    const ix = this.spaces.get(id);
+    const d = this.loaded.get(id);
+    this.detach(id);
+    if (ix !== undefined) {
+      this.spaces.delete(id);
+      if (d === undefined) throw new Error(`Index ${id} is open without a loaded document`);
+      await this.closing(ix.close(), d);
+    }
+    if (d !== undefined) await this.closing(d.close(), d);
+  }
+
+  private detach(id: string): void {
+    this.docOffs.get(id)?.();
+    this.docOffs.delete(id);
+    this.loaded.delete(id);
+    this.memo.delete(id);
+  }
+
+  private async closing(done: Promise<void>, d: PersistedDoc): Promise<void> {
+    try {
+      await done;
+    } catch (e) {
+      if (e !== d.error()) throw e;
+    }
+  }
+
+  settingsError(): AppError | null {
+    return this.settingsFailure;
+  }
+
+  async retrySettings(): Promise<void> {
+    this.usable();
+    let failure: AppError | null = null;
+    try {
+      await this.writeSettings();
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e;
+      failure = e;
+    }
+    this.settingsFailure = failure;
+    this.notify();
+    if (failure !== null) throw failure;
+  }
+
+  takeIndexRepairNotice(): string | null {
+    if (!this.indexRepairPending) return null;
+    this.indexRepairPending = false;
+    return INDEX_REPAIRED;
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    this.offLocal?.();
+    this.offLocal = null;
+    await Promise.all([...this.sessions.values()].map((s) => s.close()));
+    const indexes = [...(this.localIx === null ? [] : [this.localIx]), ...this.spaces.values()];
+    await Promise.all(indexes.map((ix) => this.closing(ix.close(), this.loadedDoc(ix.id))));
+    const docs = [...this.loaded];
+    docs.forEach(([id]) => this.detach(id));
+    await Promise.all(docs.map(([, d]) => this.closing(d.close(), d)));
+  }
+}

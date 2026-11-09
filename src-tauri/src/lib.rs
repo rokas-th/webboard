@@ -50,7 +50,11 @@ pub fn run() {
             commands::holidays::holidays_countries,
             commands::holidays::holidays_subdivisions,
             commands::holidays::holidays_year,
-            commands::holidays::holidays_ics_preview
+            commands::holidays::holidays_ics_preview,
+            commands::device::device_info,
+            commands::settings::settings_read,
+            commands::settings::settings_write,
+            commands::settings::settings_reset
         ])
         .run(tauri::generate_context!())
         .expect("error while running WebBoard");
