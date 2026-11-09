@@ -251,6 +251,12 @@ describe("the Cyberdeck look", () => {
     });
   });
 
+  it("sizes the shared modal at 520 px and the wide calendar modal at 600 px", () => {
+    const widths = (sel: string): string[] => sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0 && r.decls["width"] !== undefined).map((r) => r.decls["width"] ?? "");
+    expect(widths(".modal")).toEqual(["520px"]);
+    expect(widths(".modal.modal-wide")).toEqual(["600px"]);
+  });
+
   it("clips the panel's name inputs with an ellipsis", () => {
     [".panel .title-input", ".panel .baseline-name"].forEach((sel) => {
       const decls = Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));

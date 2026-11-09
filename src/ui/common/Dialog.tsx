@@ -4,7 +4,7 @@ const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), select:not(:disa
 
 const focusables = (root: HTMLElement): HTMLElement[] => [...root.querySelectorAll<HTMLElement>(FOCUSABLE)];
 
-export function Dialog(p: { label: string; onClose(): void; children?: ReactNode }) {
+export function Dialog(p: { label: string; wide?: boolean; onClose(): void; children?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const before = document.activeElement;
@@ -39,7 +39,7 @@ export function Dialog(p: { label: string; onClose(): void; children?: ReactNode
   };
   return (
     <div className="overlay center">
-      <div ref={ref} className="modal" role="dialog" aria-modal="true" aria-label={p.label} tabIndex={-1} onKeyDown={onKeyDown}>
+      <div ref={ref} className={p.wide === true ? "modal modal-wide" : "modal"} role="dialog" aria-modal="true" aria-label={p.label} tabIndex={-1} onKeyDown={onKeyDown}>
         <h3>{p.label}</h3>
         {p.children}
       </div>

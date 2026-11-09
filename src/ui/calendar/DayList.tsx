@@ -3,10 +3,7 @@ import { fmtShort, toDay, toIso, yearOf, type Day, type IsoDate } from "../../do
 import { NOT_AVAILABLE, noticeText, type HolidayNotice } from "../../services/holidays";
 import { originLabel } from "./origin";
 
-export interface DraftFailure {
-  message: string;
-  tried: string;
-}
+export type DraftYear = { k: "loading" } | { k: "failed"; message: string; tried: string };
 
 const NOT_LOADED = "not loaded — dates use weekdays and closures";
 
@@ -45,7 +42,7 @@ export function DayList(p: {
   to: Day;
   own: boolean;
   notices: readonly HolidayNotice[];
-  failures: ReadonlyMap<number, DraftFailure>;
+  draftYears: ReadonlyMap<number, DraftYear>;
   onTune(date: IsoDate, t: Tuning | null): void;
   onRetryDraft(year: number): void;
   onLoad(year: number): void;
@@ -60,11 +57,28 @@ export function DayList(p: {
       </p>
       <ul className="day-list" aria-label="Days off and holidays">
         {missing.map((y) => {
-          const failure = p.failures.get(y);
-          const notice = p.own && failure === undefined ? p.notices.find((n) => n.year === y && n.k === "failed") : undefined;
+          const drafted = p.draftYears.get(y);
+          if (drafted !== undefined && drafted.k === "loading") {
+            return (
+              <li key={`missing ${y}`} className="day-missing">
+                <span className="day-year">{`${y} · loading…`}</span>
+              </li>
+            );
+          }
+          const failure = drafted;
+          const own = p.own && failure === undefined;
+          const notices = own ? p.notices.filter((n) => n.year === y) : [];
+          const notice = notices.find((n) => n.k === "failed");
           return (
             <li key={`missing ${y}`} className="day-missing">
               <span className="day-year">{`${y} · ${NOT_LOADED}`}</span>
+              {own && notices.length === 0 && (
+                <span className="day-detail">
+                  <button type="button" className="button-small" onClick={() => p.onLoad(y)}>
+                    Load
+                  </button>
+                </span>
+              )}
               {failure !== undefined && (
                 <span className="day-detail">
                   <span>{failure.message}</span> <span>{`Tried ${failure.tried}`}</span>

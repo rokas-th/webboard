@@ -4,7 +4,7 @@ import { Refused, type Built, type Intent } from "../../actions/intents";
 import type { Calendar, Closure, HolidayYear, RegionRef } from "../../domain/calendar";
 import type { Registry } from "../../store/registry";
 import { fixedClock, type Clock } from "../../services/clock";
-import type { HolidayNotice } from "../../services/holidays";
+import { noticeText, type HolidayNotice } from "../../services/holidays";
 import { AppError } from "../../services/ipc";
 import { Registry as RealRegistry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
@@ -15,7 +15,9 @@ import { tauri, type Answer } from "../../test/tauriMock";
 import { clearToasts } from "../common/Toast";
 import { Shell } from "../shell/Shell";
 import { useUi, type UiState } from "../state";
+import CONSUMER_HOSTS from "../../../crates/webboard-core/tests/fixtures/holidays/consumer-hosts.json";
 import { impactText } from "./impact";
+import { consumerHost, divisionOf } from "./RegionPicker";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -42,11 +44,55 @@ const CH_SUBS = [
 
 const pending: Answer = () => new Promise(() => undefined);
 
+const offline: Answer = () => {
+  throw { code: "holidays.offline", message: "No network connection." };
+};
+
+const argOf = (args: Parameters<Answer>[0], name: string): unknown =>
+  args !== undefined && !(args instanceof Uint8Array) && !(args instanceof ArrayBuffer) && !Array.isArray(args) ? args[name] : undefined;
+
+const broken = (field: string, rest: Record<string, unknown>): Record<string, unknown> =>
+  Object.defineProperty({ ...rest }, field, {
+    enumerable: true,
+    get(): never {
+      throw new TypeError(`broken ${field}`);
+    },
+  });
+
+type RejectionListener = (reason: unknown) => void;
+
+declare const process: {
+  listeners(event: "unhandledRejection"): RejectionListener[];
+  removeAllListeners(event: "unhandledRejection"): void;
+  on(event: "unhandledRejection", l: RejectionListener): void;
+  once(event: "unhandledRejection", l: RejectionListener): void;
+};
+
+const nextUnhandled = (): Promise<unknown> => {
+  const saved = process.listeners("unhandledRejection");
+  process.removeAllListeners("unhandledRejection");
+  return new Promise((resolve) => {
+    process.once("unhandledRejection", (reason) => {
+      saved.forEach((l) => process.on("unhandledRejection", l));
+      resolve(reason);
+    });
+  });
+};
+
+const deferred = <T,>(): { promise: Promise<T>; resolve(v: T): void } => {
+  let resolve: (v: T) => void = () => {
+    throw new Error("deferred resolved before it was made");
+  };
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve: (v) => resolve(v) };
+};
+
 const REGION_ANSWERS: Record<string, Answer> = {
   holidays_countries: () => COUNTRIES,
   holidays_subdivisions: (args) => {
-    const country = args !== undefined && !(args instanceof Uint8Array) && !(args instanceof ArrayBuffer) && !Array.isArray(args) ? args.country : undefined;
-    return country === "CH" ? CH_SUBS : [];
+    return argOf(args, "country") === "CH" ? CH_SUBS : [];
   },
   holidays_year: emptyYear,
 };
@@ -184,6 +230,23 @@ const IMPACT_SEED: readonly SeedItem[] = [
 
 const zhPlan = (o: Partial<Calendar> = {}): Partial<Calendar> => ({ ...CH_ZH, ...o });
 
+const NINE_2027 = holidayYear(
+  "oh:CH:CH-ZH",
+  2027,
+  ["01-01", "01-02", "03-26", "03-29", "05-06", "05-17", "08-01", "12-25", "12-26"].map((d, i) => holidayDay(`2027-${d}`, `Holiday ${i + 1}`, "public")),
+);
+
+const LATE_2027: readonly SeedItem[] = [{ id: "N", name: "Next year", start: "2027-12-27", dur: 3 }];
+
+const weekday = (name: string): HTMLElement => within(inDialog().getByRole("group", { name: "Working days" })).getByRole("button", { name });
+
+const loadIcs = async (url: string, name: string): Promise<void> => {
+  type("Calendar link", url);
+  type("Calendar name", name);
+  fireEvent.click(inDialog().getByRole("button", { name: "Load" }));
+  await settle();
+};
+
 const reviewIntent = (t: TestSession, year: number, y: HolidayYear): Extract<Intent, { t: "calendar" }> & { base: Calendar } => {
   const base = t.session.view().plan.calendar;
   return { t: "calendar", next: { ...base, holidays: new Map([...base.holidays, [year, y]]) }, base };
@@ -194,6 +257,7 @@ describe("region sources", () => {
     const t = await made([]);
     await shown(t);
     await openDialog();
+    expect(dialog().className).toBe("modal modal-wide");
     expect(options("Holiday source")).toEqual(["No holiday region", "OpenHolidays", "GOV.UK", "US federal (OPM)", "Calendar link (ICS)"]);
     expect(dialog().querySelector(".region-now")?.textContent).toBe("No holiday region");
     await choose("Holiday source", "openholidays");
@@ -234,6 +298,249 @@ describe("region sources", () => {
     await settle();
     expect(inDialog().queryByText("No network connection.")).toBeNull();
     expect(options("Country")).toEqual(["Choose a country…", "Austria", "Switzerland"]);
+  });
+
+  it("shows a holidays_subdivisions error with its message and Try again", async () => {
+    let down = true;
+    const t = await made([], {
+      answers: {
+        holidays_subdivisions: (args) => {
+          if (down) throw { code: "holidays.http", message: "openholidaysapi.org answered HTTP 503." };
+          return argOf(args, "country") === "CH" ? CH_SUBS : [];
+        },
+      },
+    });
+    await shown(t);
+    await openDialog();
+    await choose("Holiday source", "openholidays");
+    await choose("Country", "CH");
+    expect(inDialog().getByText("openholidaysapi.org answered HTTP 503.")).toBeTruthy();
+    expect(inDialog().queryByRole("combobox", { name: "Subdivision" })).toBeNull();
+    down = false;
+    fireEvent.click(inDialog().getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(inDialog().queryByText("openholidaysapi.org answered HTTP 503.")).toBeNull();
+    expect(options("Subdivision")).toEqual(["Choose a region…", "Whole country", "Bern", "Zürich", "  Municipality of Zürich"]);
+  });
+
+  it("shows a holidays_ics_preview error with its message and Try again", async () => {
+    let down = true;
+    const t = await made([], {
+      answers: {
+        holidays_ics_preview: () => {
+          if (down) throw { code: "holidays.parse", message: "The calendar at calendar.example.com is not a calendar." };
+          return [{ date: "2026-12-24", name: "Office closed" }];
+        },
+      },
+    });
+    await shown(t);
+    await openDialog();
+    await choose("Holiday source", "ics");
+    await loadIcs("https://calendar.example.com/team.ics", "Company");
+    expect(inDialog().getByText("The calendar at calendar.example.com is not a calendar.")).toBeTruthy();
+    expect(inDialog().queryByRole("list", { name: "Calendar events" })).toBeNull();
+    expect(dialog().querySelector(".region-now")?.textContent).toBe("No holiday region");
+    down = false;
+    fireEvent.click(inDialog().getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(inDialog().queryByText("The calendar at calendar.example.com is not a calendar.")).toBeNull();
+    expect(within(inDialog().getByRole("list", { name: "Calendar events" })).getByText("Office closed")).toBeTruthy();
+    expect(inDialog().getByText("Region: “Company”")).toBeTruthy();
+  });
+
+  it("keeps the answer of the latest calendar link when two loads resolve out of order", async () => {
+    const waits = new Map<unknown, (v: unknown) => void>();
+    const t = await made([], {
+      answers: {
+        holidays_ics_preview: (args) =>
+          new Promise((r) => {
+            waits.set(argOf(args, "url"), r);
+          }),
+      },
+    });
+    await shown(t);
+    await openDialog();
+    await choose("Holiday source", "ics");
+    const first = "https://calendar.example.com/first.ics";
+    const second = "https://calendar.example.com/second.ics";
+    await loadIcs(first, "First");
+    await loadIcs(second, "Second");
+    const answer = async (url: string, events: unknown): Promise<void> => {
+      const r = waits.get(url);
+      if (r === undefined) throw new Error(`no pending preview for ${url}`);
+      await act(async () => {
+        r(events);
+      });
+      await settle();
+    };
+    await answer(second, [{ date: "2026-12-24", name: "Second closed" }]);
+    await answer(first, [{ date: "2026-12-31", name: "First closed" }]);
+    const events = inDialog().getByRole("list", { name: "Calendar events" });
+    expect(within(events).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["24 Dec 2026Second closed"]);
+    expect(inDialog().getByText("Region: “Second”")).toBeTruthy();
+    fireEvent.click(weekday("Fri"));
+    await clickApply();
+    expect(t.session.view().plan.calendar.region).toEqual({ src: "ics", url: second, name: "Second" });
+  });
+
+  it("refuses a calendar link that is not a web address without asking Rust", async () => {
+    const t = await made([], { answers: { holidays_ics_preview: () => [{ date: "2026-12-24", name: "Office closed" }] } });
+    await shown(t);
+    await openDialog();
+    await choose("Holiday source", "ics");
+    await loadIcs("not a web address", "Company");
+    expect(toastTexts()).toEqual(["A calendar link needs a web address and a name."]);
+    expect(tauri.calls.filter((c) => c.cmd === "holidays_ics_preview")).toEqual([]);
+    expect(dialog()).toBeTruthy();
+  });
+
+  it("names consumer calendar hosts by the same fixture the Rust rule is tested on", () => {
+    expect(CONSUMER_HOSTS.length).toBeGreaterThanOrEqual(8);
+    expect(CONSUMER_HOSTS.map((h) => [h.url, consumerHost(new URL(h.url))])).toEqual(CONSUMER_HOSTS.map((h) => [h.url, h.consumer]));
+  });
+
+  it("reads a GOV.UK division, ignores only the empty choice and throws on any other value", () => {
+    expect(divisionOf("")).toBeNull();
+    expect(divisionOf("scotland")).toBe("scotland");
+    expect(() => divisionOf("wales")).toThrow("No GOV.UK division wales");
+  });
+
+  it("drops the previous region's years when the region changes (no region)", async () => {
+    const t = await made([], { calendar: zhPlan(), answers: { holidays_year: pending } });
+    await shown(t);
+    await openDialog();
+    await choose("Holiday source", "none");
+    await clickApply();
+    const cal = t.session.view().plan.calendar;
+    expect(cal.region).toBeNull();
+    expect([...cal.holidays.values()].filter((y) => y.region === "oh:CH:CH-ZH")).toEqual([]);
+  });
+
+  it("drops the previous region's years when the region changes (GOV.UK while offline)", async () => {
+    const t = await made([], { calendar: zhPlan() });
+    await shown(t);
+    await openDialog();
+    Object.assign(tauri.answers, { holidays_year: offline });
+    await choose("Holiday source", "govuk");
+    await choose("Division", "scotland");
+    expect(within(missingRow(2027)).getByText("No network connection.")).toBeTruthy();
+    await clickApply();
+    const cal = t.session.view().plan.calendar;
+    expect(cal.region).toEqual({ src: "govuk", division: "scotland" });
+    expect([...cal.holidays.values()].filter((y) => y.region === "oh:CH:CH-ZH")).toEqual([]);
+  });
+});
+
+describe("failures that are not AppErrors", () => {
+  it("shows a broken countries answer with Try again and still reports it", async () => {
+    const t = await made([], { answers: { holidays_countries: () => [broken("code", { name: "Broken", src: "openholidays" })] } });
+    await shown(t);
+    await openDialog();
+    const rejected = nextUnhandled();
+    await choose("Holiday source", "openholidays");
+    const reason = await rejected;
+    expect(reason).toBeInstanceOf(TypeError);
+    expect(inDialog().getByText("broken code")).toBeTruthy();
+    expect(inDialog().getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("shows a broken calendar link answer with Try again and still reports it", async () => {
+    const t = await made([], { answers: { holidays_ics_preview: () => [broken("date", { name: "Broken" })] } });
+    await shown(t);
+    await openDialog();
+    await choose("Holiday source", "ics");
+    const rejected = nextUnhandled();
+    await loadIcs("https://calendar.example.com/team.ics", "Company");
+    const reason = await rejected;
+    expect(reason).toBeInstanceOf(TypeError);
+    expect(inDialog().getByText("broken date")).toBeTruthy();
+    expect(inDialog().getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("keeps the dialog open with a non-AppError settings failure and Try again, and still reports it", async () => {
+    const boom = new Error("settings writer crashed");
+    const save = vi.fn().mockRejectedValueOnce(boom).mockResolvedValueOnce(undefined);
+    const t = await made([]);
+    await shown(t, { setLastRegion: save });
+    await openDialog();
+    await choose("Holiday source", "opm");
+    const rejected = nextUnhandled();
+    await clickApply();
+    expect(await rejected).toBe(boom);
+    expect(inDialog().getByText("settings writer crashed")).toBeTruthy();
+    fireEvent.click(inDialog().getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(save.mock.calls).toEqual([[{ src: "opm" }], [{ src: "opm" }]]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("lists the requested years as failed when draftYears rejects, with Try again, and still reports it", async () => {
+    const boom = new Error("draft years crashed");
+    const t = await made(LATE_2027);
+    const draftYears = vi
+      .spyOn(t.holidays, "draftYears")
+      .mockRejectedValueOnce(boom)
+      .mockResolvedValueOnce(new Map<number, HolidayYear | AppError>([[2027, NINE_2027]]));
+    await shown(t, {}, fixedClock("2026-11-09", new Date(2026, 10, 9, 14, 5).getTime()));
+    await openDialog();
+    const rejected = nextUnhandled();
+    await pickZurich();
+    expect(await rejected).toBe(boom);
+    [2026, 2027].forEach((y) => {
+      expect(within(missingRow(y)).getByText("draft years crashed")).toBeTruthy();
+      expect(within(missingRow(y)).getByText("Tried 14:05")).toBeTruthy();
+    });
+    fireEvent.click(within(missingRow(2027)).getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(draftYears.mock.calls).toEqual([
+      [ZH, [2026, 2027]],
+      [ZH, [2027]],
+    ]);
+    expect(dayRow("Holiday 9")).toBeTruthy();
+    expect(within(missingRow(2026)).getByText("draft years crashed")).toBeTruthy();
+  });
+});
+
+describe("draft years in flight", () => {
+  it("shows a loading line while a picked region's years are pending, then the days", async () => {
+    const t = await made(LATE_2027);
+    const answer = deferred<ReadonlyMap<number, HolidayYear | AppError>>();
+    vi.spyOn(t.holidays, "draftYears").mockReturnValue(answer.promise);
+    await shown(t);
+    await openDialog();
+    await pickZurich();
+    expect(inDialog().getByText("2026 · loading…")).toBeTruthy();
+    expect(inDialog().getByText("2027 · loading…")).toBeTruthy();
+    expect(inDialog().queryByText(NOT_LOADED(2027))).toBeNull();
+    await act(async () => {
+      answer.resolve(new Map<number, HolidayYear | AppError>([[2026, CH_ZH_2026], [2027, NINE_2027]]));
+    });
+    await settle();
+    expect(inDialog().queryByText("2026 · loading…")).toBeNull();
+    expect(inDialog().queryByText("2027 · loading…")).toBeNull();
+    NINE_2027.days.forEach((d) => expect(dayRow(d.name)).toBeTruthy());
+  });
+
+  it("keeps a draftYears answer that lands in the same batch as a weekday change", async () => {
+    const t = await made(LATE_2027);
+    const answer = deferred<ReadonlyMap<number, HolidayYear | AppError>>();
+    vi.spyOn(t.holidays, "draftYears").mockReturnValue(answer.promise);
+    await shown(t);
+    await openDialog();
+    await pickZurich();
+    await act(async () => {
+      answer.resolve(new Map<number, HolidayYear | AppError>([[2026, CH_ZH_2026], [2027, NINE_2027]]));
+      await Promise.resolve();
+      await Promise.resolve();
+      fireEvent.click(weekday("Fri"));
+    });
+    await settle();
+    expect(weekday("Fri").getAttribute("aria-pressed")).toBe("false");
+    NINE_2027.days.forEach((d) => expect(dayRow(d.name)).toBeTruthy());
+    await clickApply();
+    const cal = t.session.view().plan.calendar;
+    expect(cal.workdays).toEqual([1, 2, 3, 4]);
+    expect(cal.holidays.get(2027)?.days).toEqual(NINE_2027.days);
   });
 
   it.each([
@@ -551,11 +858,13 @@ describe("holiday state in the plan head", () => {
     const y2028 = holidayYear("oh:CH:CH-ZH", 2028, [holidayDay("2028-01-01", "New Year's Day", "public")]);
     const intent = reviewIntent(t, 2028, y2028);
     const preview = t.session.preview(intent);
+    const failed: HolidayNotice = { k: "failed", year: 2029, error: new AppError("holidays.offline", "No network connection."), coverage: null, at: new Date(2026, 10, 8, 14, 5).getTime() };
     const list: HolidayNotice[] = [
       { k: "loading", year: 2028 },
       { k: "notLoaded", year: 2028 },
       { k: "ready", year: 2028, count: 1, intent, preview },
       { k: "changed", year: 2027, count: 2, intent, preview },
+      failed,
     ];
     vi.spyOn(t.holidays, "notices").mockReturnValue(list);
     const load = vi.spyOn(t.holidays, "load").mockResolvedValue(undefined);
@@ -568,6 +877,11 @@ describe("holiday state in the plan head", () => {
     expect(within(line("Holidays for 2028 loading")).queryAllByRole("button")).toEqual([]);
     expect(within(line("Holidays for 2028 ready — review")).getByRole("button").textContent).toBe("Review");
     expect(within(line("2 days changed in the official calendar for 2027")).getByRole("button").textContent).toBe("Review");
+    const detail = noticeText(failed).detail;
+    expect(detail).toBe("No network connection. Tried 2026-11-08 14:05.");
+    expect(line(noticeText(failed).text).querySelector(".notice-detail")?.textContent).toBe(detail);
+    expect(within(line(noticeText(failed).text)).getByRole("button").textContent).toBe("Try again");
+    expect(line("Holidays for 2028 loading").querySelector(".notice-detail")).toBeNull();
     fireEvent.click(within(line("Holidays for 2028 not loaded — load")).getByRole("button", { name: "Load" }));
     expect(load.mock.calls).toEqual([[t.session.view().plan.id, t.session, 2028]]);
   });
@@ -713,19 +1027,32 @@ describe("failed years in the day list", () => {
       answers: { holidays_year: pending },
     });
     vi.spyOn(t.holidays, "notices").mockReturnValue([]);
+    const load = vi.spyOn(t.holidays, "load").mockResolvedValue(undefined);
     await shown(t);
     await openDialog();
-    expect(within(missingRow(2027)).queryByRole("button")).toBeNull();
+    expect(within(missingRow(2027)).getAllByRole("button").map((b) => b.textContent)).toEqual(["Load"]);
     expect(inDialog().queryByText("Nothing listed in this span.")).toBeNull();
+    fireEvent.click(within(missingRow(2027)).getByRole("button", { name: "Load" }));
+    await settle();
+    expect(load.mock.calls).toEqual([[t.session.view().plan.id, t.session, 2027]]);
+  });
+
+  it("offers Load for the next year of an empty plan whose year has no notice", async () => {
+    const t = await made([], { calendar: zhPlan({ holidays: new Map([[2026, CH_ZH_2026]]) }), answers: { holidays_year: pending } });
+    const load = vi.spyOn(t.holidays, "load").mockResolvedValue(undefined);
+    await shown(t);
+    await openDialog();
+    expect(t.holidays.notices(t.session.view().plan.id)).toEqual([]);
+    expect(within(missingRow(2027)).getAllByRole("button").map((b) => b.textContent)).toEqual(["Load"]);
+    fireEvent.click(within(missingRow(2027)).getByRole("button", { name: "Load" }));
+    await settle();
+    expect(load.mock.calls).toEqual([[t.session.view().plan.id, t.session, 2027]]);
   });
 
   it("shows why a picked region's year did not load and loads it again in the dialog (refinement 43)", async () => {
-    const t = await made([{ id: "N", name: "Next year", start: "2027-12-27", dur: 3 }]);
-    const nine = holidayYear(
-      "oh:CH:CH-ZH",
-      2027,
-      ["01-01", "01-02", "03-26", "03-29", "05-06", "05-17", "08-01", "12-25", "12-26"].map((d, i) => holidayDay(`2027-${d}`, `Holiday ${i + 1}`, "public")),
-    );
+    const t = await made(LATE_2027, { calendar: { region: { src: "govuk", division: "scotland" } } });
+    await settle();
+    const nine = NINE_2027;
     const draftYears = vi
       .spyOn(t.holidays, "draftYears")
       .mockResolvedValueOnce(
@@ -738,6 +1065,10 @@ describe("failed years in the day list", () => {
     const load = vi.spyOn(t.holidays, "load");
     const apply = vi.spyOn(t.session, "apply");
     const notices = t.holidays.notices(t.session.view().plan.id);
+    expect(notices.map((n) => [n.k, n.year])).toEqual([
+      ["notLoaded", 2026],
+      ["notLoaded", 2027],
+    ]);
     await shown(t, {}, fixedClock("2026-11-09", new Date(2026, 10, 9, 14, 5).getTime()));
     await openDialog();
     await pickZurich();
@@ -779,8 +1110,8 @@ describe("read-only", () => {
     expect(dialog()).toBeTruthy();
   });
 
-  it("disables Apply in a review notice's dialog", async () => {
-    const t = await made([], { calendar: zhPlan(), answers: { holidays_year: pending } });
+  it("disables Apply in a review notice's dialog while the draft still previews", async () => {
+    const t = await made(IMPACT_SEED, { calendar: zhPlan(), answers: { holidays_year: pending } });
     const intent = reviewIntent(t, 2028, holidayYear("oh:CH:CH-ZH", 2028, []));
     vi.spyOn(t.holidays, "notices").mockReturnValue([{ k: "ready", year: 2028, count: 0, intent, preview: t.session.preview(intent) }]);
     const dismiss = vi.spyOn(t.holidays, "dismiss");
@@ -790,8 +1121,16 @@ describe("read-only", () => {
     await settle();
     const apply = vi.spyOn(t.session, "apply");
     expect(applyButton().disabled).toBe(true);
+    const before = impact();
+    fireEvent.click(weekday("Fri"));
+    expect(impact()).toBe(impactText(t.session.preview({ t: "calendar", next: { ...intent.next, workdays: [1, 2, 3, 4] }, base: intent.base })));
+    expect(impact()).toBe(`Applying changes the end date of 1 item. ${CLOSE}`);
+    expect(impact()).not.toBe(before);
+    expect(applyButton().disabled).toBe(true);
     fireEvent.click(applyButton());
+    await settle();
     expect(apply).not.toHaveBeenCalled();
     expect(dismiss).not.toHaveBeenCalled();
+    expect(dialog()).toBeTruthy();
   });
 });

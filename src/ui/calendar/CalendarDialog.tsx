@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { Refused, type Built, type Intent } from "../../actions/intents";
 import { regionKey, type Calendar, type HolidayYear, type RegionRef, type Tuning } from "../../domain/calendar";
 import { isCalendarDate, toDay, yearOf, type Day, type IsoDate, type Weekday } from "../../domain/dates";
@@ -13,9 +13,10 @@ import { Dialog } from "../common/Dialog";
 import { toast } from "../common/Toast";
 import { historyTime } from "../panel/historyText";
 import { useExec, useRun } from "../run";
-import { DayList, type DraftFailure } from "./DayList";
+import { DayList, type DraftYear } from "./DayList";
 import { addClosure, removeClosure, sameCalendar, setWorkday, tune } from "./draft";
 import { impactText } from "./impact";
+import { messageOf } from "./message";
 import { RegionPicker } from "./RegionPicker";
 
 export interface CalendarReview {
@@ -59,6 +60,21 @@ function refusedText(e: unknown): string {
   throw e;
 }
 
+function keepRegion(holidays: Calendar["holidays"], region: RegionRef | null): Calendar["holidays"] {
+  if (region === null) return new Map();
+  const rk = regionKey(region);
+  return new Map([...holidays].filter(([, y]) => y.region === rk));
+}
+
+function previewText(session: PlanSession, view: PlanView, intent: Extract<Intent, { t: "calendar" }>): string {
+  if (session.view() !== view) throw new Error("The calendar preview ran on another plan view than the dialog shows");
+  try {
+    return impactText(session.preview(intent));
+  } catch (e) {
+    return refusedText(e);
+  }
+}
+
 export function CalendarBody(p: CalendarProps) {
   const session = p.session;
   const holidays = p.registry.holidays;
@@ -75,59 +91,65 @@ export function CalendarBody(p: CalendarProps) {
   );
   const [base] = useState<Calendar>(() => p.review?.intent.base ?? session.view().plan.calendar);
   const [draft, setDraft] = useState<Calendar>(() => p.review?.intent.next ?? base);
-  const [failures, setFailures] = useState<ReadonlyMap<string, ReadonlyMap<number, DraftFailure>>>(new Map());
+  const [drafted, setDrafted] = useState<ReadonlyMap<string, ReadonlyMap<number, DraftYear>>>(new Map());
   const [regionError, setRegionError] = useState<{ region: RegionRef; message: string } | null>(null);
   const [applied, setApplied] = useState(false);
   const [dayName, setDayName] = useState("");
   const [dayFrom, setDayFrom] = useState("");
   const [dayTo, setDayTo] = useState("");
-  const picking = useRef<string | null>(null);
   const clock = p.clock;
   const span = spanOf(view);
-  const spanYears = yearsOf(span.from, span.to);
+  const spanYears = useMemo(() => yearsOf(span.from, span.to), [span.from, span.to]);
 
   const fetchYears = useCallback(
     (region: RegionRef, years: readonly number[]): void => {
       const rk = regionKey(region);
-      picking.current = rk;
-      void holidays.draftYears(region, years).then((answers) => {
-        if (picking.current !== rk) return;
-        const tried = historyTime(clock.now(), clock.today());
-        const got = [...answers];
-        setDraft((d) => ({
-          ...d,
-          holidays: new Map([...d.holidays, ...got.flatMap(([y, a]): [number, HolidayYear][] => (a instanceof AppError ? [] : [[y, a]]))]),
-        }));
-        setFailures((f) => {
-          const kept = [...(f.get(rk) ?? new Map<number, DraftFailure>())].filter(([y]) => !answers.has(y));
-          const failed = got.flatMap(([y, a]): [number, DraftFailure][] => (a instanceof AppError ? [[y, { message: a.message, tried }]] : []));
-          return new Map([...f, [rk, new Map([...kept, ...failed])]]);
+      const mark = (state: (y: number) => DraftYear | null): void =>
+        setDrafted((all) => {
+          const kept = [...(all.get(rk) ?? new Map<number, DraftYear>())].filter(([y]) => !years.includes(y));
+          const marked = years.flatMap((y): [number, DraftYear][] => {
+            const s = state(y);
+            return s === null ? [] : [[y, s]];
+          });
+          return new Map([...all, [rk, new Map([...kept, ...marked])]]);
         });
-      });
+      mark(() => ({ k: "loading" }));
+      void holidays.draftYears(region, years).then(
+        (answers) => {
+          const tried = historyTime(clock.now(), clock.today());
+          const got = [...answers].flatMap(([y, a]): [number, HolidayYear][] => (a instanceof AppError ? [] : [[y, a]]));
+          setDraft((d) => (d.region === null || regionKey(d.region) !== rk ? d : { ...d, holidays: new Map([...d.holidays, ...got]) }));
+          mark((y) => {
+            const a = answers.get(y);
+            return a instanceof AppError ? { k: "failed", message: a.message, tried } : null;
+          });
+        },
+        (e: unknown) => {
+          const tried = historyTime(clock.now(), clock.today());
+          mark(() => ({ k: "failed", message: messageOf(e), tried }));
+          if (!(e instanceof AppError)) throw e;
+        },
+      );
     },
     [holidays, clock],
   );
 
-  const years = useRef(spanYears);
-  years.current = spanYears;
   const pick = useCallback(
     (region: RegionRef | null): void => {
-      setDraft((d) => ({ ...d, region }));
-      if (region === null) {
-        picking.current = null;
-        return;
-      }
-      fetchYears(region, years.current);
+      setDraft((d) => ({ ...d, region, holidays: keepRegion(d.holidays, region) }));
+      if (region !== null) fetchYears(region, spanYears);
     },
-    [fetchYears],
+    [fetchYears, spanYears],
   );
 
   const change = (f: (c: Calendar) => Calendar): void => {
     try {
-      setDraft(f(draft));
+      f(draft);
     } catch (e) {
       toast(refusedText(e), "bad");
+      return;
     }
+    setDraft((d) => f(d));
   };
 
   const onTune = (date: IsoDate, t: Tuning | null): void => change((c) => tune(c, date, t));
@@ -154,22 +176,18 @@ export function CalendarBody(p: CalendarProps) {
   };
 
   const unchanged = sameCalendar(draft, base);
-  const impact = useMemo(() => {
-    if (unchanged) return impactText({ endsChanged: 0, movedLater: 0 });
-    try {
-      return impactText(session.preview({ t: "calendar", next: draft, base }));
-    } catch (e) {
-      return refusedText(e);
-    }
-  }, [unchanged, session, draft, base, view]);
+  const impact = useMemo(
+    () => (unchanged ? impactText({ endsChanged: 0, movedLater: 0 }) : previewText(session, view, { t: "calendar", next: draft, base })),
+    [unchanged, session, draft, base, view],
+  );
 
   const saveRegion = (region: RegionRef): void => {
     setRegionError(null);
     p.registry.setLastRegion(region).then(
       () => p.onClose(),
       (e: unknown) => {
+        setRegionError({ region, message: messageOf(e) });
         if (!(e instanceof AppError)) throw e;
-        setRegionError({ region, message: e.message });
       },
     );
   };
@@ -206,7 +224,7 @@ export function CalendarBody(p: CalendarProps) {
 
   const draftRegion = draft.region;
   const own = draftRegion !== null && view.plan.calendar.region !== null && regionKey(draftRegion) === regionKey(view.plan.calendar.region);
-  const regionFailures = draftRegion === null ? new Map<number, DraftFailure>() : (failures.get(regionKey(draftRegion)) ?? new Map<number, DraftFailure>());
+  const regionYears = draftRegion === null ? new Map<number, DraftYear>() : (drafted.get(regionKey(draftRegion)) ?? new Map<number, DraftYear>());
   const closures = [...draft.closures.values()].sort((a, b) => (a.from === b.from ? (a.id < b.id ? -1 : 1) : a.from < b.from ? -1 : 1));
 
   return (
@@ -255,7 +273,7 @@ export function CalendarBody(p: CalendarProps) {
         to={span.to}
         own={own}
         notices={notices}
-        failures={regionFailures}
+        draftYears={regionYears}
         onTune={onTune}
         onRetryDraft={(y) => {
           if (draftRegion !== null) fetchYears(draftRegion, [y]);
@@ -287,7 +305,7 @@ export function CalendarBody(p: CalendarProps) {
 export function CalendarDialog(p: CalendarProps) {
   const view = usePlanView(p.session);
   return (
-    <Dialog label={"Calendar · " + view.plan.name} onClose={p.onClose}>
+    <Dialog label={"Calendar · " + view.plan.name} wide onClose={p.onClose}>
       <CalendarBody {...p} />
     </Dialog>
   );

@@ -716,19 +716,29 @@ fn ics_lengths_and_limits() {
 
 #[test]
 fn consumer_hosts_optional() {
-    assert!(consumer_calendar_host(
-        "https://calendar.google.com/calendar/ical/en.swiss%23holiday%40group.v.calendar.google.com/public/basic.ics"
-    )
-    .expect("a web address"));
-    assert!(
-        consumer_calendar_host("https://calendars.icloud.com/holidays/ch_de.ics/")
-            .expect("a web address")
-    );
-    assert!(!consumer_calendar_host(
-        "https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/holidays.ics"
-    )
-    .expect("a web address"));
-    assert!(!consumer_calendar_host("https://icloud.com/holidays.ics").expect("a web address"));
+    let hosts: Vec<Value> =
+        serde_json::from_slice(&fixture("consumer-hosts.json")).expect("consumer hosts parse");
+    assert!(hosts.len() >= 8);
+    let got = hosts
+        .iter()
+        .map(|h| {
+            let url = h["url"].as_str().expect("a url string");
+            (
+                url.to_string(),
+                consumer_calendar_host(url).expect("a web address"),
+            )
+        })
+        .collect::<Vec<_>>();
+    let want = hosts
+        .iter()
+        .map(|h| {
+            (
+                h["url"].as_str().expect("a url string").to_string(),
+                h["consumer"].as_bool().expect("a consumer flag"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(got, want);
     let bad = consumer_calendar_host("not a web address").unwrap_err();
     assert_eq!(bad.code, "holidays.http");
     assert!(

@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RegionRef, Tuning } from "../../domain/calendar";
 import { fmtShort, isCalendarDate, toDay, yearOf, type IsoDate } from "../../domain/dates";
 import { AppError, call } from "../../services/ipc";
 import { toast } from "../common/Toast";
 import { regionText } from "../panel/calendarText";
+import { messageOf } from "./message";
 
 type Source = "none" | "openholidays" | "govuk" | "opm" | "ics";
 
@@ -40,6 +41,13 @@ const DIVISIONS: readonly Division[] = ["england-and-wales", "scotland", "northe
 
 const WHOLE = "*";
 
+export const divisionOf = (v: string): Division | null => {
+  if (v === "") return null;
+  const found = DIVISIONS.find((d) => d === v);
+  if (found === undefined) throw new Error(`No GOV.UK division ${v}`);
+  return found;
+};
+
 const sourceOf = (v: string): Source => {
   const found = SOURCES.find((s) => s.value === v);
   if (found === undefined) throw new Error(`No holiday source ${v}`);
@@ -73,8 +81,17 @@ const fetchIcs = async (url: string): Promise<IcsEvent[]> => listOf("holidays_ic
 const flatten = (list: readonly Subdivision[], depth: number): { code: string; label: string }[] =>
   list.flatMap((s) => [{ code: s.code, label: `${"  ".repeat(depth)}${s.name}` }, ...flatten(s.children, depth + 1)]);
 
-export const consumerHost = (url: string): boolean => {
-  const host = new URL(url).hostname.toLowerCase();
+const webAddress = (link: string): URL | null => {
+  try {
+    return new URL(link);
+  } catch (e) {
+    if (e instanceof TypeError) return null;
+    throw e;
+  }
+};
+
+export const consumerHost = (address: URL): boolean => {
+  const host = address.hostname.toLowerCase();
   return host === "calendar.google.com" || host.endsWith(".icloud.com");
 };
 
@@ -89,8 +106,8 @@ function useLoad<T>(key: string | null, fetch: (key: string) => Promise<T>): { s
         if (live) setGot({ key, attempt, state: { k: "ok", value } });
       },
       (e: unknown) => {
+        if (live) setGot({ key, attempt, state: { k: "failed", message: messageOf(e) } });
         if (!(e instanceof AppError)) throw e;
-        if (live) setGot({ key, attempt, state: { k: "failed", message: e.message } });
       },
     );
     return () => {
@@ -122,7 +139,8 @@ export function RegionPicker(p: {
   const [country, setCountry] = useState(p.region !== null && p.region.src === "openholidays" ? p.region.country : "");
   const [url, setUrl] = useState(p.region !== null && p.region.src === "ics" ? p.region.url : "");
   const [icsName, setIcsName] = useState(p.region !== null && p.region.src === "ics" ? p.region.name : "");
-  const [ics, setIcs] = useState<{ url: string; state: Load<IcsEvent[]> } | null>(null);
+  const [ics, setIcs] = useState<Load<{ events: IcsEvent[]; consumer: boolean }> | null>(null);
+  const icsRequest = useRef(0);
   const countries = useLoad(source === "openholidays" ? "countries" : null, fetchCountries);
   const subdivisions = useLoad(source === "openholidays" && country !== "" ? country : null, fetchSubdivisions);
   const region = p.region;
@@ -145,19 +163,24 @@ export function RegionPicker(p: {
   const loadIcs = (): void => {
     const link = url.trim();
     const name = icsName.trim();
-    if (link === "" || name === "") {
+    const address = webAddress(link);
+    if (address === null || name === "") {
       toast("A calendar link needs a web address and a name.", "bad");
       return;
     }
-    setIcs({ url: link, state: { k: "loading" } });
+    const consumer = consumerHost(address);
+    icsRequest.current += 1;
+    const request = icsRequest.current;
+    setIcs({ k: "loading" });
     fetchIcs(link).then(
       (events) => {
-        setIcs({ url: link, state: { k: "ok", value: events } });
+        if (icsRequest.current !== request) return;
+        setIcs({ k: "ok", value: { events, consumer } });
         onPick({ src: "ics", url: link, name });
       },
       (e: unknown) => {
+        if (icsRequest.current === request) setIcs({ k: "failed", message: messageOf(e) });
         if (!(e instanceof AppError)) throw e;
-        setIcs({ url: link, state: { k: "failed", message: e.message } });
       },
     );
   };
@@ -173,7 +196,6 @@ export function RegionPicker(p: {
   };
 
   const cs = countries.state;
-  const icsState = ics?.state ?? null;
 
   return (
     <div className="region-picker">
@@ -223,8 +245,8 @@ export function RegionPicker(p: {
           aria-label="Division"
           value={region !== null && region.src === "govuk" ? region.division : ""}
           onChange={(e) => {
-            const division = DIVISIONS.find((d) => d === e.target.value);
-            if (division !== undefined) onPick({ src: "govuk", division });
+            const division = divisionOf(e.target.value);
+            if (division !== null) onPick({ src: "govuk", division });
           }}
         >
           <option value="">Choose a division…</option>
@@ -244,12 +266,12 @@ export function RegionPicker(p: {
           </button>
         </div>
       )}
-      {source === "ics" && icsState !== null && icsState.k === "loading" && <span className="note">Loading the calendar…</span>}
-      {source === "ics" && icsState !== null && icsState.k === "failed" && <Failed message={icsState.message} onRetry={loadIcs} />}
-      {source === "ics" && ics !== null && icsState !== null && icsState.k === "ok" && (
+      {source === "ics" && ics !== null && ics.k === "loading" && <span className="note">Loading the calendar…</span>}
+      {source === "ics" && ics !== null && ics.k === "failed" && <Failed message={ics.message} onRetry={loadIcs} />}
+      {source === "ics" && ics !== null && ics.k === "ok" && (
         <ul className="ics-events" aria-label="Calendar events">
-          {icsState.value.map((ev) => {
-            const consumer = consumerHost(ics.url);
+          {ics.value.events.map((ev) => {
+            const consumer = ics.value.consumer;
             return (
               <li key={`${ev.date} ${ev.name}`}>
                 <label>

@@ -1,0 +1,12 @@
+[
+  { "url": "https://calendar.google.com/calendar/ical/en.swiss%23holiday%40group.v.calendar.google.com/public/basic.ics", "consumer": true },
+  { "url": "https://CALENDAR.GOOGLE.COM/calendar/ical/x/public/basic.ics", "consumer": true },
+  { "url": "https://calendars.icloud.com/holidays/ch_de.ics/", "consumer": true },
+  { "url": "https://p12-caldav.icloud.com/holidays.ics", "consumer": true },
+  { "url": "webcal://p12-caldav.icloud.com/holidays.ics", "consumer": true },
+  { "url": "https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/holidays.ics", "consumer": false },
+  { "url": "https://icloud.com/holidays.ics", "consumer": false },
+  { "url": "https://calendar.example.com/team.ics", "consumer": false },
+  { "url": "https://calendar.google.com.example.net/team.ics", "consumer": false },
+  { "url": "https://google.com/calendar.google.com/basic.ics", "consumer": false }
+]
