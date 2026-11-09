@@ -1,7 +1,7 @@
 import * as Y from "yjs";
 import { buildAction, initialAction } from "../actions/build";
 import { Refused, type Intent } from "../actions/intents";
-import { buildResolve, type Pick, type ResolveOptions } from "../actions/resolve";
+import { buildResolve, canPick, type Pick, type ResolveOptions } from "../actions/resolve";
 import { buildRevert, buildUndo, undoOffer } from "../actions/undo";
 import type { Calendar, Closure, Tuning } from "../domain/calendar";
 import { toDay, toIso, type IsoDate, type Weekday } from "../domain/dates";
@@ -350,7 +350,9 @@ export function simulate(seed: number): SimResult {
     if (ctx.view.choices.length === 0) return void steps.push(`${d.id} resolve skipped`);
     const choice = pick(ctx.view.choices);
     const keys = choice.sides.map((s) => s.key);
-    const perUnit = chance(0.3) ? new Map(choice.units.filter(() => chance(0.5)).map((u) => [u, pick(keys)] as const)) : undefined;
+    const perUnit = chance(0.3)
+      ? new Map(choice.units.filter(() => chance(0.5)).map((u) => [u, pick(keys.filter((k) => canPick(ctx, choice, k, u)))] as const))
+      : undefined;
     const p: Pick = perUnit === undefined ? { side: pick(keys) } : { side: pick(keys), perUnit };
     const opts: ResolveOptions = { pushFromPredecessors: chance(0.7), returnPushed: chance(0.7) };
     attempt(`${d.id} resolve ${choice.kind} ${choice.id}`, () => {

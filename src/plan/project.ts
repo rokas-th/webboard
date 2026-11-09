@@ -50,6 +50,12 @@ const latestWrite = (log: LogState, u: UnitKey): unknown => {
   return write.v;
 };
 
+const checkSchedule = (id: ItemId, kind: ItemKind, schedule: Schedule | null): void => {
+  if (kind === "group" && schedule !== null) throw new Error(`Group ${id} has a schedule`);
+  if (kind !== "group" && schedule === null) throw new Error(`Item ${id} has no schedule`);
+  if (kind === "task" && schedule !== null && schedule.dur < 1) throw new Error(`Task ${id} has a duration under 1 working day`);
+};
+
 const rawItem = (id: ItemId, t: Table): Raw => {
   const pick = (k: UnitKind): { v: unknown; live: boolean } | null => {
     const u = `${k}:${id}`;
@@ -67,9 +73,7 @@ const rawItem = (id: ItemId, t: Table): Raw => {
   const kind: ItemKind = ex.k;
   const s = pick("s");
   const schedule = s === null ? null : decodeAs("sched", `s:${id}`, s.v);
-  if (kind === "group" && schedule !== null) throw new Error(`Group ${id} has a schedule`);
-  if (kind !== "group" && schedule === null) throw new Error(`Item ${id} has no schedule`);
-  if (kind === "task" && schedule !== null && schedule.dur < 1) throw new Error(`Task ${id} has a duration under 1 working day`);
+  checkSchedule(id, kind, schedule);
   const r = t.live.get(`r:${id}`);
   return {
     item: {
@@ -220,10 +224,9 @@ export function applySchedules(plan: PlanState, w: readonly Write[]): PlanState 
     if (moved.has(k.arg)) throw new Error(`applySchedules: ${x.u} written twice`);
     const it = plan.items.get(k.arg);
     if (it === undefined) throw new Error(`applySchedules: no item ${k.arg}`);
-    if (it.kind === "group") throw new Error(`Group ${k.arg} has a schedule`);
     validateWrite(x);
     const schedule = decodeAs("sched", x.u, x.v);
-    if (it.kind === "task" && schedule.dur < 1) throw new Error(`Task ${k.arg} has a duration under 1 working day`);
+    checkSchedule(k.arg, it.kind, schedule);
     moved.set(k.arg, schedule);
     live.set(x.u, x.v);
   });

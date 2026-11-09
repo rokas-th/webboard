@@ -4,11 +4,12 @@ import { LogState } from "../log/state";
 import type { Action, Cause, Write } from "../log/types";
 import type { Choice } from "../plan/choices";
 import { planRules } from "../plan/rules";
+import { parseKey } from "../plan/units";
 import { act } from "../test/act";
 import { ctxOf } from "../test/planCtx";
 import { buildAction } from "./build";
 import type { Built, Ctx } from "./intents";
-import { buildResolve, previewResolve, settleText, type ResolveOptions, type ResolvePreview } from "./resolve";
+import { buildResolve, canPick, previewResolve, settleText, type ResolveOptions, type ResolvePreview } from "./resolve";
 import { buildRevert, buildUndo } from "./undo";
 
 const TODAY = "2026-11-09";
@@ -424,7 +425,7 @@ describe("two resolutions made apart", () => {
     expect(valueOf(after, "s:Spec")).toEqual(s("2026-11-19", 3));
   });
 
-  it("refuses to pick a side that has no value for a unit the other side created", () => {
+  it("leaves a unit only the other side created unwritten when picking a side that never saw it (Ruling A-final)", () => {
     const first = only(ctxFrom(BASE, m1, p1));
     const resolves = { resolves: first.id };
     const r1 = act("R1", ["m1", "p1"], [w("s:PFF", s("2026-11-25", 3), "resolution")], { dev: "d1", meta: resolves });
@@ -437,7 +438,12 @@ describe("two resolutions made apart", () => {
     expect(c.kind).toBe("resolutions");
     const side = c.sides.find((x) => x.actions.includes("R1"));
     if (side === undefined) throw new Error("No side holds R1");
-    expect(() => buildResolve(ctx, c, { side: side.key }, ON)).toThrow(`Unit e:X of choice ${c.id} has no value on side ${side.key}`);
+    const b = buildResolve(ctx, c, { side: side.key }, ON);
+    expect(b.action.w).toEqual([w("s:PFF", s("2026-11-25", 3), "resolution")]);
+    const after = applied(ctx, b);
+    expect(after.view.plan.items.get("X")?.trashed).toBe(false);
+    expect(after.view.plan.items.get("X")?.name).toBe("Extra");
+    expect(after.view.choices).toEqual([]);
   });
 });
 
@@ -646,7 +652,7 @@ describe("sides with no value of their own", () => {
   });
 });
 
-describe("an item created inside a group trashed apart (Ruling A'')", () => {
+describe("an item created inside a group trashed apart (Ruling A-final)", () => {
   const TRASHED: Write[] = [...item("G", "group", "Phase", null, "a0"), ...item("A", "task", "A", "G", "a0", sched("2026-11-16", 2))];
   const trash = act("t", ["a0"], [w("e:G", { k: "group", t: true })], mac);
   const create = act("c", ["a0"], item("X", "task", "Extra", "G", "a1", sched("2026-11-18", 2)), iph);
@@ -689,6 +695,49 @@ describe("an item created inside a group trashed apart (Ruling A'')", () => {
     expect(after.view.plan.items.get("X")?.trashed).toBe(false);
     expect(after.view.plan.items.get("X")?.name).toBe("Extra");
     expect(after.view.plan.items.get("X")?.place).toEqual({ parent: "G", order: "a1" });
+    expect(after.view.choices).toEqual([]);
+  });
+
+  const createD = act("c", ["a0"], item("D", "task", "Docs", "G", "a1", sched("2026-11-18", 2)), iph);
+  const renameA = act("r", ["a0"], [w("n:A", "Alpha")], { dev: "d3" });
+
+  it("seed 1485714804: refuses a per-unit pick of a side that never saw the unit", () => {
+    const ctx = ctxFrom(TRASHED, trash, createD, renameA);
+    const c = only(ctx);
+    expect(c.sides).toHaveLength(3);
+    const ipad = sideKey(c, "iPad");
+    const iphone = sideKey(c, "iPhone");
+    expect(canPick(ctx, c, ipad, "s:D")).toBe(false);
+    expect(canPick(ctx, c, iphone, "s:D")).toBe(true);
+    expect(() => buildResolve(ctx, c, { side: iphone, perUnit: new Map([["s:D", ipad]]) }, ON)).toThrow(`Side ${ipad} has no version of s:D`);
+  });
+
+  it("picking a side that never saw a created item restores the group and keeps the item with its creator's values", () => {
+    const ctx = ctxFrom(TRASHED, trash, createD, renameA);
+    const c = only(ctx);
+    const b = buildResolve(ctx, c, { side: sideKey(c, "iPad") }, ON);
+    expect(b.action.w.filter((x) => parseKey(x.u).arg === "D")).toEqual([]);
+    const after = applied(ctx, b);
+    expect(after.view.plan.items.get("G")?.trashed).toBe(false);
+    expect(after.view.plan.items.get("A")?.name).toBe("Alpha");
+    expect(after.view.plan.items.get("D")?.trashed).toBe(false);
+    expect(after.view.plan.items.get("D")?.name).toBe("Docs");
+    expect(after.view.plan.items.get("D")?.place).toEqual({ parent: "G", order: "a1" });
+    expect(after.view.plan.items.get("D")?.schedule).toEqual({ start: "2026-11-18", dur: 2, status: "todo", progress: 0, horizon: "later" });
+    expect(after.view.choices).toEqual([]);
+  });
+
+  it("does not return a push of an item the losing side created", () => {
+    const createY = act("c1", ["a0"], [...item("Y", "task", "Yarn", "G", "a1", sched("2026-11-18", 2)), w("l:A>Y", ["FS", 0])], iph);
+    const pushY = act("c2", ["c1"], [w("s:A", sched("2026-11-23", 2)), w("s:Y", sched("2026-11-25", 2), "push")], iph);
+    const ctx = ctxFrom(TRASHED, trash, createY, pushY);
+    const c = only(ctx);
+    const b = buildResolve(ctx, c, { side: "t" }, ON);
+    expect(b.action.w.filter((x) => parseKey(x.u).arg === "Y")).toEqual([]);
+    const after = applied(ctx, b);
+    expect(after.view.plan.items.get("G")?.trashed).toBe(true);
+    expect(after.view.plan.items.get("Y")?.trashed).toBe(true);
+    expect(valueOf(after, "s:Y")).toEqual(sched("2026-11-25", 2));
     expect(after.view.choices).toEqual([]);
   });
 });

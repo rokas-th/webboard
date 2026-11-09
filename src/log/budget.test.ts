@@ -50,12 +50,12 @@ describe("size budget", () => {
 
   it(
     "bigLog(20000, 1) encodes to at most 5,000,000 B",
+    SLOW,
     () => {
       const bytes = Y.encodeStateAsUpdate(doc.ydoc).byteLength;
       console.info(`plan document of ${N} actions: ${bytes} B (${(bytes / N).toFixed(1)} B per action)`);
       expect(bytes).toBeLessThanOrEqual(SIZE_LIMIT);
     },
-    SLOW,
   );
 });
 
@@ -69,6 +69,7 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
 
   it(
     "applyUpdate into a fresh doc plus actions() takes at most 150 ms",
+    SLOW,
     () => {
       const update = Y.encodeStateAsUpdate(doc.ydoc);
       const ms = median(
@@ -81,11 +82,11 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
       );
       expect(ms).toBeLessThanOrEqual(150);
     },
-    SLOW,
   );
 
   it(
     "replay(actions, planRules) takes at most 400 ms",
+    SLOW,
     () => {
       const ms = median(
         "replay",
@@ -96,11 +97,11 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
       );
       expect(ms).toBeLessThanOrEqual(400);
     },
-    SLOW,
   );
 
   it(
     "projectPlan plus choices takes at most 60 ms",
+    SLOW,
     () => {
       const ms = median(
         "projectPlan + choices",
@@ -113,11 +114,11 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
       );
       expect(ms).toBeLessThanOrEqual(60);
     },
-    SLOW,
   );
 
   it(
     "buildAction of a move with pushes, append, add and projectPlan take at most 25 ms",
+    SLOW,
     () => {
       const plan = projectPlan(PLAN_ID, log);
       const outgoing = [...plan.links.values()].reduce((m, l) => m.set(l.from, (m.get(l.from) ?? 0) + 1), new Map<string, number>());
@@ -140,11 +141,11 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
       );
       expect(ms).toBeLessThanOrEqual(25);
     },
-    SLOW,
   );
 
   it(
     "add of one head action takes at most 2 ms",
+    SLOW,
     () => {
       const item = [...projectPlan(PLAN_ID, log).items.keys()][0];
       const ms = median(
@@ -156,11 +157,11 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
       );
       expect(ms).toBeLessThanOrEqual(2);
     },
-    SLOW,
   );
 
   it(
     "add of one remote action 5,000 positions back takes at most 10 ms",
+    SLOW,
     () => {
       const order = log.order();
       const parent = order[order.length - 5000];
@@ -174,11 +175,11 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
       );
       expect(ms).toBeLessThanOrEqual(10);
     },
-    SLOW,
   );
 
   it(
     "fork() takes at most 20 ms",
+    SLOW,
     () => {
       const ms = median(
         "fork()",
@@ -189,7 +190,6 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
       );
       expect(ms).toBeLessThanOrEqual(20);
     },
-    SLOW,
   );
 });
 

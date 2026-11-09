@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 import { toDay } from "../domain/dates";
-import { schedView } from "../domain/derive";
+import { lockOf as statusLock, schedView } from "../domain/derive";
 import type { ItemId } from "../domain/model";
 import { replay, type LogState } from "../log/state";
 import { OWNER_CAUSES, type Action, type ActionId, type UnitKey, type Write } from "../log/types";
@@ -9,8 +9,10 @@ import { choices, heldItems, type Choice, type ChoiceSide } from "../plan/choice
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { decodeAs, parseKey } from "../plan/units";
-import { simulate, type SimBuilt, type SimResult } from "../test/sim";
-import { FIXTURE_DEVICES, PLAN_ID } from "../test/planCtx";
+import { buildResolve } from "./resolve";
+import { act } from "../test/act";
+import { simulate, SIM_TODAY, type SimBuilt, type SimResult } from "../test/sim";
+import { ctxOf, FIXTURE_DEVICES, PLAN_ID } from "../test/planCtx";
 
 const ids = vi.hoisted(() => {
   const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -112,9 +114,12 @@ const heldFor = (b: SimBuilt): ReadonlySet<ItemId> => {
 };
 
 const lockOf = (b: SimBuilt, item: ItemId): string | null => {
-  const s = schedView(b.view.plan, heldFor(b)).items.get(item);
-  if (s === undefined) return "not scheduled";
-  return s.lock;
+  const held = heldFor(b);
+  const s = schedView(b.view.plan, held).items.get(item);
+  if (s !== undefined) return s.lock;
+  const stored = b.view.plan.items.get(item);
+  if (stored === undefined || !stored.trashed || stored.schedule === null) return "not scheduled";
+  return statusLock(stored.schedule.status, held.has(item));
 };
 
 const valueApart = (log: LogState, u: UnitKey, without: ReadonlySet<ActionId>): unknown => {
@@ -174,6 +179,13 @@ const r17Violations = (sim: SimResult, b: SimBuilt): string[] => {
   return b.action.w.filter((x) => !ok(x)).map((x) => `resolution ${b.action.id} of ${choice.kind} ${choice.id} writes ${x.u} (${x.c}) = ${JSON.stringify(x.v)}`);
 };
 
+const pushViolations = (b: SimBuilt): string[] =>
+  b.action.w
+    .filter((x) => x.c === "push")
+    .map((x) => ({ x, lock: lockOf(b, parseKey(x.u).arg) }))
+    .filter(({ lock }) => lock !== null)
+    .map(({ x, lock }) => `${b.kind} ${b.action.id} pushes ${x.u} (${lock})`);
+
 const lostWrites = (log: LogState): string[] =>
   log
     .order()
@@ -194,6 +206,7 @@ const stateOf = (log: LogState, u: UnitKey) => log.unit(u) ?? null;
 describe("simulated devices", () => {
   it(
     "every device and the shuffled log agree on plan, choices and held items",
+    TIMEOUT,
     () => {
       property((_seed, sim) => {
         const expected = viewOf(sim.shuffled);
@@ -211,48 +224,41 @@ describe("simulated devices", () => {
         });
       });
     },
-    TIMEOUT,
   );
 
   it(
     "no owner write of an active action is lost",
+    TIMEOUT,
     () => {
       property((_seed, sim) => {
         expect(lostWrites(sim.shuffled)).toEqual([]);
       });
     },
-    TIMEOUT,
   );
 
   it(
     "undo, redo and revert write only a: units; a resolution only its choice, its pushes and its returns (refinement 17)",
+    TIMEOUT,
     () => {
       property((_seed, sim) => {
         expect(sim.built.flatMap((b) => r17Violations(sim, b))).toEqual([]);
       });
     },
-    TIMEOUT,
   );
 
   it(
     "no push write targets an item held, done or doing in the view it was built from",
+    TIMEOUT,
     () => {
       property((_seed, sim) => {
-        const bad = sim.built.flatMap((b) =>
-          b.action.w
-            .filter((x) => x.c === "push")
-            .map((x) => ({ x, lock: lockOf(b, parseKey(x.u).arg) }))
-            .filter(({ lock }) => lock !== null)
-            .map(({ x, lock }) => `${b.kind} ${b.action.id} pushes ${x.u} (${lock})`),
-        );
-        expect(bad).toEqual([]);
+        expect(sim.built.flatMap(pushViolations)).toEqual([]);
       });
     },
-    TIMEOUT,
   );
 
   it(
     "every typed note marker is in its note on every device",
+    TIMEOUT,
     () => {
       property((_seed, sim) => {
         sim.devices.forEach((d) => {
@@ -261,7 +267,6 @@ describe("simulated devices", () => {
         });
       });
     },
-    TIMEOUT,
   );
 
   it("simulate(188) pops a stale undo or redo entry", () => {
@@ -273,8 +278,60 @@ describe("simulated devices", () => {
     expect(sim.built.filter((b) => b.kind === "resolve" && b.choice?.kind === "delete").length).toBeGreaterThan(0);
   });
 
+  it("simulate(1485714804) completes: per-unit picks name only sides that have a version of the unit", () => {
+    const sim = run(1485714804);
+    expect(sim.built.some((b) => b.kind === "resolve")).toBe(true);
+  });
+
+  it("a push of an item the resolution restores from the Trash reads its lock from its stored status (Ruling restored push)", () => {
+    const w = (u: UnitKey, v: unknown, c: Write["c"] = "own"): Write => ({ u, v, c });
+    const root = act("a0", [], [
+      w("pn", "Plan"),
+      w("cw", [1, 2, 3, 4, 5]),
+      w("cr", null),
+      w("e:P", { k: "task", t: false }),
+      w("n:P", "P"),
+      w("s:P", ["2026-11-16", 2, "todo", 0, "later"]),
+      w("p:P", [null, "a0"]),
+      w("e:R", { k: "task", t: false }),
+      w("n:R", "R"),
+      w("s:R", ["2026-11-18", 1, "todo", 0, "later"]),
+      w("p:R", [null, "a1"]),
+      w("l:P>R", ["FS", 0]),
+    ]);
+    const trash = act("t", ["a0"], [w("e:R", { k: "task", t: true })], { dev: "d1" });
+    const move = act("m", ["t"], [w("s:P", ["2026-11-23", 2, "todo", 0, "later"])], { dev: "d1" });
+    const place = act("p", ["a0"], [w("p:R", [null, "a5"])], { dev: "d2" });
+    const log = replay([root, trash, move, place], planRules);
+    expect(log.pending).toEqual([]);
+    const ctx = ctxOf(log, "d1", SIM_TODAY);
+    const choice = ctx.view.choices.find((c) => c.units.includes("e:R"));
+    if (choice === undefined) throw new Error("No choice over e:R");
+    const pick = { side: "p" };
+    const opts = { pushFromPredecessors: true, returnPushed: false };
+    const b = buildResolve(ctx, choice, pick, opts);
+    expect(b.action.w).toContainEqual(w("e:R", { k: "task", t: false }, "resolution"));
+    expect(b.action.w).toContainEqual(w("p:R", [null, "a5"], "resolution"));
+    expect(b.action.w).toContainEqual(w("s:R", ["2026-11-25", 1, "todo", 0, "later"], "push"));
+    const resolved: SimBuilt = { action: b.action, kind: "resolve", view: ctx.view, choice, pick, opts };
+    const sim: SimResult = {
+      devices: [],
+      shuffled: log,
+      built: [trash, move, place].map((action): SimBuilt => ({ action, kind: "schedule", view: ctx.view })).concat([resolved]),
+      notes: [],
+      root,
+      lost: new Set(),
+      steps: [],
+      stalePops: 0,
+    };
+    expect(lockOf(resolved, "R")).toBe(null);
+    expect(r17Violations(sim, resolved)).toEqual([]);
+    expect(pushViolations(resolved)).toEqual([]);
+  });
+
   it(
     "the runs exercise clashes, resolutions, undo, pushes into held items' neighbours, restores and note races",
+    TIMEOUT,
     () => {
       const seeds = fc.sample(arbSeed, { numRuns: NUM_RUNS, seed: PARAMS.seed });
       const sims = seeds.map(run);
@@ -297,6 +354,5 @@ describe("simulated devices", () => {
       console.info(`simulation coverage over ${NUM_RUNS} runs: ${JSON.stringify(hits)}; stale undo or redo entries popped: ${JSON.stringify(stale)}`);
       Object.values(hits).forEach((n) => expect(n).toBeGreaterThanOrEqual(NUM_RUNS / 20));
     },
-    TIMEOUT,
   );
 });

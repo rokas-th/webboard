@@ -12,7 +12,7 @@ import { decodeAs, parseKey, validateWrite } from "../plan/units";
 import { previewOf, withDerived, type Derivation } from "./build";
 import { calendarSuffix, items, toastOf } from "./copy";
 import type { Built, Ctx, Preview } from "./intents";
-import { forkWith, ITEM_KINDS, subjectOf, unique } from "./settle";
+import { forkWith, subjectOf, unique } from "./settle";
 
 export { settleText } from "./settle";
 
@@ -79,16 +79,19 @@ const valueOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): { v: u
   return valueApart(ctx, u, others);
 };
 
-const latestOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): unknown => {
+const latestOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): { v: unknown } | null => {
   const mine = [...side.actions]
     .reverse()
     .map((a) => actionOf(ctx.log, a).w.find((x) => x.u === u))
     .find((x) => x !== undefined);
-  if (mine !== undefined) return mine.v;
-  const got = valueApart(ctx, u, othersOf(choice, side));
-  if (got === null) throw new Error(`Unit ${u} of choice ${choice.id} has no value on side ${side.key}`);
-  return got.v;
+  if (mine !== undefined) return { v: mine.v };
+  return valueApart(ctx, u, othersOf(choice, side));
 };
+
+export function canPick(ctx: Ctx, choice: Choice, sideKey: string, u: UnitKey): boolean {
+  if (!choice.units.includes(u)) throw new Error(`Unit ${u} is not in choice ${choice.id}`);
+  return valueOn(ctx, choice, sideOf(choice, sideKey), u) !== null;
+}
 
 const draftOf = (ctx: Ctx, choice: Choice, w: readonly Write[]): Action => ({
   id: newId(),
@@ -118,23 +121,22 @@ const ownWrites = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): 
   const picked = sideOf(choice, pick.side);
   const perUnit = pick.perUnit ?? new Map<UnitKey, string>();
   [...perUnit].forEach(([u, s]) => {
-    if (!choice.units.includes(u)) throw new Error(`Unit ${u} is not in choice ${choice.id}`);
-    sideOf(choice, s);
+    if (!canPick(ctx, choice, s, u)) throw new Error(`Side ${s} has no version of ${u}`);
   });
-  const valued = choice.units.map((u) => {
-    const side = sideOf(choice, perUnit.get(u) ?? picked.key);
-    return { u, side, got: valueOn(ctx, choice, side, u) };
+  const chosen = choice.units.flatMap((u): Write[] => {
+    const got = valueOn(ctx, choice, sideOf(choice, perUnit.get(u) ?? picked.key), u);
+    return got === null ? [] : [resolution(u, got.v)];
   });
-  const chosen = valued.flatMap(({ u, got }) => (got === null ? [] : [resolution(u, got.v)]));
   const extras =
     choice.kind !== "resolutions"
       ? []
       : unique(choice.sides.flatMap((s) => s.actions).flatMap((a) => actionOf(ctx.log, a).w.map((x) => x.u)))
           .filter((u) => !choice.units.includes(u))
           .flatMap((u): Write[] => {
-            const v = latestOn(ctx, choice, picked, u);
+            const got = latestOn(ctx, choice, picked, u);
+            if (got === null) return [];
             const current = ctx.log.unit(u);
-            return current !== undefined && planRules.same(u, v, current.value) ? [] : [resolution(u, v)];
+            return current !== undefined && planRules.same(u, got.v, current.value) ? [] : [resolution(u, got.v)];
           });
   const keys = new Set([picked.key, ...perUnit.values()]);
   const losing = choice.sides.filter((s) => !keys.has(s.key)).flatMap((s) => s.actions);
@@ -144,23 +146,12 @@ const ownWrites = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): 
     : losing.flatMap((a) =>
         actionOf(ctx.log, a)
           .w.filter((x) => x.c === "push" && ctx.log.unit(x.u)?.from === a)
-          .map((x) => {
+          .flatMap((x): Write[] => {
             const before = valueApart(ctx, x.u, lost);
-            if (before === null) throw new Error(`Pushed unit ${x.u} of action ${a} has no value without the sides that lost`);
-            return resolution(x.u, before.v);
+            return before === null ? [] : [resolution(x.u, before.v)];
           }),
       );
-  const all = combined(chosen, [...extras, ...returns]);
-  const missing = valued.filter(({ got }) => got === null);
-  if (missing.length === 0) return all;
-  const plan = all.length === 0 ? ctx.view.plan : projectPlan(ctx.view.plan.id, forkWith(ctx.log, draftOf(ctx, choice, all)));
-  missing.forEach(({ u, side }) => {
-    const k = parseKey(u);
-    if (!ITEM_KINDS.has(k.kind) || plan.items.get(k.arg)?.trashed !== true) {
-      throw new Error(`Side ${side.key} of choice ${choice.id} has no value for ${u}`);
-    }
-  });
-  return all;
+  return combined(chosen, [...extras, ...returns]);
 };
 
 interface Resolved {
