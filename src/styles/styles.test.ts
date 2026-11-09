@@ -214,6 +214,7 @@ describe("the Cyberdeck look", () => {
     const anchors: Record<string, string> = {
       ".seg-modes": ".toolbar",
       ".choice-list": ".plan-head",
+      ".plan-menu-list": ".plan-menu",
       ".tl-month": ".tl-scale",
       ".tl-tick": ".tl-scale",
       ".tl-today-label": ".tl-scale",

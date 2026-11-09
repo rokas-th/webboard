@@ -8,6 +8,7 @@ import { childrenOf } from "../../plan/project";
 import type { PlanSession } from "../../store/session";
 import { countedConflicts, goToFirstPatch } from "../choices/HeadCounts";
 import { baselineDefault } from "../panel/Baselines";
+import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { UiState, ViewKind, Zoom } from "../state";
 
 export interface Command {
@@ -201,6 +202,7 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
       },
     },
     ...conflict,
+    { id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session) },
     {
       id: "undo",
       group: "Edit",
@@ -240,6 +242,7 @@ export function commands(ctx: CommandCtx): Command[] {
     );
   const always: Command[] = [
     { id: "new-plan", group: "File", label: "New plan", run: () => ctx.newPlan() },
+    { id: "import", group: "File", label: "Import plan…", run: () => void importFlow(ctx.registry, (id) => ctx.select(id)) },
     ...openPlans,
     { id: "palette", group: "Help", label: "Command palette", keys: ctx.mac ? "⌘K" : "Ctrl K", run: () => ctx.setUi({ dialog: { t: "palette" } }) },
     { id: "about", group: "Help", label: "About WebBoard", run: () => ctx.setUi({ dialog: { t: "about" } }) },

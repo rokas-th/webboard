@@ -260,7 +260,7 @@ export async function exportPlan(session: PlanSession): Promise<string | null> {
   return path;
 }
 
-const fileNameOf = (path: string): string => {
+export const fileNameOf = (path: string): string => {
   const last = path.slice(path.lastIndexOf("/") + 1);
   return path.startsWith(FILE_PREFIX) ? decodeURIComponent(last) : last;
 };

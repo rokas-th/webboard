@@ -7,6 +7,7 @@ import { sideText } from "../../plan/choices";
 import { fixedClock } from "../../services/clock";
 import { AppError } from "../../services/ipc";
 import { decodeAction, encodeAction } from "../../store/doc";
+import { importPlan } from "../../store/file";
 import { IndexDoc } from "../../store/index-doc";
 import type { PersistedDoc } from "../../store/persist";
 import { Registry } from "../../store/registry";
@@ -19,10 +20,19 @@ import { hold, resetTauri, tauri, type Call } from "../../test/tauriMock";
 import { orderedSides } from "../choices/order";
 import { clearToasts } from "../common/Toast";
 import { PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
+import { exportFlow, importFlow } from "./fileFlows";
 import { PlanHead } from "./PlanHead";
 import { Shell } from "./Shell";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("../../store/file", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../../store/file")>();
+  return { ...m, exportPlan: vi.fn(m.exportPlan), importPlan: vi.fn(m.importPlan) };
+});
+vi.mock("./fileFlows", async (importOriginal) => {
+  const m = await importOriginal<typeof import("./fileFlows")>();
+  return { ...m, exportFlow: vi.fn(m.exportFlow), importFlow: vi.fn(m.importFlow) };
+});
 vi.mock("../state", async (importOriginal) => {
   const m = await importOriginal<typeof import("../state")>();
   return { ...m, useUi: vi.fn(m.useUi) };
@@ -47,6 +57,9 @@ afterEach(async () => {
   clearToasts();
   vi.restoreAllMocks();
   vi.mocked(useUi).mockClear();
+  vi.mocked(importPlan).mockClear();
+  vi.mocked(exportFlow).mockClear();
+  vi.mocked(importFlow).mockClear();
   await Promise.all(sessions.splice(0).map((s) => s.close()));
   await Promise.all(registries.splice(0).map((r) => r.close()));
   window.localStorage.clear();
@@ -175,6 +188,52 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect([undo.hasAttribute("disabled"), redo.hasAttribute("disabled")]).toEqual([true, false]);
     act(() => t.session.setReadOnly(true));
     expect([undo.hasAttribute("disabled"), redo.hasAttribute("disabled")]).toEqual([true, true]);
+  });
+
+  it("lists Export plan… and Import plan… under ⋯, both enabled while read-only, and runs each flow", async () => {
+    const t = await made(MESA_SEED);
+    t.session.setReadOnly(true);
+    const { ui, registry } = shellFor(t);
+    render(ui);
+    await settle();
+    const head = document.querySelector(".plan-head");
+    if (!(head instanceof HTMLElement)) throw new Error("no plan head");
+    const more = within(head).getByRole("button", { name: "Plan menu" });
+    expect(more.textContent).toBe("⋯");
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(more);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    const items = within(screen.getByRole("menu", { name: "Plan" })).getAllByRole("menuitem");
+    expect(items.map((b) => [b.textContent, b.hasAttribute("disabled")])).toEqual([
+      ["Export plan…", false],
+      ["Import plan…", false],
+    ]);
+    vi.mocked(exportFlow).mockResolvedValueOnce(undefined);
+    fireEvent.click(items[0]);
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[t.session]]);
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(more);
+    vi.mocked(importFlow).mockResolvedValueOnce(undefined);
+    fireEvent.click(within(screen.getByRole("menu", { name: "Plan" })).getByRole("menuitem", { name: "Import plan…" }));
+    expect(vi.mocked(importFlow).mock.calls.map((c) => c[0])).toEqual([registry]);
+    expect(screen.queryByRole("menu")).toBeNull();
+    await settle();
+  });
+
+  it("closes the ⋯ menu on Esc without touching the selection", async () => {
+    const t = await made(MESA_SEED);
+    const { ui } = shellFor(t);
+    render(ui);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Plan menu" }));
+    const menu = screen.getByRole("menu", { name: "Plan" });
+    expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: "Export plan…" }));
+    act(() => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Plan menu" }));
   });
 
   it("reads Ctrl K off macOS", async () => {
@@ -969,6 +1028,41 @@ describe("Shell on Registry.open", () => {
     expect(currentName()).toBe("New plan");
     expectTimeline();
     expect(slot("timeline")?.textContent).toBe("No items yet. Add one with + Task.");
+  });
+
+  it.each(["the empty state's button", "the palette"])("imports a plan from %s and opens it", async (from) => {
+    resetTauri({ ...memoryStore().answers, settings_read: () => null, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
+    const registry = await opened();
+    vi.mocked(importPlan).mockImplementationOnce(async (r) => r.createPlan("MESA 2027"));
+    render(shellOn(registry));
+    await settle();
+    expectNoTimeline();
+    const main = document.querySelector("main.main");
+    if (!(main instanceof HTMLElement)) throw new Error("no main");
+    expect(within(main).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…"]);
+    if (from === "the palette") {
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+      });
+      const input = within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("textbox", { name: "Command" });
+      act(() => {
+        fireEvent.change(input, { target: { value: "Import" } });
+      });
+      act(() => {
+        fireEvent.keyDown(input, { key: "Enter" });
+      });
+    } else {
+      fireEvent.click(within(main).getByRole("button", { name: "Import plan…" }));
+    }
+    await settle();
+    expect(importFlow).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(importPlan).mock.calls).toEqual([[registry]]);
+    expect(currentName()).toBe("MESA 2027");
+    expectTimeline();
+    expect(toastTexts()).toEqual(["Imported “MESA 2027”"]);
+    expect(within(main).queryByRole("button", { name: "New plan" })).toBeNull();
+    expect(within(main).queryByRole("button", { name: "Import plan…" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it.each(["empty state", "sidebar"])("shows Creating… while a plan is created from the %s", async (from) => {

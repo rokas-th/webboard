@@ -263,6 +263,12 @@
   width: auto;
 }
 
+.empty-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .main-note {
   margin: 0;
   padding: 24px;
@@ -670,4 +676,22 @@ button.chip:hover:not(:disabled) {
   .legend {
     display: none;
   }
+}
+
+.plan-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.plan-menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  min-width: 180px;
+  padding: 4px 0;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
 }

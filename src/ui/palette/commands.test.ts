@@ -7,15 +7,19 @@ import { fs, MESA_SEED, testSession, type SeedItem, type TestSession } from "../
 import { testRegistry } from "../../test/shell";
 import { clearToasts } from "../common/Toast";
 import { runWith } from "../run";
+import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { UiState } from "../state";
 import { commands, createdItem, type CommandCtx } from "./commands";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("../shell/fileFlows", () => ({ exportFlow: vi.fn(async () => undefined), importFlow: vi.fn(async () => undefined) }));
 
 const sessions: PlanSession[] = [];
 
 afterEach(async () => {
   clearToasts();
+  vi.mocked(exportFlow).mockClear();
+  vi.mocked(importFlow).mockClear();
   vi.restoreAllMocks();
   await Promise.all(sessions.splice(0).map((s) => s.close()));
 });
@@ -126,11 +130,41 @@ describe("commands()", () => {
     expect(all.filter((x) => x.startsWith("nudge") || x.startsWith("resize") || x === "trash" || x === "go-first-conflict")).toEqual([]);
   });
 
-  it("holds exactly new-plan, open-plan, palette and about with no session", async () => {
+  it("holds exactly new-plan, import, open-plan, palette and about with no session", async () => {
     const t = await made(SMALL);
     const h = harness(t, { plan: null }, ["p2"]);
     const ctx: CommandCtx = { ...h.ctx, session: null, run: null, undo: null, redo: null };
-    expect(ids(ctx)).toEqual(["new-plan", `open-plan:${t.session.view().plan.id}`, "open-plan:p2", "palette", "about"]);
+    expect(ids(ctx)).toEqual(["new-plan", "import", `open-plan:${t.session.view().plan.id}`, "open-plan:p2", "palette", "about"]);
+  });
+
+  it("holds export and import in the File group with an open plan", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    expect([find(h.ctx, "export"), find(h.ctx, "import")].map((c) => [c.label, c.group])).toEqual([
+      ["Export plan…", "File"],
+      ["Import plan…", "File"],
+    ]);
+  });
+
+  it("runs export through exportFlow once, on the open session", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    find(h.ctx, "export").run();
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[t.session]]);
+    expect(importFlow).not.toHaveBeenCalled();
+  });
+
+  it.each(["with", "without"])("runs import through importFlow once %s a session, opening the plan through select", async (mode) => {
+    const t = await made(SMALL);
+    const h = harness(t, mode === "with" ? {} : { plan: null });
+    const ctx: CommandCtx = mode === "with" ? h.ctx : { ...h.ctx, session: null, run: null, undo: null, redo: null };
+    find(ctx, "import").run();
+    const calls = vi.mocked(importFlow).mock.calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBe(h.ctx.registry);
+    calls[0][1]("p9");
+    expect(h.select.mock.calls).toEqual([["p9"]]);
+    expect(exportFlow).not.toHaveBeenCalled();
   });
 
   it("runs new-plan through the shell's one path, once", async () => {

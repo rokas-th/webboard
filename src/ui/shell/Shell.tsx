@@ -24,7 +24,9 @@ import { PlanPanel } from "../panel/PlanPanel";
 import { Timeline } from "../timeline/Timeline";
 import { HolidayState } from "./HolidayState";
 import { FILES_STAY, PlanFailed } from "./PlanFailed";
+import { importFlow } from "./fileFlows";
 import { PlanHead } from "./PlanHead";
+import { PlanMenu } from "./PlanMenu";
 import { RELOAD_LABEL, ReloadConfirm } from "./ReloadConfirm";
 import { NewPlanButton, Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
@@ -379,7 +381,12 @@ export function Shell(p: ShellProps) {
     if (sel === null) {
       return (
         <div className="empty-state">
-          <NewPlanButton creating={creating} onNew={newPlan} />
+          <div className="empty-actions">
+            <NewPlanButton creating={creating} onNew={newPlan} />
+            <button type="button" onClick={() => void importFlow(registry, (id) => select(id))}>
+              Import plan…
+            </button>
+          </div>
         </div>
       );
     }
@@ -406,7 +413,12 @@ export function Shell(p: ShellProps) {
             </button>
           </Banner>
         )}
-        <PlanHead session={session} local={registry.device.name} onChoose={(choice) => openChoice(choice)}>
+        <PlanHead
+          session={session}
+          local={registry.device.name}
+          onChoose={(choice) => openChoice(choice)}
+          menu={<PlanMenu session={session} registry={registry} onOpen={(id) => select(id)} />}
+        >
           <HolidayState session={session} registry={registry} clock={p.clock} />
         </PlanHead>
         <div className="view">

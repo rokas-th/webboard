@@ -7,7 +7,7 @@ import { orderedSides } from "../choices/order";
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-export function PlanHead(p: { session: PlanSession; local: string; onChoose(choice: string): void; children?: ReactNode }) {
+export function PlanHead(p: { session: PlanSession; local: string; onChoose(choice: string): void; menu?: ReactNode; children?: ReactNode }) {
   const view = usePlanView(p.session);
   const [listOpen, setListOpen] = useState(false);
   const plan = view.plan;
@@ -45,6 +45,7 @@ export function PlanHead(p: { session: PlanSession; local: string; onChoose(choi
           <HeadCounts view={view} onChoose={choose} />
         </div>
       </div>
+      {p.menu}
       {listOpen && view.choices.length > 0 && (
         <ul className="choice-list" aria-label="Open choices">
           {view.choices.map((c) => (
