@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: './wrangler.jsonc' },
-      miniflare: { bindings: { SETUP_SECRET: 'test-setup-secret-000000000000000000' } },
+      miniflare: { bindings: { SETUP_SECRET: 'x'.repeat(32) } },
     }),
   ],
   test: {
