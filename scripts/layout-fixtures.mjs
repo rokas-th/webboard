@@ -443,6 +443,8 @@ function fixtureOf(plans) {
       holidays_year: { __byArg: "year", map: { 2026: yearAnswer(2026), 2027: yearAnswer(2027) } },
       holidays_countries: COUNTRIES,
       holidays_subdivisions: { __byArg: "country", map: SUBDIVISIONS },
+      "plugin:event|listen": 1,
+      "plugin:event|unlisten": null,
     },
   };
 }

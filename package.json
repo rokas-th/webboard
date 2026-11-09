@@ -9,7 +9,7 @@
     "test": "vitest run",
     "tauri": "tauri",
     "version:check": "node scripts/version.mjs --check",
-    "test:scripts": "node --test scripts/*.test.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs && bash scripts/install-linux.test.sh",
     "layout:probe": "node scripts/layout-probe.mjs"
   },
   "dependencies": {

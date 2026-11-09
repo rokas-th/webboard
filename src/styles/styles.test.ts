@@ -272,6 +272,13 @@ describe("the Cyberdeck look", () => {
     });
   });
 
+  it("insets the toolbar for the traffic lights only on macOS", () => {
+    const plain = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect(plain(".toolbar")["padding"]).toBe("0 24px");
+    expect(plain(".toolbar.toolbar-mac")["padding-left"]).toBe("96px");
+    expect(sheet.rules.filter((r) => r.decls["padding"]?.includes("96px") === true || r.decls["padding-left"] === "96px").map((r) => r.selector)).toEqual([".toolbar.toolbar-mac"]);
+  });
+
   it("tightens the toolbar below 1240 px so it fits a 1024 px window", () => {
     const narrow = (sel: string): Decls =>
       Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 1 && r.conditions[0] === "@media (max-width: 1240px)").map((r) => r.decls));

@@ -66,7 +66,7 @@ function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState;
 
 export function Toolbar(p: ToolbarProps) {
   return (
-    <header className="toolbar" data-tauri-drag-region>
+    <header className={p.mac ? "toolbar toolbar-mac" : "toolbar"} data-tauri-drag-region>
       <span className="wordmark">WebBoard</span>
       {p.session === null ? (
         <span className="toolbar-spacer" />

@@ -17,11 +17,15 @@
   gap: 10px;
   height: 52px;
   flex-shrink: 0;
-  padding: 0 24px 0 96px;
+  padding: 0 24px;
   border-bottom: 1px solid var(--line);
   position: relative;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.toolbar.toolbar-mac {
+  padding-left: 96px;
 }
 
 .wordmark {

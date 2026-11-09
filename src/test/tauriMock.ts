@@ -80,6 +80,12 @@ export function listenerCount(name: string): number {
   return subscriptions.get(name)?.size ?? 0;
 }
 
+type CloseHandler = (event: { preventDefault(): void }) => void | Promise<void>;
+
+const closeHandlers = new Set<CloseHandler>();
+
+export const windowState = { destroyed: 0 };
+
 export function getCurrentWindow() {
   return {
     startDragging: () => Promise.resolve(),
@@ -89,11 +95,40 @@ export function getCurrentWindow() {
     minimize: () => Promise.resolve(),
     toggleMaximize: () => Promise.resolve(),
     close: () => Promise.resolve(),
+    onCloseRequested: (handler: CloseHandler): Promise<() => void> => {
+      closeHandlers.add(handler);
+      return Promise.resolve(() => {
+        closeHandlers.delete(handler);
+      });
+    },
   };
+}
+
+export function closeListenerCount(): number {
+  return closeHandlers.size;
+}
+
+export async function requestWindowClose(): Promise<{ prevented: boolean }> {
+  const results = await Promise.all(
+    [...closeHandlers].map(async (handler) => {
+      let prevented = false;
+      await handler({
+        preventDefault: () => {
+          prevented = true;
+        },
+      });
+      return prevented;
+    }),
+  );
+  const prevented = results.some((p) => p);
+  if (!prevented) windowState.destroyed += 1;
+  return { prevented };
 }
 
 export function resetTauri(answers: Record<string, Answer>): void {
   subscriptions.clear();
+  closeHandlers.clear();
+  windowState.destroyed = 0;
   holds.clear();
   tauri.calls.length = 0;
   for (const k of Object.keys(tauri.answers)) delete tauri.answers[k];

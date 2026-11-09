@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { systemClock } from "./services/clock";
 import { AppError, call } from "./services/ipc";
+import { guardWindowClose } from "./services/window";
 import { Registry } from "./store/registry";
 import { toast } from "./ui/common/Toast";
 import { Shell } from "./ui/shell/Shell";
@@ -52,6 +53,24 @@ export default function App() {
       console.error(e);
       toast(messageOf(e), "bad");
     });
+  }, [registry]);
+
+  useEffect(() => {
+    if (registry === null) return;
+    const failed = (e: unknown): void => {
+      console.error(e);
+      toast(messageOf(e), "bad");
+    };
+    let off: (() => void) | null = null;
+    let gone = false;
+    guardWindowClose(registry, failed).then((unlisten) => {
+      if (gone) unlisten();
+      else off = unlisten;
+    }, failed);
+    return () => {
+      gone = true;
+      off?.();
+    };
   }, [registry]);
 
   if (start.k === "opening") return null;

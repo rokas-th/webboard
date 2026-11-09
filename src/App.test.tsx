@@ -5,12 +5,13 @@ import App, { REBUILD_LIST_LINE, RESET_SETTINGS_LINE } from "./App";
 import { AppError } from "./services/ipc";
 import { Registry } from "./store/registry";
 import { seededStore } from "./test/shell";
-import { resetTauri, tauri } from "./test/tauriMock";
+import { closeListenerCount, requestWindowClose, resetTauri, tauri, windowState } from "./test/tauriMock";
 import { Dialog } from "./ui/common/Dialog";
 import { clearToasts } from "./ui/common/Toast";
 import { PLACE_KEY } from "./ui/state";
 
 vi.mock("@tauri-apps/api/core", () => import("./test/tauriMock"));
+vi.mock("@tauri-apps/api/window", () => import("./test/tauriMock"));
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -175,6 +176,52 @@ it("toasts a warm rejection", async () => {
   await settle();
   expect(screen.getAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([["warm broke", "toast bad"]]);
   expect(log.mock.calls).toEqual([[failure]]);
+});
+
+describe("closing the window", () => {
+  it("closes the registry before the window goes", async () => {
+    await seededStore(["Alpha"]);
+    spyOpen();
+    render(<App />);
+    await settle();
+    expect(closeListenerCount()).toBe(1);
+    const close = vi.spyOn(Registry.prototype, "close");
+    let result: { prevented: boolean } | null = null;
+    await act(async () => {
+      result = await requestWindowClose();
+    });
+    expect(result).toEqual({ prevented: false });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(windowState.destroyed).toBe(1);
+  });
+
+  it("keeps the window open and toasts the failure when the registry fails to close", async () => {
+    await seededStore(["Alpha"]);
+    const failure = new AppError("store.io", "Could not save “Alpha”: disk full.");
+    const log = logged();
+    spyOpen();
+    render(<App />);
+    await settle();
+    vi.spyOn(Registry.prototype, "close").mockRejectedValueOnce(failure);
+    let result: { prevented: boolean } | null = null;
+    await act(async () => {
+      result = await requestWindowClose();
+    });
+    expect(result).toEqual({ prevented: true });
+    expect(windowState.destroyed).toBe(0);
+    expect(screen.getAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([["Could not save “Alpha”: disk full.", "toast bad"]]);
+    expect(log.mock.calls).toEqual([[failure]]);
+  });
+
+  it("stops listening when the app unmounts", async () => {
+    await seededStore(["Alpha"]);
+    spyOpen();
+    const { unmount } = render(<App />);
+    await settle();
+    expect(closeListenerCount()).toBe(1);
+    unmount();
+    expect(closeListenerCount()).toBe(0);
+  });
 });
 
 it("restores the view from webboard.place after a remount", async () => {

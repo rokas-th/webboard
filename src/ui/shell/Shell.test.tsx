@@ -317,6 +317,19 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect(screen.queryByRole("button", { name: "⌘K" })).toBeNull();
   });
 
+  it("keeps the traffic-light inset to macOS", async () => {
+    const t = await made(MESA_SEED);
+    const linux = shellFor(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
+    const first = render(linux.ui);
+    await settle();
+    expect(document.querySelector("header.toolbar")?.classList.contains("toolbar-mac")).toBe(false);
+    first.unmount();
+    const mac = shellFor(t, { device: { deviceId: "mac", name: "Mac", platform: "macos" } });
+    render(mac.ui);
+    await settle();
+    expect(document.querySelector("header.toolbar")?.classList.contains("toolbar-mac")).toBe(true);
+  });
+
   it("mounts the slots for the view", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
