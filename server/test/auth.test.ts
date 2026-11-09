@@ -1,18 +1,8 @@
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-import {
-  claim,
-  consumeTicket,
-  devices,
-  enrol,
-  normalizeCode,
-  pairCode,
-  removeDevice,
-  sha256Hex,
-  ticket,
-  type Result,
-} from '../src/auth';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { claim, consumeTicket, devices, enrol, normalizeCode, pairCode, removeDevice, schema, sha256Hex, ticket } from '../src/auth';
 import { int, text } from '../src/sql';
+import { value } from './helpers';
 
 const SECRET = env.SETUP_SECRET;
 const DEV_A = 'devA0000000';
@@ -30,15 +20,13 @@ const BAD_CODE = {
 const BAD_DEVICE = { ok: false, status: 400, error: 'bad_request', message: 'The device id is not valid. Update WebBoard on this device.' };
 const CODE = /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
-function inSpace<R>(name: string, run: (storage: DurableObjectStorage) => Promise<R>): Promise<R> {
-  return runInDurableObject(env.Space.getByName('t-' + name), (_space, state) => run(state.storage));
-}
+const TABLES = ['meta', 'devices', 'codes', 'tickets', 'joins', 'attempts'];
 
-function value<V>(result: Result<V>): V {
-  if (!result.ok) {
-    throw new Error(`Expected ok, got ${result.status} ${result.error}: ${result.message}`);
-  }
-  return result.value;
+function inSpace<R>(name: string, run: (storage: DurableObjectStorage) => Promise<R>): Promise<R> {
+  return runInDurableObject(env.Space.getByName('t-' + name), (_space, state) => {
+    schema(state.storage.sql);
+    return run(state.storage);
+  });
 }
 
 function count(storage: DurableObjectStorage, table: string): number {
@@ -60,6 +48,10 @@ function otherCode(code: string): string {
 }
 
 describe('auth', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('stores tokens only as SHA-256 hashes', async () => {
     await inSpace('hashes', async (storage) => {
       const admitted = value(await enrol(storage, T, SECRET, SECRET, DEV_A, 'Mac', '1.1.1.1'));
@@ -72,8 +64,7 @@ describe('auth', () => {
       const issued = value(await ticket(storage, T, admitted.enrolled.token, 'docA0000000'));
       expect(issued.ticket).toMatch(/^[A-Za-z0-9_-]{43}$/);
       const secrets = [admitted.enrolled.token, code, code.replace('-', ''), issued.ticket];
-      const tables = ['meta', 'devices', 'codes', 'tickets', 'joins', 'attempts'];
-      const cells = tables.flatMap((table) =>
+      const cells = TABLES.flatMap((table) =>
         storage.sql.exec(`SELECT * FROM ${table}`).toArray().flatMap((row) => Object.values(row)),
       );
       expect(cells.filter((cell) => secrets.includes(String(cell)))).toEqual([]);
@@ -94,6 +85,8 @@ describe('auth', () => {
       expect(await enrol(storage, T, undefined, short, DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
       expect(await enrol(storage, T, '', '', DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
       expect(await enrol(storage, T, short, short, DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
+      expect(await enrol(storage, T, undefined, SECRET, 'short', 'Mac', '1.1.1.1')).toEqual(refused);
+      expect(TABLES.map((table) => count(storage, table))).toEqual([0, 0, 0, 0, 0, 0]);
       const wide = 'é'.repeat(16);
       expect(value(await enrol(storage, T, wide, wide, DEV_A, 'Mac', '1.1.1.1')).enrolled.deviceId).toBe(DEV_A);
       expect(count(storage, 'devices')).toBe(1);
@@ -359,6 +352,17 @@ describe('auth', () => {
     });
   });
 
+  it('a ticket for a device with no row is a storage fault, not a 403', async () => {
+    await inSpace('ticket-orphan', async (storage) => {
+      const { token } = await enrolled(storage, DEV_A);
+      const issued = value(await ticket(storage, T, token, 'docA0000000'));
+      storage.sql.exec('DELETE FROM devices WHERE id = ?', DEV_A);
+      await expect(consumeTicket(storage, T, issued.ticket, 'docA0000000')).rejects.toThrow(
+        'Space: ticket for unknown device ' + DEV_A,
+      );
+    });
+  });
+
   it('consuming a ticket of a removed device answers 403', async () => {
     await inSpace('ticket-revoked', async (storage) => {
       const a = await enrolled(storage, DEV_A);
@@ -382,6 +386,17 @@ describe('auth', () => {
       expect(await ticket(storage, T, a.token, 'docA0000000')).toEqual(REVOKED);
       expect(await devices(storage, a.token)).toEqual(REVOKED);
       expect(await removeDevice(storage, T, a.token, DEV_B)).toEqual(REVOKED);
+    });
+  });
+
+  it('removing a removed device keeps the first removal time and fans out again', async () => {
+    await inSpace('remove-twice', async (storage) => {
+      const a = await enrolled(storage, DEV_A);
+      const b = await enrolled(storage, DEV_B);
+      value(await ticket(storage, T, a.token, 'docA0000000'));
+      expect(value(await removeDevice(storage, T, b.token, DEV_A))).toEqual({ joins: ['docA0000000'] });
+      expect(value(await removeDevice(storage, T + 5_000, b.token, DEV_A))).toEqual({ joins: ['docA0000000'] });
+      expect(int(storage.sql.exec('SELECT revoked_at FROM devices WHERE id = ?', DEV_A).one(), 'revoked_at')).toBe(T);
     });
   });
 

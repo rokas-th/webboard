@@ -1,18 +1,42 @@
 import { DurableObject } from 'cloudflare:workers';
 import * as auth from './auth';
-import type { Admission, DeviceEntry, Enrolled, Result } from './auth';
+import type { Admission, DeviceEntry, Enrolled, Failure, Result } from './auth';
 
-const ROOM_CLOSE_FAILED: Result<never> = {
+const ROOM_CLOSE_FAILED: Failure = {
   ok: false,
   status: 500,
   error: 'internal',
   message: 'The device was removed, but one of its open connections could not be closed; it stops syncing when that connection drops.',
 };
 
+const ROOM_RESTORE_FAILED: Failure = {
+  ok: false,
+  status: 500,
+  error: 'internal',
+  message: 'This device joined, but the server could not reconnect it to every plan. Join again.',
+};
+
+export interface RoomCalls {
+  close(doc: string, deviceId: string): Promise<number>;
+  restore(doc: string, deviceId: string): Promise<void>;
+}
+
 export class Space extends DurableObject<Env> {
+  readonly rooms: RoomCalls = {
+    close: (doc, deviceId) => this.env.Room.getByName(doc).closeDevice(deviceId),
+    restore: (doc, deviceId) => this.env.Room.getByName(doc).restoreDevice(deviceId),
+  };
+
+  private readonly queues = new Map<string, Promise<void>>();
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    void ctx.blockConcurrencyWhile(async () => auth.schema(ctx.storage.sql));
+  }
+
   async enrol(secret: string, deviceId: string, deviceName: string, ip: string): Promise<Result<Enrolled>> {
-    return this.readmit(
-      await auth.enrol(this.ctx.storage, Date.now(), this.env.SETUP_SECRET, secret, deviceId, deviceName, ip),
+    return this.serialised(deviceId, async () =>
+      this.readmit(await auth.enrol(this.ctx.storage, Date.now(), this.env.SETUP_SECRET, secret, deviceId, deviceName, ip)),
     );
   }
 
@@ -21,7 +45,9 @@ export class Space extends DurableObject<Env> {
   }
 
   async claim(code: string, deviceId: string, deviceName: string, ip: string): Promise<Result<Enrolled>> {
-    return this.readmit(await auth.claim(this.ctx.storage, Date.now(), code, deviceId, deviceName, ip));
+    return this.serialised(deviceId, async () =>
+      this.readmit(await auth.claim(this.ctx.storage, Date.now(), code, deviceId, deviceName, ip)),
+    );
   }
 
   async ticket(token: string, doc: string): Promise<Result<{ ticket: string; expiresAt: number }>> {
@@ -37,20 +63,17 @@ export class Space extends DurableObject<Env> {
   }
 
   async removeDevice(token: string, id: string): Promise<Result<{ closed: number }>> {
-    const removed = await auth.removeDevice(this.ctx.storage, Date.now(), token, id);
-    if (!removed.ok) {
-      return removed;
-    }
-    let closed = 0;
-    for (const doc of removed.value.joins) {
-      try {
-        closed += await this.env.Room.getByName(doc).closeDevice(id);
-      } catch (error) {
-        console.error(error);
-        return ROOM_CLOSE_FAILED;
+    return this.serialised(id, async (): Promise<Result<{ closed: number }>> => {
+      const removed = await auth.removeDevice(this.ctx.storage, Date.now(), token, id);
+      if (!removed.ok) {
+        return removed;
       }
-    }
-    return { ok: true, value: { closed } };
+      const joins = removed.value.joins;
+      const settled = await Promise.allSettled(joins.map((doc) => this.rooms.close(doc, id)));
+      const failed = this.logFailures('closeDevice', id, joins, settled);
+      const closed = settled.reduce((sum, outcome) => (outcome.status === 'fulfilled' ? sum + outcome.value : sum), 0);
+      return failed ? ROOM_CLOSE_FAILED : { ok: true, value: { closed } };
+    });
   }
 
   private async readmit(admitted: Result<Admission>): Promise<Result<Enrolled>> {
@@ -58,7 +81,30 @@ export class Space extends DurableObject<Env> {
       return admitted;
     }
     const { enrolled, joins } = admitted.value;
-    await Promise.all(joins.map((doc) => this.env.Room.getByName(doc).restoreDevice(enrolled.deviceId)));
-    return { ok: true, value: enrolled };
+    const settled = await Promise.allSettled(joins.map((doc) => this.rooms.restore(doc, enrolled.deviceId)));
+    return this.logFailures('restoreDevice', enrolled.deviceId, joins, settled)
+      ? ROOM_RESTORE_FAILED
+      : { ok: true, value: enrolled };
+  }
+
+  private logFailures(call: string, deviceId: string, docs: readonly string[], settled: readonly PromiseSettledResult<unknown>[]): boolean {
+    const failures = settled.flatMap((outcome, index) => (outcome.status === 'rejected' ? [{ doc: docs[index], reason: outcome.reason }] : []));
+    failures.forEach(({ doc, reason }) => console.error(`Space: ${call}(${deviceId}) failed in room ${doc}`, reason));
+    return failures.length > 0;
+  }
+
+  private serialised<T>(deviceId: string, run: () => Promise<T>): Promise<T> {
+    const current = (this.queues.get(deviceId) ?? Promise.resolve()).then(run);
+    const settled = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.queues.set(deviceId, settled);
+    void settled.then(() => {
+      if (this.queues.get(deviceId) === settled) {
+        this.queues.delete(deviceId);
+      }
+    });
+    return current;
   }
 }

@@ -108,7 +108,7 @@ function base64url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
-function randomBase64url(length: number): string {
+export function randomBase64url(length: number): string {
   return base64url(crypto.getRandomValues(new Uint8Array(length)));
 }
 
@@ -132,7 +132,7 @@ function newCode(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(CODE_LENGTH)), (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
 }
 
-function schema(sql: SqlStorage): void {
+export function schema(sql: SqlStorage): void {
   sql.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
   sql.exec(
     'CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, revoked_at INTEGER)',
@@ -147,10 +147,7 @@ function schema(sql: SqlStorage): void {
 }
 
 function inTransaction<T>(storage: DurableObjectStorage, run: (sql: SqlStorage) => T): T {
-  return storage.transactionSync(() => {
-    schema(storage.sql);
-    return run(storage.sql);
-  });
+  return storage.transactionSync(() => run(storage.sql));
 }
 
 function spaceIdOf(sql: SqlStorage): string | null {
@@ -372,8 +369,11 @@ export async function consumeTicket(
     }
     const deviceId = text(rows[0], 'device');
     sql.exec('UPDATE tickets SET used_at = ? WHERE hash = ?', now, ticketHash);
-    const revoked = sql.exec('SELECT 1 FROM devices WHERE id = ? AND revoked_at IS NULL', deviceId).toArray().length === 0;
-    return revoked ? REVOKED : ok({ deviceId });
+    const device = sql.exec('SELECT revoked_at IS NOT NULL AS revoked FROM devices WHERE id = ?', deviceId).toArray();
+    if (device.length === 0) {
+      throw new Error('Space: ticket for unknown device ' + deviceId);
+    }
+    return int(device[0], 'revoked') === 1 ? REVOKED : ok({ deviceId });
   });
 }
 
@@ -418,7 +418,7 @@ export async function removeDevice(
     if (sql.exec('SELECT 1 FROM devices WHERE id = ?', id).toArray().length === 0) {
       return NO_SUCH_DEVICE;
     }
-    sql.exec('UPDATE devices SET revoked_at = ? WHERE id = ?', now, id);
+    sql.exec('UPDATE devices SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?', now, id);
     return ok({ joins: joinsOf(sql, id) });
   });
 }
