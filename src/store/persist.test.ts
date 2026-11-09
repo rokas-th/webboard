@@ -169,20 +169,29 @@ describe("openPersisted", () => {
       ["store_compact", 9],
     ]);
     expect(tauri.calls[tauri.calls.length - 1].args).toEqual(Y.encodeStateAsUpdate(p.ydoc));
-    const edit = (): unknown => {
+    const seen: Uint8Array[] = [];
+    p.ydoc.on("update", (u: Uint8Array) => {
+      seen.push(u);
+    });
+    const edit = (key: string, value: number): unknown => {
       try {
-        p.ydoc.getMap("m").set("c", 3);
+        p.ydoc.getMap("m").set(key, value);
         return null;
       } catch (e) {
         return e;
       }
     };
-    const thrown = edit();
-    expect(thrown).toBeInstanceOf(AppError);
-    expect(thrown).toMatchObject({ code: "store.closed", message: "Document p1 was edited after close" });
+    const thrown = [edit("c", 3), edit("d", 4), edit("e", 5)];
+    thrown.forEach((t) => {
+      expect(t).toBeInstanceOf(AppError);
+      expect(t).toMatchObject({ code: "store.closed", message: "Document p1 was edited after close" });
+    });
+    expect(seen).toHaveLength(3);
+    expect(p.ydoc.getMap("m").toJSON()).toEqual({ a: 1, b: 2, c: 3, d: 4, e: 5 });
     await expect(p.compact()).rejects.toMatchObject({ code: "store.closed", message: "Document p1 is closed" });
     await vi.advanceTimersByTimeAsync(COMPACT_EVERY_MS * 2);
     expect(writes()).toHaveLength(3);
+    expect(writes().filter((c) => c.cmd === "store_append")).toHaveLength(2);
   });
 
   it("a throwing onError listener does not stop the queue", async () => {

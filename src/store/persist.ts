@@ -170,8 +170,7 @@ export async function openPersisted(id: string): Promise<PersistedDoc> {
   };
 
   const onUpdate = (update: Uint8Array, origin: unknown): void => {
-    if (origin === LOAD_ORIGIN) return;
-    if (closed) throw new AppError("store.closed", `Document ${id} was edited after close`);
+    if (origin === LOAD_ORIGIN || closed) return;
     lastSeq += 1;
     enqueue({ cmd: "store_append", seq: lastSeq, bytes: update });
     dirty = true;
@@ -182,7 +181,15 @@ export async function openPersisted(id: string): Promise<PersistedDoc> {
       timer = setTimeout(enqueueCompact, COMPACT_EVERY_MS);
     }
   };
+  const onAfterTransaction = (tr: Y.Transaction): void => {
+    if (!closed || tr.origin === LOAD_ORIGIN) return;
+    const grew = [...tr.afterState].some(([client, clock]) => tr.beforeState.get(client) !== clock);
+    if (grew || tr.deleteSet.clients.size > 0) {
+      throw new AppError("store.closed", `Document ${id} was edited after close`);
+    }
+  };
   ydoc.on("update", onUpdate);
+  ydoc.on("afterTransaction", onAfterTransaction);
   if (dirty) timer = setTimeout(enqueueCompact, COMPACT_EVERY_MS);
 
   return {
