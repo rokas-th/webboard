@@ -56,6 +56,24 @@ const SITES = [
     re: new RegExp(String.raw`("packages":\s*\{\s*"":\s*\{[^{}]*?"version":\s*")(${V})(")`),
     write: false,
   },
+  {
+    path: "server/package.json",
+    key: "version",
+    re: new RegExp(String.raw`(^\s*"version":\s*")(${V})(")`, "m"),
+    write: true,
+  },
+  {
+    path: "server/package-lock.json",
+    key: "root version",
+    re: new RegExp(String.raw`(^  "version":\s*")(${V})(")`, "m"),
+    write: false,
+  },
+  {
+    path: "server/package-lock.json",
+    key: 'packages."" version',
+    re: new RegExp(String.raw`("packages":\s*\{\s*"":\s*\{[^{}]*?"version":\s*")(${V})(")`),
+    write: false,
+  },
 ];
 
 /** @param {string[]} argv */
@@ -170,6 +188,7 @@ async function write(root, next, lock) {
   }
   run(root, "cargo", ["check", "--workspace"]);
   run(root, "npm", ["install", "--package-lock-only"]);
+  run(join(root, "server"), "npm", ["install", "--package-lock-only"]);
   await check(root, next);
 }
 

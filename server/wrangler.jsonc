@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "webboard",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "webboard.rokass.org", "custom_domain": true }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "Room", "class_name": "Room" },
+      { "name": "Space", "class_name": "Space" }
+    ]
+  },
+  "exports": {
+    "Room": { "type": "durable-object", "storage": "sqlite" },
+    "Space": { "type": "durable-object", "storage": "sqlite" }
+  }
+}

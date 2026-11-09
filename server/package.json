@@ -1,0 +1,34 @@
+{
+  "name": "webboard-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "types": "wrangler types --env-file .dev.vars.example"
+  },
+  "dependencies": {
+    "lib0": "^0.2.117",
+    "partyserver": "0.5.10",
+    "y-partyserver": "2.2.0",
+    "y-protocols": "^1.0.7",
+    "yjs": "13.6.33"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.6.0",
+    "@cloudflare/workers-types": "^5.20261104.1",
+    "typescript": "~5.8.3",
+    "vitest": "^4.1.12",
+    "wrangler": "4.158.0"
+  },
+  "overrides": {
+    "y-partyserver": {
+      "@cloudflare/workers-types": "$@cloudflare/workers-types"
+    }
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "workerd@1.20261104.1": true,
+    "fsevents": false
+  }
+}
