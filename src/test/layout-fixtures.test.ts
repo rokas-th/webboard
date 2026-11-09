@@ -1,17 +1,16 @@
 import * as Y from "yjs";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InvokeArgs } from "@tauri-apps/api/core";
-import { buildFixtures } from "../../scripts/layout-fixtures.mjs";
+import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, UNREADABLE_ID, UNREADABLE_LINE } from "../../scripts/layout-fixtures.mjs";
 import { normalizeName } from "../actions/build";
-import type { ItemId } from "../domain/model";
 import { LogState } from "../log/state";
-import type { Action, DeviceId } from "../log/types";
+import type { Action, Cause, DeviceId } from "../log/types";
 import { choices, heldItems } from "../plan/choices";
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { parseKey, validateWrite } from "../plan/units";
 import { fixedClock } from "../services/clock";
-import { decodeAction, PlanDoc } from "../store/doc";
+import { decodeAction, encodeAction, PlanDoc } from "../store/doc";
 import { Registry } from "../store/registry";
 import { MESA_SEED } from "./session";
 import { resetTauri, type Answer } from "./tauriMock";
@@ -118,11 +117,33 @@ function decoded(f: Fixture, doc: string) {
   return { ydoc, actions, log, plan, cs, held: heldItems(cs, plan) };
 }
 
+const openRegistries: Registry[] = [];
+
+afterEach(async () => {
+  const closing = openRegistries.splice(0);
+  await Promise.all(closing.map((r) => r.close()));
+});
+
 async function opened(f: Fixture, doc: string) {
   resetTauri(answersOf(f));
   const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
+  openRegistries.push(registry);
   const session = await registry.session(doc);
   return { registry, session };
+}
+
+const stringsOf = (v: unknown, what: string): string[] => {
+  if (!Array.isArray(v) || !v.every((x): x is string => typeof x === "string")) throw new Error(`${what} is not a list of strings`);
+  return v;
+};
+
+function readable(f: Fixture, doc: string) {
+  const raws = rawActions(ydocOf(f, doc));
+  const actions = raws.filter(([id]) => id !== UNREADABLE_ID).map(([id, raw]) => decodeAction(id, raw));
+  const log = new LogState(planRules);
+  const delta = log.add(actions);
+  expect(delta.refused).toEqual([]);
+  return { raws, actions, log, items: [...projectPlan(doc, log).items.keys()] };
 }
 
 const shapeOf = (plan: ReturnType<typeof projectPlan>) =>
@@ -167,14 +188,14 @@ describe("layout fixtures", () => {
   });
 
   it("lists exactly its docs in store_list", () => {
-    Object.values(FIXTURES).forEach((f) => expect([...(ipcOf(f, "store_list") as string[])].sort()).toEqual(Object.keys(f.docs).sort()));
+    Object.values(FIXTURES).forEach((f) => expect([...stringsOf(ipcOf(f, "store_list"), "store_list")].sort()).toEqual(Object.keys(f.docs).sort()));
   });
 
   it("writes only unit keys parseKey reads and values validateWrite accepts", () => {
     Object.entries(FIXTURES).forEach(([name, f]) =>
       planDocs(f).forEach((doc) =>
         rawActions(ydocOf(f, doc)).forEach(([id, raw]) => {
-          if (name === "unreadable" && id === "badIphone01") return;
+          if (name === "unreadable" && id === UNREADABLE_ID) return;
           decodeAction(id, raw).w.forEach((w) => {
             expect(() => parseKey(w.u)).not.toThrow();
             validateWrite(w);
@@ -188,7 +209,17 @@ describe("layout fixtures", () => {
     Object.values(FIXTURES).forEach((f) =>
       planDocs(f).forEach((doc) => {
         const notes = ydocOf(f, doc).getMap("notes");
-        decodedItems(f, doc).forEach((item) => expect(notes.get(item)).toBeInstanceOf(Y.Text));
+        readable(f, doc).items.forEach((item) => expect(notes.get(item)).toBeInstanceOf(Y.Text));
+      }),
+    );
+  });
+
+  it("decodes every action but the one unreadable tuple, and the log refuses none of them", () => {
+    Object.entries(FIXTURES).forEach(([name, f]) =>
+      planDocs(f).forEach((doc) => {
+        const { raws, log } = readable(f, doc);
+        expect(raws.some(([id]) => id === UNREADABLE_ID)).toBe(name === "unreadable");
+        if (name !== "unreadable") expect(log.pending).toEqual([]);
       }),
     );
   });
@@ -235,6 +266,16 @@ describe("layout fixtures", () => {
     expect([...d.held]).toEqual(["t3"]);
   });
 
+  it("lists every long-names plan and item name in LONG_NAMES, which the probe's clip check judges", () => {
+    const f = fixture("long-names");
+    const names = planDocs(f).flatMap((doc) => {
+      const d = decoded(f, doc);
+      return [d.plan.name, ...[...d.plan.items.values()].map((i) => i.name)];
+    });
+    expect(names.filter((n) => !LONG_NAMES.includes(n))).toEqual([]);
+    expect([...LONG_NAMES].sort()).toEqual([...new Set(names)].sort());
+  });
+
   it("long-names stores 300-character, emoji, right-to-left and once-multi-line names on one line", () => {
     const f = fixture("long-names");
     const names = planDocs(f).flatMap((doc) => {
@@ -255,26 +296,22 @@ describe("layout fixtures", () => {
   it("unreadable is mesa plus one iPhone action decodeAction refuses and one child of it", async () => {
     const f = fixture("unreadable");
     const doc = only(planDocs(f));
-    const ydoc = ydocOf(f, doc);
-    const raws = rawActions(ydoc);
-    const refused = raws.flatMap(([id, raw]) => {
-      try {
-        decodeAction(id, raw);
-        return [];
-      } catch (e) {
-        if (!(e instanceof Error)) throw e;
-        return [{ id, raw, message: e.message }];
-      }
-    });
-    const bad = only(refused);
-    expect(Array.isArray(bad.raw) && bad.raw[0]).toBe("iphone");
+    const { raws, actions, log } = readable(f, doc);
+    const bad = only(raws.filter(([id]) => id === UNREADABLE_ID));
+    expect(Array.isArray(bad[1]) && bad[1][0]).toBe("iphone");
+    expect(() => decodeAction(UNREADABLE_ID, bad[1])).toThrow(`Action ${UNREADABLE_ID} has a malformed lbl`);
+    expect(actions).toHaveLength(raws.length - 1);
+    const child = only(actions.filter((a) => a.par.includes(UNREADABLE_ID)));
+    expect(child.dev).toBe("iphone");
+    expect(log.pending).toEqual([child.id]);
     const { session } = await opened(f, doc);
     const view = session.view();
     expect(shapeOf(view.plan)).toEqual(seedShape());
-    expect(view.unreadable).toEqual([{ id: bad.id, message: `A change from iPhone could not be read: ${bad.message}. Update WebBoard on this device.` }]);
+    expect(view.unreadable).toHaveLength(1);
+    expect(view.unreadable[0].id).toBe(UNREADABLE_ID);
+    expect(view.unreadable[0].message).toBe(UNREADABLE_LINE);
+    expect(view.unreadable[0].message).toBe(`A change from iPhone could not be read: Action ${UNREADABLE_ID} has a malformed lbl. Update WebBoard on this device.`);
     expect(view.pending).toBe(1);
-    const child = raws.filter(([id]) => id !== bad.id).map(([id, raw]) => decodeAction(id, raw)).filter((a) => a.par.includes(bad.id));
-    expect(only(child).dev).toBe("iphone");
   });
 
   it("two-choices is mesa plus an n: clash and a ct: clash, holding nothing", async () => {
@@ -293,14 +330,40 @@ describe("layout fixtures", () => {
     for (const f of Object.values(FIXTURES)) {
       resetTauri(answersOf(f));
       const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
+      openRegistries.push(registry);
       expect(registry.device.name).toBe("Mac");
       expect(registry.plans().map((p) => p.id).sort()).toEqual(planDocs(f).sort());
       for (const doc of planDocs(f)) {
         const session = await registry.session(doc);
         expect(registry.plans().find((p) => p.id === doc)?.name).toBe(session.view().plan.name);
       }
-      await registry.close();
     }
+  });
+
+  it("encodes each cause letter and meta exactly as encodeAction does, and decodeAction reads them back", () => {
+    const causes: Cause[] = ["own", "push", "recalendar", "undo", "revert", "resolution"];
+    const base = { dev: "mac", ses: "sesMacSetup", at: 1_762_000_000_000, par: ["mesaM000000"], lbl: "Encoded" };
+    const cases: Action[] = [
+      ...causes.map((c, n): Action => ({ id: `enc${n}`, ...base, w: [{ u: `n:t${n}`, v: `name ${n}`, c }] })),
+      { id: "encMeta", ...base, w: [{ u: "n:t9", v: "undone", c: "undo" }], meta: { undo: "mesaM000001" } },
+    ];
+    cases.forEach((a) => {
+      const raw = encodeTuple(a);
+      expect(raw).toEqual(encodeAction(a));
+      const back = decodeAction(a.id, raw);
+      expect(back.w.map((w) => w.c)).toEqual(a.w.map((w) => w.c));
+      expect(back.meta).toEqual(a.meta);
+      expect(back).toEqual(a);
+    });
+    expect(() => encodeTuple({ ...base, w: [{ u: "n:t1", v: "x", c: "bogus" }] })).toThrow("layout fixtures: unknown cause bogus");
+  });
+
+  it("orders siblings with keys up to 62 + 62x62 and refuses one past them", () => {
+    expect(orderKey(0)).toBe("a0");
+    expect(orderKey(61)).toBe("az");
+    expect(orderKey(62)).toBe("b00");
+    expect(orderKey(62 + 62 * 62 - 1)).toBe("bzz");
+    expect(() => orderKey(62 + 62 * 62)).toThrow(`layout fixtures: orderKey ${62 + 62 * 62} out of range`);
   });
 
   it("answers holidays_year for CH-ZH 2026 and 2027 exactly as the plans store them", () => {
@@ -315,19 +378,3 @@ describe("layout fixtures", () => {
     });
   });
 });
-
-function decodedItems(f: Fixture, doc: string): ItemId[] {
-  const ydoc = ydocOf(f, doc);
-  const log = new LogState(planRules);
-  log.add(
-    rawActions(ydoc).flatMap(([id, raw]) => {
-      try {
-        return [decodeAction(id, raw)];
-      } catch (e) {
-        if (!(e instanceof Error)) throw e;
-        return [];
-      }
-    }),
-  );
-  return [...projectPlan(doc, log).items.keys()];
-}

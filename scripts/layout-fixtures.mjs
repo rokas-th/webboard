@@ -16,6 +16,10 @@ export const PLAN_IDS = {
 
 export const UNREADABLE_ID = "badIphone01";
 
+export const UNREADABLE_LINE = `A change from iPhone could not be read: Action ${UNREADABLE_ID} has a malformed lbl. Update WebBoard on this device.`;
+
+const ORDER_LIMIT = 62 + 62 * 62;
+
 const ZH = { src: "openholidays", country: "CH", subdivision: "CH-ZH" };
 const ZH_KEY = "oh:CH:CH-ZH";
 const FETCHED_AT = "2026-11-01T07:00:00Z";
@@ -61,14 +65,20 @@ const q = (name) => `“${name}”`;
 
 const idOf = (prefix, n) => `${prefix}${String(n).padStart(11 - prefix.length, "0")}`;
 
-function orderKey(n) {
+export function orderKey(n) {
+  if (!Number.isInteger(n) || n < 0 || n >= ORDER_LIMIT) throw new Error(`layout fixtures: orderKey ${n} out of range`);
   if (n < 62) return `a${DIGITS[n]}`;
   const m = n - 62;
   return `b${DIGITS[Math.floor(m / 62)]}${DIGITS[m % 62]}`;
 }
 
-function tuple(a) {
-  const t = [a.dev, a.ses, a.at, [...a.par], a.lbl, a.w.flatMap((w) => [w.u, w.v, LETTER[w.c]])];
+function letterOf(c) {
+  if (!Object.hasOwn(LETTER, c)) throw new Error(`layout fixtures: unknown cause ${c}`);
+  return LETTER[c];
+}
+
+export function encodeTuple(a) {
+  const t = [a.dev, a.ses, a.at, [...a.par], a.lbl, a.w.flatMap((w) => [w.u, w.v, letterOf(w.c)])];
   return a.meta === undefined ? t : [...t, { ...a.meta }];
 }
 
@@ -117,7 +127,7 @@ class Log {
     this.n += 1;
     this.at += 7 * 60_000;
     const parents = par ?? (this.entries.length === 0 ? [] : [this.entries[this.entries.length - 1][0]]);
-    this.entries.push([id, tuple({ dev, ses, at: this.at, par: parents, lbl, w })]);
+    this.entries.push([id, encodeTuple({ dev, ses, at: this.at, par: parents, lbl, w })]);
     this.notes.push(...notes);
     return id;
   }
@@ -283,7 +293,7 @@ function unreadableLog() {
   const log = mesaLog("mesaU");
   const head = log.head();
   log.raw(UNREADABLE_ID, ["iphone", "sesIphone01", START + 9 * DAY_MS, [head], 7, ["n:u1", "Kids star parties (iPhone)", "o"]]);
-  log.raw("kidIphone01", tuple({ dev: "iphone", ses: "sesIphone01", at: START + 9 * DAY_MS + 60_000, par: [UNREADABLE_ID], lbl: `Moved ${q("Kids star parties")} to Now`, w: [own("s:u1", sched(null, 3, "todo", 0, "now"))] }));
+  log.raw("kidIphone01", encodeTuple({ dev: "iphone", ses: "sesIphone01", at: START + 9 * DAY_MS + 60_000, par: [UNREADABLE_ID], lbl: `Moved ${q("Kids star parties")} to Now`, w: [own("s:u1", sched(null, 3, "todo", 0, "now"))] }));
   return log;
 }
 
@@ -351,6 +361,7 @@ const LONG = {
   milestone: long("Milestone"),
   later: long("Later"),
   emoji: "🚀 Launch ✨ review 👩‍💻 with the whole team 🎉 and the 🇨🇭 partners 🔭🌌",
+  emojiReversed: "🔭🌌 partners 🇨🇭 the and 🎉 team whole the with 👩‍💻 review ✨ Launch 🚀",
   arabic: "تركيب قبة المرصد وضبط التلسكوب قبل ليلة الافتتاح مع فريق النادي",
   hebrew: "הכנת מפת השמים לקראת ערב הפתיחה במצפה",
   multi: normalizeName("Kick-off notes\nfrom the vendor workshop\r\n\tsecond line kept"),
@@ -368,7 +379,7 @@ const LONG_ITEMS = [
   T("lt5", LONG.multi, { start: "2026-11-11", dur: 2, horizon: "now" }),
   T("lm1", LONG.milestone, { kind: "milestone", parent: "lg1", start: "2026-11-25", deps: [fs("lt3")] }),
   T("lu1", LONG.later, { horizon: "later" }),
-  T("lu2", LONG.emoji.split(" ").reverse().join(" "), { horizon: "now" }),
+  T("lu2", LONG.emojiReversed, { horizon: "now" }),
 ];
 
 function longLog() {

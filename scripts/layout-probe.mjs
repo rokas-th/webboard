@@ -1,10 +1,10 @@
 import { createServer } from "node:http";
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
-import { buildFixtures, LONG_NAMES, UNREADABLE_ID } from "./layout-fixtures.mjs";
+import { buildFixtures, LONG_NAMES, UNREADABLE_LINE } from "./layout-fixtures.mjs";
 
 const DIST = fileURLToPath(new URL("../dist", import.meta.url));
 
@@ -34,9 +34,18 @@ const DIALOG = [
   [820, 1180],
 ];
 
+const FULL_MIN_WIDTH = 1024;
+const READY_MS = 5000;
+const QUIET_MS = 4000;
+const SEND_TIMEOUT_MS = 30_000;
+const DEVTOOLS_MS = 10_000;
+const FONTS = [
+  ["IBM Plex Mono", '13px "IBM Plex Mono"'],
+  ["Chakra Petch", '600 12px "Chakra Petch"'],
+];
+
 const EMPTY_PLAN = "No items yet. Add one with + Task.";
 const CALENDAR_BANNER = "The calendar was changed on two devices. Nothing moves until you choose.";
-const UNREADABLE_LINE = `A change from iPhone could not be read: Action ${UNREADABLE_ID} has a malformed lbl. Update WebBoard on this device.`;
 const PICKED = "Tracking: review results";
 const PICKED_CHOICE = "Tracking: review results and fixes";
 
@@ -84,7 +93,7 @@ function states() {
     });
   });
   add("scale", "scale", { actions: [expect(".tl-row .name", "WS01 task 01"), expect(".plan-head h1", "Scale: 1,000 items")] });
-  VIEWS.filter(([slug]) => slug === "timeline-w" || slug === "board" || slug === "list").forEach(([slug, place]) =>
+  VIEWS.forEach(([slug, place]) =>
     add(`long-names/${slug}`, "long-names", { place, clip: true, actions: [viewExpect(place.view), count(".sidebar .entry", 2)] }),
   );
   add("choices", "choices", {
@@ -159,15 +168,13 @@ const SHIM = String.raw`
   function now() {
     return pin + Math.floor(performance.now() - started);
   }
-  class PinnedDate extends RealDate {
-    constructor(...args) {
-      if (args.length === 0) super(now());
-      else super(...args);
-    }
-    static now() {
-      return now();
-    }
+  function PinnedDate() {
+    if (new.target === undefined) return new RealDate(now()).toString();
+    return Reflect.construct(RealDate, arguments.length === 0 ? [now()] : Array.prototype.slice.call(arguments), new.target);
   }
+  Object.setPrototypeOf(PinnedDate, RealDate);
+  PinnedDate.prototype = RealDate.prototype;
+  PinnedDate.now = now;
   window.Date = PinnedDate;
   function bytes(b64) {
     var raw = atob(b64);
@@ -221,8 +228,8 @@ const SHIM = String.raw`
 const MEASURE = String.raw`
 (function () {
   var EPS = 1;
-  var FULL_MIN_WIDTH = 1024;
   var P = window.__PROBE__;
+  if (typeof P.dialog !== "boolean" || typeof P.fullMinWidth !== "number") throw new Error("__PROBE__ carries no dialog flag or minimum full width");
   var se = document.scrollingElement || document.documentElement;
   var vw = window.innerWidth;
   var vh = window.innerHeight;
@@ -258,10 +265,11 @@ const MEASURE = String.raw`
   }
 
   var all = Array.prototype.slice.call(document.querySelectorAll("*"));
-  var narrow = vw < FULL_MIN_WIDTH;
+  var narrow = P.dialog && vw < P.fullMinWidth;
   function scope() {
     return narrow ? document.querySelector('[role="dialog"]') : document.querySelector(".app");
   }
+  var scopeFound = scope() !== null;
   function inScope(el) {
     var s = scope();
     return s !== null && s.contains(el);
@@ -724,7 +732,14 @@ const MEASURE = String.raw`
   return {
     chain: chain(),
     narrow: narrow,
-    fonts: { mono: document.fonts.check('13px "IBM Plex Mono"'), display: document.fonts.check('600 12px "Chakra Petch"') },
+    scope: { name: narrow ? '[role="dialog"]' : ".app", found: scopeFound },
+    fonts: P.fonts.map(function (f) {
+      var faces = [];
+      document.fonts.forEach(function (face) {
+        if (face.family.replace(/^["']|["']$/g, "") === f[0]) faces.push(face.status);
+      });
+      return { family: f[0], faces: faces.length, loaded: faces.indexOf("loaded") !== -1 && document.fonts.check(f[1]) };
+    }),
     doc: { scrollHeight: se.scrollHeight, innerHeight: vh, scrollWidth: se.scrollWidth, innerWidth: vw,
            overY: se.scrollHeight - vh, overX: se.scrollWidth - vw,
            alreadyScrolledTo: { top: Math.round(wasTop), left: Math.round(wasLeft) } },
@@ -801,12 +816,19 @@ window.__probeAct = function (a) {
 };
 `;
 
+class NotMeasured extends Error {}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const tailOf = (text) => (text.length > 4000 ? `…${text.slice(-4000)}` : text);
+
 class Cdp {
   constructor(ws) {
     this.ws = ws;
     this.next = 1;
     this.waiting = new Map();
     this.listeners = new Set();
+    this.failure = null;
     ws.addEventListener("message", (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.id === undefined) {
@@ -816,7 +838,8 @@ class Cdp {
       const pending = this.waiting.get(msg.id);
       if (pending === undefined) return;
       this.waiting.delete(msg.id);
-      if (msg.error) pending.reject(new Error(`${msg.error.message} (${JSON.stringify(msg.error.data ?? null)})`));
+      clearTimeout(pending.timer);
+      if (msg.error) pending.reject(new Error(`${pending.method}: ${msg.error.message} (${JSON.stringify(msg.error.data ?? null)})`));
       else pending.resolve(msg.result);
     });
   }
@@ -830,12 +853,34 @@ class Cdp {
     return new Cdp(ws);
   }
 
+  watch(onLost) {
+    this.ws.addEventListener("close", () => onLost("the devtools socket closed"));
+    this.ws.addEventListener("error", () => onLost("the devtools socket failed"));
+  }
+
+  fail(error) {
+    if (this.failure === null) this.failure = error;
+    const pending = [...this.waiting.values()];
+    this.waiting.clear();
+    pending.forEach((p) => {
+      clearTimeout(p.timer);
+      p.reject(this.failure);
+    });
+  }
+
   send(method, params = {}, sessionId) {
+    if (this.failure !== null) return Promise.reject(this.failure);
     const id = this.next++;
     const payload = { id, method, params };
     if (sessionId !== undefined) payload.sessionId = sessionId;
-    this.ws.send(JSON.stringify(payload));
-    return new Promise((resolve, reject) => this.waiting.set(id, { resolve, reject }));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiting.delete(id);
+        reject(new Error(`devtools gave no answer to ${method} within ${SEND_TIMEOUT_MS / 1000} s`));
+      }, SEND_TIMEOUT_MS);
+      this.waiting.set(id, { method, resolve, reject, timer });
+      this.ws.send(JSON.stringify(payload));
+    });
   }
 
   on(cb) {
@@ -872,27 +917,54 @@ async function findShell() {
       }
     }
   }
-  throw new Error(`no chrome-headless-shell under ${SHELL_CANDIDATES.join(" or ")}; install Playwright's chromium-headless-shell first`);
+  throw new NotMeasured(`no chrome-headless-shell under ${SHELL_CANDIDATES.join(" or ")}; install Playwright's chromium-headless-shell first`);
 }
 
-function serve(indexHtml) {
-  const server = createServer(async (req, res) => {
+function freshTraffic() {
+  return { notFound: [], pageErrors: [], unknownState: null, crash: null };
+}
+
+function serve(indexHtml, traffic) {
+  const handle = async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      const body = indexHtml(url.searchParams.get("state") ?? "");
+      const name = url.searchParams.get("state") ?? "";
+      const body = indexHtml(name);
+      if (body === null) {
+        traffic.current.unknownState = name;
+        res.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }).end(`unknown probe state ${name}`);
+        return;
+      }
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-length": Buffer.byteLength(body), "cache-control": "no-store" });
       res.end(body);
       return;
     }
-    const rel = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");
+    let decoded;
+    try {
+      decoded = decodeURIComponent(url.pathname);
+    } catch (e) {
+      if (!(e instanceof URIError)) throw e;
+      traffic.current.pageErrors.push(`the page requested ${url.pathname}, which is not a valid encoded path (${e.message})`);
+      res.writeHead(400, { "content-type": "text/plain; charset=utf-8" }).end("bad path");
+      return;
+    }
+    const rel = normalize(decoded).replace(/^(\.\.[/\\])+/, "");
     const file = join(DIST, rel);
     if (!file.startsWith(DIST) || !(await exists(file))) {
+      traffic.current.notFound.push(url.pathname);
       res.writeHead(404).end("not found");
       return;
     }
     const data = await readFile(file);
     res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream", "cache-control": "no-store" });
     res.end(data);
+  };
+  const server = createServer((req, res) => {
+    handle(req, res).catch((e) => {
+      if (traffic.current.crash === null) traffic.current.crash = e;
+      if (!res.headersSent) res.writeHead(500);
+      res.end();
+    });
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -900,16 +972,23 @@ function serve(indexHtml) {
   });
 }
 
-async function waitForDevtools(port) {
-  for (let i = 0; i < 100; i += 1) {
-    const res = await fetch(`http://127.0.0.1:${port}/json/version`).then(
-      (r) => r,
-      () => null,
-    );
-    if (res !== null && res.ok) return res.json();
-    await new Promise((r) => setTimeout(r, 100));
+const exitOf = (child) => `code ${child.exitCode}, signal ${child.signalCode}`;
+const exited = (child) => child.exitCode !== null || child.signalCode !== null;
+
+async function devtoolsUrl(child, profile, stderrOf, startError) {
+  const file = join(profile, "DevToolsActivePort");
+  const deadline = Date.now() + DEVTOOLS_MS;
+  while (Date.now() < deadline) {
+    const failed = startError();
+    if (failed !== null) throw new NotMeasured(`chrome-headless-shell did not start: ${failed.message}`);
+    if (exited(child)) throw new NotMeasured(`chrome-headless-shell exited (${exitOf(child)}) before devtools came up; its stderr:\n${tailOf(stderrOf())}`);
+    if (await exists(file)) {
+      const [port, path] = (await readFile(file, "utf8")).split("\n");
+      if (/^\d+$/.test(port ?? "") && (path ?? "").startsWith("/devtools/browser/")) return `ws://127.0.0.1:${port}${path}`;
+    }
+    await sleep(100);
   }
-  throw new Error(`devtools never came up on port ${port}`);
+  throw new NotMeasured(`chrome-headless-shell wrote no ${file} within ${DEVTOOLS_MS / 1000} s; its stderr:\n${tailOf(stderrOf())}`);
 }
 
 async function evaluate(cdp, sessionId, expression, awaitPromise = false) {
@@ -921,26 +1000,37 @@ async function evaluate(cdp, sessionId, expression, awaitPromise = false) {
 async function settle(cdp, sessionId) {
   const expr = String.raw`(async function () {
     await document.fonts.ready;
-    for (var i = 0; i < 200; i++) {
-      var ready = document.querySelector(".app") !== null &&
+    var begun = performance.now();
+    var ready = false;
+    while (!ready && performance.now() - begun < ${READY_MS}) {
+      ready = document.querySelector(".app") !== null &&
         (document.querySelector(".plan-head") !== null || document.querySelector(".empty-state") !== null);
-      if (ready) break;
-      await new Promise(function (r) { setTimeout(r, 25); });
+      if (!ready) await new Promise(function (r) { setTimeout(r, 25); });
     }
+    if (!ready) return { ready: false, quiet: false };
     var last = performance.now();
     var watch = new MutationObserver(function () { last = performance.now(); });
     watch.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
     var start = performance.now();
-    while (performance.now() - last < 150 && performance.now() - start < 4000) {
+    var quiet = false;
+    while (!quiet && performance.now() - start < ${QUIET_MS}) {
       await new Promise(function (r) { setTimeout(r, 30); });
+      quiet = performance.now() - last >= 150;
     }
     watch.disconnect();
     await document.fonts.ready;
     await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });
-    return true;
+    return { ready: true, quiet: quiet };
   })()`;
-  await evaluate(cdp, sessionId, expr, true);
+  return evaluate(cdp, sessionId, expr, true);
 }
+
+const unsettled = (s) =>
+  !s.ready
+    ? `app never rendered .app and .plan-head/.empty-state within ${READY_MS / 1000} s`
+    : !s.quiet
+      ? `DOM still changing after ${QUIET_MS / 1000} s`
+      : null;
 
 async function press(cdp, sessionId, k) {
   const base = { key: k.key, code: k.code, modifiers: k.modifiers, windowsVirtualKeyCode: k.key.toUpperCase().charCodeAt(0) };
@@ -956,27 +1046,40 @@ async function pointer(cdp, sessionId, [x, y]) {
 
 const describeAction = (a) => JSON.stringify(a);
 
-async function runState(cdp, sessionId, origin, state, errors) {
+async function runState(cdp, sessionId, origin, state, errors, traffic) {
   errors.length = 0;
-  await cdp.send("Page.navigate", { url: `${origin}/?state=${encodeURIComponent(state.name)}` }, sessionId);
-  await settle(cdp, sessionId);
+  traffic.current = freshTraffic();
+  const seen = () => [...errors, ...traffic.current.pageErrors];
+  const unreached = (why) => ({ unreached: why, errors: seen() });
+  const checked = () => {
+    if (traffic.current.crash !== null) throw traffic.current.crash;
+  };
+  const nav = await cdp.send("Page.navigate", { url: `${origin}/?state=${encodeURIComponent(state.name)}` }, sessionId);
+  checked();
+  if (typeof nav.errorText === "string" && nav.errorText !== "") return unreached(`navigation to ${state.name} failed: ${nav.errorText}`);
+  if (traffic.current.unknownState !== null) return unreached(`the probe server knows no state ${traffic.current.unknownState} (404 unknown probe state)`);
+  const first = unsettled(await settle(cdp, sessionId));
+  checked();
+  if (first !== null) return unreached(first);
   await evaluate(cdp, sessionId, ACT);
   for (const action of state.actions) {
     if (action.key !== undefined) {
       await press(cdp, sessionId, action.key);
-      await settle(cdp, sessionId);
-      continue;
+    } else {
+      const got = await evaluate(cdp, sessionId, `window.__probeAct(${JSON.stringify(action)})`);
+      if (got.fail !== undefined) return unreached(`${describeAction(action)}: ${got.fail}`);
+      if (got.at !== undefined) await pointer(cdp, sessionId, got.at);
     }
-    const got = await evaluate(cdp, sessionId, `window.__probeAct(${JSON.stringify(action)})`);
-    if (got.fail !== undefined) return { unreached: `${describeAction(action)}: ${got.fail}` };
-    if (got.at !== undefined) await pointer(cdp, sessionId, got.at);
-    await settle(cdp, sessionId);
+    const after = unsettled(await settle(cdp, sessionId));
+    checked();
+    if (after !== null) return unreached(`after ${describeAction(action)}: ${after}`);
   }
   const reading = await evaluate(cdp, sessionId, MEASURE);
-  return { reading, errors: [...errors] };
+  checked();
+  return { reading, errors: seen(), notFound: [...traffic.current.notFound] };
 }
 
-function judge(state, r, errors) {
+function judge(state, r, errors, notFound) {
   const problems = [];
   if (r.doc.overY > 1) problems.push(`document scrolls ${r.doc.overY}px vertically`);
   if (r.doc.overX > 1) problems.push(`document scrolls ${r.doc.overX}px horizontally`);
@@ -1007,25 +1110,33 @@ function judge(state, r, errors) {
     if (r.dialogs.count !== 1) problems.push(`${r.dialogs.count} elements have role="dialog", not one`);
     r.dialogs.faults.forEach((f) => problems.push(f));
   }
+  const unloaded = r.fonts.filter((f) => !f.loaded).map((f) => `${f.family} (${f.faces} faces)`);
+  if (unloaded.length > 0) problems.push(`fonts not loaded: ${unloaded.join(", ")}`);
+  notFound.forEach((p) => problems.push(`dist has no ${p}: the page asked for it and got 404`));
   errors.forEach((e) => problems.push(`the page reported an error: ${e}`));
   return { ok: problems.length === 0, problems };
 }
 
+const SCOPE_NOTE = "measures 3-8 judge only the dialog below 1024 px; Task 5.3's compact form brings the shell under them";
+
 function report(name, viewport, verdict, r) {
   process.stdout.write(`\n${verdict.ok ? "ok  " : "FAIL"} ${name} @ ${viewport}\n`);
-  process.stdout.write(`     doc ${r.doc.scrollHeight}/${r.doc.innerHeight}h ${r.doc.scrollWidth}/${r.doc.innerWidth}w   fonts mono=${r.fonts.mono} display=${r.fonts.display}\n`);
+  process.stdout.write(`     doc ${r.doc.scrollHeight}/${r.doc.innerHeight}h ${r.doc.scrollWidth}/${r.doc.innerWidth}w   fonts ${r.fonts.map((f) => `${f.family}=${f.loaded}`).join(" ")}\n`);
   process.stdout.write(`     ${Object.entries(r.overflow).map(([k, v]) => `${k} ${v}`).join(" | ")}\n`);
   verdict.problems.forEach((p) => process.stdout.write(`     ! ${p}\n`));
   r.offenders.forEach((o) => process.stdout.write(`     > past the edge by ${o.over}  [${o.position}]  ${o.path}\n`));
   r.tallest.forEach((t) => process.stdout.write(`     = bottom ${t.bottom} (h ${t.height}) [${t.position}]  ${t.path}${t.clippedBy === null ? "" : ` — but clipped by ${t.clippedBy}`}\n`));
-  if (r.narrow) process.stdout.write(`     measures 3-8 judge only the dialog below 1024 px; Task 5.3's compact form brings the shell under them
-`);
   if (r.names.checked > 0) process.stdout.write(`     long names checked: ${r.names.checked}\n`);
   if (!verdict.ok) {
     r.chain.forEach((c) =>
       process.stdout.write(`     . ${c.name.padEnd(18)} client ${String(c.client).padStart(5)} scroll ${String(c.scroll).padStart(5)} box ${String(c.top).padStart(7)}..${String(c.bottom).padEnd(7)} x ${String(c.left).padStart(7)}..${String(c.right).padEnd(7)}  ${c.css}\n`),
     );
   }
+}
+
+function reportUnreached(name, viewport, why, errors) {
+  process.stdout.write(`\nUNREACHED ${name} @ ${viewport}\n     ! ${why}\n`);
+  errors.forEach((e) => process.stdout.write(`     page error: ${e}\n`));
 }
 
 function printTable(rows) {
@@ -1047,7 +1158,7 @@ function printTable(rows) {
 const base64 = (bytes) => Buffer.from(bytes).toString("base64");
 
 async function stopChild(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (child.pid === undefined || exited(child)) return;
   await new Promise((resolve) => {
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
@@ -1060,13 +1171,96 @@ async function stopChild(child) {
   });
 }
 
+function waitExit(child, ms) {
+  if (exited(child)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+async function onFailure(work, cleanup) {
+  try {
+    return await work();
+  } catch (e) {
+    await cleanup().catch((c) => process.stderr.write(`layout-probe: cleanup failed too: ${c instanceof Error ? c.stack : String(c)}\n`));
+    throw e;
+  }
+}
+
+async function guarded(work, cleanup) {
+  const result = await onFailure(work, cleanup);
+  await cleanup();
+  return result;
+}
+
+async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffic) {
+  const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
+  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+  const errors = [];
+  cdp.on((msg) => {
+    if (msg.sessionId !== sessionId) return;
+    if (msg.method === "Runtime.exceptionThrown") errors.push(msg.params.exceptionDetails.exception?.description ?? msg.params.exceptionDetails.text);
+    if (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error") {
+      errors.push(msg.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
+    }
+  });
+  await cdp.send("Page.enable", {}, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
+  await cdp.send("Emulation.setTimezoneOverride", { timezoneId: "Europe/Zurich" }, sessionId);
+  await cdp.send("Emulation.setLocaleOverride", { locale: "en-GB" }, sessionId);
+
+  const sizes = [...DESKTOP, ...DIALOG].filter(([w, h]) => oneSize === null || `${w}x${h}` === oneSize);
+  if (sizes.length === 0) throw new NotMeasured(`--viewport ${oneSize} is none of the probe's sizes`);
+  const rows = [];
+  for (const [w, h] of sizes) {
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }, sessionId);
+    for (const state of picked.filter((s) => sizesOf(s).some(([sw, sh]) => sw === w && sh === h))) {
+      const viewport = `${w}x${h}`;
+      const run = await runState(cdp, sessionId, origin, state, errors, traffic);
+      if (run.unreached !== undefined) {
+        rows.push({ state: state.name, viewport, ok: false, unreached: run.unreached, errors: run.errors });
+        reportUnreached(state.name, viewport, run.unreached, run.errors);
+        continue;
+      }
+      const r = run.reading;
+      const why = !r.scope.found
+        ? `measures 3-8 are scoped to ${r.scope.name}${r.narrow ? ` (dialog state below ${FULL_MIN_WIDTH} px)` : ""}, and the page has none`
+        : r.missing.length > 0
+          ? `the app asked for what no fixture answers: ${r.missing.join(", ")}`
+          : r.text === 0
+            ? "the app painted no text"
+            : null;
+      if (why !== null) {
+        rows.push({ state: state.name, viewport, ok: false, unreached: why, errors: run.errors, reading: r });
+        reportUnreached(state.name, viewport, why, run.errors);
+        continue;
+      }
+      const verdict = judge(state, r, run.errors, run.notFound);
+      rows.push({ state: state.name, viewport, ...verdict, reading: r });
+      if (verbose || !verdict.ok) report(state.name, viewport, verdict, r);
+      if (r.narrow) process.stdout.write(`note ${state.name} @ ${viewport}: ${SCOPE_NOTE}\n`);
+      if (shotDir !== null) {
+        const { data } = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
+        const file = join(shotDir, `${state.name.replace(/\//g, "-")}-${viewport}.png`);
+        await writeFile(file, Buffer.from(data, "base64"));
+        process.stdout.write(`shot: ${file}\n`);
+      }
+    }
+  }
+  return rows;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const flag = (name) => {
     const at = argv.indexOf(name);
     if (at === -1) return null;
     const v = argv[at + 1];
-    if (v === undefined) throw new Error(`layout-probe: ${name} needs a value`);
+    if (v === undefined) throw new NotMeasured(`${name} needs a value`);
     return v;
   };
   const only = flag("--only");
@@ -1075,18 +1269,13 @@ async function main() {
   const oneSize = flag("--viewport");
   const verbose = argv.includes("--verbose");
 
-  if (!(await exists(join(DIST, "index.html")))) {
-    process.stderr.write(`layout-probe: nothing to measure, no index.html under ${DIST}; run npm run build first.\n`);
-    process.exit(2);
-  }
+  if (!(await exists(join(DIST, "index.html")))) throw new NotMeasured(`nothing to measure, no index.html under ${DIST}; run npm run build first`);
 
   const template = await readFile(join(DIST, "index.html"), "utf8");
   if (!template.includes("<head>")) throw new Error("layout-probe: dist/index.html has no <head> to put the shim in");
   const picked = states().filter((s) => only === null || s.name.includes(only));
-  if (picked.length === 0) {
-    process.stderr.write(`layout-probe: --only ${only} matched no state\n`);
-    process.exit(2);
-  }
+  if (picked.length === 0) throw new NotMeasured(`--only ${only} matched no state`);
+  if (shotDir !== null) await mkdir(shotDir, { recursive: true });
   const built = buildFixtures();
   const fixtures = new Map(
     [...new Set(picked.map((s) => s.fixture))].map((name) => {
@@ -1098,99 +1287,68 @@ async function main() {
 
   const indexHtml = (name) => {
     const state = picked.find((s) => s.name === name);
-    if (state === undefined) return template;
-    const payload = JSON.stringify({ place: state.place, fixture: fixtures.get(state.fixture), clip: state.clip ? LONG_NAMES : [] }).replace(/</g, "\\u003c");
+    if (state === undefined) return null;
+    const payload = JSON.stringify({
+      place: state.place,
+      fixture: fixtures.get(state.fixture),
+      clip: state.clip ? LONG_NAMES : [],
+      dialog: state.dialog,
+      fullMinWidth: FULL_MIN_WIDTH,
+      fonts: FONTS,
+    }).replace(/</g, "\\u003c");
     return template.replace("<head>", `<head>\n    <script>window.__PROBE__ = ${payload};</script>\n    <script>${SHIM}</script>`);
   };
-  const server = await serve(indexHtml);
-  const origin = `http://127.0.0.1:${server.address().port}`;
-
   const bin = await findShell();
   const profile = await mkdtemp(join(tmpdir(), "webboard-layout-probe-"));
-  const debugPort = 9300 + (process.pid % 500);
-  const child = spawn(
-    bin,
-    [`--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, "--no-first-run", "--disable-gpu", "--hide-scrollbars=false", "--force-device-scale-factor=1", "--disable-lcd-text", "about:blank"],
-    { stdio: ["ignore", "ignore", "pipe"] },
+  const traffic = { current: freshTraffic() };
+  const server = await onFailure(() => serve(indexHtml, traffic), () => rm(profile, { recursive: true, force: true }));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const closeServer = () => {
+    server.closeAllConnections();
+    return new Promise((resolve, reject) => server.close((e) => (e === undefined ? resolve() : reject(e))));
+  };
+  const child = await onFailure(
+    async () =>
+      spawn(
+        bin,
+        ["--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--disable-gpu", "--hide-scrollbars=false", "--force-device-scale-factor=1", "--disable-lcd-text", "about:blank"],
+        { stdio: ["ignore", "ignore", "pipe"] },
+      ),
+    async () => {
+      await closeServer();
+      await rm(profile, { recursive: true, force: true });
+    },
   );
   let stderr = "";
+  let startError = null;
+  child.once("error", (e) => {
+    startError = e;
+  });
   child.stderr.on("data", (d) => {
     stderr += d.toString();
   });
-
   const cleanup = async () => {
-    server.close();
+    await closeServer();
     await stopChild(child);
     await rm(profile, { recursive: true, force: true });
   };
 
-  let version;
-  try {
-    version = await waitForDevtools(debugPort);
-  } catch (e) {
-    await cleanup();
-    process.stderr.write(`layout-probe: ${e.message}\n${stderr}\n`);
-    process.exit(2);
-  }
-
-  const rows = [];
-  try {
-    const cdp = await Cdp.open(version.webSocketDebuggerUrl);
-    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
-    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-    const errors = [];
-    cdp.on((msg) => {
-      if (msg.sessionId !== sessionId) return;
-      if (msg.method === "Runtime.exceptionThrown") errors.push(msg.params.exceptionDetails.exception?.description ?? msg.params.exceptionDetails.text);
-      if (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error") {
-        errors.push(msg.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
-      }
-    });
-    await cdp.send("Page.enable", {}, sessionId);
-    await cdp.send("Runtime.enable", {}, sessionId);
-    await cdp.send("Emulation.setTimezoneOverride", { timezoneId: "Europe/Zurich" }, sessionId);
-    await cdp.send("Emulation.setLocaleOverride", { locale: "en-GB" }, sessionId);
-
-    const sizes = [...DESKTOP, ...DIALOG].filter(([w, h]) => oneSize === null || `${w}x${h}` === oneSize);
-    if (sizes.length === 0) throw new Error(`layout-probe: --viewport ${oneSize} is none of the probe's sizes`);
-    for (const [w, h] of sizes) {
-      await cdp.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }, sessionId);
-      for (const state of picked.filter((s) => sizesOf(s).some(([sw, sh]) => sw === w && sh === h))) {
-        const viewport = `${w}x${h}`;
-        const run = await runState(cdp, sessionId, origin, state, errors);
-        if (run.unreached !== undefined) {
-          rows.push({ state: state.name, viewport, ok: false, unreached: run.unreached });
-          process.stdout.write(`\nUNREACHED ${state.name} @ ${viewport}\n     ! ${run.unreached}\n`);
-          continue;
-        }
-        const r = run.reading;
-        if (r.missing.length > 0 || r.text === 0) {
-          const why = r.missing.length > 0 ? `the app asked for what no fixture answers: ${r.missing.join(", ")}` : "the app painted no text";
-          rows.push({ state: state.name, viewport, ok: false, unreached: why, reading: r });
-          process.stdout.write(`\nUNREACHED ${state.name} @ ${viewport}\n     ! ${why}\n`);
-          continue;
-        }
-        const verdict = judge(state, r, run.errors);
-        rows.push({ state: state.name, viewport, ...verdict, reading: r });
-        if (verbose || !verdict.ok) report(state.name, viewport, verdict, r);
-        if (shotDir !== null) {
-          const { data } = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
-          const file = join(shotDir, `${state.name.replace(/\//g, "-")}-${viewport}.png`);
-          await writeFile(file, Buffer.from(data, "base64"));
-          process.stdout.write(`shot: ${file}\n`);
-        }
-      }
-    }
+  const rows = await guarded(async () => {
+    const url = await devtoolsUrl(child, profile, () => stderr, () => startError);
+    const cdp = await Cdp.open(url);
+    const lost = (what) => cdp.fail(new Error(`${what} (chrome-headless-shell ${exited(child) ? exitOf(child) : "still running"}); its stderr:\n${tailOf(stderr)}`));
+    child.once("exit", () => lost("chrome-headless-shell exited mid-run"));
+    cdp.watch((what) => waitExit(child, 1000).then(() => lost(what)));
+    const measured = await measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffic);
     cdp.close();
-  } finally {
-    await cleanup();
-  }
+    return measured;
+  }, cleanup);
 
   printTable(rows);
-  const narrowRuns = rows.filter((r) => r.reading !== undefined && r.reading.narrow);
+  const narrowRuns = rows.filter((r) => r.unreached === undefined && r.reading.narrow);
   if (narrowRuns.length > 0) {
     process.stdout.write(`
-${narrowRuns.length} run(s) below 1024 px judged measures 3-8 on the dialog only; the desktop shell has no layout there until Task 5.3.
+${narrowRuns.length} dialog run(s) below ${FULL_MIN_WIDTH} px judged measures 3-8 on the dialog only; the desktop shell has no layout there until Task 5.3.
 `);
   }
   if (jsonOut !== null) {
@@ -1204,12 +1362,23 @@ ${narrowRuns.length} run(s) below 1024 px judged measures 3-8 on the dialog only
     failed.slice(0, 20).forEach((r) => process.stdout.write(`  ${r.state} @ ${r.viewport}: ${r.problems[0]}\n`));
   }
   if (unreached.length > 0) {
-    process.stdout.write(`\nlayout-probe: ${unreached.length} state run(s) never reached their state:\n`);
+    process.stdout.write(`\nlayout-probe: NOT MEASURED, ${unreached.length} state run(s) never reached their state:\n`);
     unreached.slice(0, 20).forEach((r) => process.stdout.write(`  ${r.state} @ ${r.viewport}: ${r.unreached}\n`));
-    process.exit(2);
+    return 2;
   }
-  if (failed.length > 0) process.exit(1);
+  if (failed.length > 0) return 1;
   process.stdout.write(`\nlayout-probe: PASS, ${rows.length} state runs over ${new Set(rows.map((r) => r.state)).size} states, every one contained.\n`);
+  return 0;
 }
 
-await main();
+main().then(
+  (code) => process.exit(code),
+  (e) => {
+    if (e instanceof NotMeasured) {
+      process.stderr.write(`layout-probe: not measured: ${e.message}\n`);
+      process.exit(2);
+    }
+    process.stderr.write(`layout-probe: crashed: ${e instanceof Error ? e.stack : String(e)}\n`);
+    process.exit(3);
+  },
+);
