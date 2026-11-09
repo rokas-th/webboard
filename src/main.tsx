@@ -7,6 +7,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/shell.css";
+import "./styles/timeline.css";
 import App from "./App";
 
 const root = document.getElementById("root");

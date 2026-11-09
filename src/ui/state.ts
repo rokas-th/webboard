@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { BaselineId, ItemId, PlanId } from "../domain/model";
 import type { PlanListing } from "../store/registry";
 import { toast } from "./common/Toast";
@@ -77,7 +77,22 @@ const savePlace = (s: UiState): void => {
 const placeChanged = (a: UiState, b: UiState): boolean =>
   a.plan !== b.plan || a.view !== b.view || a.zoom !== b.zoom || a.collapsed !== b.collapsed;
 
-export function useUi(): [UiState, (patch: Partial<UiState>) => void] {
+export type SetUi = (patch: Partial<UiState>) => void;
+
+export interface UiValue {
+  ui: UiState;
+  setUi: SetUi;
+}
+
+export const UiContext = createContext<UiValue | null>(null);
+
+export function useUiValue(): UiValue {
+  const value = useContext(UiContext);
+  if (value === null) throw new Error("useUiValue needs a UiContext provider");
+  return value;
+}
+
+export function useUi(): [UiState, SetUi] {
   const [loaded] = useState(loadPlace);
   const [ui, setState] = useState<UiState>(loaded.state);
   const told = useRef(false);

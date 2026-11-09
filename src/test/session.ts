@@ -13,7 +13,7 @@ import { PlanDoc } from "../store/doc";
 import { openPersisted, type PersistedDoc } from "../store/persist";
 import { PlanSession, type SessionDeps } from "../store/session";
 import { memoryStore } from "./fixtures/store";
-import { resetTauri } from "./tauriMock";
+import { resetTauri, type Answer } from "./tauriMock";
 
 export const SEED_ROOT: ActionId = "seed0000000";
 export const TEST_PLAN: PlanId = "plan0000001";
@@ -103,6 +103,7 @@ export interface TestSessionOpts {
   calendar?: Partial<Calendar>;
   clashes?: readonly Clash[];
   raw?: Record<ActionId, unknown>;
+  answers?: Record<string, Answer>;
 }
 
 export interface TestSession {
@@ -179,7 +180,7 @@ export function memoryDoc(id: string, ydoc: Y.Doc): PersistedDoc {
 
 export async function testSession(seed: readonly SeedItem[], opts: TestSessionOpts = {}): Promise<TestSession> {
   const mem = memoryStore();
-  resetTauri(mem.answers);
+  resetTauri({ ...mem.answers, ...opts.answers });
   const clock = fixedClock(opts.today ?? "2026-11-09");
   const holidays = new HolidayService(() => clock.now());
   const calendar: Calendar = { ...PLAIN, ...opts.calendar };

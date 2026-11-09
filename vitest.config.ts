@@ -8,5 +8,6 @@ export default defineConfig({
     css: true,
     pool: "forks",
     include: ["src/**/*.test.{ts,tsx}"],
+    setupFiles: ["src/test/setup.ts"],
   },
 });

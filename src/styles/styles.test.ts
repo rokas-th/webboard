@@ -151,7 +151,7 @@ const styled = new Set(sheet.rules.flatMap((r) => (r.selector.match(/\.[A-Za-z][
 
 describe("every class the stylesheets style", () => {
   it("reads the sources and sheets it is asserting against", () => {
-    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./shell.css", "./tokens.css"]);
+    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./shell.css", "./timeline.css", "./tokens.css"]);
     expect(Object.keys(SOURCES).length).toBeGreaterThan(40);
     expect(CODE.length).toBeGreaterThan(100000);
     expect(styled.size).toBeGreaterThan(60);
@@ -206,16 +206,41 @@ describe("the Cyberdeck look", () => {
   });
 
   it("anchors every absolute box to a positioned box in its pane", () => {
-    const anchors: Record<string, string> = { ".seg-modes": ".toolbar", ".choice-list": ".plan-head" };
+    const anchors: Record<string, string> = {
+      ".seg-modes": ".toolbar",
+      ".choice-list": ".plan-head",
+      ".tl-month": ".tl-scale",
+      ".tl-tick": ".tl-scale",
+      ".tl-today-label": ".tl-scale",
+      ".tl-row": ".tl-rows",
+      ".tl-rowline": ".tl-chart",
+      ".tl-off": ".tl-chart",
+      ".tl-today": ".tl-chart",
+      ".tl-links": ".tl-chart",
+      ".bar": ".tl-chart",
+      ".bar-label": ".tl-chart",
+      ".gbar": ".tl-chart",
+      ".ms": ".tl-chart",
+      ".ghost": ".tl-chart",
+      ".drop-ghost": ".tl-chart",
+      ".bar .fill": ".bar",
+      ".bar .h": ".bar",
+      ".nub": ".bar",
+      ".gbar::before": ".gbar",
+      ".gbar::after": ".gbar",
+      ".ms::before": ".ms",
+    };
+    const positioned = ["relative", "absolute", "sticky"];
     const absolute = sheet.rules.filter((r) => r.decls["position"] === "absolute" && r.conditions.length === 0).map((r) => r.selector);
     expect(absolute.sort()).toEqual(Object.keys(anchors).sort());
     Object.values(anchors).forEach((anchor) => {
-      expect(sheet.rules.some((r) => r.selector === anchor && r.decls["position"] === "relative")).toBe(true);
+      expect([anchor, sheet.rules.some((r) => r.selector === anchor && positioned.includes(r.decls["position"] ?? ""))]).toEqual([anchor, true]);
     });
+    expect(sheet.rules.some((r) => r.selector === ".tl-scroll" && r.decls["position"] === "relative" && r.decls["overflow"] === "auto")).toBe(true);
   });
 
   it("clips every name to one line", () => {
-    [".entry-name", ".plan-head h1", ".toolbar-plan", ".choice-row"].forEach((sel) => {
+    [".entry-name", ".plan-head h1", ".toolbar-plan", ".choice-row", ".tl-row .name"].forEach((sel) => {
       const decls = Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
       expect([sel, decls["overflow"], decls["text-overflow"], decls["white-space"]]).toEqual([sel, "hidden", "ellipsis", "nowrap"]);
     });

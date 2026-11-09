@@ -70,6 +70,18 @@ const toastNodes = (): HTMLElement[] => screen.queryAllByRole("status");
 
 const slot = (name: string): Element | null => document.querySelector(`[data-slot="${name}"]`);
 
+const expectTimeline = (): void => {
+  const at = slot("timeline");
+  expect(at).not.toBeNull();
+  expect(at?.querySelector(".tl-scroll")).not.toBeNull();
+  expect(document.querySelectorAll(".tl-scroll")).toHaveLength(1);
+};
+
+const expectNoTimeline = (): void => {
+  expect(slot("timeline")).toBeNull();
+  expect(document.querySelector(".tl-scroll")).toBeNull();
+};
+
 const lastUi = () => {
   const results = vi.mocked(useUi).mock.results;
   const r = results[results.length - 1];
@@ -177,11 +189,11 @@ describe("Shell on testSession(MESA_SEED)", () => {
     const { ui } = shellFor(t);
     render(ui);
     await settle();
-    expect(slot("timeline")).not.toBeNull();
+    expectTimeline();
     expect(slot("panel")).not.toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
     expect(slot("list")).not.toBeNull();
-    expect(slot("timeline")).toBeNull();
+    expectNoTimeline();
     expect(screen.getByRole("tab", { name: "List" }).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(screen.getByRole("tab", { name: "Now · Next · Later" }));
     expect(slot("board")).not.toBeNull();
@@ -625,12 +637,12 @@ describe("Shell banners on a stub registry", () => {
     await settle();
     expect(currentName()).toBe("Beta");
     expect(screen.getByText(INCOMPLETE)).toBeTruthy();
-    expect(slot("timeline")).toBeNull();
+    expectNoTimeline();
     expect(document.querySelector(".plan-failed")).toBeNull();
     act(() => registry.notify());
     await settle();
     expect(session).toHaveBeenCalledTimes(2);
-    expect(slot("timeline")).not.toBeNull();
+    expectTimeline();
     expect(screen.queryByText(INCOMPLETE)).toBeNull();
   });
 
@@ -658,7 +670,7 @@ describe("Shell banners on a stub registry", () => {
     expect(session).toHaveBeenCalledTimes(3);
     await act(async () => held.resolve(t.session));
     await settle();
-    expect(slot("timeline")).not.toBeNull();
+    expectTimeline();
     expect(screen.queryByText(INCOMPLETE)).toBeNull();
   });
 
@@ -685,12 +697,12 @@ describe("Shell banners on a stub registry", () => {
     render(ui);
     await settle();
     expect(screen.getByText("boom").closest(".banner")?.classList.contains("bad")).toBe(true);
-    expect(slot("timeline")).toBeNull();
+    expectNoTimeline();
     expect(await Promise.all(rethrown)).toEqual([boom]);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await settle();
     expect(calls).toEqual([t.session.view().plan.id, t.session.view().plan.id]);
-    expect(slot("timeline")).not.toBeNull();
+    expectTimeline();
     expect(screen.queryByText("boom")).toBeNull();
   });
 
@@ -705,7 +717,7 @@ describe("Shell banners on a stub registry", () => {
     const failed = document.querySelector(".plan-failed");
     if (!(failed instanceof HTMLElement)) throw new Error("no PlanFailed");
     expect(within(failed).getByText("Could not read the plan: disk error.")).toBeTruthy();
-    expect(slot("timeline")).toBeNull();
+    expectNoTimeline();
     fireEvent.click(within(failed).getByRole("button", { name: "Try again" }));
     expect(retryPlan.mock.calls).toEqual([[id]]);
   });
@@ -724,7 +736,7 @@ describe("Shell on Registry.open", () => {
     expect(within(beta).queryByRole("button", { name: "Try again" })).toBeNull();
     fireEvent.click(within(beta).getByRole("button", { name: "Beta" }));
     await settle();
-    expect(slot("timeline")).toBeNull();
+    expectNoTimeline();
     const failed = document.querySelector(".plan-failed");
     if (!(failed instanceof HTMLElement)) throw new Error("no PlanFailed");
     expect(within(failed).getByText("Could not read the plan: disk error.").classList.contains("bad")).toBe(true);
@@ -733,7 +745,7 @@ describe("Shell on Registry.open", () => {
     fireEvent.click(within(failed).getByRole("button", { name: "Try again" }));
     await settle();
     expect(retryPlan.mock.calls).toEqual([[s.ids[1]]]);
-    expect(slot("timeline")).not.toBeNull();
+    expectTimeline();
     expect(document.querySelector(".plan-failed")).toBeNull();
   });
 
@@ -904,7 +916,7 @@ describe("Shell on Registry.open", () => {
     expect(retryPlan.mock.calls).toEqual([[p1]]);
     fireEvent.click(within(alpha).getByRole("button", { name: "Alpha" }));
     await settle();
-    expect(slot("timeline")).not.toBeNull();
+    expectTimeline();
     expect(document.querySelector(".plan-failed")).toBeNull();
     expect(screen.getAllByText("Could not save the plan: disk full.")).toHaveLength(1);
     expect(screen.getByText("Could not save the plan: disk full.").closest(".banner")).not.toBeNull();
@@ -919,7 +931,7 @@ describe("Shell on Registry.open", () => {
     const createPlan = vi.spyOn(registry, "createPlan");
     render(shellOn(registry));
     await settle();
-    expect(slot("timeline")).toBeNull();
+    expectNoTimeline();
     expect(screen.queryAllByRole("tab")).toEqual([]);
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
     const bar = document.querySelector("header.toolbar");
@@ -933,7 +945,8 @@ describe("Shell on Registry.open", () => {
     expect(createPlan.mock.calls).toEqual([["New plan"]]);
     expect(tauri.calls.filter((c) => c.cmd === "holidays_year")).toEqual([]);
     expect(currentName()).toBe("New plan");
-    expect(slot("timeline")).not.toBeNull();
+    expectTimeline();
+    expect(slot("timeline")?.textContent).toBe("No items yet. Add one with + Task.");
   });
 
   it.each(["empty state", "sidebar"])("shows Creating… while a plan is created from the %s", async (from) => {
@@ -1022,7 +1035,7 @@ describe("Shell on Registry.open", () => {
     if (!(main instanceof HTMLElement)) throw new Error("no main");
     expect(within(main).getByRole("button", { name: "New plan" })).toBeTruthy();
     expect(screen.getByText("Local only")).toBeTruthy();
-    expect(slot("timeline")).toBeNull();
+    expectNoTimeline();
     expect(slot("panel")).toBeNull();
   });
 
@@ -1063,7 +1076,7 @@ describe("Shell on Registry.open", () => {
     if (!(main instanceof HTMLElement)) throw new Error("no main");
     expect(within(main).getByRole("button", { name: "New plan" })).toBeTruthy();
     expect(screen.getByText("Local only")).toBeTruthy();
-    expect(slot("timeline")).toBeNull();
+    expectNoTimeline();
   });
 
   it("toasts only its own message for a local trash", async () => {

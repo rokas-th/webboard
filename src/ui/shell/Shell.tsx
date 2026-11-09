@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { Refused } from "../../actions/intents";
 import type { PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
@@ -7,7 +7,8 @@ import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { toast, Toasts } from "../common/Toast";
 import { OpenChoice } from "../run";
-import { pickPlan, useUi } from "../state";
+import { pickPlan, UiContext, useUi } from "../state";
+import { Timeline } from "../timeline/Timeline";
 import { FILES_STAY, PlanFailed } from "./PlanFailed";
 import { PlanHead } from "./PlanHead";
 import { RELOAD_LABEL, ReloadConfirm } from "./ReloadConfirm";
@@ -77,6 +78,7 @@ function IndexBanner(p: { registry: Registry; error: AppError }) {
 export function Shell(p: ShellProps) {
   const registry = p.registry;
   const [ui, setUi] = useUi();
+  const uiValue = useMemo(() => ({ ui, setUi }), [ui, setUi]);
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const [main, setMainState] = useState<Main>({ k: "none" });
   const [creating, setCreating] = useState(false);
@@ -287,48 +289,52 @@ export function Shell(p: ShellProps) {
         )}
         <PlanHead session={session} onChoose={(choice) => openChoice(choice)} />
         <div className="view">
-          <div className="slot" data-slot={ui.view} />
-          {ui.view === "timeline" && <Tray session={session} />}
+          <div className="slot" data-slot={ui.view}>
+            {ui.view === "timeline" && <Timeline session={session} readOnly={readOnly} />}
+          </div>
+          {ui.view === "timeline" && <Tray session={session} readOnly={readOnly} />}
         </div>
       </>
     );
   })();
 
   return (
-    <OpenChoice.Provider value={openChoice}>
-      <div className="app">
-        <Toolbar session={session} readOnly={readOnly} ui={ui} setUi={setUi} mac={registry.device.platform === "macos"} />
-        <div className="app-body">
-          <Sidebar
-            registry={registry}
-            plans={plans}
-            selected={sel}
-            creating={creating}
-            onNew={newPlan}
-            onSelect={(id) => select(id)}
-            onTrash={trash}
-            onRestore={restore}
-          />
-          <main className="main">
-            {indexError !== null && <IndexBanner registry={registry} error={indexError} />}
-            {registry.indexUnreadable().map((line) => (
-              <p key={line} className="banner bad">
-                {line}
-              </p>
-            ))}
-            {settingsError !== null && (
-              <Banner message={settingsError.message}>
-                <button type="button" className="button-small" onClick={() => void registry.retrySettings()}>
-                  Try again
-                </button>
-              </Banner>
-            )}
-            {content}
-          </main>
-          {session !== null && <div className="slot slot-panel" data-slot="panel" />}
+    <UiContext.Provider value={uiValue}>
+      <OpenChoice.Provider value={openChoice}>
+        <div className="app">
+          <Toolbar session={session} readOnly={readOnly} ui={ui} setUi={setUi} mac={registry.device.platform === "macos"} />
+          <div className="app-body">
+            <Sidebar
+              registry={registry}
+              plans={plans}
+              selected={sel}
+              creating={creating}
+              onNew={newPlan}
+              onSelect={(id) => select(id)}
+              onTrash={trash}
+              onRestore={restore}
+            />
+            <main className="main">
+              {indexError !== null && <IndexBanner registry={registry} error={indexError} />}
+              {registry.indexUnreadable().map((line) => (
+                <p key={line} className="banner bad">
+                  {line}
+                </p>
+              ))}
+              {settingsError !== null && (
+                <Banner message={settingsError.message}>
+                  <button type="button" className="button-small" onClick={() => void registry.retrySettings()}>
+                    Try again
+                  </button>
+                </Banner>
+              )}
+              {content}
+            </main>
+            {session !== null && <div className="slot slot-panel" data-slot="panel" />}
+          </div>
+          <Toasts />
         </div>
-        <Toasts />
-      </div>
-    </OpenChoice.Provider>
+      </OpenChoice.Provider>
+    </UiContext.Provider>
   );
 }
