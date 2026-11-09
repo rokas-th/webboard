@@ -18,6 +18,12 @@ const made = async (...a: Parameters<typeof testSession>): Promise<TestSession> 
   return t;
 };
 
+const SPRINT = [
+  { id: "S", name: "Sprint 4", kind: "group" as const },
+  { id: "r", name: "Review", parent: "S", start: "2026-11-10", dur: 3, status: "doing" as const },
+  { id: "x", name: "Other", start: "2026-11-16", dur: 2 },
+];
+
 describe("listGroups", () => {
   it("keeps plan order inside each group, whatever the start dates", async () => {
     const t = await made([
@@ -86,6 +92,50 @@ describe("listGroups", () => {
     expect(listGroups(t.session.view())).toEqual([{ group: null, name: "Not in a group", items: ["A", "B"] }]);
   });
 
+  it("lists a ghost child of a trashed group under its ghost group (CR07, CR14)", async () => {
+    const t = await made(SPRINT);
+    const p = await t.peer("iphone");
+    sessions.push(p.session);
+    t.session.apply({ t: "trash", items: ["S"] });
+    p.session.apply({ t: "rename", item: "r", name: "Review 2" });
+    p.sync();
+    const view = t.session.view();
+    expect(view.choices.map((c) => [c.kind, [...c.items].sort()])).toEqual([["delete", ["S", "r"]]]);
+    expect(listGroups(view)).toEqual([
+      { group: "S", name: "Sprint 4", items: ["r"] },
+      { group: null, name: "Not in a group", items: ["x"] },
+    ]);
+  });
+
+  it("places a ghost whose parent group was trashed apart in the nearest listed ancestor's section", async () => {
+    const t = await made(SPRINT);
+    const p = await t.peer("iphone");
+    sessions.push(p.session);
+    t.session.apply({ t: "trash", items: ["r"] });
+    p.session.apply({ t: "rename", item: "r", name: "Review 2" });
+    p.sync();
+    t.session.apply({ t: "trash", items: ["S"] });
+    const view = t.session.view();
+    expect(view.choices.map((c) => [c.kind, c.items])).toEqual([["delete", ["r"]]]);
+    expect(listGroups(view)).toEqual([{ group: null, name: "Not in a group", items: ["r", "x"] }]);
+  });
+
+  it("places a ghost under a separately trashed nested group in the outer group's section", async () => {
+    const t = await made([
+      { id: "G", name: "G", kind: "group" },
+      { id: "H", name: "H", kind: "group", parent: "G" },
+      { id: "r", name: "r", parent: "H", start: "2026-11-10" },
+      { id: "y", name: "y", parent: "G", start: "2026-11-10" },
+    ]);
+    const p = await t.peer("iphone");
+    sessions.push(p.session);
+    t.session.apply({ t: "trash", items: ["r"] });
+    p.session.apply({ t: "rename", item: "r", name: "r2" });
+    p.sync();
+    t.session.apply({ t: "trash", items: ["H"] });
+    expect(listGroups(t.session.view())).toEqual([{ group: "G", name: "G", items: ["r", "y"] }]);
+  });
+
   it("is empty for an empty plan", async () => {
     const t = await made([]);
     expect(listGroups(t.session.view())).toEqual([]);
@@ -130,6 +180,24 @@ describe("statusLabel", () => {
       "held",
       "conflict",
     ]);
+  });
+
+  it("reads held for a ghost row, whatever its own status", async () => {
+    const t = await made(SPRINT);
+    const p = await t.peer("iphone");
+    sessions.push(p.session);
+    t.session.apply({ t: "trash", items: ["S"] });
+    p.session.apply({ t: "rename", item: "r", name: "Review 2" });
+    p.sync();
+    const view = t.session.view();
+    expect(view.plan.items.get("r")?.schedule?.status).toBe("doing");
+    expect(["r", "x"].map((id) => statusLabel(view, id))).toEqual(["held", "not started"]);
+  });
+
+  it("throws by name for an item that is neither live nor a ghost", async () => {
+    const t = await made(SPRINT);
+    t.session.apply({ t: "trash", items: ["x"] });
+    expect(() => statusLabel(t.session.view(), "x")).toThrow("statusLabel: item x has no derived status");
   });
 
   it("marks the successor of a loop link as a conflict", async () => {

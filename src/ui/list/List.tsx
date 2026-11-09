@@ -4,9 +4,10 @@ import type { Item, ItemId, Link } from "../../domain/model";
 import { liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
+import { EMPTY_PLAN } from "../copy";
+import { ghostIds } from "../ghosts";
 import { useUiValue } from "../state";
 import { isClick } from "../timeline/gesture";
-import { EMPTY_PLAN } from "../timeline/Timeline";
 import { listGroups, statusLabel, type StatusLabel } from "./groups";
 
 const HEADS: readonly string[] = ["Item", "Start", "End", "Days", "Status", "Depends on"];
@@ -45,6 +46,7 @@ export function List(p: { session: PlanSession }) {
   const { ui, setUi } = useUiValue();
   const down = useRef<{ id: ItemId; x: number; y: number } | null>(null);
   const sections = listGroups(view);
+  const ghosts = ghostIds(view);
   const links = liveLinks(view.plan);
 
   const onDown = (e: ReactPointerEvent<HTMLTableRowElement>, id: ItemId): void => {
@@ -68,8 +70,9 @@ export function List(p: { session: PlanSession }) {
     const item = itemOf(view, id);
     const label = statusLabel(view, id);
     const milestone = item.kind === "milestone";
-    const dated = !item.trashed && item.schedule !== null && item.schedule.start !== null;
-    const classes = [item.trashed ? "ghost-row" : "", ui.selected === id ? "selected" : ""].filter((c) => c !== "").join(" ");
+    const ghost = ghosts.has(id);
+    const dated = !ghost && item.schedule !== null && item.schedule.start !== null;
+    const classes = [ghost ? "ghost-row" : "", ui.selected === id ? "selected" : ""].filter((c) => c !== "").join(" ");
     return (
       <tr
         key={id}
@@ -88,11 +91,11 @@ export function List(p: { session: PlanSession }) {
         </td>
         <td>{dated ? dateOf(view.derived.start, id, "start") : ""}</td>
         <td>{dated && !milestone ? dateOf(view.derived.end, id, "end") : ""}</td>
-        <td>{item.schedule === null || milestone ? "" : item.schedule.dur}</td>
+        <td>{ghost || item.schedule === null || milestone ? "" : item.schedule.dur}</td>
         <td>
           <span className={STATUS_CLASS[label]}>{label}</span>
         </td>
-        <td className="wrap">{depsOf(view, links, id)}</td>
+        <td className="wrap">{ghost ? "" : depsOf(view, links, id)}</td>
       </tr>
     );
   };

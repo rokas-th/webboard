@@ -83,6 +83,12 @@ const STATUS_SEED: SeedItem[] = [
   { name: "U" },
 ];
 
+const SPRINT: SeedItem[] = [
+  { id: "S", name: "Sprint 4", kind: "group" },
+  { id: "r", name: "Review", parent: "S", start: "2026-11-10", dur: 3, status: "doing" },
+  { id: "x", name: "Other", start: "2026-11-16", dur: 2 },
+];
+
 describe("List", () => {
   it("has the columns Item Start End Days Status Depends on, unsorted", async () => {
     const t = await made(STATUS_SEED);
@@ -165,9 +171,43 @@ describe("List", () => {
     await list(t);
     expect(row("A").classList.contains("ghost-row")).toBe(true);
     expect(row("B").classList.contains("ghost-row")).toBe(false);
+    expect(cells("A")).toEqual(["Renamed", "", "", "", "held", ""]);
+    expect(one(".st", row("A")).className).toBe("st held");
     pointer(row("A"), "down", 10, 10);
     pointer(row("A"), "up", 12, 11);
     expect(uiNow().selected).toBe("A");
+  });
+
+  it("renders a ghost child of a trashed group as a name-only held row that opens (CR07, CR14)", async () => {
+    const t = await made(SPRINT);
+    const p = await t.peer("iphone");
+    sessions.push(p.session);
+    t.session.apply({ t: "trash", items: ["S"] });
+    p.session.apply({ t: "rename", item: "r", name: "Review 2" });
+    p.sync();
+    await list(t);
+    expect(all("tbody tr").map((r) => (r.classList.contains("grp") ? `# ${r.textContent}` : r.dataset.lrow))).toEqual(["# Sprint 4", "r", "# Not in a group", "x"]);
+    expect(row("r").tagName).toBe("TR");
+    expect(row("r").classList.contains("ghost-row")).toBe(true);
+    expect(row("x").classList.contains("ghost-row")).toBe(false);
+    expect(cells("r")).toEqual(["Review 2", "", "", "", "held", ""]);
+    pointer(row("r"), "down", 10, 10);
+    pointer(row("r"), "up", 12, 11);
+    expect(uiNow().selected).toBe("r");
+  });
+
+  it("renders a ghost whose parent group was trashed apart under Not in a group", async () => {
+    const t = await made(SPRINT);
+    const p = await t.peer("iphone");
+    sessions.push(p.session);
+    t.session.apply({ t: "trash", items: ["r"] });
+    p.session.apply({ t: "rename", item: "r", name: "Review 2" });
+    p.sync();
+    t.session.apply({ t: "trash", items: ["S"] });
+    await list(t);
+    expect(all("tbody tr").map((r) => (r.classList.contains("grp") ? `# ${r.textContent}` : r.dataset.lrow))).toEqual(["# Not in a group", "r", "x"]);
+    expect(row("r").classList.contains("ghost-row")).toBe(true);
+    expect(cells("r")).toEqual(["Review 2", "", "", "", "held", ""]);
   });
 
   it("says so for an empty plan", async () => {

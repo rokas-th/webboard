@@ -6,7 +6,7 @@ import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { toast } from "../common/Toast";
-import { statusLabel, type StatusLabel } from "../list/groups";
+import { groupPath, statusLabel, type StatusLabel } from "../list/groups";
 import { useRun } from "../run";
 import { useUiValue } from "../state";
 import { isClick } from "../timeline/gesture";
@@ -78,13 +78,7 @@ function When(p: { view: PlanView; item: Item }) {
   return <span className="when">{`${start} – ${dayOf(p.view.derived.end, p.item.id, "end")}`}</span>;
 }
 
-const groupName = (view: PlanView, item: Item): string | null => {
-  const parent = item.place.parent;
-  if (parent === null) return null;
-  const g = view.plan.items.get(parent);
-  if (g === undefined) throw new Error(`Board: item ${item.id} has a parent ${parent} that is not in the plan`);
-  return g.name;
-};
+const groupName = (view: PlanView, item: Item): string | null => (item.place.parent === null ? null : groupPath(view, item.place.parent));
 
 export function Board(p: { session: PlanSession; readOnly: boolean }) {
   const view = usePlanView(p.session);
@@ -96,9 +90,10 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   const { cards, column, done } = columnsOf(view);
 
   const moveTo = (id: ItemId, h: Horizon): void => {
-    const current = column.get(id);
     const item = view.plan.items.get(id);
-    if (current === undefined || item === undefined || current === h) return;
+    if (item === undefined) throw new Error(`Board: dragged item ${id} is not in the plan`);
+    const current = column.get(id);
+    if (current === undefined || current === h) return;
     if (item.schedule === null) throw new Error(`Board: item ${id} has no schedule`);
     if (item.schedule.start !== null) {
       toast(DATED);
@@ -144,6 +139,11 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
     if (dragged.current === null) return;
     e.preventDefault();
     if (over !== h) setOver(h);
+  };
+
+  const onDragLeave = (e: ReactDragEvent<HTMLElement>): void => {
+    if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+    setOver(null);
   };
 
   const onDrop = (e: ReactDragEvent<HTMLElement>, h: Horizon): void => {
@@ -203,7 +203,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
             className={over === c.h ? "col over" : "col"}
             data-col={c.h}
             onDragOver={p.readOnly ? undefined : (e) => onDragOver(e, c.h)}
-            onDragLeave={p.readOnly ? undefined : () => setOver(null)}
+            onDragLeave={p.readOnly ? undefined : onDragLeave}
             onDrop={p.readOnly ? undefined : (e) => onDrop(e, c.h)}
           >
             <div className="col-head">

@@ -4,6 +4,7 @@ import { toDay, type Day } from "../../domain/dates";
 import type { ItemId, LinkType } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
+import { EMPTY_PLAN } from "../copy";
 import { useRun } from "../run";
 import { useUiValue } from "../state";
 import { Chart, itemOf, type DropGhost, type TempLink } from "./Chart";
@@ -12,8 +13,6 @@ import { gestureIntent, isClick, startIntent } from "./gesture";
 import { Grid, type Marks, type Placed } from "./Grid";
 import { timelineRows, visibleRange } from "./rows";
 import { Scale } from "./Scale";
-
-export const EMPTY_PLAN = "No items yet. Add one with + Task.";
 
 type Mode = "move" | "resize" | "start" | "link" | "select" | "blank";
 

@@ -2,6 +2,7 @@ import { goneSet } from "../../domain/derive";
 import type { ItemId, ItemKind } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
+import { ghostIds } from "../ghosts";
 import { ROW } from "./geometry";
 
 export interface Row {
@@ -11,12 +12,12 @@ export interface Row {
 }
 
 export function timelineRows(view: PlanView, collapsed: ReadonlySet<ItemId>): Row[] {
-  const ghosts = new Set(view.choices.filter((c) => c.kind === "delete").flatMap((c) => c.items));
+  const ghosts = ghostIds(view);
   const gone = goneSet(view.plan);
   const walk = (parent: ItemId | null, depth: number): Row[] =>
     childrenOf(view.plan, parent).flatMap((item): Row[] => {
       const below = item.kind === "group" && !collapsed.has(item.id) ? walk(item.id, depth + 1) : [];
-      if (item.trashed && ghosts.has(item.id)) return [{ id: item.id, depth, kind: "ghost" }, ...below];
+      if (ghosts.has(item.id)) return [{ id: item.id, depth, kind: "ghost" }, ...below];
       if (gone.has(item.id)) return below;
       if (item.kind === "group") return [{ id: item.id, depth, kind: "group" }, ...below];
       return item.schedule !== null && item.schedule.start !== null ? [{ id: item.id, depth, kind: item.kind }] : [];

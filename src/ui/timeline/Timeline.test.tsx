@@ -8,10 +8,11 @@ import type { PlanSession } from "../../store/session";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { emptyYear, shellFor } from "../../test/shell";
 import { clearToasts } from "../common/Toast";
+import { EMPTY_PLAN } from "../copy";
 import { OpenChoice } from "../run";
 import { UiContext, useUi, type UiState } from "../state";
 import { geometry } from "./geometry";
-import { EMPTY_PLAN, Timeline } from "./Timeline";
+import { Timeline } from "./Timeline";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {

@@ -156,6 +156,18 @@ describe("Board columns", () => {
   });
 });
 
+describe("Board group names", () => {
+  it("names a card's nested group by its path, as the List does", async () => {
+    const t = await made([
+      { name: "G", kind: "group" },
+      { name: "H", kind: "group", parent: "G" },
+      { name: "h", parent: "H", start: "2026-11-20" },
+    ]);
+    await board(t);
+    expect(all(".card-meta span", card("h")).map((e) => e.textContent)).toEqual(["20 Nov – 24 Nov", "G › H"]);
+  });
+});
+
 describe("Board markers (refinement 50)", () => {
   it("carries one status marker per card, by the List's precedence", async () => {
     const t = await made(
@@ -261,6 +273,48 @@ describe("Board moves", () => {
     });
     expect(apply).not.toHaveBeenCalled();
     expect(document.querySelector('[data-card="u"]')).toBeNull();
+  });
+  it("keeps a column lit while the pointer moves onto its children, and clears it on leaving", async () => {
+    const t = await made(SEED);
+    await board(t);
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "none" };
+    act(() => {
+      fireEvent.dragStart(card("u"), { dataTransfer });
+    });
+    act(() => {
+      fireEvent.dragOver(col("next"), { dataTransfer });
+    });
+    expect(col("next").classList.contains("over")).toBe(true);
+    const leave = (to: Element): void => {
+      act(() => {
+        col("next").dispatchEvent(new MouseEvent("dragleave", { bubbles: true, relatedTarget: to }));
+      });
+    };
+    leave(one(".col-body", col("next")));
+    expect(col("next").classList.contains("over")).toBe(true);
+    leave(col("later"));
+    expect(col("next").classList.contains("over")).toBe(false);
+  });
+
+  it("fails loudly when the dragged item is not in the plan at all", async () => {
+    const t = await made(SEED);
+    await board(t);
+    const apply = vi.spyOn(t.session, "apply");
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "none" };
+    act(() => {
+      fireEvent.dragStart(card("u"), { dataTransfer });
+    });
+    const real = t.session.view();
+    const stripped = { ...real, plan: { ...real.plan, items: new Map([...real.plan.items].filter(([id]) => id !== "u")) } };
+    vi.spyOn(t.session, "view").mockReturnValue(stripped);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    act(() => t.session.setReadOnly(false));
+    expect(document.querySelector('[data-card="u"]')).toBeNull();
+    act(() => {
+      fireEvent.drop(col("next"), { dataTransfer });
+    });
+    expect(apply).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual(["Board: dragged item u is not in the plan"]);
   });
 });
 
