@@ -879,7 +879,13 @@ class Cdp {
         reject(new Error(`devtools gave no answer to ${method} within ${SEND_TIMEOUT_MS / 1000} s`));
       }, SEND_TIMEOUT_MS);
       this.waiting.set(id, { method, resolve, reject, timer });
-      this.ws.send(JSON.stringify(payload));
+      try {
+        this.ws.send(JSON.stringify(payload));
+      } catch (e) {
+        clearTimeout(timer);
+        this.waiting.delete(id);
+        throw e;
+      }
     });
   }
 
@@ -1364,9 +1370,9 @@ ${narrowRuns.length} dialog run(s) below ${FULL_MIN_WIDTH} px judged measures 3-
   if (unreached.length > 0) {
     process.stdout.write(`\nlayout-probe: NOT MEASURED, ${unreached.length} state run(s) never reached their state:\n`);
     unreached.slice(0, 20).forEach((r) => process.stdout.write(`  ${r.state} @ ${r.viewport}: ${r.unreached}\n`));
-    return 2;
   }
   if (failed.length > 0) return 1;
+  if (unreached.length > 0) return 2;
   process.stdout.write(`\nlayout-probe: PASS, ${rows.length} state runs over ${new Set(rows.map((r) => r.state)).size} states, every one contained.\n`);
   return 0;
 }

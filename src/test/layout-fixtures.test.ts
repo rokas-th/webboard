@@ -330,12 +330,15 @@ describe("layout fixtures", () => {
     for (const f of Object.values(FIXTURES)) {
       resetTauri(answersOf(f));
       const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
-      openRegistries.push(registry);
-      expect(registry.device.name).toBe("Mac");
-      expect(registry.plans().map((p) => p.id).sort()).toEqual(planDocs(f).sort());
-      for (const doc of planDocs(f)) {
-        const session = await registry.session(doc);
-        expect(registry.plans().find((p) => p.id === doc)?.name).toBe(session.view().plan.name);
+      try {
+        expect(registry.device.name).toBe("Mac");
+        expect(registry.plans().map((p) => p.id).sort()).toEqual(planDocs(f).sort());
+        for (const doc of planDocs(f)) {
+          const session = await registry.session(doc);
+          expect(registry.plans().find((p) => p.id === doc)?.name).toBe(session.view().plan.name);
+        }
+      } finally {
+        await registry.close();
       }
     }
   });
