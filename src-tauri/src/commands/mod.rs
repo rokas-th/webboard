@@ -1,4 +1,5 @@
 pub mod device;
+pub mod file;
 pub mod holidays;
 pub mod settings;
 pub mod store;

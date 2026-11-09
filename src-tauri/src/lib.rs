@@ -28,6 +28,7 @@ pub fn run() {
     let builder = builder.plugin(single_instance_guard());
 
     builder
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             use tauri::Manager;
             use webboard_core::holidays::{Holidays, Sources};
@@ -52,6 +53,8 @@ pub fn run() {
             commands::holidays::holidays_year,
             commands::holidays::holidays_ics_preview,
             commands::device::device_info,
+            commands::file::file_write,
+            commands::file::file_read,
             commands::settings::settings_read,
             commands::settings::settings_write,
             commands::settings::settings_reset

@@ -3,7 +3,7 @@ import { initialAction, normalizeName } from "../actions/build";
 import { Refused } from "../actions/intents";
 import { regionKey, type HolidayYear, type RegionRef } from "../domain/calendar";
 import { toDay, yearOf } from "../domain/dates";
-import type { PlanId, PlanState } from "../domain/model";
+import type { ItemId, PlanId, PlanState } from "../domain/model";
 import { newId } from "../log/ids";
 import { LogState } from "../log/state";
 import type { ActionId, DeviceId } from "../log/types";
@@ -13,7 +13,8 @@ import { region as regionCodec, validateWrite } from "../plan/units";
 import { collected, notifyEach, systemClock, type Clock } from "../services/clock";
 import { HolidayService } from "../services/holidays";
 import { AppError, call } from "../services/ipc";
-import { PlanDoc } from "./doc";
+import { LOCAL, PlanDoc } from "./doc";
+import type { ImportResult } from "./file";
 import { IndexDoc } from "./index-doc";
 import { openPersisted, type PersistedDoc } from "./persist";
 import { readActions } from "./read-actions";
@@ -469,6 +470,26 @@ export class Registry {
     this.local.addPlan(id);
     await this.session(id);
     if (this.cacheName(id, normalizeName(name))) this.notify();
+    return id;
+  }
+
+  async createPlanFrom(r: ImportResult): Promise<PlanId> {
+    this.usable();
+    const id = r.planId;
+    const texts = r.newNotes.map((item): [ItemId, string] => {
+      const text = r.notes.get(item);
+      if (text === undefined) throw new Error(`The import lists a note for ${item} without its text`);
+      return [item, text];
+    });
+    const doc = await this.load(id, false);
+    const planDoc = new PlanDoc(doc.ydoc);
+    doc.ydoc.transact(() => {
+      planDoc.append(r.action, r.newNotes);
+      texts.forEach(([item, text]) => planDoc.note(item).insert(0, text));
+    }, LOCAL);
+    this.local.addPlan(id);
+    const session = await this.session(id);
+    if (this.cacheName(id, session.view().plan.name)) this.notify();
     return id;
   }
 

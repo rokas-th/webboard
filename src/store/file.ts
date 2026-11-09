@@ -1,0 +1,252 @@
+import { open, save } from "@tauri-apps/plugin-dialog";
+import * as Y from "yjs";
+import type { Baseline, BaselineId, Item, ItemId, Link, LinkKey, PlanId, PlanState } from "../domain/model";
+import { linkKey } from "../domain/model";
+import type { Closure } from "../domain/calendar";
+import { newId } from "../log/ids";
+import { LogState } from "../log/state";
+import type { Action, DeviceId, SessionId, Write } from "../log/types";
+import { projectPlan } from "../plan/project";
+import { planRules } from "../plan/rules";
+import { key, parseKey, stateWrites, validateWrite } from "../plan/units";
+import { AppError, call, callBytes } from "../services/ipc";
+import { decodeAction } from "./doc";
+import type { Registry } from "./registry";
+import type { PlanSession } from "./session";
+
+export interface WbxHeader {
+  planId: PlanId;
+  name: string;
+  exportedAt: string;
+  updateLength: number;
+}
+
+export interface ImportResult {
+  planId: PlanId;
+  action: Action;
+  newNotes: readonly ItemId[];
+  notes: ReadonlyMap<ItemId, string>;
+  idMap: ReadonlyMap<string, string>;
+}
+
+const MAGIC: readonly number[] = [0x57, 0x42, 0x58, 0x31];
+const FIXED = 12;
+const VERSION = 1;
+const FILTERS = [{ name: "WebBoard plan", extensions: ["webboard"] }];
+const FILE_PREFIX = "file://";
+
+const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+const foreign = (): AppError => new AppError("import.foreign", "This file is not a WebBoard plan.");
+const truncated = (n: number, m: number): AppError =>
+  new AppError("import.truncated", `This file is incomplete (${n} of ${m} bytes); export it again.`);
+const newer = (v: number): AppError =>
+  new AppError("import.newer", `This file comes from a newer WebBoard (format ${v}); update WebBoard to open it.`);
+const corrupt = (reason: string): AppError => new AppError("import.corrupt", `This file is damaged: ${reason}`);
+const unknownUnits = (keys: readonly string[]): AppError =>
+  new AppError("import.unknown_units", `This plan uses data this WebBoard does not know (${keys.join(", ")}); update WebBoard to open it.`);
+
+export function encodeWbx(h: WbxHeader, update: Uint8Array): Uint8Array {
+  if (h.updateLength !== update.length) throw new Error(`updateLength ${h.updateLength} does not match the update's ${update.length} bytes`);
+  const header = new TextEncoder().encode(JSON.stringify({ planId: h.planId, name: h.name, exportedAt: h.exportedAt, updateLength: h.updateLength }));
+  const out = new Uint8Array(FIXED + header.length + update.length);
+  const view = new DataView(out.buffer);
+  out.set(MAGIC, 0);
+  view.setUint32(4, VERSION, true);
+  view.setUint32(8, header.length, true);
+  out.set(header, FIXED);
+  out.set(update, FIXED + header.length);
+  return out;
+}
+
+const startsWithMagic = (bytes: Uint8Array, length: number): boolean => MAGIC.slice(0, length).every((b, i) => bytes[i] === b);
+
+function readHeaderJson(bytes: Uint8Array): unknown {
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch (e) {
+    throw corrupt(`its header is not readable: ${messageOf(e)}`);
+  }
+}
+
+function parseHeader(raw: unknown): WbxHeader {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw corrupt("its header is not an object");
+  const text = (field: "planId" | "name" | "exportedAt"): string => {
+    const v: unknown = field in raw ? Reflect.get(raw, field) : undefined;
+    if (typeof v !== "string") throw corrupt(`its header has no ${field}`);
+    return v;
+  };
+  const length: unknown = "updateLength" in raw ? raw.updateLength : undefined;
+  if (typeof length !== "number" || !Number.isInteger(length) || length < 0) throw corrupt("its header has no valid updateLength");
+  return { planId: text("planId"), name: text("name"), exportedAt: text("exportedAt"), updateLength: length };
+}
+
+export function decodeWbx(bytes: Uint8Array): { header: WbxHeader; update: Uint8Array } {
+  const n = bytes.length;
+  if (n < FIXED) {
+    if (startsWithMagic(bytes, Math.min(n, MAGIC.length))) throw truncated(n, FIXED);
+    throw foreign();
+  }
+  if (!startsWithMagic(bytes, MAGIC.length)) throw foreign();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const version = view.getUint32(4, true);
+  if (version > VERSION) throw newer(version);
+  if (version !== VERSION) throw corrupt(`its format version is ${version}`);
+  const headerEnd = FIXED + view.getUint32(8, true);
+  if (n < headerEnd) throw truncated(n, headerEnd);
+  const header = parseHeader(readHeaderJson(bytes.subarray(FIXED, headerEnd)));
+  const end = headerEnd + header.updateLength;
+  if (n < end) throw truncated(n, end);
+  if (n > end) throw corrupt(`${n - end} bytes follow the plan`);
+  return { header, update: bytes.slice(headerEnd, end) };
+}
+
+const knownPrefix = (u: string): boolean => {
+  const colon = u.indexOf(":");
+  return Object.prototype.hasOwnProperty.call(key, colon < 0 ? u : u.slice(0, colon));
+};
+
+function readLog(doc: Y.Doc): Action[] {
+  const unknown = new Set<string>();
+  const damage: string[] = [];
+  const actions = [...doc.getMap("actions").entries()].flatMap(([id, raw]): Action[] => {
+    let a: Action;
+    try {
+      a = decodeAction(id, raw);
+    } catch (e) {
+      damage.push(messageOf(e));
+      return [];
+    }
+    a.w.forEach((w) => checkWrite(w, unknown, damage));
+    return [a];
+  });
+  if (unknown.size > 0) throw unknownUnits([...unknown].sort().slice(0, 3));
+  if (damage.length > 0) throw corrupt(damage[0]);
+  return actions;
+}
+
+function checkWrite(w: Write, unknown: Set<string>, damage: string[]): void {
+  try {
+    parseKey(w.u);
+  } catch (e) {
+    if (knownPrefix(w.u)) damage.push(messageOf(e));
+    else unknown.add(w.u);
+    return;
+  }
+  try {
+    validateWrite(w);
+  } catch (e) {
+    damage.push(messageOf(e));
+  }
+}
+
+function readPlan(id: PlanId, update: Uint8Array): { plan: PlanState; notes: ReadonlyMap<ItemId, string> } {
+  const doc = new Y.Doc();
+  try {
+    Y.applyUpdate(doc, update);
+  } catch (e) {
+    throw corrupt(`its plan data cannot be read: ${messageOf(e)}`);
+  }
+  if (doc.store.pendingStructs !== null || doc.store.pendingDs !== null) throw corrupt("its plan data refers to parts that are missing");
+  const log = new LogState(planRules);
+  const delta = log.add(readLog(doc));
+  if (delta.refused.length > 0) throw corrupt(delta.refused[0].message);
+  if (log.pending.length > 0) throw corrupt(`${log.pending.length} actions refer to missing parents`);
+  let plan: PlanState;
+  try {
+    plan = projectPlan(id, log);
+  } catch (e) {
+    throw corrupt(messageOf(e));
+  }
+  const notes = new Map(
+    [...doc.getMap("notes").entries()].map(([item, text]): [ItemId, string] => {
+      if (!(text instanceof Y.Text)) throw corrupt(`the note of ${item} is not text`);
+      if (!plan.items.has(item)) throw corrupt(`a note belongs to no item (${item})`);
+      return [item, text.toString()];
+    }),
+  );
+  return { plan, notes };
+}
+
+function remap(plan: PlanState, planId: PlanId): { plan: PlanState; idMap: ReadonlyMap<string, string> } {
+  const idMap = new Map<string, string>();
+  const fresh = (old: string): string => {
+    const known = idMap.get(old);
+    if (known !== undefined) return known;
+    const made = newId();
+    idMap.set(old, made);
+    return made;
+  };
+  const items = new Map(
+    [...plan.items.values()].map((i): [ItemId, Item] => {
+      const id = fresh(i.id);
+      return [id, { ...i, id, place: { parent: i.place.parent === null ? null : fresh(i.place.parent), order: i.place.order } }];
+    }),
+  );
+  const links = new Map(
+    [...plan.links.values()].map((l): [LinkKey, Link] => {
+      const from = fresh(l.from);
+      const to = fresh(l.to);
+      return [linkKey(from, to), { ...l, from, to }];
+    }),
+  );
+  const closures = new Map(
+    [...plan.calendar.closures.values()].map((c): [string, Closure] => {
+      const id = fresh(c.id);
+      return [id, { ...c, id }];
+    }),
+  );
+  const baselines = new Map(
+    [...plan.baselines.values()].map((b): [BaselineId, Baseline] => {
+      const id = fresh(b.id);
+      return [id, { ...b, id, dates: Object.fromEntries(Object.entries(b.dates).map(([item, d]) => [fresh(item), { ...d }])) }];
+    }),
+  );
+  return { plan: { id: planId, name: plan.name, items, links, calendar: { ...plan.calendar, closures }, baselines }, idMap };
+}
+
+export function buildImport(bytes: Uint8Array, fileName: string, dev: DeviceId, ses: SessionId, now: number): ImportResult {
+  const { header, update } = decodeWbx(bytes);
+  const source = readPlan(header.planId, update);
+  const planId = newId();
+  const { plan, idMap } = remap(source.plan, planId);
+  const notes = new Map([...source.notes].map(([item, text]): [ItemId, string] => [idMap.get(item) ?? missingId(item), text]));
+  const action: Action = {
+    id: newId(),
+    dev,
+    ses,
+    at: now,
+    par: [],
+    lbl: `Imported from ${fileName}`,
+    w: stateWrites(plan, "own"),
+    meta: { imported: fileName },
+  };
+  return { planId, action, newNotes: [...notes.keys()], notes, idMap };
+}
+
+function missingId(item: ItemId): never {
+  throw new Error(`Item ${item} has a note but no new id`);
+}
+
+export async function exportPlan(session: PlanSession): Promise<string | null> {
+  const { id, name } = session.view().plan;
+  const path = await save({ defaultPath: name + ".webboard", filters: FILTERS });
+  if (path === null) return null;
+  const u = session.encodeState();
+  const body = encodeWbx({ planId: id, name, exportedAt: new Date(Date.now()).toISOString(), updateLength: u.length }, u);
+  await call<null>("file_write", body, { headers: { "x-path": encodeURIComponent(path) } });
+  return path;
+}
+
+const fileNameOf = (path: string): string => {
+  const last = path.slice(path.lastIndexOf("/") + 1);
+  return path.startsWith(FILE_PREFIX) ? decodeURIComponent(last) : last;
+};
+
+export async function importPlan(registry: Registry): Promise<PlanId | null> {
+  const path = await open({ multiple: false, directory: false, filters: FILTERS });
+  if (path === null) return null;
+  const bytes = await callBytes("file_read", {}, { headers: { "x-path": encodeURIComponent(path) } });
+  const r = buildImport(bytes, fileNameOf(path), registry.device.deviceId, newId(), Date.now());
+  return registry.createPlanFrom(r);
+}
