@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { fmtShort, toIso, type Day } from "../../domain/dates";
+import { fmtShort, isCalendarDate, toIso, type Day } from "../../domain/dates";
 import type { Item, ItemId, PlanState, Schedule, Status } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
@@ -7,8 +7,10 @@ import { usePlanView, type PlanSession } from "../../store/session";
 import { toast } from "../common/Toast";
 import { planGroupPath } from "../list/groups";
 import { READ_ONLY, useRun, type Run } from "../run";
+import { derivedStatus } from "../status";
 import { LinksEditor } from "./LinksEditor";
 import { bindTextarea, type NoteBinding } from "./noteBinding";
+import { TextField } from "./TextField";
 
 export const TOP_LEVEL = "Top level";
 
@@ -40,57 +42,6 @@ export function groupOptions(plan: PlanState, item: ItemId): { id: ItemId | null
   return [{ id: null, label: TOP_LEVEL }, ...walk(null)];
 }
 
-export function TextField(p: {
-  value: string;
-  label: string;
-  className: string;
-  readOnly: boolean;
-  type?: "text" | "date";
-  onCommit(next: string): boolean;
-}) {
-  const [draft, setDraft] = useState(p.value);
-  const sent = useRef<string | null>(null);
-  useEffect(() => {
-    setDraft(p.value);
-    sent.current = null;
-  }, [p.value]);
-  if (p.readOnly) {
-    return (
-      <span className={`${p.className} as-text`} aria-label={p.label}>
-        {p.value === "" ? "—" : p.value}
-      </span>
-    );
-  }
-  const commit = (): void => {
-    const next = draft.trim();
-    if (next === p.value) {
-      setDraft(p.value);
-      return;
-    }
-    if (next === sent.current) return;
-    sent.current = next;
-    if (!p.onCommit(next)) setDraft(p.value);
-  };
-  return (
-    <input
-      type={p.type ?? "text"}
-      className={p.className}
-      aria-label={p.label}
-      value={draft}
-      onChange={(e) => {
-        sent.current = null;
-        setDraft(e.target.value);
-      }}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key !== "Enter") return;
-        e.preventDefault();
-        commit();
-      }}
-    />
-  );
-}
-
 const dayText = (m: ReadonlyMap<ItemId, Day>, it: Item, what: string): string => {
   const d = m.get(it.id);
   if (d === undefined) throw new Error(`ItemPanel: scheduled item ${it.id} has no derived ${what}`);
@@ -102,12 +53,13 @@ const scheduleOf = (it: Item): Schedule => {
   return it.schedule;
 };
 
-function ProgressField(p: { value: number; readOnly: boolean; onCommit(v: number): void }) {
+function ProgressField(p: { value: number; readOnly: boolean; onCommit(v: number): boolean }) {
   const [draft, setDraft] = useState(p.value);
   useEffect(() => setDraft(p.value), [p.value]);
   if (p.readOnly) return <span className="val">{p.value} %</span>;
   const commit = (): void => {
-    if (draft !== p.value) p.onCommit(draft);
+    if (draft === p.value) return;
+    if (!p.onCommit(draft)) setDraft(p.value);
   };
   return (
     <span className="inline">
@@ -120,8 +72,10 @@ function ProgressField(p: { value: number; readOnly: boolean; onCommit(v: number
         value={draft}
         onChange={(e) => setDraft(Number(e.target.value))}
         onPointerUp={commit}
-        onKeyUp={commit}
         onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+        }}
       />
       <span className="val">{draft} %</span>
     </span>
@@ -154,11 +108,9 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
   const statusId = useId();
   const dated = sc.start !== null && !it.trashed;
   const milestone = it.kind === "milestone";
-  const derivedStatus = (): Status => {
+  const shownStatus = (): Status => {
     if (it.trashed) return sc.status;
-    const s = p.view.derived.status.get(it.id);
-    if (s === undefined) throw new Error(`ItemPanel: item ${it.id} has no derived status`);
-    return s;
+    return derivedStatus(p.view, it.id, "ItemPanel");
   };
   const schedule = (set: Partial<Schedule>): boolean => p.run.run({ t: "schedule", item: it.id, set }) !== null;
   return (
@@ -170,7 +122,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
         label={milestone ? "Date" : "Start"}
         value={sc.start ?? ""}
         readOnly={p.readOnly}
-        onCommit={(next) => schedule({ start: next === "" ? null : next })}
+        onCommit={(next) => isCalendarDate(next) && schedule({ start: next })}
       />
       {!milestone && (
         <>
@@ -203,7 +155,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
       <label htmlFor={statusId}>Status</label>
       {milestone ? (
         <span className="val">
-          {derivedStatus() === "done" ? "reached" : "open"} <span className="dimc">· from its predecessors</span>
+          {shownStatus() === "done" ? "reached" : "open"} <span className="dimc">· from its predecessors</span>
         </span>
       ) : p.readOnly ? (
         <span className="val">{statusLabel(sc.status)}</span>
@@ -306,7 +258,7 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean }) {
     e.preventDefault();
     e.stopPropagation();
     if (readOnly.current) {
-      toast(READ_ONLY, "bad");
+      if (p.session.readOnly) toast(READ_ONLY, "bad");
       return;
     }
     const b = binding.current;
@@ -320,9 +272,9 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean }) {
 export function ItemPanel(p: { session: PlanSession; item: ItemId; readOnly?: boolean }) {
   const view = usePlanView(p.session);
   const run = useRun(p.session);
-  const readOnly = p.readOnly === true;
   const it = view.plan.items.get(p.item);
   if (it === undefined) throw new Error(`ItemPanel: no item ${p.item}`);
+  const readOnly = p.readOnly === true || it.trashed;
   return (
     <div className="panel">
       <span className="kind">{KIND[it.kind]}</span>

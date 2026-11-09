@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { bindTextarea, LOCAL_NOTE } from "./noteBinding";
 
@@ -30,6 +30,7 @@ function pair(initial: string) {
 }
 
 const type = (el: HTMLTextAreaElement, value: string, caret: number): void => {
+  el.focus();
   el.value = value;
   el.setSelectionRange(caret, caret);
   el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -72,6 +73,19 @@ describe("bindTextarea", () => {
     expect(el.value).toBe(">> abXc");
     expect(el.selectionStart).toBe(6);
     expect(el.selectionEnd).toBe(6);
+  });
+
+  it("leaves the caret and focus alone when a remote edit lands while another field has focus", () => {
+    const { el, remote } = pair("abc");
+    type(el, "abXc", 3);
+    const other = document.createElement("input");
+    document.body.append(other);
+    other.focus();
+    const select = vi.spyOn(el, "setSelectionRange");
+    remote.insert(0, ">> ");
+    expect(el.value).toBe(">> abXc");
+    expect(select).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(other);
   });
 
   it("undoes and redoes only its own edits", () => {

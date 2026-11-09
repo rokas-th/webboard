@@ -1,11 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { Built } from "../../actions/intents";
 import { childrenOf } from "../../plan/project";
 import type { HistoryEntry, PlanSession } from "../../store/session";
+import { deleteClash } from "../../test/fixtures/deleteClash";
 import { fs, MESA_SEED, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { shellFor } from "../../test/shell";
 import { clearToasts } from "../common/Toast";
+import { READ_ONLY } from "../run";
 import { useUi, type UiState } from "../state";
 import { historyTime, revertText } from "./historyText";
 import { groupOptions } from "./ItemPanel";
@@ -130,12 +132,10 @@ const tap = (el: Element): void => {
   pointer(el, "up", 11);
 };
 
-const builtOf = (spy: { mock: { results: { type: string; value: unknown }[] } }, i: number): Built => {
+const builtOf = (spy: MockInstance<PlanSession["revert"]>, i: number): Built => {
   const r = spy.mock.results[i];
   if (r === undefined || r.type !== "return") throw new Error("no result " + i);
-  const v = r.value;
-  if (typeof v !== "object" || v === null || !("toast" in v)) throw new Error("not a Built");
-  return v as Built;
+  return r.value;
 };
 
 const ITEM_SEED: SeedItem[] = [
@@ -178,6 +178,27 @@ describe("ItemPanel fields", () => {
     expect(panel().textContent).toContain("End19 Nov");
   });
 
+  it("never unschedules from the Start or Date field: an empty or malformed value puts the stored date back", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("X");
+    const apply = vi.spyOn(t.session, "apply");
+    edit(input("Start"), "", "blur");
+    expect(input("Start").value).toBe("2026-11-16");
+    edit(input("Start"), "16.11.2026", "blur");
+    expect(input("Start").value).toBe("2026-11-16");
+    edit(input("Start"), "", "Enter");
+    expect(input("Start").value).toBe("2026-11-16");
+    select("M");
+    edit(input("Date"), "", "blur");
+    expect(input("Date").value).toBe("2026-11-23");
+    edit(input("Date"), "16.11.2026", "Enter");
+    expect(input("Date").value).toBe("2026-11-23");
+    expect(apply).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual([]);
+    expect(t.session.view().plan.items.get("X")?.schedule?.start).toBe("2026-11-16");
+  });
+
   it("resizes by working days and stops − at 1", async () => {
     const t = await made(ITEM_SEED);
     await shown(t);
@@ -214,6 +235,50 @@ describe("ItemPanel fields", () => {
       [{ t: "schedule", item: "X", set: { status: "done" } }],
       [{ t: "schedule", item: "X", set: { progress: 45 } }],
     ]);
+  });
+
+  it("moves the progress draft with arrow keys and writes once on blur", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("X");
+    const apply = vi.spyOn(t.session, "apply");
+    act(() => input("Progress").focus());
+    [45, 50, 55].forEach((v) =>
+      act(() => {
+        fireEvent.keyDown(input("Progress"), { key: "ArrowRight" });
+        fireEvent.change(input("Progress"), { target: { value: String(v) } });
+        fireEvent.keyUp(input("Progress"), { key: "ArrowRight" });
+      }),
+    );
+    expect(apply).not.toHaveBeenCalled();
+    expect(panel().textContent).toContain("55 %");
+    act(() => input("Progress").blur());
+    expect(apply.mock.calls).toEqual([[{ t: "schedule", item: "X", set: { progress: 55 } }]]);
+    expect(t.session.history()).toHaveLength(2);
+  });
+
+  it("puts the slider back and toasts once when the progress write is refused", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("X");
+    const apply = vi.spyOn(t.session, "apply");
+    vi.spyOn(t.session, "readOnly", "get").mockReturnValue(true);
+    act(() => {
+      input("Progress").focus();
+      fireEvent.change(input("Progress"), { target: { value: "70" } });
+    });
+    act(() => {
+      fireEvent.pointerUp(input("Progress"));
+    });
+    expect(input("Progress").value).toBe("40");
+    expect(panel().textContent).toContain("40 %");
+    act(() => input("Progress").blur());
+    act(() => {
+      fireEvent.keyDown(input("Progress"), { key: "Enter" });
+    });
+    expect(toastTexts()).toEqual([READ_ONLY]);
+    expect(apply).not.toHaveBeenCalled();
+    expect(t.session.view().plan.items.get("X")?.schedule?.progress).toBe(40);
   });
 
   it("shows a milestone without duration, its status derived from its predecessors", async () => {
@@ -506,6 +571,28 @@ describe("ItemPanel read-only", () => {
   });
 });
 
+describe("ItemPanel on a trashed item", () => {
+  it("shows the ghost row of a delete choice as text with no writing control", async () => {
+    const { t, p } = await deleteClash();
+    sessions.push(t.session, p.session);
+    await shown(t);
+    select("A");
+    expect(uiNow()[0].selected).toBe("A");
+    expect(panel().querySelectorAll("input, select")).toHaveLength(0);
+    expect(all("button", panel())).toEqual([]);
+    expect(inPanel().getByLabelText("Name").textContent).toBe("Renamed");
+    const note = inPanel().getByLabelText("Notes");
+    expect(note instanceof HTMLTextAreaElement && note.readOnly).toBe(true);
+    expect(panel().textContent).not.toContain("+ Add a dependency…");
+    const apply = vi.spyOn(t.session, "apply");
+    act(() => {
+      fireEvent.keyDown(note, { key: "z", metaKey: true });
+    });
+    expect(toastTexts()).toEqual([]);
+    expect(apply).not.toHaveBeenCalled();
+  });
+});
+
 describe("opens from every view (refinement 48)", () => {
   it("opens the item's panel from its bar, card, list row and tray chip", async () => {
     const t = await made(MESA_SEED);
@@ -722,6 +809,27 @@ describe("History", () => {
     vi.spyOn(t.session, "history").mockReturnValue([entry]);
     await shown(t);
     expect(rows().map(rowText)).toEqual(["7 Nov 14:02 · Mac · Moved “A”"]);
+  });
+
+  it("shows the newest 50 changes and 50 more per Show older changes", async () => {
+    const t = await made(SEED);
+    const entries: HistoryEntry[] = Array.from({ length: 120 }, (_, i) => ({
+      id: "h" + i,
+      label: "Change " + i,
+      device: "Mac",
+      at: 0,
+      active: true,
+      root: i === 119,
+    }));
+    vi.spyOn(t.session, "history").mockReturnValue(entries);
+    await shown(t);
+    const ids = (): (string | undefined)[] => rows().map((li) => li.dataset.action);
+    expect(ids()).toEqual(entries.slice(0, 50).map((e) => e.id));
+    click(button("Show older changes"));
+    expect(ids()).toEqual(entries.slice(0, 100).map((e) => e.id));
+    click(button("Show older changes"));
+    expect(ids()).toEqual(entries.map((e) => e.id));
+    noButton("Show older changes");
   });
 
   it("gives the first action no button", async () => {

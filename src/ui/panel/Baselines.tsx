@@ -2,7 +2,7 @@ import { fmtShort, type IsoDate } from "../../domain/dates";
 import type { PlanView } from "../../store/doc";
 import type { Run } from "../run";
 import { useUiValue } from "../state";
-import { TextField } from "./ItemPanel";
+import { TextField } from "./TextField";
 
 export const baselineDefault = (today: IsoDate): string => `Baseline ${fmtShort(today)} ${today.slice(0, 4)}`;
 

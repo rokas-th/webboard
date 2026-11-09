@@ -3,6 +3,7 @@ import type { ItemId, PlanState } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { ghostIds } from "../ghosts";
+import { derivedStatus } from "../status";
 
 interface ListSection {
   group: ItemId | null;
@@ -67,8 +68,7 @@ const conflicted = (view: PlanView, id: ItemId): boolean =>
 
 export function statusLabel(view: PlanView, id: ItemId): StatusLabel {
   if (ghostIds(view).has(id)) return "held";
-  const status = view.derived.status.get(id);
-  if (status === undefined) throw new Error(`statusLabel: item ${id} has no derived status`);
+  const status = derivedStatus(view, id, "statusLabel");
   if (conflicted(view, id)) return "conflict";
   if (view.held.has(id)) return "held";
   if (view.derived.late.has(id)) return "late";

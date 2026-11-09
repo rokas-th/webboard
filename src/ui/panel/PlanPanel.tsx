@@ -1,11 +1,12 @@
 import { goneSet } from "../../domain/derive";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { useRun } from "../run";
+import { derivedStatus } from "../status";
 import { useUiValue } from "../state";
 import { Baselines } from "./Baselines";
 import { calendarSummary } from "./calendarText";
 import { History } from "./History";
-import { TextField } from "./ItemPanel";
+import { TextField } from "./TextField";
 import { Trash } from "./Trash";
 
 function Stat(p: { k: string; v: number; tone?: "amber" | "magenta" }) {
@@ -26,7 +27,7 @@ export function PlanPanel(p: { session: PlanSession; readOnly: boolean }) {
   const plan = view.plan;
   const gone = goneSet(plan);
   const items = [...plan.items.values()].filter((i) => i.kind !== "group" && !gone.has(i.id));
-  const done = items.filter((i) => view.derived.status.get(i.id) === "done").length;
+  const done = items.filter((i) => derivedStatus(view, i.id, "PlanPanel") === "done").length;
   const unscheduled = items.filter((i) => i.schedule !== null && i.schedule.start === null).length;
   const late = items.filter((i) => view.derived.late.has(i.id)).length;
   const conflicts = view.derived.conflicts.filter((c) => c.kind !== "dayoff").length;

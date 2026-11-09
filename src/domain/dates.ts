@@ -17,16 +17,22 @@ export function toIso(d: Day): IsoDate {
   return new Date(checkDay(d) * MS_PER_DAY).toISOString().slice(0, 10);
 }
 
-export function toDay(d: IsoDate): Day {
-  const refuse = () => new RangeError(`not a calendar date: ${JSON.stringify(d)}`);
-  if (!ISO_SHAPE.test(d)) throw refuse();
+const parseDay = (d: string): Day | null => {
+  if (!ISO_SHAPE.test(d)) return null;
   const [y, m, dd] = d.split("-").map(Number);
   const t = new Date(0);
   t.setUTCFullYear(y, m - 1, dd);
   const day = t.getTime() / MS_PER_DAY;
-  if (toIso(day) !== d) throw refuse();
+  return toIso(day) === d ? day : null;
+};
+
+export function toDay(d: IsoDate): Day {
+  const day = parseDay(d);
+  if (day === null) throw new RangeError(`not a calendar date: ${JSON.stringify(d)}`);
   return day;
 }
+
+export const isCalendarDate = (d: string): boolean => parseDay(d) !== null;
 
 export function weekday(d: Day): Weekday {
   return ((((checkDay(d) + 3) % 7) + 7) % 7 + 1) as Weekday;

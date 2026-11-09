@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtShort, localToday, toDay, toIso, weekday, yearOf } from "./dates";
+import { fmtShort, isCalendarDate, localToday, toDay, toIso, weekday, yearOf } from "./dates";
 
 describe("dates", () => {
   it("toDay counts whole days since 1970-01-01", () => {
@@ -30,7 +30,9 @@ describe("dates", () => {
     ].forEach((s) => {
       expect(() => toDay(s)).toThrow(RangeError);
       expect(() => toDay(s)).toThrow(`not a calendar date: ${JSON.stringify(s)}`);
+      expect([s, isCalendarDate(s)]).toEqual([s, false]);
     });
+    expect(["2024-02-29", "2026-11-08"].map(isCalendarDate)).toEqual([true, true]);
     expect(() => toDay("2026-02-30")).toThrow('not a calendar date: "2026-02-30"');
   });
 

@@ -53,7 +53,7 @@ export function bindTextarea(el: HTMLTextAreaElement, text: Y.Text): NoteBinding
     if (value === el.value) return;
     const at = caret;
     el.value = value;
-    if (at !== null) el.setSelectionRange(indexOf(at.start), indexOf(at.end));
+    if (at !== null && el.ownerDocument.activeElement === el) el.setSelectionRange(indexOf(at.start), indexOf(at.end));
   };
 
   doc.on("beforeTransaction", remember);

@@ -1205,6 +1205,62 @@ describe("the panel slot", () => {
     expect(document.querySelectorAll(".nub").length).toBeGreaterThan(0);
   });
 
+  describe("stale selection", () => {
+    const SEED: SeedItem[] = [{ name: "A", start: "2026-11-10", dur: 3 }];
+
+    it("lets go of a selected item the open plan no longer holds, and shows the plan", async () => {
+      const t = await made(SEED);
+      await shown(t);
+      act(() => {
+        t.session.apply({ t: "create", kind: "task", name: "New", parent: null, after: "A", start: "2026-11-12", dur: 1 });
+      });
+      const created = [...t.session.view().plan.items.keys()].find((id) => id !== "A");
+      if (created === undefined) throw new Error("create added no item");
+      select(created);
+      expect(input("Name").value).toBe("New");
+      clearToasts();
+      act(() => {
+        t.session.undo();
+      });
+      expect(t.session.view().plan.items.has(created)).toBe(false);
+      expect(uiNow()[0].selected).toBeNull();
+      expect(input("Plan name").value).toBe("Plan");
+      expect(toastTexts().filter((x) => x !== null && /Trash/.test(x))).toEqual([]);
+    });
+
+    it("lets go of a selection that names no item of the open plan, without a toast", async () => {
+      const t = await made(SEED);
+      await shown(t);
+      select("A");
+      select("gone");
+      expect(uiNow()[0].selected).toBeNull();
+      expect(input("Plan name").value).toBe("Plan");
+      expect(toastTexts()).toEqual([]);
+    });
+
+    it("keeps the selection when the open plan is picked again and drops it on a switch to another plan", async () => {
+      const t = await made(SEED);
+      const id = t.session.view().plan.id;
+      const plans = () => [
+        { id, name: "Plan", trashed: false, loaded: true, space: null },
+        { id: "other", name: "Other", trashed: false, loaded: true, space: null },
+      ];
+      const session = (x: string): Promise<PlanSession> => (x === id ? Promise.resolve(t.session) : new Promise<PlanSession>(() => undefined));
+      render(shellFor(t, { plans, session }).ui);
+      await settle();
+      expect(uiNow()[0].plan).toBe(id);
+      select("A");
+      click(within(entry("Plan")).getByRole("button", { name: "Plan" }));
+      await settle();
+      expect(uiNow()[0].plan).toBe(id);
+      expect(uiNow()[0].selected).toBe("A");
+      expect(input("Name").value).toBe("A");
+      click(within(entry("Other")).getByRole("button", { name: "Other" }));
+      expect(uiNow()[0].plan).toBe("other");
+      expect(uiNow()[0].selected).toBeNull();
+    });
+  });
+
   describe("trashed selection (refinement 41)", () => {
     const SEED: SeedItem[] = [
       { name: "A", start: "2026-11-10", dur: 3 },
@@ -1263,8 +1319,19 @@ describe("the panel slot", () => {
       const { t, p } = await deleteClash();
       sessions.push(t.session, p.session);
       await shown(t);
-      select("A");
-      expect(input("Name").value).toBe("Renamed");
+      click(screen.getByRole("tab", { name: "List" }));
+      const row = document.querySelector('[data-lrow="A"]');
+      if (row === null) throw new Error("no ghost row for A");
+      expect(row.classList.contains("ghost-row")).toBe(true);
+      const at = { clientX: 10, clientY: 10, button: 0, pointerId: 1, pointerType: "mouse" };
+      act(() => {
+        fireEvent.pointerDown(row, at);
+      });
+      act(() => {
+        fireEvent.pointerUp(row, { ...at, clientX: 11 });
+      });
+      expect(uiNow()[0].selected).toBe("A");
+      expect(inPanel().getByLabelText("Name").textContent).toBe("Renamed");
       act(() => {
         p.session.apply({ t: "rename", item: "B", name: "Other" });
         p.sync();

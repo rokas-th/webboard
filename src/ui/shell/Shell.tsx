@@ -93,7 +93,7 @@ export function Shell(p: ShellProps) {
   const registry = p.registry;
   const [ui, setUi] = useUi();
   const uiValue = useMemo(() => ({ ui, setUi }), [ui, setUi]);
-  const [, bump] = useReducer((n: number) => n + 1, 0);
+  const [tick, bump] = useReducer((n: number) => n + 1, 0);
   const [main, setMainState] = useState<Main>({ k: "none" });
   const [creating, setCreating] = useState(false);
   const selected = useRef(ui.plan);
@@ -110,6 +110,10 @@ export function Shell(p: ShellProps) {
 
   const select = useCallback(
     (id: PlanId | null) => {
+      if (id === selected.current) {
+        setUi({ plan: id });
+        return;
+      }
       selected.current = id;
       selectedItem.current = null;
       setUi({ plan: id, selected: null });
@@ -196,16 +200,21 @@ export function Shell(p: ShellProps) {
   }, [ui.selected]);
 
   useEffect(() => {
+    if (session === null || ui.selected === null || session.view().plan.items.has(ui.selected)) return;
+    selectedItem.current = null;
+    setUi({ selected: null });
+  }, [session, ui.selected, tick, setUi]);
+
+  useEffect(() => {
     if (session === null) return;
     const letGo = (): void => {
       const item = selectedItem.current;
       if (item === null) return;
       const view = session.view();
       const it = view.plan.items.get(item);
-      if (it !== undefined && (!it.trashed || ghostIds(view).has(item))) return;
+      if (it === undefined || !it.trashed || ghostIds(view).has(item)) return;
       selectedItem.current = null;
       setUi({ selected: null });
-      if (it === undefined) return;
       const root = trashRootOf(session, item);
       const a = session.authorOf("e:" + root);
       if (a === null) throw new Error(`Shell: trashed item ${root} has no author`);
