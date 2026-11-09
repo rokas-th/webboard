@@ -58,14 +58,15 @@ export function DayList(p: {
       <ul className="day-list" aria-label="Days off and holidays">
         {missing.map((y) => {
           const drafted = p.draftYears.get(y);
-          if (drafted !== undefined && drafted.k === "loading") {
+          const loading = drafted === undefined ? p.own && p.notices.some((n) => n.year === y && n.k === "loading") : drafted.k === "loading";
+          if (loading) {
             return (
               <li key={`missing ${y}`} className="day-missing">
                 <span className="day-year">{`${y} · loading…`}</span>
               </li>
             );
           }
-          const failure = drafted;
+          const failure = drafted?.k === "failed" ? drafted : undefined;
           const own = p.own && failure === undefined;
           const notices = own ? p.notices.filter((n) => n.year === y) : [];
           const notice = notices.find((n) => n.k === "failed");

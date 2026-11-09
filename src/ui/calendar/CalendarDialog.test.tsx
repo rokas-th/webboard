@@ -1108,9 +1108,131 @@ describe("failed years in the day list", () => {
     expect(apply).toHaveBeenCalledTimes(1);
     const intent = apply.mock.calls[0][0];
     if (intent.t !== "calendar" || intent.base === undefined) throw new Error("Apply ran no calendar intent with a base");
-    expect(intent.next.holidays.get(2027)).toBe(intent.base.holidays.get(2027));
+    expect(intent.next.holidays.get(2027)).toEqual(intent.base.holidays.get(2027));
     expect(t.session.view().plan.calendar.holidays.get(2027)?.days).toEqual(NINE_2027.days);
     expect(t.session.view().plan.calendar.workdays).toEqual([1, 2, 3, 4]);
+  });
+
+  const year2027 = () => {
+    const answer = deferred<unknown>();
+    const holidaysYear: Answer = (args) => (argOf(args, "year") === 2027 ? answer.promise : pending(args));
+    const resolve = async (): Promise<void> => {
+      await act(async () => {
+        answer.resolve({ days: NINE_2027.days, fetchedAt: "2026-11-09T08:00:00Z", fromCache: false, coverage: [2020, 2030] });
+      });
+      await settle();
+    };
+    return { holidaysYear, resolve };
+  };
+
+  const readyYear = (t: TestSession, year: number): HolidayYear => {
+    const n = t.holidays.notices(t.session.view().plan.id).find((x) => x.k === "ready" && x.year === year);
+    if (n === undefined || n.k !== "ready" || n.intent.t !== "calendar") throw new Error(`no ready notice for ${year}`);
+    const y = n.intent.next.holidays.get(year);
+    if (y === undefined) throw new Error(`the ready notice for ${year} holds no year`);
+    return y;
+  };
+
+  const loadingRow = (y: number): HTMLElement => {
+    const el = inDialog().getByText(`${y} · loading…`).closest("li");
+    if (el === null) throw new Error(`no loading row ${y}`);
+    return el;
+  };
+
+  it("takes the year Load brings into the open dialog's draft and writes it on Apply, which clears the ready notice", async () => {
+    const y = year2027();
+    const t = await made([], { calendar: zhPlan({ holidays: new Map([[2026, CH_ZH_2026]]) }), answers: { holidays_year: y.holidaysYear } });
+    await shown(t);
+    await openDialog();
+    const plan = t.session.view().plan.id;
+    const base = t.session.view().plan.calendar;
+    fireEvent.click(within(missingRow(2027)).getByRole("button", { name: "Load" }));
+    await settle();
+    expect(within(loadingRow(2027)).queryAllByRole("button")).toEqual([]);
+    expect(inDialog().queryByText(NOT_LOADED(2027))).toBeNull();
+    await y.resolve();
+    const ready = readyYear(t, 2027);
+    const next = { ...base, holidays: new Map([...base.holidays, [2027, ready]]) };
+    const inSpan = NINE_2027.days.filter((d) => d.date <= "2027-11-09");
+    expect(inSpan.length).toBe(7);
+    inSpan.forEach((d) => expect(dayRow(d.name)).toBeTruthy());
+    expect(inDialog().queryByText(NOT_LOADED(2027))).toBeNull();
+    expect(inDialog().queryByText("2027 · loading…")).toBeNull();
+    expect(inDialog().queryByRole("button", { name: "Load" })).toBeNull();
+    expect(impact()).toBe(impactText(t.session.preview({ t: "calendar", next, base })));
+    expect(applyButton().disabled).toBe(false);
+    expect(t.session.view().plan.calendar.holidays.has(2027)).toBe(false);
+    const apply = vi.spyOn(t.session, "apply");
+    await clickApply();
+    expect(apply).toHaveBeenCalledTimes(1);
+    const sent = apply.mock.calls[0][0];
+    if (sent.t !== "calendar") throw new Error("Apply ran no calendar intent");
+    expect(sent.base).toBe(base);
+    expect(sent.next.holidays.get(2027)).toBe(ready);
+    expect(sent.next).toEqual(next);
+    expect(t.session.view().plan.calendar.holidays.get(2027)?.days).toEqual(NINE_2027.days);
+    expect(t.holidays.notices(plan).filter((n) => n.k === "ready" && n.year === 2027)).toEqual([]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("counts a loaded year in the impact preview of a plan with items in it", async () => {
+    const y = year2027();
+    const t = await made([{ id: "E", name: "Easter", start: "2027-03-25", dur: 3 }], {
+      calendar: zhPlan({ holidays: new Map([[2026, CH_ZH_2026]]) }),
+      answers: { holidays_year: y.holidaysYear },
+    });
+    await shown(t);
+    await openDialog();
+    const plan = t.session.view().plan.id;
+    expect(impact()).toBe(NONE);
+    act(() => {
+      void t.holidays.load(plan, t.session, 2027);
+    });
+    await settle();
+    expect(within(loadingRow(2027)).queryAllByRole("button")).toEqual([]);
+    await y.resolve();
+    expect(dayRow("Holiday 3")).toBeTruthy();
+    expect(impact()).toBe(`Applying changes the end date of 1 item. ${CLOSE}`);
+    expect(applyButton().disabled).toBe(false);
+  });
+
+  it("keeps a year the draft already holds when a ready notice for it arrives", async () => {
+    const y = year2027();
+    const foreign = holidayYear("oh:DE:DE-BY", 2027, [holidayDay("2027-01-06", "Epiphany", "public")]);
+    const t = await made([], {
+      calendar: zhPlan({ holidays: new Map([[2026, CH_ZH_2026], [2027, foreign]]) }),
+      answers: { holidays_year: y.holidaysYear },
+    });
+    await shown(t);
+    await openDialog();
+    fireEvent.click(within(missingRow(2027)).getByRole("button", { name: "Load" }));
+    await settle();
+    await y.resolve();
+    expect(readyYear(t, 2027).days).toEqual(NINE_2027.days);
+    expect(impact()).toBe(NONE);
+    expect(applyButton().disabled).toBe(true);
+    expect(() => dayRow("Holiday 1")).toThrow("no day row Holiday 1");
+  });
+
+  it("leaves the plan and the ready notice for the plan head when the dialog is cancelled", async () => {
+    const y = year2027();
+    const t = await made([], { calendar: zhPlan({ holidays: new Map([[2026, CH_ZH_2026]]) }), answers: { holidays_year: y.holidaysYear } });
+    await shown(t);
+    await openDialog();
+    const before = t.session.view().plan.calendar;
+    const apply = vi.spyOn(t.session, "apply");
+    fireEvent.click(within(missingRow(2027)).getByRole("button", { name: "Load" }));
+    await settle();
+    await y.resolve();
+    expect(dayRow("Holiday 1")).toBeTruthy();
+    fireEvent.click(inDialog().getByRole("button", { name: "Cancel" }));
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(apply).not.toHaveBeenCalled();
+    expect(t.session.view().plan.calendar).toBe(before);
+    expect(readyYear(t, 2027).days).toEqual(NINE_2027.days);
+    expect(within(head()).getByRole("button", { name: "Review" })).toBeTruthy();
+    expect(within(head()).getByText("Holidays for 2027 ready — review")).toBeTruthy();
   });
 
   it("shows why a picked region's year did not load and loads it again in the dialog (refinement 43)", async () => {

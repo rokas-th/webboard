@@ -5,6 +5,7 @@ import { isCalendarDate, toDay, yearOf, type Day, type IsoDate, type Weekday } f
 import { planRules } from "../../plan/rules";
 import { key } from "../../plan/units";
 import type { Clock } from "../../services/clock";
+import type { HolidayNotice } from "../../services/holidays";
 import { AppError } from "../../services/ipc";
 import type { PlanView } from "../../store/doc";
 import type { Registry } from "../../store/registry";
@@ -78,6 +79,22 @@ function withArrived(cal: Calendar, arrived: readonly [number, HolidayYear][]): 
   return added.length === 0 ? cal : { ...cal, holidays: new Map([...cal.holidays, ...added]) };
 }
 
+function readyYears(notices: readonly HolidayNotice[]): [number, HolidayYear][] {
+  return notices.flatMap((n): [number, HolidayYear][] => {
+    if (n.k !== "ready") return [];
+    if (n.intent.t !== "calendar") throw new Error(`The ready notice for ${n.year} carries no calendar intent`);
+    const y = n.intent.next.holidays.get(n.year);
+    if (y === undefined) throw new Error(`The ready notice for ${n.year} carries no holidays for that year`);
+    return [[n.year, y]];
+  });
+}
+
+function withReady(d: Calendar, ready: readonly [number, HolidayYear][]): Calendar {
+  if (d.region === null) return d;
+  const rk = regionKey(d.region);
+  return withArrived(d, ready.filter(([, y]) => y.region === rk));
+}
+
 function previewText(session: PlanSession, view: PlanView, intent: Extract<Intent, { t: "calendar" }>): string {
   if (session.view() !== view) throw new Error("The calendar preview ran on another plan view than the dialog shows");
   try {
@@ -104,6 +121,7 @@ export function CalendarBody(p: CalendarProps) {
   const [base, setBase] = useState<Calendar>(() => p.review?.intent.base ?? session.view().plan.calendar);
   const [draft, setDraft] = useState<Calendar>(() => p.review?.intent.next ?? base);
   const [seen, setSeen] = useState<Calendar["holidays"]>(() => view.plan.calendar.holidays);
+  const [seenNotices, setSeenNotices] = useState<readonly HolidayNotice[] | null>(null);
   const [drafted, setDrafted] = useState<ReadonlyMap<string, ReadonlyMap<number, DraftYear>>>(new Map());
   const [regionError, setRegionError] = useState<{ region: RegionRef; message: string } | null>(null);
   const [applied, setApplied] = useState(false);
@@ -120,6 +138,11 @@ export function CalendarBody(p: CalendarProps) {
       setBase((c) => withArrived(c, arrived));
       setDraft((d) => (d.region !== null && regionKey(d.region) === ownKey ? withArrived(d, arrived) : d));
     }
+  }
+  if (p.review === undefined && seenNotices !== notices) {
+    const ready = readyYears(notices);
+    setSeenNotices(notices);
+    if (ready.length > 0) setDraft((d) => withReady(d, ready));
   }
   const span = spanOf(view);
   const spanYears = useMemo(() => yearsOf(span.from, span.to), [span.from, span.to]);
