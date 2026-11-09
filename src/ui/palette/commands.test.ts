@@ -262,7 +262,15 @@ describe("nudge and resize", () => {
     const t = await made(SMALL);
     const edits = (sel: string): string[] => ids(harness(t, { selected: sel }).ctx).filter((x) => x.startsWith("nudge") || x.startsWith("resize") || x === "trash");
     const dated = ["nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash"];
-    expect([edits("a"), edits("m"), edits("u"), edits("g1")]).toEqual([dated, dated, ["trash"], ["trash"]]);
+    const group = ["nudge+1", "nudge-1", "nudge+5", "nudge-5", "trash"];
+    expect([edits("a"), edits("m"), edits("u"), edits("g1")]).toEqual([dated, dated, ["trash"], group]);
+  });
+
+  it("nudges a selected group by moving its dated items", async () => {
+    const t = await made(SMALL);
+    const apply = vi.spyOn(t.session, "apply");
+    find(harness(t, { selected: "g1" }).ctx, "nudge+1").run();
+    expect(apply.mock.calls).toEqual([[{ t: "move", items: ["g1"], days: 1 }]]);
   });
 
   it("throws by name when the task lost its start between listing and running", async () => {

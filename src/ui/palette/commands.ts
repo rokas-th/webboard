@@ -116,7 +116,6 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
       run({ t: "trash", items: [sel] });
     },
   };
-  if (!dated(it)) return [trash];
   const nudges = STEPS.map(
     (n): Command => ({
       id: `nudge${signed(n)}`,
@@ -137,6 +136,8 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
       run: () => resize(session, run, sel, n),
     }),
   );
+  if (it.kind === "group") return [...nudges, trash];
+  if (!dated(it)) return [trash];
   return [...nudges, ...resizes, trash];
 }
 
