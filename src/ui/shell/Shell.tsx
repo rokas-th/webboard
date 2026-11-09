@@ -9,12 +9,14 @@ import { toast, Toasts } from "../common/Toast";
 import { OpenChoice } from "../run";
 import { pickPlan, UiContext, useUi } from "../state";
 import { Board } from "../board/Board";
+import { CalendarDialog } from "../calendar/CalendarDialog";
 import { ghostIds } from "../ghosts";
 import { List } from "../list/List";
 import { RevertDialog } from "../panel/History";
 import { ItemPanel } from "../panel/ItemPanel";
 import { PlanPanel } from "../panel/PlanPanel";
 import { Timeline } from "../timeline/Timeline";
+import { HolidayState } from "./HolidayState";
 import { FILES_STAY, PlanFailed } from "./PlanFailed";
 import { PlanHead } from "./PlanHead";
 import { RELOAD_LABEL, ReloadConfirm } from "./ReloadConfirm";
@@ -334,7 +336,9 @@ export function Shell(p: ShellProps) {
             </button>
           </Banner>
         )}
-        <PlanHead session={session} onChoose={(choice) => openChoice(choice)} />
+        <PlanHead session={session} onChoose={(choice) => openChoice(choice)}>
+          <HolidayState session={session} registry={registry} clock={p.clock} />
+        </PlanHead>
         <div className="view">
           <div className="slot" data-slot={ui.view}>
             {ui.view === "timeline" && <Timeline session={session} readOnly={readOnly} />}
@@ -389,6 +393,9 @@ export function Shell(p: ShellProps) {
               </div>
             )}
           </div>
+          {session !== null && ui.dialog !== null && ui.dialog.t === "calendar" && (
+            <CalendarDialog key={session.view().plan.id} session={session} registry={registry} clock={p.clock} onClose={() => setUi({ dialog: null })} />
+          )}
           {session !== null && ui.dialog !== null && ui.dialog.t === "revert" && (
             <RevertDialog key={ui.dialog.id} session={session} id={ui.dialog.id} onClose={() => setUi({ dialog: null })} />
           )}

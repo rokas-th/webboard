@@ -11,6 +11,7 @@ import "./styles/timeline.css";
 import "./styles/board.css";
 import "./styles/list.css";
 import "./styles/panel.css";
+import "./styles/calendar.css";
 import App from "./App";
 
 const root = document.getElementById("root");

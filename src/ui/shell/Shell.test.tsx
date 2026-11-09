@@ -1341,3 +1341,37 @@ describe("the panel slot", () => {
     });
   });
 });
+
+describe("calendar dialog in the shell", () => {
+  const calendarDialogs = (): HTMLElement[] => screen.queryAllByRole("dialog", { name: "Calendar · Plan" });
+
+  it("opens from PlanPanel's Change calendar… and closes with Esc", async () => {
+    const t = await made(MESA_SEED);
+    render(shellFor(t).ui);
+    await settle();
+    const panel = slot("panel");
+    if (!(panel instanceof HTMLElement)) throw new Error("no panel");
+    fireEvent.click(within(panel).getByRole("button", { name: "Change calendar…" }));
+    await settle();
+    expect(lastUi().dialog).toEqual({ t: "calendar" });
+    expect(calendarDialogs()).toHaveLength(1);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.keyDown(calendarDialogs()[0], { key: "Escape" });
+    await settle();
+    expect(lastUi().dialog).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens the same dialog from Choose region on a plan with no region", async () => {
+    const t = await made(MESA_SEED);
+    expect(t.session.view().plan.calendar.region).toBeNull();
+    render(shellFor(t).ui);
+    await settle();
+    const head = document.querySelector(".plan-head");
+    if (!(head instanceof HTMLElement)) throw new Error("no plan head");
+    fireEvent.click(within(head).getByRole("button", { name: "Choose region" }));
+    await settle();
+    expect(lastUi().dialog).toEqual({ t: "calendar" });
+    expect(calendarDialogs()).toHaveLength(1);
+  });
+});

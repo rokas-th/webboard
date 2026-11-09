@@ -33,7 +33,7 @@ interface Entry {
 
 const TRANSIENT: ReadonlySet<string> = new Set(["holidays.offline", "holidays.rate_limited"]);
 
-const NOT_AVAILABLE: ReadonlySet<string> = new Set(["holidays.unsupported", "holidays.out_of_range"]);
+export const NOT_AVAILABLE: ReadonlySet<string> = new Set(["holidays.unsupported", "holidays.out_of_range"]);
 
 const NO_NOTICES: readonly HolidayNotice[] = Object.freeze([]);
 

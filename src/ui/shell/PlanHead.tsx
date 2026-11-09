@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { sideText } from "../../plan/choices";
 import { usePlanView, type PlanSession } from "../../store/session";
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-export function PlanHead(p: { session: PlanSession; onChoose(choice: string): void }) {
+export function PlanHead(p: { session: PlanSession; onChoose(choice: string): void; children?: ReactNode }) {
   const view = usePlanView(p.session);
   const [listOpen, setListOpen] = useState(false);
   const plan = view.plan;
@@ -30,6 +30,7 @@ export function PlanHead(p: { session: PlanSession; onChoose(choice: string): vo
             {u.message}
           </p>
         ))}
+        {p.children}
         <div className="chips">
           {view.pending > 0 && (
             <span className="chip chip-cyan">Receiving… · {plural(view.pending, "change waiting", "changes waiting")}</span>
