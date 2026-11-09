@@ -120,6 +120,15 @@ const notifier = (r: Registry): (() => void) => {
 
 const shellOn = (r: Registry) => <Shell registry={r} clock={fixedClock("2026-11-09")} />;
 
+function deferred<T>(): { promise: Promise<T>; resolve(v: T): void; reject(e: unknown): void } {
+  const settlers: { resolve(v: T): void; reject(e: unknown): void }[] = [];
+  const promise = new Promise<T>((resolve, reject) => {
+    settlers.push({ resolve, reject });
+  });
+  const [s] = settlers;
+  return { promise, resolve: s.resolve, reject: s.reject };
+}
+
 describe("Shell on testSession(MESA_SEED)", () => {
   it("renders the toolbar", async () => {
     const t = await made(MESA_SEED);
@@ -300,6 +309,26 @@ describe("Shell on testSession(MESA_SEED)", () => {
     probe.unmount();
   });
 
+  it("toasts only error events that carry an error", async () => {
+    const t = await made(MESA_SEED);
+    const { ui } = shellFor(t);
+    render(ui);
+    await settle();
+    act(() => {
+      window.dispatchEvent(new ErrorEvent("error", { message: "ResizeObserver loop completed with undelivered notifications." }));
+      window.dispatchEvent(new ErrorEvent("error", { message: "Script error." }));
+    });
+    expect(toastTexts()).toEqual([]);
+    act(() => {
+      window.dispatchEvent(new ErrorEvent("error", { error: new Error("thrown in a handler"), message: "Uncaught Error: thrown in a handler" }));
+    });
+    expect(toastNodes().map((n) => [n.textContent, n.className])).toEqual([["thrown in a handler", "toast bad"]]);
+    act(() => {
+      window.dispatchEvent(new ErrorEvent("error", { error: "thrown string", message: "Uncaught thrown string" }));
+    });
+    expect(toastTexts()).toEqual(["thrown in a handler", "thrown string"]);
+  });
+
   it("resets an unreadable webboard.place with one toast", async () => {
     window.localStorage.setItem(PLACE_KEY, "{");
     const t = await made(MESA_SEED);
@@ -397,6 +426,27 @@ describe("PlanHead", () => {
     expect(screen.queryByRole("list", { name: "Open choices" })).toBeNull();
   });
 
+  it("closes the list when the last choice is resolved", async () => {
+    const t = await made(A, { clashes: [NAME_CLASH] });
+    render(<PlanHead session={t.session} onChoose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    expect(screen.queryByRole("list", { name: "Open choices" })).not.toBeNull();
+    act(() => {
+      const c = t.session.view().choices[0];
+      t.session.resolve(c.id, { side: c.sides[0].key }, { pushFromPredecessors: false, returnPushed: false });
+    });
+    expect(chip()).toBeNull();
+    const p = await t.peer("iphone");
+    act(() => {
+      t.session.apply({ t: "rename", item: "A", name: "East" });
+      p.session.apply({ t: "rename", item: "A", name: "West" });
+      p.sync();
+    });
+    expect(chip()).toBe("1 open choice · Choose…");
+    expect(screen.queryByRole("list", { name: "Open choices" })).toBeNull();
+    await p.session.close();
+  });
+
   it("opens the choice holding the held items", async () => {
     const t = await made(A, { clashes: [{ unit: "s:A", mac: ["2026-11-16", 3, "todo", 0, "now"], iphone: ["2026-11-18", 3, "todo", 0, "now"] }] });
     const onChoose = vi.fn();
@@ -450,6 +500,34 @@ describe("Shell banners on a stub registry", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Load again" }));
     await settle();
     expect(reloadFromServer.mock.calls).toEqual([["ix-sp000000000"]]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("starts one reload per press until it settles", async () => {
+    const t = await made(MESA_SEED);
+    const held = deferred<void>();
+    const reloadFromServer = vi.fn<(docId: string) => Promise<void>>().mockReturnValueOnce(held.promise).mockResolvedValue(undefined);
+    const { ui } = shellFor(t, {
+      indexError: () => new AppError("store.corrupt", "The space plan list is damaged at record 4."),
+      indexErrorDoc: () => "ix-sp000000000",
+      retryIndex: vi.fn(async () => undefined),
+      reloadFromServer,
+    });
+    render(ui);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: RELOAD }));
+    const load = within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" });
+    fireEvent.click(load);
+    fireEvent.click(load);
+    expect(reloadFromServer).toHaveBeenCalledTimes(1);
+    expect(load.hasAttribute("disabled")).toBe(true);
+    await act(async () => held.reject(new AppError("store.io", "Could not set the plan aside: disk full.")));
+    await settle();
+    expect(toastTexts()).toEqual(["Could not set the plan aside: disk full."]);
+    expect(load.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(load);
+    await settle();
+    expect(reloadFromServer).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -512,8 +590,9 @@ describe("Shell banners on a stub registry", () => {
     const view = render(ui);
     await settle();
     expect(toastTexts().filter((x) => x === text)).toHaveLength(1);
-    view.rerender(shellFor(t, { takeIndexRepairNotice: take }).ui);
+    view.rerender(ui);
     act(() => registry.notify());
+    expect(take).toHaveBeenCalledTimes(2);
     expect(toastTexts().filter((x) => x === text)).toHaveLength(1);
   });
 
@@ -553,6 +632,82 @@ describe("Shell banners on a stub registry", () => {
     expect(session).toHaveBeenCalledTimes(2);
     expect(slot("timeline")).not.toBeNull();
     expect(screen.queryByText(INCOMPLETE)).toBeNull();
+  });
+
+  it("keeps the not-arrived message while its retry runs", async () => {
+    const t = await made(MESA_SEED);
+    const id = t.session.view().plan.id;
+    const held = deferred<PlanSession>();
+    const session = vi
+      .fn<(x: string) => Promise<PlanSession>>()
+      .mockRejectedValueOnce(new AppError("plan.incomplete", INCOMPLETE))
+      .mockReturnValue(held.promise);
+    const { ui, registry } = shellFor(t, {
+      plans: () => [{ id, name: "Beta", trashed: false, loaded: false, space: null }],
+      session,
+    });
+    render(ui);
+    await settle();
+    expect(screen.getByText(INCOMPLETE)).toBeTruthy();
+    act(() => registry.notify());
+    expect(screen.getByText(INCOMPLETE)).toBeTruthy();
+    act(() => registry.notify());
+    expect(screen.getByText(INCOMPLETE)).toBeTruthy();
+    await settle();
+    expect(screen.getByText(INCOMPLETE)).toBeTruthy();
+    expect(session).toHaveBeenCalledTimes(3);
+    await act(async () => held.resolve(t.session));
+    await settle();
+    expect(slot("timeline")).not.toBeNull();
+    expect(screen.queryByText(INCOMPLETE)).toBeNull();
+  });
+
+  it("shows a failed session open with Try again, and still rethrows it", async () => {
+    const t = await made(MESA_SEED);
+    const boom = new Error("boom");
+    const rethrown: Promise<unknown>[] = [];
+    const failing = (): Promise<PlanSession> => {
+      const p = Promise.reject(boom);
+      const then = p.then.bind(p);
+      vi.spyOn(p, "then").mockImplementation((ok, bad) => {
+        const next = then(ok, bad);
+        rethrown.push(next.then(() => null, (e: unknown) => e));
+        return next;
+      });
+      return p;
+    };
+    const calls: string[] = [];
+    const session = (x: string): Promise<PlanSession> => {
+      calls.push(x);
+      return calls.length === 1 ? failing() : Promise.resolve(t.session);
+    };
+    const { ui } = shellFor(t, { session });
+    render(ui);
+    await settle();
+    expect(screen.getByText("boom").closest(".banner")?.classList.contains("bad")).toBe(true);
+    expect(slot("timeline")).toBeNull();
+    expect(await Promise.all(rethrown)).toEqual([boom]);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(calls).toEqual([t.session.view().plan.id, t.session.view().plan.id]);
+    expect(slot("timeline")).not.toBeNull();
+    expect(screen.queryByText("boom")).toBeNull();
+  });
+
+  it("shows a recorded failure of a loaded plan that did not open", async () => {
+    const t = await made(MESA_SEED);
+    const id = t.session.view().plan.id;
+    const failure = new AppError("store.io", "Could not read the plan: disk error.");
+    const retryPlan = vi.fn(async () => undefined);
+    const { ui } = shellFor(t, { failures: () => new Map([[id, failure]]), session: () => Promise.reject(failure), retryPlan });
+    render(ui);
+    await settle();
+    const failed = document.querySelector(".plan-failed");
+    if (!(failed instanceof HTMLElement)) throw new Error("no PlanFailed");
+    expect(within(failed).getByText("Could not read the plan: disk error.")).toBeTruthy();
+    expect(slot("timeline")).toBeNull();
+    fireEvent.click(within(failed).getByRole("button", { name: "Try again" }));
+    expect(retryPlan.mock.calls).toEqual([[id]]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { sideText } from "../../plan/choices";
 import { usePlanView, type PlanSession } from "../../store/session";
 
@@ -8,6 +8,10 @@ export function PlanHead(p: { session: PlanSession; onChoose(choice: string): vo
   const view = usePlanView(p.session);
   const [listOpen, setListOpen] = useState(false);
   const plan = view.plan;
+  const none = view.choices.length === 0;
+  useEffect(() => {
+    if (none) setListOpen(false);
+  }, [none]);
   const choose = (id: string): void => {
     setListOpen(false);
     p.onChoose(id);

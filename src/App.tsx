@@ -30,7 +30,10 @@ export default function App() {
     setStart({ k: "opening" });
     Registry.open({ clock: systemClock }).then(
       (registry) => setStart({ k: "open", registry }),
-      (e: unknown) => setStart({ k: "failed", message: messageOf(e), recovery: recoveryOf(e) }),
+      (e: unknown) => {
+        console.error(e);
+        setStart({ k: "failed", message: messageOf(e), recovery: recoveryOf(e) });
+      },
     );
   };
 
@@ -45,7 +48,10 @@ export default function App() {
   useEffect(() => {
     if (registry === null || warmed.current === registry) return;
     warmed.current = registry;
-    registry.warm().catch((e: unknown) => toast(messageOf(e), "bad"));
+    registry.warm().catch((e: unknown) => {
+      console.error(e);
+      toast(messageOf(e), "bad");
+    });
   }, [registry]);
 
   if (start.k === "opening") return null;

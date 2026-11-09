@@ -23,8 +23,7 @@ afterEach(async () => {
   cleanup();
   clearToasts();
   vi.restoreAllMocks();
-  const all = await Promise.allSettled(opened.splice(0));
-  await Promise.all(all.flatMap((r) => (r.status === "fulfilled" ? [r.value.close()] : [])));
+  await Promise.all(opened.splice(0).map(async (p) => (await p).close()));
   window.localStorage.clear();
 });
 
@@ -47,6 +46,8 @@ function spyOpen() {
 
 const toolbar = (): Element | null => document.querySelector("header.toolbar");
 
+const logged = () => vi.spyOn(console, "error").mockImplementation(() => undefined);
+
 it("the toolbar is the window's drag region and carries the wordmark", async () => {
   await seededStore(["Alpha"]);
   spyOpen();
@@ -58,9 +59,12 @@ it("the toolbar is the window's drag region and carries the wordmark", async () 
 describe("start failure", () => {
   it("device.io offers Try again only", async () => {
     await seededStore(["Alpha"]);
-    const open = spyOpen().mockRejectedValueOnce(new AppError("device.io", "Could not read the device id: permission denied."));
+    const failure = new AppError("device.io", "Could not read the device id: permission denied.");
+    const log = logged();
+    const open = spyOpen().mockRejectedValueOnce(failure);
     render(<App />);
     await settle();
+    expect(log.mock.calls).toEqual([[failure]]);
     expect(screen.getByText("Could not read the device id: permission denied.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Reset settings" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Rebuild the plan list" })).toBeNull();
@@ -75,9 +79,12 @@ describe("start failure", () => {
     await seededStore(["Alpha"]);
     const reset = vi.fn(() => null);
     tauri.answers.settings_reset = reset;
-    const open = spyOpen().mockRejectedValueOnce(new AppError("settings.corrupt", "settings.json is not valid JSON: line 1."));
+    const failure = new AppError("settings.corrupt", "settings.json is not valid JSON: line 1.");
+    const log = logged();
+    const open = spyOpen().mockRejectedValueOnce(failure);
     render(<App />);
     await settle();
+    expect(log.mock.calls).toEqual([[failure]]);
     expect(screen.getByText("settings.json is not valid JSON: line 1.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(screen.getByText(RESET_SETTINGS_LINE)).toBeTruthy();
@@ -87,6 +94,8 @@ describe("start failure", () => {
     await settle();
     expect(reset).toHaveBeenCalledTimes(1);
     expect(open).toHaveBeenCalledTimes(2);
+    expect(reset.mock.invocationCallOrder[0]).toBeGreaterThan(open.mock.invocationCallOrder[0]);
+    expect(reset.mock.invocationCallOrder[0]).toBeLessThan(open.mock.invocationCallOrder[1]);
     expect(toolbar()).not.toBeNull();
   });
 
@@ -95,7 +104,9 @@ describe("start failure", () => {
     tauri.answers.settings_reset = () => {
       throw { code: "settings.io", message: "Could not rename settings.json: permission denied." };
     };
-    const open = spyOpen().mockRejectedValueOnce(new AppError("settings.corrupt", "settings.json is not valid JSON: line 1."));
+    const failure = new AppError("settings.corrupt", "settings.json is not valid JSON: line 1.");
+    const log = logged();
+    const open = spyOpen().mockRejectedValueOnce(failure);
     render(<App />);
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Reset settings" }));
@@ -105,13 +116,19 @@ describe("start failure", () => {
     expect(open).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reset settings" })).toBeTruthy();
+    expect(log.mock.calls).toEqual([[failure]]);
   });
 
   it("store.corrupt offers Rebuild the plan list", async () => {
     await seededStore(["Alpha"]);
-    const open = spyOpen().mockRejectedValueOnce(new AppError("store.corrupt", "The plan list is damaged at record 3."));
+    const setAside = vi.fn(tauri.answers.store_set_aside);
+    tauri.answers.store_set_aside = setAside;
+    const failure = new AppError("store.corrupt", "The plan list is damaged at record 3.");
+    const log = logged();
+    const open = spyOpen().mockRejectedValueOnce(failure);
     render(<App />);
     await settle();
+    expect(log.mock.calls).toEqual([[failure]]);
     expect(screen.getByText("The plan list is damaged at record 3.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(screen.getByText(REBUILD_LIST_LINE)).toBeTruthy();
@@ -122,6 +139,9 @@ describe("start failure", () => {
     await settle();
     expect(tauri.calls.slice(from).filter((c) => c.cmd === "store_set_aside").map((c) => c.args)).toEqual([{ doc: "local" }]);
     expect(open).toHaveBeenCalledTimes(2);
+    expect(setAside).toHaveBeenCalledTimes(1);
+    expect(setAside.mock.invocationCallOrder[0]).toBeGreaterThan(open.mock.invocationCallOrder[0]);
+    expect(setAside.mock.invocationCallOrder[0]).toBeLessThan(open.mock.invocationCallOrder[1]);
     expect(toolbar()).not.toBeNull();
   });
 });
@@ -147,11 +167,14 @@ it("lists plans before loading them and warms after the first render", async () 
 
 it("toasts a warm rejection", async () => {
   await seededStore(["Alpha"]);
-  vi.spyOn(Registry.prototype, "warm").mockRejectedValue(new Error("warm broke"));
+  const failure = new Error("warm broke");
+  const log = logged();
+  vi.spyOn(Registry.prototype, "warm").mockRejectedValue(failure);
   spyOpen();
   render(<App />);
   await settle();
   expect(screen.getAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([["warm broke", "toast bad"]]);
+  expect(log.mock.calls).toEqual([[failure]]);
 });
 
 it("restores the view from webboard.place after a remount", async () => {

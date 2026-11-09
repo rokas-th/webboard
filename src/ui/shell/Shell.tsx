@@ -25,7 +25,8 @@ type Main =
   | { k: "opening"; id: PlanId }
   | { k: "open"; id: PlanId; session: PlanSession }
   | { k: "incomplete"; id: PlanId; message: string }
-  | { k: "failed"; id: PlanId };
+  | { k: "failed"; id: PlanId }
+  | { k: "error"; id: PlanId; message: string };
 
 const quoted = (l: PlanListing | undefined): string => (l === undefined || l.name === null ? "the plan" : `“${l.name}”`);
 
@@ -100,7 +101,8 @@ export function Shell(p: ShellProps) {
 
   const open = useCallback(
     (id: PlanId) => {
-      setMain({ k: "opening", id });
+      const m = mainRef.current;
+      if (!(m.k === "incomplete" && m.id === id)) setMain({ k: "opening", id });
       registry.session(id).then(
         (s) => {
           if (selected.current !== id) return;
@@ -110,7 +112,10 @@ export function Shell(p: ShellProps) {
         (e: unknown) => {
           const recorded = e instanceof AppError && registry.failures().get(id) === e;
           const incomplete = e instanceof AppError && e.code === "plan.incomplete";
-          if (!recorded && !incomplete) throw e;
+          if (!recorded && !incomplete) {
+            if (selected.current === id) setMain({ k: "error", id, message: messageOf(e) });
+            throw e;
+          }
           if (selected.current !== id) return;
           setMain(incomplete ? { k: "incomplete", id, message: e.message } : { k: "failed", id });
         },
@@ -178,7 +183,9 @@ export function Shell(p: ShellProps) {
 
   useEffect(() => {
     const onError = (e: ErrorEvent): void => {
-      toast(e.error instanceof Error ? e.error.message : e.message, "bad");
+      const error: unknown = e.error;
+      if (error === null || error === undefined) return;
+      toast(messageOf(error), "bad");
     };
     const onRejection = (e: PromiseRejectionEvent): void => {
       toast(messageOf(e.reason), "bad");
@@ -255,10 +262,19 @@ export function Shell(p: ShellProps) {
         </div>
       );
     }
-    if (failure !== undefined && listing !== undefined && !listing.loaded) {
+    if (failure !== undefined && (session === null || (listing !== undefined && !listing.loaded))) {
       return <PlanFailed registry={registry} id={sel} error={failure} onTrash={trash} />;
     }
     if (main.k === "incomplete" && main.id === sel) return <p className="main-note">{main.message}</p>;
+    if (main.k === "error" && main.id === sel) {
+      return (
+        <Banner message={main.message}>
+          <button type="button" className="button-small" onClick={() => open(sel)}>
+            Try again
+          </button>
+        </Banner>
+      );
+    }
     if (session === null) return null;
     return (
       <>

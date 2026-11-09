@@ -86,12 +86,14 @@ export function useUi(): [UiState, (patch: Partial<UiState>) => void] {
     told.current = true;
     toast(PLACE_UNREADABLE, "bad");
   }, [loaded]);
+  const saved = useRef<UiState>(loaded.state);
+  useEffect(() => {
+    if (!placeChanged(saved.current, ui)) return;
+    saved.current = ui;
+    savePlace(ui);
+  }, [ui.plan, ui.view, ui.zoom, ui.collapsed]);
   const setUi = useCallback((patch: Partial<UiState>) => {
-    setState((prev) => {
-      const nextState = { ...prev, ...patch };
-      if (placeChanged(prev, nextState)) savePlace(nextState);
-      return nextState;
-    });
+    setState((prev) => ({ ...prev, ...patch }));
   }, []);
   return [ui, setUi];
 }

@@ -9,7 +9,8 @@ export const FILES_STAY = "The plan’s files stay on this device.";
 export function PlanFailed(p: { registry: Registry; id: PlanId; error: AppError; onTrash(id: PlanId): void }) {
   const [confirm, setConfirm] = useState(false);
   const listing = p.registry.plans().find((l) => l.id === p.id);
-  const space = listing?.space ?? null;
+  if (listing === undefined) throw new Error(`Plan ${p.id} is not listed`);
+  const space = listing.space;
   const corrupt = p.error.code === "store.corrupt";
   const readOnly = p.registry.spaceReadOnly();
   return (
