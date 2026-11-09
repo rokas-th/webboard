@@ -148,15 +148,13 @@ fn innermost(e: &(dyn std::error::Error + 'static)) -> String {
 fn chain<'a>(
     e: &'a (dyn std::error::Error + 'static),
 ) -> Vec<&'a (dyn std::error::Error + 'static)> {
-    std::iter::successors(Some(e), |cur| cur.source())
-        .flat_map(|cur| {
-            let wrapped = cur
-                .downcast_ref::<std::io::Error>()
-                .and_then(|io| io.get_ref())
-                .map(|inner| inner as &(dyn std::error::Error + 'static));
-            std::iter::once(cur).chain(wrapped)
-        })
-        .collect()
+    std::iter::successors(Some(e), |cur| {
+        cur.downcast_ref::<std::io::Error>()
+            .and_then(|io| io.get_ref())
+            .map(|inner| inner as &(dyn std::error::Error + 'static))
+            .or_else(|| cur.source())
+    })
+    .collect()
 }
 
 #[cfg(target_vendor = "apple")]
