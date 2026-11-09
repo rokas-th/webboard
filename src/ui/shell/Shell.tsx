@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { Refused } from "../../actions/intents";
-import type { PlanId } from "../../domain/model";
+import type { ItemId, PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
 import { AppError } from "../../services/ipc";
 import type { PlanListing, Registry } from "../../store/registry";
@@ -9,7 +9,11 @@ import { toast, Toasts } from "../common/Toast";
 import { OpenChoice } from "../run";
 import { pickPlan, UiContext, useUi } from "../state";
 import { Board } from "../board/Board";
+import { ghostIds } from "../ghosts";
 import { List } from "../list/List";
+import { RevertDialog } from "../panel/History";
+import { ItemPanel } from "../panel/ItemPanel";
+import { PlanPanel } from "../panel/PlanPanel";
 import { Timeline } from "../timeline/Timeline";
 import { FILES_STAY, PlanFailed } from "./PlanFailed";
 import { PlanHead } from "./PlanHead";
@@ -34,6 +38,14 @@ type Main =
 const quoted = (l: PlanListing | undefined): string => (l === undefined || l.name === null ? "the plan" : `“${l.name}”`);
 
 const capital = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+function trashRootOf(s: PlanSession, id: ItemId): ItemId {
+  const plan = s.view().plan;
+  const it = plan.items.get(id);
+  if (it === undefined) throw new Error(`Shell: no item ${id}`);
+  const parent = it.place.parent === null ? undefined : plan.items.get(it.place.parent);
+  return parent !== undefined && parent.trashed ? trashRootOf(s, parent.id) : id;
+}
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -88,6 +100,7 @@ export function Shell(p: ShellProps) {
   const mainRef = useRef<Main>(main);
   const creatingRef = useRef(false);
   const ownTrash = useRef(new Set<PlanId>());
+  const selectedItem = useRef<ItemId | null>(ui.selected);
   const lastTrashed = useRef(new Map<PlanId, boolean>());
 
   const setMain = useCallback((m: Main) => {
@@ -98,7 +111,8 @@ export function Shell(p: ShellProps) {
   const select = useCallback(
     (id: PlanId | null) => {
       selected.current = id;
-      setUi({ plan: id });
+      selectedItem.current = null;
+      setUi({ plan: id, selected: null });
     },
     [setUi],
   );
@@ -178,12 +192,34 @@ export function Shell(p: ShellProps) {
   const session = main.k === "open" && main.id === ui.plan ? main.session : null;
 
   useEffect(() => {
+    selectedItem.current = ui.selected;
+  }, [ui.selected]);
+
+  useEffect(() => {
     if (session === null) return;
+    const letGo = (): void => {
+      const item = selectedItem.current;
+      if (item === null) return;
+      const view = session.view();
+      const it = view.plan.items.get(item);
+      if (it !== undefined && (!it.trashed || ghostIds(view).has(item))) return;
+      selectedItem.current = null;
+      setUi({ selected: null });
+      if (it === undefined) return;
+      const root = trashRootOf(session, item);
+      const a = session.authorOf("e:" + root);
+      if (a === null) throw new Error(`Shell: trashed item ${root} has no author`);
+      if (a.dev === registry.device.deviceId) return;
+      const rootItem = view.plan.items.get(root);
+      if (rootItem === undefined) throw new Error(`Shell: no item ${root}`);
+      toast(`“${rootItem.name}” was moved to the Trash on ${a.device}. Restore it from the Trash.`);
+    };
     return session.subscribe(() => {
       bump();
       takeRepair(session);
+      letGo();
     });
-  }, [session]);
+  }, [session, setUi, registry]);
 
   useEffect(() => {
     const onError = (e: ErrorEvent): void => {
@@ -334,8 +370,19 @@ export function Shell(p: ShellProps) {
               )}
               {content}
             </main>
-            {session !== null && <div className="slot slot-panel" data-slot="panel" />}
+            {session !== null && (
+              <div className="slot slot-panel" data-slot="panel">
+                {ui.selected !== null && session.view().plan.items.has(ui.selected) ? (
+                  <ItemPanel key={ui.selected} session={session} item={ui.selected} readOnly={readOnly} />
+                ) : (
+                  <PlanPanel session={session} readOnly={readOnly} />
+                )}
+              </div>
+            )}
           </div>
+          {session !== null && ui.dialog !== null && ui.dialog.t === "revert" && (
+            <RevertDialog key={ui.dialog.id} session={session} id={ui.dialog.id} onClose={() => setUi({ dialog: null })} />
+          )}
           <Toasts />
         </div>
       </OpenChoice.Provider>

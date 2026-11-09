@@ -1,5 +1,5 @@
 import { goneSet } from "../../domain/derive";
-import type { ItemId } from "../../domain/model";
+import type { ItemId, PlanState } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { ghostIds } from "../ghosts";
@@ -14,13 +14,15 @@ export type StatusLabel = "conflict" | "held" | "late" | "in progress" | "done" 
 
 const NOT_IN_A_GROUP = "Not in a group";
 
-const pathOf = (view: PlanView, id: ItemId): string[] => {
-  const g = view.plan.items.get(id);
+const pathOf = (plan: PlanState, id: ItemId): string[] => {
+  const g = plan.items.get(id);
   if (g === undefined) throw new Error(`groupPath: no item ${id}`);
-  return g.place.parent === null ? [g.name] : [...pathOf(view, g.place.parent), g.name];
+  return g.place.parent === null ? [g.name] : [...pathOf(plan, g.place.parent), g.name];
 };
 
-export const groupPath = (view: PlanView, id: ItemId): string => pathOf(view, id).join(" › ");
+export const planGroupPath = (plan: PlanState, id: ItemId): string => pathOf(plan, id).join(" › ");
+
+export const groupPath = (view: PlanView, id: ItemId): string => planGroupPath(view.plan, id);
 
 interface Placed {
   id: ItemId;

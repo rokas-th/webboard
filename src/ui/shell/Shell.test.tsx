@@ -11,12 +11,13 @@ import { IndexDoc } from "../../store/index-doc";
 import type { PersistedDoc } from "../../store/persist";
 import { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
+import { deleteClash } from "../../test/fixtures/deleteClash";
 import { memoryStore } from "../../test/fixtures/store";
-import { MESA_SEED, memoryDoc, testSession, type TestSession } from "../../test/session";
+import { MESA_SEED, memoryDoc, testSession, type SeedItem, type TestSession } from "../../test/session";
 import { seededStore as store, shellFor } from "../../test/shell";
 import { hold, resetTauri, tauri, type Call } from "../../test/tauriMock";
 import { clearToasts } from "../common/Toast";
-import { PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi } from "../state";
+import { PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
 import { PlanHead } from "./PlanHead";
 import { Shell } from "./Shell";
 
@@ -1156,5 +1157,120 @@ describe("selection rule", () => {
     await settle();
     expect(currentName()).toBe("Beta");
     expect(screen.getByText(INCOMPLETE)).toBeTruthy();
+  });
+});
+
+describe("the panel slot", () => {
+  const shown = async (t: TestSession): Promise<void> => {
+    render(shellFor(t).ui);
+    await settle();
+  };
+  const uiNow = (): [UiState, (patch: Partial<UiState>) => void] => {
+    const results = vi.mocked(useUi).mock.results;
+    const r = results[results.length - 1];
+    if (r === undefined || r.type !== "return") throw new Error("useUi has not returned");
+    return r.value;
+  };
+  const select = (id: string | null): void => act(() => uiNow()[1]({ selected: id }));
+  const panel = (): HTMLElement => {
+    const el = slot("panel");
+    if (!(el instanceof HTMLElement)) throw new Error("no panel slot");
+    return el;
+  };
+  const inPanel = () => within(panel());
+  const input = (label: string): HTMLInputElement => {
+    const el = inPanel().getByLabelText(label);
+    if (!(el instanceof HTMLInputElement)) throw new Error(label + " is not an input");
+    return el;
+  };
+  const button = (name: string): HTMLElement => inPanel().getByRole("button", { name });
+  const click = (el: Element): void => {
+    act(() => {
+      fireEvent.click(el);
+    });
+  };
+
+  it("drops nubs, handles and panel fields when the session turns read-only, and brings the nubs back", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    select("t3");
+    expect(document.querySelectorAll(".nub").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".h").length).toBeGreaterThan(0);
+    expect(panel().querySelectorAll("input, select").length).toBeGreaterThan(0);
+    act(() => t.session.setReadOnly(true));
+    expect(document.querySelectorAll(".nub")).toHaveLength(0);
+    expect(document.querySelectorAll(".h")).toHaveLength(0);
+    expect(panel().querySelectorAll("input, select")).toHaveLength(0);
+    act(() => t.session.setReadOnly(false));
+    expect(document.querySelectorAll(".nub").length).toBeGreaterThan(0);
+  });
+
+  describe("trashed selection (refinement 41)", () => {
+    const SEED: SeedItem[] = [
+      { name: "A", start: "2026-11-10", dur: 3 },
+      { name: "B", start: "2026-11-16", dur: 2 },
+    ];
+    const remote = /was moved to the Trash on/;
+
+    it("lets go of an item this device trashed, with only the trash's toast", async () => {
+      const t = await made(SEED);
+      await shown(t);
+      select("A");
+      const apply = vi.spyOn(t.session, "apply");
+      click(button("Delete"));
+      expect(t.session.authorOf("e:A")).toEqual({ dev: "mac", device: "Mac" });
+      expect(uiNow()[0].selected).toBeNull();
+      expect(input("Plan name").value).toBe("Plan");
+      const done = apply.mock.results[0];
+      if (done === undefined || done.type !== "return") throw new Error("Delete did not apply");
+      expect(toastTexts()).toEqual([done.value.toast]);
+      expect(toastTexts().filter((x) => x !== null && remote.test(x))).toEqual([]);
+    });
+
+    it("lets go of an item another device trashed, and says so", async () => {
+      const t = await made(SEED);
+      await shown(t);
+      select("A");
+      const p = await t.peer("iphone");
+      sessions.push(p.session);
+      act(() => {
+        p.session.apply({ t: "trash", items: ["A"] });
+        p.sync();
+      });
+      expect(t.session.authorOf("e:A")).toEqual({ dev: "iphone", device: "iPhone" });
+      expect(uiNow()[0].selected).toBeNull();
+      expect(toastTexts()).toEqual(["“A” was moved to the Trash on iPhone. Restore it from the Trash."]);
+    });
+
+    it("names the group another device trashed when a selected item inside it goes", async () => {
+      const t = await made([
+        { name: "G", kind: "group" },
+        { name: "A", parent: "G", start: "2026-11-10", dur: 3 },
+      ]);
+      await shown(t);
+      select("A");
+      const p = await t.peer("iphone");
+      sessions.push(p.session);
+      act(() => {
+        p.session.apply({ t: "trash", items: ["G"] });
+        p.sync();
+      });
+      expect(uiNow()[0].selected).toBeNull();
+      expect(toastTexts()).toEqual(["“G” was moved to the Trash on iPhone. Restore it from the Trash."]);
+    });
+
+    it("keeps the ghost row of an open delete choice selected", async () => {
+      const { t, p } = await deleteClash();
+      sessions.push(t.session, p.session);
+      await shown(t);
+      select("A");
+      expect(input("Name").value).toBe("Renamed");
+      act(() => {
+        p.session.apply({ t: "rename", item: "B", name: "Other" });
+        p.sync();
+      });
+      expect(uiNow()[0].selected).toBe("A");
+      expect(toastTexts().filter((x) => x !== null && remote.test(x))).toEqual([]);
+    });
   });
 });

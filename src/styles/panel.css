@@ -1,0 +1,292 @@
+.panel {
+  padding: 18px 20px 28px;
+  min-width: 0;
+}
+
+.panel h2 {
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin: 22px 0 10px;
+}
+
+.panel h2:first-child {
+  margin-top: 0;
+}
+
+.panel .kind {
+  font-family: var(--display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.panel .title-input {
+  display: block;
+  width: calc(100% + 6px);
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--heading);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin: 8px 0 4px -6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel .title-input:hover {
+  border-color: var(--line);
+}
+
+.panel .as-text {
+  min-width: 0;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.fields label {
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.fields .val,
+.fields .date-input {
+  font-size: 12.5px;
+}
+
+.panel .dimc {
+  color: var(--dim);
+}
+
+.panel .inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.panel .step {
+  min-width: 26px;
+  padding: 2px 6px;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.panel .val-line {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+}
+
+.panel .note {
+  font-family: var(--prose);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--dim);
+  margin: 8px 0 0;
+}
+
+.deps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dep {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 62px auto 26px;
+  gap: 6px;
+  align-items: center;
+}
+
+.dep .dep-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dep select {
+  padding: 4px 6px;
+  font-size: 11.5px;
+  width: 100%;
+}
+
+.dep .lag {
+  gap: 4px;
+}
+
+.x {
+  border: none;
+  padding: 2px 6px;
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0;
+  color: var(--dim);
+}
+
+.x:hover:not(:disabled) {
+  color: var(--magenta);
+  background: rgba(255, 59, 107, 0.06);
+}
+
+.suggest {
+  margin-top: 8px;
+}
+
+.suggest select {
+  width: 100%;
+}
+
+.links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(35, 35, 61, 0.6);
+  font-size: 12px;
+}
+
+.link-row .t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-row .repo {
+  color: var(--dim);
+  font-size: 10.5px;
+  flex-shrink: 0;
+}
+
+.panel .actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.stat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat .k {
+  color: var(--dim);
+}
+
+.stat .v {
+  text-align: right;
+}
+
+.stat .v.amber {
+  color: var(--amber);
+}
+
+.stat .v.magenta {
+  color: var(--magenta);
+}
+
+.baselines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.baseline-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.baseline-row.shown .baseline-at {
+  color: var(--cyan);
+}
+
+.panel .baseline-name {
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.baseline-at {
+  color: var(--dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+}
+
+.history li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.history li.inactive .hist-text {
+  color: var(--dim);
+}
+
+.history .hist-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.history .when {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.history li button {
+  flex-shrink: 0;
+}
+
+.revert-text p:first-child {
+  color: var(--heading);
+}
