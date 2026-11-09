@@ -130,10 +130,12 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape" && drag.current !== null) cancel();
+      if (e.key !== "Escape" || drag.current === null) return;
+      e.preventDefault();
+      cancel();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
   const [first, last] = visibleRange(scrollTop, height, rows.length);

@@ -498,6 +498,27 @@ describe("gestures", () => {
     expect(toastTexts()).toEqual([]);
   });
 
+  it("cancels only the drag on Esc, keeping the selection; a second Esc lets go", async () => {
+    const t = await shown(SEED);
+    const apply = vi.spyOn(t.session, "apply");
+    act(() => uiNow()[1]({ selected: "c" }));
+    pointer(barOf("a"), "down", 0);
+    pointer(barOf("a"), "move", 80);
+    expect(all(".drop-ghost")).toHaveLength(1);
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+    expect(all(".drop-ghost")).toHaveLength(0);
+    expect(uiNow()[0].selected).toBe("c");
+    pointer(barOf("a"), "up", 80);
+    expect(apply).not.toHaveBeenCalled();
+    expect(uiNow()[0].selected).toBe("c");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+    expect(uiNow()[0].selected).toBeNull();
+  });
+
   it("previews once per intent, not once per move", async () => {
     const t = await shown(SEED);
     const preview = vi.spyOn(t.session, "preview");

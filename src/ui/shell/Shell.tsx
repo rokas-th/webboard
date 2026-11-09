@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { Refused } from "../../actions/intents";
 import type { ItemId, PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
@@ -9,7 +9,7 @@ import { About } from "../common/About";
 import { toast, Toasts } from "../common/Toast";
 import { revealPatch } from "../choices/HeadCounts";
 import { commands, type CommandCtx } from "../palette/commands";
-import { keyToCommand, looksLikeMac } from "../palette/keymap";
+import { isTyping, keyToCommand } from "../palette/keymap";
 import { Palette } from "../palette/Palette";
 import { OpenChoice, runWith } from "../run";
 import { pickPlan, UiContext, useUi } from "../state";
@@ -314,7 +314,7 @@ export function Shell(p: ShellProps) {
   const indexError = registry.indexError();
   const settingsError = registry.settingsError();
   const readOnly = session?.readOnly ?? false;
-  const mac = looksLikeMac() || registry.device.platform === "macos";
+  const mac = registry.device.platform === "macos";
 
   const runner = useMemo(() => (session === null ? null : runWith(session, openChoice)), [session, openChoice]);
 
@@ -338,11 +338,14 @@ export function Shell(p: ShellProps) {
     readOnly,
     mac,
     clock: p.clock,
+    select,
     newPlan,
     reveal,
   };
   const ctxRef = useRef(ctx);
-  ctxRef.current = ctx;
+  useLayoutEffect(() => {
+    ctxRef.current = ctx;
+  });
 
   const runCommand = useCallback((id: string): void => {
     const cmd = commands(ctxRef.current).find((c) => c.id === id);
@@ -355,7 +358,7 @@ export function Shell(p: ShellProps) {
       if (e.defaultPrevented) return;
       const c = ctxRef.current;
       const target = e.target instanceof Element ? e.target : null;
-      const typing = target !== null && target.closest('input, textarea, select, [contenteditable="true"]') !== null;
+      const typing = isTyping(e.target, e.key);
       const dialog = c.ui.dialog !== null || (target !== null && target.closest('[aria-modal="true"]') !== null);
       const id = keyToCommand(e, { mac: c.mac, typing, dialog, selected: c.ui.selected !== null });
       if (id === null) return;

@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intent } from "../../actions/intents";
+import { AppError } from "../../services/ipc";
+import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { fs, MESA_SEED, testSession, type SeedItem, type TestSession } from "../../test/session";
 import { testRegistry } from "../../test/shell";
 import { clearToasts } from "../common/Toast";
 import { runWith } from "../run";
 import type { UiState } from "../state";
-import { commands, type CommandCtx } from "./commands";
+import { commands, createdItem, type CommandCtx } from "./commands";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
@@ -48,13 +50,15 @@ const SMALL: readonly SeedItem[] = [
 interface Harness {
   ctx: CommandCtx;
   setUi: ReturnType<typeof vi.fn<(p: Partial<UiState>) => void>>;
+  select: ReturnType<typeof vi.fn<(id: string) => void>>;
   newPlan: ReturnType<typeof vi.fn<() => void>>;
   reveal: ReturnType<typeof vi.fn<(target: string) => void>>;
   open: ReturnType<typeof vi.fn<(choice: string, side?: string) => void>>;
 }
 
-function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly string[] = []): Harness {
+function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly string[] = [], more: Partial<Registry> = {}): Harness {
   const setUi = vi.fn<(p: Partial<UiState>) => void>();
+  const select = vi.fn<(id: string) => void>();
   const newPlan = vi.fn<() => void>();
   const reveal = vi.fn<(target: string) => void>();
   const open = vi.fn<(choice: string, side?: string) => void>();
@@ -65,6 +69,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
       ...plans.map((p) => ({ id: p, name: `Plan ${p}`, trashed: false, loaded: true, space: null })),
       { id: "gone", name: "Gone", trashed: true, loaded: true, space: null },
     ],
+    ...more,
   });
   const r = runWith(t.session, open);
   const ctx: CommandCtx = {
@@ -78,10 +83,11 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     readOnly: t.session.readOnly,
     mac: true,
     clock: t.clock,
+    select,
     newPlan,
     reveal,
   };
-  return { ctx, setUi, newPlan, reveal, open };
+  return { ctx, setUi, select, newPlan, reveal, open };
 }
 
 const find = (ctx: CommandCtx, id: string) => {
@@ -150,13 +156,26 @@ describe("commands()", () => {
     expect(h.reveal.mock.calls).toEqual([["today"]]);
   });
 
-  it("selects and reveals on Go to and go-first-conflict", async () => {
+  it("selects and reveals on Go to, for an item and for a group", async () => {
     const t = await made(SMALL);
     const h = harness(t);
     find(h.ctx, "goto:one").run();
-    find(h.ctx, "go-first-conflict").run();
-    expect(h.setUi.mock.calls).toEqual([[{ selected: "one" }], [{ selected: "b" }]]);
-    expect(h.reveal.mock.calls).toEqual([["one"], ["b"]]);
+    find(h.ctx, "goto:g1").run();
+    expect(h.setUi.mock.calls).toEqual([[{ selected: "one" }], [{ selected: "g1" }]]);
+    expect(h.reveal.mock.calls).toEqual([["one"], ["g1"]]);
+  });
+
+  it("goes to the first conflict's task successor in one patch, opening its group", async () => {
+    const t = await made(SMALL);
+    const open = harness(t);
+    find(open.ctx, "go-first-conflict").run();
+    const shut = harness(t, { collapsed: new Set(["g1"]) });
+    find(shut.ctx, "go-first-conflict").run();
+    expect([open.setUi.mock.calls, shut.setUi.mock.calls]).toEqual([
+      [[{ selected: "b", view: "timeline", collapsed: new Set(), reveal: "b" }]],
+      [[{ selected: "b", view: "timeline", collapsed: new Set(), reveal: "b" }]],
+    ]);
+    expect([open.reveal, shut.reveal].map((r) => r.mock.calls.length)).toEqual([0, 0]);
   });
 
   it("shows and hides a baseline", async () => {
@@ -177,7 +196,22 @@ describe("commands()", () => {
     const h = harness(t, {}, ["p2"]);
     expect(find(h.ctx, "open-plan:p2").label).toBe("Open Plan p2");
     find(h.ctx, "open-plan:p2").run();
-    expect(h.setUi.mock.calls).toEqual([[{ plan: "p2", selected: null, dialog: null }]]);
+    expect(h.select.mock.calls).toEqual([["p2"]]);
+    expect(h.setUi).not.toHaveBeenCalled();
+  });
+
+  it("leaves failed plans out and labels a loading plan Loading…", async () => {
+    const t = await made(SMALL);
+    const id = t.session.view().plan.id;
+    const h = harness(t, {}, [], {
+      plans: () => [
+        { id, name: "Plan", trashed: false, loaded: true, space: null },
+        { id: "bad", name: null, trashed: false, loaded: false, space: null },
+        { id: "slow", name: null, trashed: false, loaded: false, space: null },
+      ],
+      failures: () => new Map([["bad", new AppError("store.corrupt", "The plan file is damaged.")]]),
+    });
+    expect(commands(h.ctx).filter((c) => c.id.startsWith("open-plan:")).map((c) => [c.id, c.label])).toEqual([["open-plan:slow", "Open Loading…"]]);
   });
 
   it("saves a baseline named for the shell clock's today", async () => {
@@ -216,10 +250,28 @@ describe("nudge and resize", () => {
     ]);
   });
 
-  it("issues nothing for a milestone or a group", async () => {
+  it("issues nothing when resizing a milestone", async () => {
     const t = await made(SMALL);
     const apply = vi.spyOn(t.session, "apply");
-    ["m", "g1"].forEach((sel) => ["resize+1", "resize-1", "resize+5"].forEach((id) => find(harness(t, { selected: sel }).ctx, id).run()));
+    ["resize+1", "resize-1", "resize+5"].forEach((id) => find(harness(t, { selected: "m" }).ctx, id).run());
+    expect(apply).not.toHaveBeenCalled();
+    expect(document.querySelectorAll(".toast")).toHaveLength(0);
+  });
+
+  it("lists nudge and resize only for a selection with a dated schedule", async () => {
+    const t = await made(SMALL);
+    const edits = (sel: string): string[] => ids(harness(t, { selected: sel }).ctx).filter((x) => x.startsWith("nudge") || x.startsWith("resize") || x === "trash");
+    const dated = ["nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash"];
+    expect([edits("a"), edits("m"), edits("u"), edits("g1")]).toEqual([dated, dated, ["trash"], ["trash"]]);
+  });
+
+  it("throws by name when the task lost its start between listing and running", async () => {
+    const t = await made(SMALL);
+    const resize = find(harness(t, { selected: "a" }).ctx, "resize+1");
+    t.session.apply({ t: "schedule", item: "a", set: { start: null } });
+    expect(t.session.view().plan.items.get("a")?.schedule?.start).toBeNull();
+    const apply = vi.spyOn(t.session, "apply");
+    expect(() => resize.run()).toThrow("Command: cannot resize task a, which has no dated schedule");
     expect(apply).not.toHaveBeenCalled();
   });
 
@@ -278,6 +330,15 @@ describe("new items", () => {
     const apply = vi.spyOn(t.session, "apply");
     find(harness(t).ctx, "new-task").run();
     expect(created(apply).map((i) => (i.t === "create" ? i.start : null))).toEqual(["2026-11-16"]);
+  });
+
+  it("takes the new item from the build's one new id, and throws unless there is exactly one", async () => {
+    const t = await made(SMALL);
+    const built = t.session.apply({ t: "create", kind: "task", name: "X", parent: null, after: null, start: null });
+    const [id] = built.newNotes;
+    expect(createdItem(built)).toBe(id);
+    expect(() => createdItem({ ...built, newNotes: [] })).toThrow("Command: the create “Added task “X”” made 0 items, not one");
+    expect(() => createdItem({ ...built, newNotes: [id, "other"] })).toThrow("Command: the create “Added task “X”” made 2 items, not one");
   });
 
   it("selects nothing when the create is refused", async () => {

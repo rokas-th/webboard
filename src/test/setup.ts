@@ -1,3 +1,5 @@
+import { beforeEach, vi } from "vitest";
+
 class TestPointerEvent extends MouseEvent {
   readonly pointerId: number;
   readonly pointerType: string;
@@ -24,7 +26,24 @@ if (Element.prototype.setPointerCapture === undefined) {
     return false;
   };
 }
-if (Element.prototype.scrollIntoView === undefined) Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+const scrollIntoView = vi.fn<(this: Element, arg?: boolean | ScrollIntoViewOptions) => void>();
+Element.prototype.scrollIntoView = scrollIntoView;
+beforeEach(() => {
+  scrollIntoView.mockClear();
+});
+if (!("isContentEditable" in HTMLElement.prototype)) {
+  Object.defineProperty(HTMLElement.prototype, "isContentEditable", {
+    configurable: true,
+    get(this: HTMLElement): boolean {
+      const state = this.getAttribute("contenteditable");
+      const mode = state === null ? null : state.toLowerCase();
+      if (mode === "" || mode === "true" || mode === "plaintext-only") return true;
+      if (mode === "false") return false;
+      const up = this.parentElement;
+      return up !== null && up.isContentEditable;
+    },
+  });
+}
 if (Document.prototype.elementFromPoint === undefined) {
   Document.prototype.elementFromPoint = function elementFromPoint(): Element | null {
     throw new Error("elementFromPoint is not stubbed in this test");

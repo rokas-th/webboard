@@ -10,6 +10,7 @@ import { AppError } from "../../services/ipc";
 import type { PlanView } from "../../store/doc";
 import type { Registry } from "../../store/registry";
 import { usePlanView, type PlanSession } from "../../store/session";
+import { HOLIDAY_ATTRIBUTION } from "../common/About";
 import { Dialog } from "../common/Dialog";
 import { toast } from "../common/Toast";
 import { historyTime } from "../panel/historyText";
@@ -327,7 +328,7 @@ export function CalendarBody(p: CalendarProps) {
         onLoad={(y) => void holidays.load(planId, session, y)}
       />
       <p className="impact">{impact}</p>
-      {draftRegion !== null && draftRegion.src === "openholidays" && <p className="dimp">Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.</p>}
+      {draftRegion !== null && draftRegion.src === "openholidays" && <p className="dimp">{HOLIDAY_ATTRIBUTION}</p>}
       {regionError !== null && (
         <div className="cal-failed">
           <span className="note bad">{regionError.message}</span>

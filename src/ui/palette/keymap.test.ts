@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { keyToCommand, looksLikeMac, type KeyInput, type KeyState } from "./keymap";
+import { afterEach, describe, expect, it } from "vitest";
+import { isTyping, keyToCommand, type KeyInput, type KeyState } from "./keymap";
 
 const k = (key: string, o: Partial<KeyInput> = {}): KeyInput => ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...o });
 
@@ -92,21 +92,74 @@ describe("keyToCommand off macOS", () => {
   });
 });
 
-describe("looksLikeMac", () => {
-  const withPlatform = (platform: string, run: () => void): void => {
-    const before = Object.getOwnPropertyDescriptor(navigator, "platform");
-    Object.defineProperty(navigator, "platform", { configurable: true, get: () => platform });
-    try {
-      run();
-    } finally {
-      if (before === undefined) Reflect.deleteProperty(navigator, "platform");
-      else Object.defineProperty(navigator, "platform", before);
-    }
+describe("keyToCommand in a dialog or a text field", () => {
+  it("leaves undo and redo to the dialog: ⌘Z, ⇧⌘Z and Ctrl+Y give null", () => {
+    expect(keyToCommand(k("z", { metaKey: true }), { ...MAC, dialog: true })).toBeNull();
+    expect(keyToCommand(k("z", { metaKey: true, shiftKey: true }), { ...MAC, dialog: true })).toBeNull();
+    expect(keyToCommand(k("z", { ctrlKey: true }), { ...PC, dialog: true })).toBeNull();
+    expect(keyToCommand(k("z", { ctrlKey: true, shiftKey: true }), { ...PC, dialog: true })).toBeNull();
+    expect(keyToCommand(k("y", { ctrlKey: true }), { ...PC, dialog: true })).toBeNull();
+  });
+
+  it("leaves Esc to the text field outside a dialog", () => {
+    expect(keyToCommand(k("Escape"), { ...MAC, typing: true, selected: true })).toBeNull();
+    expect(keyToCommand(k("Escape"), { ...PC, typing: true, selected: true })).toBeNull();
+  });
+});
+
+describe("isTyping", () => {
+  const made = (html: string): Element => {
+    const box = document.createElement("div");
+    box.innerHTML = html;
+    document.body.append(box);
+    const el = box.querySelector("[data-t]");
+    if (el === null) throw new Error("no target in " + html);
+    return el;
   };
 
-  it("reads the platform the web view names", () => {
-    withPlatform("MacIntel", () => expect(looksLikeMac()).toBe(true));
-    withPlatform("Linux x86_64", () => expect(looksLikeMac()).toBe(false));
-    withPlatform("", () => expect(looksLikeMac()).toBe(false));
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("counts text fields and editable content as typing", () => {
+    const typing = [
+      '<input data-t type="text">',
+      "<input data-t>",
+      '<input data-t type="search">',
+      '<input data-t type="email">',
+      '<input data-t type="url">',
+      '<input data-t type="tel">',
+      '<input data-t type="password">',
+      '<input data-t type="number">',
+      '<input data-t type="date">',
+      "<textarea data-t></textarea>",
+      "<select data-t></select>",
+      '<div data-t contenteditable=""></div>',
+      '<div data-t contenteditable="true"></div>',
+      '<div data-t contenteditable="plaintext-only"></div>',
+      '<div contenteditable=""><p data-t>x</p></div>',
+    ];
+    expect(typing.filter((h) => ["n", "ArrowRight", "Escape"].some((key) => !isTyping(made(h), key)))).toEqual([]);
+  });
+
+  it("leaves the arrow keys to a range or a radio, and nothing else", () => {
+    const stepped = ['<input data-t type="range">', '<input data-t type="radio">'];
+    expect(stepped.map((h) => ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "n", "2", "Delete", "Escape"].map((key) => isTyping(made(h), key)))).toEqual(
+      stepped.map(() => [true, true, true, true, false, false, false, false]),
+    );
+  });
+
+  it("does not count checkboxes, radios, ranges, buttons or plain elements for N, 1-3 or Delete", () => {
+    const not = [
+      '<input data-t type="checkbox">',
+      '<input data-t type="radio">',
+      '<input data-t type="range">',
+      "<button data-t>x</button>",
+      "<div data-t></div>",
+      '<div contenteditable=""><p data-t contenteditable="false">x</p></div>',
+    ];
+    expect(not.filter((h) => ["n", "2", "Delete"].some((key) => isTyping(made(h), key)))).toEqual([]);
+    expect(isTyping(null, "n")).toBe(false);
+    expect(isTyping(window, "n")).toBe(false);
   });
 });

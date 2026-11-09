@@ -28,7 +28,9 @@ export function Palette(p: { commands: readonly Command[]; onClose(): void }) {
   }, []);
 
   useEffect(() => {
-    const el = list.current?.querySelector(".palette-item.on");
+    const box = list.current;
+    if (box === null) throw new Error("Palette rendered without its list");
+    const el = box.querySelector(".palette-item.on");
     if (el instanceof HTMLElement) el.scrollIntoView({ block: "nearest" });
   }, [at, query]);
 

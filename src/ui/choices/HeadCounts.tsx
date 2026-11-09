@@ -34,6 +34,13 @@ export function revealPatch(view: PlanView, collapsed: ReadonlySet<ItemId>, id: 
   return { view: "timeline", collapsed: open, reveal: hasRow(view.plan, id) ? id : null };
 }
 
+export function goToFirstPatch(view: PlanView, collapsed: ReadonlySet<ItemId>): Pick<UiState, "selected" | "view" | "collapsed" | "reveal"> {
+  const first = countedConflicts(view)[0];
+  if (first === undefined) throw new Error("Go to first conflict: there is no conflict");
+  const succ = conflictSuccessor(view, first);
+  return { selected: succ, ...revealPatch(view, collapsed, succ) };
+}
+
 export function HeadCounts(p: { view: PlanView; onChoose(choice: string): void }) {
   const view = p.view;
   const uiValue = useContext(UiContext);
@@ -41,10 +48,7 @@ export function HeadCounts(p: { view: PlanView; onChoose(choice: string): void }
 
   const goToFirst = (): void => {
     if (uiValue === null) throw new Error("Go to first conflict needs a UiContext provider");
-    const first = conflicts[0];
-    if (first === undefined) throw new Error("Go to first conflict: there is no conflict");
-    const succ = conflictSuccessor(view, first);
-    uiValue.setUi({ selected: succ, ...revealPatch(view, uiValue.ui.collapsed, succ) });
+    uiValue.setUi(goToFirstPatch(view, uiValue.ui.collapsed));
   };
 
   const openHeld = (): void => {

@@ -11,11 +11,15 @@ const VIEWS: Readonly<Record<string, string>> = { "1": "view-timeline", "2": "vi
 
 const ARROWS: Readonly<Record<string, number>> = { ArrowRight: 1, ArrowLeft: -1 };
 
-export function looksLikeMac(): boolean {
-  const agent = navigator as Navigator & { userAgentData?: { platform?: unknown } };
-  const declared = agent.userAgentData?.platform;
-  const named = typeof declared === "string" && declared !== "" ? declared : navigator.platform;
-  return /^mac/i.test(named);
+const TEXT_TYPES: ReadonlySet<string> = new Set(["text", "search", "email", "url", "tel", "password", "number", "date"]);
+
+const STEPPED_TYPES: ReadonlySet<string> = new Set(["range", "radio"]);
+
+const ARROW_KEYS: ReadonlySet<string> = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
+
+export function isTyping(target: EventTarget | null, key: string): boolean {
+  if (target instanceof HTMLInputElement) return TEXT_TYPES.has(target.type) || (STEPPED_TYPES.has(target.type) && ARROW_KEYS.has(key));
+  return target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable);
 }
 
 function modified(e: KeyInput, s: KeyState): string | null {

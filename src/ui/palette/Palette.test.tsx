@@ -8,7 +8,8 @@ import { shellFor } from "../../test/shell";
 import { clearToasts } from "../common/Toast";
 import { READ_ONLY } from "../run";
 import { useUi, type UiState } from "../state";
-import { geometry, LEAD } from "../timeline/geometry";
+import { geometry, LEAD, ROW } from "../timeline/geometry";
+import { timelineRows } from "../timeline/rows";
 import type { Command } from "./commands";
 import { shownCommands } from "./Palette";
 
@@ -143,6 +144,26 @@ describe("opening the palette", () => {
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 
+  it("takes the modifier from the device's platform, not from a web view that names itself MacIntel", async () => {
+    const t = await made(MESA_SEED);
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    await shown(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
+    press("k", { metaKey: true });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    press("k", { ctrlKey: true });
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  it("uses ⌘ on macOS whatever the web view names itself", async () => {
+    const t = await made(MESA_SEED);
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+    await shown(t);
+    press("k", { ctrlKey: true });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    press("k", { metaKey: true });
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
   it("opens in the empty state from the key and from the toolbar", async () => {
     const t = await made(MESA_SEED);
     await shown(t, { plans: () => [] });
@@ -189,10 +210,21 @@ describe("the palette list", () => {
     expect(highlighted()).toBe("ViewTimeline1");
     press("ArrowUp", {}, query());
     expect(highlighted()).toBe("ViewTimeline1");
+    const scrolled = vi.mocked(Element.prototype.scrollIntoView);
+    scrolled.mockClear();
     [1, 2, 3, 4, 5].forEach(() => press("ArrowDown", {}, query()));
     expect(highlighted()).toBe("Go toTracking: review results");
+    const lastScrolled = (): string | null => {
+      const el: unknown = scrolled.mock.contexts[scrolled.mock.contexts.length - 1];
+      if (!(el instanceof Element)) throw new Error("scrollIntoView was not called on an element");
+      expect(el.classList.contains("on")).toBe(true);
+      return el.textContent;
+    };
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([4, "Go toTracking: review results"]);
+    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4].map(() => [{ block: "nearest" }]));
     [1, 2, 3].forEach(() => press("ArrowUp", {}, query()));
     expect(highlighted()).toBe("ViewNow · Next · Later2");
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([7, "ViewNow · Next · Later2"]);
     press("Enter", {}, query());
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(uiNow()[0].view).toBe("board");
@@ -214,6 +246,19 @@ describe("the palette list", () => {
     expect([...uiNow()[0].collapsed]).toEqual([]);
     expect(uiNow()[0].reveal).toBeNull();
     expect(nameField().value).toBe("First light: dry runs");
+  });
+
+  it("selects a group from Go to and scrolls the timeline to its row", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    setUi({ view: "board", collapsed: new Set(["g2"]) });
+    runFromPalette("Visitor services");
+    const scroll = document.querySelector(".tl-scroll");
+    if (!(scroll instanceof HTMLElement)) throw new Error("no timeline");
+    const index = timelineRows(t.session.view(), new Set(["g2"])).findIndex((r) => r.id === "g3");
+    expect(index).toBe(6);
+    expect([uiNow()[0].selected, uiNow()[0].view, [...uiNow()[0].collapsed], uiNow()[0].reveal]).toEqual(["g3", "timeline", ["g2"], null]);
+    expect(scroll.scrollTop).toBe(index * ROW);
   });
 
   it("jumps to today from another view, scrolling the timeline to today's column", async () => {
@@ -406,6 +451,25 @@ describe("keys on the selection", () => {
     expect(uiNow()[0].view).toBe("list");
     press("1");
     expect(uiNow()[0].view).toBe("timeline");
+  });
+
+  it("treats editable content as typing and a checkbox as not typing", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    const editable = document.createElement("div");
+    editable.setAttribute("contenteditable", "");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    document.body.append(editable, box);
+    try {
+      press("2", {}, editable);
+      expect(uiNow()[0].view).toBe("timeline");
+      press("2", {}, box);
+      expect(uiNow()[0].view).toBe("board");
+    } finally {
+      editable.remove();
+      box.remove();
+    }
   });
 });
 

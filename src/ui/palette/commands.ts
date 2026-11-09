@@ -1,12 +1,12 @@
 import type { Built, Intent } from "../../actions/intents";
 import { workCalendar } from "../../domain/calendar";
 import { toDay, toIso } from "../../domain/dates";
-import type { Item, ItemId, ItemKind } from "../../domain/model";
+import type { Item, ItemId, ItemKind, PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
 import { childrenOf } from "../../plan/project";
 import type { PlanSession } from "../../store/session";
-import { conflictSuccessor, countedConflicts } from "../choices/HeadCounts";
+import { countedConflicts, goToFirstPatch } from "../choices/HeadCounts";
 import { baselineDefault } from "../panel/Baselines";
 import type { UiState, ViewKind, Zoom } from "../state";
 
@@ -29,6 +29,7 @@ export interface CommandCtx {
   readOnly: boolean;
   mac: boolean;
   clock: Clock;
+  select(id: PlanId): void;
   newPlan(): void;
   reveal(target: ItemId | "today"): void;
 }
@@ -66,9 +67,9 @@ function itemOf(session: PlanSession, id: ItemId): Item {
 }
 
 export function createdItem(built: Built): ItemId {
-  const w = built.action.w.find((x) => x.u.startsWith("e:"));
-  if (w === undefined) throw new Error(`Command: the create “${built.action.lbl}” wrote no item`);
-  return w.u.slice(2);
+  const [id, ...more] = built.newNotes;
+  if (id === undefined || more.length > 0) throw new Error(`Command: the create “${built.action.lbl}” made ${built.newNotes.length} items, not one`);
+  return id;
 }
 
 function placeOf(session: PlanSession, selected: ItemId | null): { parent: ItemId | null; after: ItemId | null } {
@@ -89,11 +90,15 @@ function newItem(ctx: CommandCtx, session: PlanSession, run: (i: Intent) => Buil
   ctx.setUi({ selected: id, naming: id });
 }
 
+const dated = (it: Item): boolean => it.schedule !== null && it.schedule.start !== null;
+
 function resize(session: PlanSession, run: (i: Intent) => Built | null, id: ItemId, n: number): void {
   const it = itemOf(session, id);
-  if (it.kind !== "task" || it.schedule === null) return;
-  const dur = Math.max(1, it.schedule.dur + n);
-  if (dur === it.schedule.dur) return;
+  if (it.kind === "milestone") return;
+  const sc = it.schedule;
+  if (it.kind !== "task" || sc === null || sc.start === null) throw new Error(`Command: cannot resize ${it.kind} ${id}, which has no dated schedule`);
+  const dur = Math.max(1, sc.dur + n);
+  if (dur === sc.dur) return;
   run({ t: "resize", item: id, dur });
 }
 
@@ -102,6 +107,16 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
   if (sel === null) return [];
   const it = session.view().plan.items.get(sel);
   if (it === undefined || it.trashed) return [];
+  const trash: Command = {
+    id: "trash",
+    group: "Edit",
+    label: `Move “${it.name}” to the Trash`,
+    keys: "Delete",
+    run: () => {
+      run({ t: "trash", items: [sel] });
+    },
+  };
+  if (!dated(it)) return [trash];
   const nudges = STEPS.map(
     (n): Command => ({
       id: `nudge${signed(n)}`,
@@ -122,15 +137,6 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
       run: () => resize(session, run, sel, n),
     }),
   );
-  const trash: Command = {
-    id: "trash",
-    group: "Edit",
-    label: `Move “${it.name}” to the Trash`,
-    keys: "Delete",
-    run: () => {
-      run({ t: "trash", items: [sel] });
-    },
-  };
   return [...nudges, ...resizes, trash];
 }
 
@@ -157,25 +163,10 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
       run: () => ctx.setUi(ctx.ui.baseline === b.id ? { baseline: null } : { view: "timeline", baseline: b.id }),
     }),
   );
-  const firstConflict = countedConflicts(view)[0];
   const conflict: Command[] =
-    firstConflict === undefined
+    countedConflicts(view).length === 0
       ? []
-      : [
-          {
-            id: "go-first-conflict",
-            group: "Plan",
-            label: "Go to first conflict",
-            run: () => {
-              const now = session.view();
-              const c = countedConflicts(now)[0];
-              if (c === undefined) throw new Error("Go to first conflict: there is no conflict");
-              const succ = conflictSuccessor(now, c);
-              ctx.setUi({ selected: succ });
-              ctx.reveal(succ);
-            },
-          },
-        ];
+      : [{ id: "go-first-conflict", group: "Plan", label: "Go to first conflict", run: () => ctx.setUi(goToFirstPatch(session.view(), ctx.ui.collapsed)) }];
   const tree = (parent: ItemId | null): Item[] =>
     childrenOf(view.plan, parent)
       .filter((it) => !it.trashed)
@@ -234,15 +225,16 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
 
 export function commands(ctx: CommandCtx): Command[] {
   const current = ctx.ui.plan;
+  const failed = ctx.registry.failures();
   const openPlans = ctx.registry
     .plans()
-    .filter((l) => !l.trashed && l.id !== current)
+    .filter((l) => !l.trashed && l.id !== current && !failed.has(l.id))
     .map(
       (l): Command => ({
         id: `open-plan:${l.id}`,
         group: "Plan",
         label: `Open ${l.name ?? "Loading…"}`,
-        run: () => ctx.setUi({ plan: l.id, selected: null, dialog: null }),
+        run: () => ctx.select(l.id),
       }),
     );
   const always: Command[] = [
