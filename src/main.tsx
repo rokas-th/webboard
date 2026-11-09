@@ -8,6 +8,8 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/timeline.css";
+import "./styles/board.css";
+import "./styles/list.css";
 import App from "./App";
 
 const root = document.getElementById("root");

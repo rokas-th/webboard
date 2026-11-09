@@ -8,6 +8,8 @@ import type { PlanSession } from "../../store/session";
 import { toast, Toasts } from "../common/Toast";
 import { OpenChoice } from "../run";
 import { pickPlan, UiContext, useUi } from "../state";
+import { Board } from "../board/Board";
+import { List } from "../list/List";
 import { Timeline } from "../timeline/Timeline";
 import { FILES_STAY, PlanFailed } from "./PlanFailed";
 import { PlanHead } from "./PlanHead";
@@ -291,6 +293,8 @@ export function Shell(p: ShellProps) {
         <div className="view">
           <div className="slot" data-slot={ui.view}>
             {ui.view === "timeline" && <Timeline session={session} readOnly={readOnly} />}
+            {ui.view === "board" && <Board session={session} readOnly={readOnly} />}
+            {ui.view === "list" && <List session={session} />}
           </div>
           {ui.view === "timeline" && <Tray session={session} readOnly={readOnly} />}
         </div>

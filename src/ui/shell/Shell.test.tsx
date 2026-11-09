@@ -193,11 +193,14 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect(slot("panel")).not.toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
     expect(slot("list")).not.toBeNull();
+    expect(slot("list")?.querySelector(".list-wrap table.list")).not.toBeNull();
     expectNoTimeline();
     expect(screen.getByRole("tab", { name: "List" }).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(screen.getByRole("tab", { name: "Now · Next · Later" }));
     expect(slot("board")).not.toBeNull();
+    expect(slot("board")?.querySelectorAll(".nnl [data-col]")).toHaveLength(3);
     expect(slot("list")).toBeNull();
+    expect(document.querySelector(".list-wrap")).toBeNull();
   });
 
   it("lists cached names, Loading… for a missing one, and marks the selected plan", async () => {
