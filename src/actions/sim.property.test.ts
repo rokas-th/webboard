@@ -9,8 +9,8 @@ import { choices, heldItems, type Choice, type ChoiceSide } from "../plan/choice
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { decodeAs, parseKey } from "../plan/units";
-import { PLAN, simulate, type SimBuilt, type SimResult } from "../test/sim";
-import { FIXTURE_DEVICES } from "../test/planCtx";
+import { simulate, type SimBuilt, type SimResult } from "../test/sim";
+import { FIXTURE_DEVICES, PLAN_ID } from "../test/planCtx";
 
 const ids = vi.hoisted(() => {
   const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -65,7 +65,7 @@ const property = (check: (seed: number, sim: SimResult) => void): void =>
   );
 
 const viewOf = (log: LogState) => {
-  const plan = projectPlan(PLAN, log);
+  const plan = projectPlan(PLAN_ID, log);
   const cs = choices(log, plan, FIXTURE_DEVICES);
   return { plan, choices: cs, held: heldItems(cs, plan) };
 };
@@ -93,7 +93,7 @@ const ancestry = (sim: SimResult, par: readonly ActionId[]): Action[] => {
 const logAt = (sim: SimResult, b: SimBuilt): LogState => {
   const log = replay(ancestry(sim, b.action.par), planRules);
   expect(log.pending).toEqual([]);
-  expect(projectPlan(PLAN, log)).toEqual(b.view.plan);
+  expect(projectPlan(PLAN_ID, log)).toEqual(b.view.plan);
   return log;
 };
 
@@ -117,18 +117,31 @@ const lockOf = (b: SimBuilt, item: ItemId): string | null => {
   return s.lock;
 };
 
+const valueApart = (log: LogState, u: UnitKey, without: ReadonlySet<ActionId>): unknown => {
+  const st = log.valueWithout(u, without);
+  if (st !== undefined) return st.value;
+  const ws = log.writers(u).filter((id) => !without.has(id));
+  if (ws.length === 0) return undefined;
+  const last = ws[ws.length - 1];
+  const x = actionOf(log, last).w.find((y) => y.u === u);
+  if (x === undefined) throw new Error(`Action ${last} holds no write to ${u}`);
+  return x.v;
+};
+
 const sideValue = (log: LogState, choice: Choice, side: ChoiceSide, u: UnitKey): unknown => {
   const mine = [...side.actions]
     .reverse()
     .map((a) => actionOf(log, a).w.find((x) => x.u === u))
     .find((x) => x !== undefined);
   if (mine !== undefined) return mine.v;
-  const others = new Set(choice.sides.filter((s) => s.key !== side.key).flatMap((s) => s.actions));
-  return log.valueWithout(u, others)?.value;
+  return valueApart(log, u, new Set(choice.sides.filter((s) => s.key !== side.key).flatMap((s) => s.actions)));
 };
 
-const matches = (x: Write, v: unknown): boolean =>
-  v !== undefined && (planRules.same(x.u, x.v, v) || (parseKey(x.u).kind === "s" && startOf(x.u, x.v) > startOf(x.u, v)));
+const matches = (b: SimBuilt, x: Write, v: unknown): boolean => {
+  if (v === undefined) return false;
+  if (planRules.same(x.u, x.v, v)) return true;
+  return parseKey(x.u).kind === "s" && startOf(x.u, x.v) > startOf(x.u, v) && lockOf(b, parseKey(x.u).arg) === null;
+};
 
 const r17Violations = (sim: SimResult, b: SimBuilt): string[] => {
   if (b.kind === "undo" || b.kind === "redo" || b.kind === "revert") {
@@ -139,10 +152,12 @@ const r17Violations = (sim: SimResult, b: SimBuilt): string[] => {
   if (choice === undefined || pick === undefined || opts === undefined) throw new Error(`Resolution ${b.action.id} lacks its choice`);
   const log = logAt(sim, b);
   const keys = new Set([pick.side, ...(pick.perUnit?.values() ?? [])]);
-  const others = choice.sides.filter((s) => !keys.has(s.key));
+  const losing = choice.sides.filter((s) => !keys.has(s.key)).flatMap((s) => s.actions);
+  const lost = new Set(losing);
   const picked = choice.sides.find((s) => s.key === pick.side);
   if (picked === undefined) throw new Error(`Choice ${choice.id} has no side ${pick.side}`);
   const participants = new Set(choice.sides.flatMap((s) => s.actions).flatMap((a) => actionOf(log, a).w.map((x) => x.u)));
+  const pushedByLoser = (u: UnitKey): boolean => losing.some((a) => actionOf(log, a).w.some((y) => y.u === u && y.c === "push"));
   const ok = (x: Write): boolean => {
     if (choice.units.includes(x.u)) return true;
     const item = parseKey(x.u).arg;
@@ -153,8 +168,8 @@ const r17Violations = (sim: SimResult, b: SimBuilt): string[] => {
     }
     if (x.c === "recalendar") return choice.kind === "calendar" && lockOf(b, item) === null;
     if (x.c !== "resolution") return false;
-    if (opts.returnPushed && others.some((s) => matches(x, log.valueWithout(x.u, new Set(s.actions))?.value))) return true;
-    return choice.kind === "resolutions" && participants.has(x.u) && matches(x, sideValue(log, choice, picked, x.u));
+    if (opts.returnPushed && pushedByLoser(x.u) && matches(b, x, valueApart(log, x.u, lost))) return true;
+    return choice.kind === "resolutions" && participants.has(x.u) && matches(b, x, sideValue(log, choice, picked, x.u));
   };
   return b.action.w.filter((x) => !ok(x)).map((x) => `resolution ${b.action.id} of ${choice.kind} ${choice.id} writes ${x.u} (${x.c}) = ${JSON.stringify(x.v)}`);
 };
@@ -249,6 +264,10 @@ describe("simulated devices", () => {
     TIMEOUT,
   );
 
+  it("simulate(188) pops a stale undo or redo entry", () => {
+    expect(run(188).stalePops).toBeGreaterThan(0);
+  });
+
   it(
     "the runs exercise clashes, resolutions, undo, pushes into held items' neighbours, restores and note races",
     () => {
@@ -269,7 +288,8 @@ describe("simulated devices", () => {
         notes: count((s) => s.notes.length > 0),
         threeDevices: count((s) => s.devices.length === 3),
       };
-      console.info(`simulation coverage over ${NUM_RUNS} runs: ${JSON.stringify(hits)}`);
+      const stale = { runs: count((s) => s.stalePops > 0), pops: sims.reduce((n, s) => n + s.stalePops, 0) };
+      console.info(`simulation coverage over ${NUM_RUNS} runs: ${JSON.stringify(hits)}; stale undo or redo entries popped: ${JSON.stringify(stale)}`);
       Object.values(hits).forEach((n) => expect(n).toBeGreaterThanOrEqual(NUM_RUNS / 20));
     },
     TIMEOUT,

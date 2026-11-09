@@ -579,3 +579,69 @@ describe("settling by edit", () => {
     expect(b.toast).toBe("Scheduled “Review” from 24 Nov. “Review” is settled; 1 item in this choice remains.");
   });
 });
+
+describe("sides with no value of their own", () => {
+  const create = act("c", ["a0"], item("N", "task", "New", null, "a6", sched("2026-11-16", 2)), mac);
+  const rename = act("r", ["c"], [w("n:N", "Newer")], iph);
+  const undo = act("u0", ["c"], [w("a:c", false, "undo")], { dev: "d1", meta: { undo: "c" } });
+
+  it("simulate(1566296047): the trash side of a delete over an undone create writes the create's name", () => {
+    const ctx = ctxFrom([], create, rename, undo);
+    const c = only(ctx);
+    expect(c.kind).toBe("delete");
+    expect(c.units).toEqual(["e:N", "n:N"]);
+    const b = buildResolve(ctx, c, { side: "u0" }, ON);
+    expect(b.action.w).toEqual([w("e:N", { k: "task", t: true }, "resolution"), w("n:N", "New", "resolution")]);
+    const after = applied(ctx, b);
+    expect(after.view.plan.items.get("N")?.trashed).toBe(true);
+    expect(after.view.plan.items.get("N")?.name).toBe("New");
+    expect(after.view.choices).toEqual([]);
+  });
+
+  it("simulate(1566296047): the rename side of that delete restores the item with the rename", () => {
+    const ctx = ctxFrom([], create, rename, undo);
+    const c = only(ctx);
+    const b = buildResolve(ctx, c, { side: "r" }, ON);
+    expect(b.action.w).toEqual([w("e:N", { k: "task", t: false }, "resolution"), w("n:N", "Newer", "resolution")]);
+    const after = applied(ctx, b);
+    expect(after.view.plan.items.get("N")?.trashed).toBe(false);
+    expect(after.view.plan.items.get("N")?.name).toBe("Newer");
+    expect(after.view.choices).toEqual([]);
+  });
+
+  it("simulate(47): the rename side of a trash apart from a rename, with the create reverted elsewhere, restores the item with the rename", () => {
+    const ctx = ctxFrom(
+      [],
+      create,
+      act("v", ["c"], [w("a:c", false, "revert")], { dev: "d1", meta: { revert: "c" } }),
+      rename,
+      act("t", ["c"], [w("e:N", { k: "task", t: true })], { dev: "d3" }),
+    );
+    const c = only(ctx);
+    expect(c.kind).toBe("delete");
+    expect(c.sides.map((s) => s.key)).toEqual(["r", "t"]);
+    const b = buildResolve(ctx, c, { side: "r" }, ON);
+    expect(b.action.w).toEqual([w("e:N", { k: "task", t: false }, "resolution"), w("n:N", "Newer", "resolution")]);
+    const after = applied(ctx, b);
+    expect(after.view.plan.items.get("N")?.trashed).toBe(false);
+    expect(after.view.plan.items.get("N")?.name).toBe("Newer");
+    expect(after.view.choices).toEqual([]);
+  });
+
+  it("returns an item two losing sides both pushed to its base value", () => {
+    const ctx = ctxFrom(
+      [...item("A", "task", "A", null, "a0", sched("2026-11-16", 2)), ...item("D", "task", "D", null, "a1", sched("2026-11-18", 2)), w("l:A>D", ["FS", 0])],
+      act("m1", ["a0"], [w("s:A", sched("2026-11-17", 2)), w("s:D", sched("2026-11-19", 2), "push")], mac),
+      act("p1", ["a0"], [w("s:A", sched("2026-11-23", 2)), w("s:D", sched("2026-11-25", 2), "push")], iph),
+      act("q1", ["a0"], [w("s:A", sched("2026-11-10", 2))], { dev: "d3" }),
+    );
+    const c = only(ctx);
+    expect(c.units).toEqual(["s:A"]);
+    expect(c.sides).toHaveLength(3);
+    const b = buildResolve(ctx, c, { side: sideKey(c, "iPad") }, ON);
+    expect(b.action.w).toEqual([w("s:A", sched("2026-11-10", 2), "resolution"), w("s:D", sched("2026-11-18", 2), "resolution")]);
+    const after = applied(ctx, b);
+    expect(valueOf(after, "s:D")).toEqual(sched("2026-11-18", 2));
+    expect(after.view.choices).toEqual([]);
+  });
+});

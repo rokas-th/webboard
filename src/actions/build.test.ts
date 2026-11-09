@@ -182,6 +182,21 @@ describe("buildAction: push", () => {
     expect(units(b)).toEqual(["s:PFF", "s:Spec", "s:Build"]);
     expect(b.preview.conflictsAfter).toBe(1);
   });
+
+  it("seed 2147483625: a link into a milestone stored as in progress stops at it instead of moving it", () => {
+    const ctx = ctxFrom([
+      ...ROOT,
+      ...item("T", "task", "Task", null, "a0", sched("2026-11-16", 5)),
+      ...item("M", "milestone", "Milestone", null, "a1", sched("2026-11-17", 0, "doing")),
+    ]);
+    expect(ctx.view.derived.status.get("M")).toBe("doing");
+    const b = buildAction(ctx, { t: "link", from: "T", to: "M", type: "FS", lag: 0 });
+    expect(units(b)).toEqual(["l:T>M"]);
+    expect(b.preview.stopped).toEqual([{ id: "M", reason: "doing" }]);
+    expect(b.preview.conflictsAfter).toBe(1);
+    const after = applied(ctx, b);
+    expect(after.view.derived.conflicts.map((c) => (c.kind === "early" ? c.link : c.kind))).toEqual(["T>M"]);
+  });
 });
 
 describe("buildAction: own starts (refinement 29)", () => {

@@ -432,3 +432,18 @@ describe("undoOffer", () => {
   });
 
 });
+
+describe("kept lines for items that no longer project", () => {
+  it("simulate(1566320693): reverting a link whose start item's create was reverted names the item by its last name", () => {
+    const base = act("a0", [], [...ROOT, ...item("R", "R", "a3", sched("2026-11-25", 1))]);
+    const c = act("c", ["a0"], item("D", "Draft", "a4", sched("2026-11-16", 2)), mac);
+    const l = act("L", ["c"], [w("l:D>R", ["FS", 0])], mac);
+    const x = act("X", ["L"], [w("l:D>R", null)], iph);
+    const v = act("V", ["X"], [w("a:c", false, "revert")], { dev: "d1", meta: { revert: "c" } });
+    const ctx = ctxOf(logOf(base, c, l, x, v), "d1", TODAY);
+    expect(ctx.view.plan.items.has("D")).toBe(false);
+    const b = buildRevert(ctx, "L");
+    expect(b.action.w).toEqual([w("a:L", false, "revert")]);
+    expect(b.preview.kept).toEqual(["The link “Draft” → “R” was changed since on the iPhone — kept"]);
+  });
+});

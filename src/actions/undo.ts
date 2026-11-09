@@ -39,10 +39,16 @@ const isHistoryAction = (a: Action): boolean =>
 
 const frontierHolds = (log: LogState, u: UnitKey, id: ActionId): boolean => log.frontier(u).includes(id);
 
-const nameOf = (plans: readonly PlanState[], id: ItemId): string => {
+const nameOf = (log: LogState, plans: readonly PlanState[], id: ItemId): string => {
   const found = plans.map((p) => p.items.get(id)).find((it) => it !== undefined);
-  if (found === undefined) throw new Error(`No item ${id}`);
-  return found.name;
+  if (found !== undefined) return found.name;
+  const u = key.n(id);
+  const ws = log.writers(u);
+  if (ws.length === 0) throw new Error(`No item ${id}`);
+  const last = ws[ws.length - 1];
+  const x = log.get(last)?.w.find((y) => y.u === u);
+  if (x === undefined) throw new Error(`Action ${last} holds no write to ${u}`);
+  return decodeAs("name", u, x.v);
 };
 
 const baselineName = (plans: readonly PlanState[], w: Write, id: string): string => {
@@ -59,14 +65,14 @@ interface Subject {
   text: string;
 }
 
-const subjectOf = (plans: readonly PlanState[], w: Write): Subject => {
+const subjectOf = (log: LogState, plans: readonly PlanState[], w: Write): Subject => {
   const k = parseKey(w.u);
-  if (ITEM_KINDS.has(k.kind)) return { id: "i:" + k.arg, item: k.arg, text: q(nameOf(plans, k.arg)) };
+  if (ITEM_KINDS.has(k.kind)) return { id: "i:" + k.arg, item: k.arg, text: q(nameOf(log, plans, k.arg)) };
   if (CALENDAR_KINDS.has(k.kind)) return { id: "calendar", item: null, text: "The calendar" };
   if (k.kind === "pn") return { id: "pn", item: null, text: "The plan name" };
   if (k.kind === "l") {
     if (k.to === undefined) throw new Error(`Link ${w.u} has no successor`);
-    return { id: w.u, item: null, text: `The link ${linkText(nameOf(plans, k.arg), nameOf(plans, k.to))}` };
+    return { id: w.u, item: null, text: `The link ${linkText(nameOf(log, plans, k.arg), nameOf(log, plans, k.to))}` };
   }
   if (k.kind === "b") return { id: w.u, item: null, text: `Baseline ${q(baselineName(plans, w, k.arg))}` };
   throw new Error(`No subject for ${w.u}`);
@@ -98,7 +104,7 @@ const keptLines = (ctx: Ctx, fork: LogState, after: PlanState, flipped: readonly
       .filter((w) => parseKey(w.u).kind !== "a")
       .forEach((w) => {
         if (frontierHolds(holder, w.u, x)) return;
-        const s = subjectOf(plans, w);
+        const s = subjectOf(fork, plans, w);
         if (lines.has(s.id)) return;
         const orphan = s.item === null ? undefined : trashedBy(fork, a, s.item);
         lines.set(

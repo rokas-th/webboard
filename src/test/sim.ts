@@ -15,11 +15,9 @@ import { planRules } from "../plan/rules";
 import { parseKey } from "../plan/units";
 import { PlanDoc, type PlanView } from "../store/doc";
 import { CH_ZH } from "./fixtures/calendars";
-import { ctxOf, FIXTURE_DEVICES } from "./planCtx";
+import { ctxOf, FIXTURE_DEVICES, PLAN_ID } from "./planCtx";
 
 export const SIM_TODAY: IsoDate = "2026-11-09";
-
-export const PLAN = "P";
 
 export type BuiltKind = Intent["t"] | "undo" | "redo" | "revert" | "resolve";
 
@@ -48,6 +46,7 @@ export interface SimResult {
   root: Action;
   lost: ReadonlySet<ActionId>;
   steps: readonly string[];
+  stalePops: number;
 }
 
 interface Device extends SimDevice {
@@ -136,8 +135,6 @@ const noteTexts = (doc: PlanDoc): Map<ItemId, string> => {
 
 const actionIds = (doc: PlanDoc): Set<ActionId> => new Set(doc.ydoc.getMap("actions").keys());
 
-const isRefused = (e: unknown): boolean => e instanceof Refused;
-
 export function simulate(seed: number): SimResult {
   const r = rngOf(seed);
   const int = (lo: number, hi: number): number => lo + Math.floor(r() * (hi - lo + 1));
@@ -159,9 +156,14 @@ export function simulate(seed: number): SimResult {
     return { ...d, log, stop };
   };
 
+  const fixtureName = (id: DeviceId): string => {
+    const name = FIXTURE_DEVICES.get(id);
+    if (name === undefined) throw new Error(`Fixture device ${id} has no name`);
+    return name;
+  };
   const ids = [...FIXTURE_DEVICES.keys()].slice(0, int(2, 3));
   const devices: Device[] = ids.map((id) =>
-    attach({ id, name: FIXTURE_DEVICES.get(id) ?? id, ses: newId(), doc: new PlanDoc(freshDoc()), undo: [], redo: [], backups: [] }),
+    attach({ id, name: fixtureName(id), ses: newId(), doc: new PlanDoc(freshDoc()), undo: [], redo: [], backups: [] }),
   );
   const root = initialAction({ dev: devices[0].id, ses: devices[0].ses, now: 0, name: "Plan", calendar: CH_ZH });
   devices[0].doc.append(root, []);
@@ -175,6 +177,7 @@ export function simulate(seed: number): SimResult {
   let epoch = 0;
   let partition: { group: ReadonlyMap<DeviceId, number>; left: number } | null = null;
   let clock = 0;
+  let stalePops = 0;
 
   const ctxFor = (d: Device) => ctxOf(d.log, d.id, SIM_TODAY, FIXTURE_DEVICES, { ses: d.ses, now: (clock += 60_000) });
 
@@ -190,8 +193,8 @@ export function simulate(seed: number): SimResult {
       fn();
       steps.push(label);
     } catch (e) {
-      if (!isRefused(e)) throw e;
-      steps.push(`${label} refused: ${(e as Error).message}`);
+      if (!(e instanceof Refused)) throw e;
+      steps.push(`${label} refused: ${e.message}`);
     }
   };
 
@@ -312,8 +315,12 @@ export function simulate(seed: number): SimResult {
 
   const stepUndo = (d: Device, redo: boolean): void => {
     const stack = redo ? d.redo : d.undo;
+    while (stack.length > 0 && !d.log.active(stack[stack.length - 1])) {
+      stack.pop();
+      stalePops += 1;
+    }
     const target = stack[stack.length - 1];
-    if (target === undefined || !d.log.active(target)) return void steps.push(`${d.id} ${redo ? "redo" : "undo"} skipped`);
+    if (target === undefined) return void steps.push(`${d.id} ${redo ? "redo" : "undo"} skipped`);
     const ctx = ctxFor(d);
     if (undoOffer(ctx, target) !== null) return void steps.push(`${d.id} ${redo ? "redo" : "undo"} offered`);
     attempt(`${d.id} ${redo ? "redo" : "undo"} ${target}`, () => {
@@ -355,9 +362,9 @@ export function simulate(seed: number): SimResult {
   };
 
   const stepNote = (d: Device, n: number): void => {
-    const known = [...projectPlan(PLAN, d.log).items.keys()];
+    const known = [...projectPlan(PLAN_ID, d.log).items.keys()];
     if (known.length === 0) return void steps.push(`${d.id} note skipped`);
-    const fresh = known.filter((item) => createdIn.get(item) === epoch);
+    const fresh = partition === null ? [] : known.filter((item) => createdIn.get(item) === epoch);
     const item = fresh.length > 0 && chance(0.5) ? pick(fresh) : pick(known);
     const marker = `<m${n}>`;
     const text = d.doc.note(item);
@@ -401,7 +408,16 @@ export function simulate(seed: number): SimResult {
     const kept = [actionIds(doc), ...others.map((x) => actionIds(x.doc))];
     [...actionIds(d.doc)].filter((id) => kept.every((s) => !s.has(id))).forEach((id) => lost.add(id));
     const texts = [noteTexts(doc), ...others.map((x) => noteTexts(x.doc))];
-    const survivors = notes.filter((n) => texts.some((t) => (t.get(n.item) ?? "").includes(n.marker)));
+    const current = noteTexts(d.doc);
+    const holds = (t: ReadonlyMap<ItemId, string>, n: { item: ItemId; marker: string }): boolean => {
+      const text = t.get(n.item);
+      return text !== undefined && text.includes(n.marker);
+    };
+    const survivors = notes.filter((n) => {
+      if (texts.some((t) => holds(t, n))) return true;
+      if (holds(current, n)) return false;
+      throw new Error(`marker ${n.marker} on ${n.item} vanished before restore`);
+    });
     notes.splice(0, notes.length, ...survivors);
     d.stop();
     const next = attach({ id: d.id, name: d.name, ses: newId(), doc, undo: [], redo: [], backups: d.backups.slice(0, at + 1) });
@@ -409,7 +425,8 @@ export function simulate(seed: number): SimResult {
     steps.push(`${d.id} restore at ${n} from backup ${at}`);
   };
 
-  const count = int(20, 80);
+  const creates = int(3, 5);
+  const count = int(20, 80 - (2 * creates - 1));
   const stepAt = (n: number, fn: () => void): void => {
     try {
       fn();
@@ -420,12 +437,14 @@ export function simulate(seed: number): SimResult {
   };
   const opening = devices[0];
   const chain: string[] = [];
-  Array.from({ length: int(3, 5) }).forEach((_, k) =>
+  Array.from({ length: creates }).forEach((_, k) =>
     stepAt(-1, () => {
       const ctx = ctxFor(opening);
       const b = buildAction(ctx, { t: "create", kind: "task", name: NAMES[k], parent: null, after: null, start: pick(DATES.slice(0, 20)), dur: int(1, 4) });
       record(opening, { action: b.action, kind: "create", view: ctx.view }, b.newNotes);
-      chain.push(parseKey(b.action.w[0].u).arg);
+      const e = b.action.w.find((x) => parseKey(x.u).kind === "e");
+      if (e === undefined) throw new Error(`Create ${b.action.id} writes no e: unit`);
+      chain.push(parseKey(e.u).arg);
     }),
   );
   chain.slice(1).forEach((to, k) =>
@@ -507,5 +526,6 @@ export function simulate(seed: number): SimResult {
     root,
     lost,
     steps,
+    stalePops,
   };
 }

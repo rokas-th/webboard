@@ -1,6 +1,6 @@
 import { generateKeyBetween } from "fractional-indexing";
 import { toDay, toIso, type Day } from "../../domain/dates";
-import type { ItemId, ItemKind, LinkType, Status } from "../../domain/model";
+import type { Horizon, ItemId, ItemKind, LinkType, Status } from "../../domain/model";
 import type { Action, ActionId, Cause, DeviceId, SessionId, Write } from "../../log/types";
 import * as codec from "../../plan/units";
 import { key, validateWrite } from "../../plan/units";
@@ -11,6 +11,9 @@ interface Live {
   start: Day;
   dur: number;
   order: string;
+  status: Status;
+  progress: number;
+  horizon: Horizon;
 }
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -48,11 +51,14 @@ export function bigLog(n: number, seed: number): { actions: Action[]; items: num
   let lastOrder: string | null = null;
 
   const sched = (it: Live, c: Cause): Write => {
-    const status: Status = c === "own" ? pick(["todo", "todo", "doing", "done"] as const) : "todo";
-    const progress = status === "done" ? 100 : status === "doing" ? int(1, 99) : 0;
+    if (c === "own") {
+      it.status = pick(["todo", "todo", "doing", "done"] as const);
+      it.progress = it.status === "done" ? 100 : it.status === "doing" ? int(1, 99) : 0;
+      it.horizon = pick(["now", "next", "later"] as const);
+    }
     return {
       u: key.s(it.id),
-      v: codec.sched.enc({ start: toIso(it.start), dur: it.dur, status, progress, horizon: pick(["now", "next", "later"] as const) }),
+      v: codec.sched.enc({ start: toIso(it.start), dur: it.dur, status: it.status, progress: it.progress, horizon: it.horizon }),
       c,
     };
   };
@@ -61,13 +67,13 @@ export function bigLog(n: number, seed: number): { actions: Action[]; items: num
     const kind = rnd() < 0.1 ? "milestone" : "task";
     const order = generateKeyBetween(lastOrder, null);
     lastOrder = order;
-    const it: Live = { id: id(), kind, start: FIRST + int(0, SPAN), dur: kind === "milestone" ? 0 : int(1, 10), order };
+    const it: Live = { id: id(), kind, start: FIRST + int(0, SPAN), dur: kind === "milestone" ? 0 : int(1, 10), order, status: "todo", progress: 0, horizon: "later" };
     live.push(it);
     return [
       { u: key.e(it.id), v: codec.existence.enc({ k: kind, t: false }), c: "own" },
       { u: key.n(it.id), v: codec.name.enc(pick(NAMES)), c: "own" },
       { u: key.p(it.id), v: codec.place.enc({ parent: null, order }), c: "own" },
-      { u: key.s(it.id), v: codec.sched.enc({ start: toIso(it.start), dur: it.dur, status: "todo", progress: 0, horizon: "later" }), c: "own" },
+      { u: key.s(it.id), v: codec.sched.enc({ start: toIso(it.start), dur: it.dur, status: it.status, progress: it.progress, horizon: it.horizon }), c: "own" },
     ];
   };
 
@@ -113,11 +119,13 @@ export function bigLog(n: number, seed: number): { actions: Action[]; items: num
   const mixed = (): Write[] => {
     const r = rnd();
     const size = r < 0.6 ? 1 : r < 0.85 ? 2 : r < 0.95 ? 4 : 8;
-    return Array.from({ length: size * 4 }).reduce<Write[]>((ws) => {
-      if (ws.length === size) return ws;
-      const x = writeOf(new Set(ws.map((y) => y.u)), ws.length === 0);
-      return x === null ? ws : [...ws, x];
+    const ws = Array.from({ length: size * 64 }).reduce<Write[]>((acc) => {
+      if (acc.length === size) return acc;
+      const x = writeOf(new Set(acc.map((y) => y.u)), acc.length === 0);
+      return x === null ? acc : [...acc, x];
     }, []);
+    if (ws.length !== size) throw new Error(`bigLog made an action of ${ws.length} writes, not ${size}, in ${size * 64} tries, with ${live.length} items and ${linked.size} links`);
+    return ws;
   };
 
   const due = (done: number, total: number, i: number, by: number): boolean => done < total && done < Math.ceil((i * total) / (by * n));
@@ -139,7 +147,7 @@ export function bigLog(n: number, seed: number): { actions: Action[]; items: num
   const actions = Array.from({ length: n - 1 }).reduce<Action[]>(
     (acc, _, k) => {
       const i = k + 1;
-      const w = due(live.length, items, i, 0.8) || live.length < 2 ? create() : due(linked.size, links, i, 0.9) && live.length * (live.length - 1) > 4 * linked.size ? link() : mixed();
+      const w = due(live.length, items, i, 0.8) || live.length < 3 ? create() : due(linked.size, links, i, 0.9) && live.length * (live.length - 1) > 4 * linked.size ? link() : mixed();
       w.forEach(validateWrite);
       const s = Math.min(sessionCount - 1, Math.floor(i / per));
       const prev: ActionId = acc[acc.length - 1].id;

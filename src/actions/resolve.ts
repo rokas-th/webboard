@@ -58,12 +58,27 @@ const sideOf = (choice: Choice, side: string): ChoiceSide => {
 const othersOf = (choice: Choice, side: ChoiceSide): ReadonlySet<ActionId> =>
   new Set(choice.sides.filter((s) => s.key !== side.key).flatMap((s) => s.actions));
 
+const valueApart = (ctx: Ctx, u: UnitKey, others: ReadonlySet<ActionId>): { v: unknown } | null => {
+  const without = ctx.log.valueWithout(u, others);
+  if (without !== undefined) return { v: without.value };
+  const ws = ctx.log.writers(u).filter((id) => !others.has(id));
+  if (ws.length === 0) return null;
+  const last = ws[ws.length - 1];
+  const x = actionOf(ctx.log, last).w.find((y) => y.u === u);
+  if (x === undefined) throw new Error(`Action ${last} holds no write to ${u}`);
+  return { v: x.v };
+};
+
 const valueOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): unknown => {
   if (side.values.has(u)) return side.values.get(u);
-  const without = ctx.log.valueWithout(u, othersOf(choice, side));
-  if (without !== undefined) return without.value;
-  if (isActivity(u)) return true;
-  throw new Error(`Side ${side.key} of choice ${choice.id} has no value for ${u}`);
+  const others = othersOf(choice, side);
+  if (isActivity(u)) {
+    const without = ctx.log.valueWithout(u, others);
+    return without === undefined ? true : without.value;
+  }
+  const got = valueApart(ctx, u, others);
+  if (got === null) throw new Error(`Side ${side.key} of choice ${choice.id} has no value for ${u}`);
+  return got.v;
 };
 
 const latestOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): unknown => {
@@ -72,9 +87,9 @@ const latestOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): unkno
     .map((a) => actionOf(ctx.log, a).w.find((x) => x.u === u))
     .find((x) => x !== undefined);
   if (mine !== undefined) return mine.v;
-  const without = ctx.log.valueWithout(u, othersOf(choice, side));
-  if (without === undefined) throw new Error(`Unit ${u} of choice ${choice.id} has no value on side ${side.key}`);
-  return without.value;
+  const got = valueApart(ctx, u, othersOf(choice, side));
+  if (got === null) throw new Error(`Unit ${u} of choice ${choice.id} has no value on side ${side.key}`);
+  return got.v;
 };
 
 const combined = (chosen: readonly Write[], rest: readonly Write[]): Write[] => {
@@ -109,22 +124,19 @@ const ownWrites = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): 
             return current !== undefined && planRules.same(u, v, current.value) ? [] : [resolution(u, v)];
           });
   const keys = new Set([picked.key, ...perUnit.values()]);
+  const losing = choice.sides.filter((s) => !keys.has(s.key)).flatMap((s) => s.actions);
+  const lost = new Set(losing);
   const returns = !opts.returnPushed
     ? []
-    : choice.sides
-        .filter((s) => !keys.has(s.key))
-        .flatMap((s) => {
-          const theirs = new Set(s.actions);
-          return s.actions.flatMap((a) =>
-            actionOf(ctx.log, a)
-              .w.filter((x) => x.c === "push" && ctx.log.unit(x.u)?.from === a)
-              .map((x) => {
-                const before = ctx.log.valueWithout(x.u, theirs);
-                if (before === undefined) throw new Error(`Pushed unit ${x.u} of action ${a} has no value without side ${s.key}`);
-                return resolution(x.u, before.value);
-              }),
-          );
-        });
+    : losing.flatMap((a) =>
+        actionOf(ctx.log, a)
+          .w.filter((x) => x.c === "push" && ctx.log.unit(x.u)?.from === a)
+          .map((x) => {
+            const before = valueApart(ctx, x.u, lost);
+            if (before === null) throw new Error(`Pushed unit ${x.u} of action ${a} has no value without the sides that lost`);
+            return resolution(x.u, before.v);
+          }),
+      );
   return combined(chosen, [...extras, ...returns]);
 };
 

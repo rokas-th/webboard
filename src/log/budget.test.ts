@@ -6,7 +6,7 @@ import { choices } from "../plan/choices";
 import { planRules } from "../plan/rules";
 import { PlanDoc } from "../store/doc";
 import { bigLog } from "../test/fixtures/bigLog";
-import { ctxOf, FIXTURE_DEVICES } from "../test/planCtx";
+import { ctxOf, FIXTURE_DEVICES, PLAN_ID } from "../test/planCtx";
 import { newId } from "./ids";
 import { replay, type LogState } from "./state";
 import type { Action } from "./types";
@@ -44,6 +44,10 @@ const median = <T>(label: string, setup: () => T, fn: (t: T) => void): number =>
 };
 
 describe("size budget", () => {
+  it("reads the platform the timing cases depend on", () => {
+    expect(typeof platform).toBe("string");
+  });
+
   it(
     "bigLog(20000, 1) encodes to at most 5,000,000 B",
     () => {
@@ -102,7 +106,7 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
         "projectPlan + choices",
         () => null,
         () => {
-          const plan = projectPlan("P", log);
+          const plan = projectPlan(PLAN_ID, log);
           expect(plan.items.size).toBe(1000);
           choices(log, plan, FIXTURE_DEVICES);
         },
@@ -115,9 +119,11 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
   it(
     "buildAction of a move with pushes, append, add and projectPlan take at most 25 ms",
     () => {
-      const plan = projectPlan("P", log);
+      const plan = projectPlan(PLAN_ID, log);
       const outgoing = [...plan.links.values()].reduce((m, l) => m.set(l.from, (m.get(l.from) ?? 0) + 1), new Map<string, number>());
       const [mover] = [...outgoing].sort((a, b) => b[1] - a[1])[0];
+      const own = new PlanDoc(new Y.Doc());
+      Y.applyUpdate(own.ydoc, Y.encodeStateAsUpdate(doc.ydoc));
       const ms = median(
         "buildAction (move with pushes) + append + add + projectPlan",
         () => {
@@ -127,9 +133,9 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
         ({ fork, ctx }) => {
           const built = buildAction(ctx, { t: "move", items: [mover], days: 40 });
           expect(built.action.w.some((x) => x.c === "push")).toBe(true);
-          doc.append(built.action, built.newNotes);
+          own.append(built.action, built.newNotes);
           expect(fork.add([built.action]).refused).toEqual([]);
-          projectPlan("P", fork);
+          projectPlan(PLAN_ID, fork);
         },
       );
       expect(ms).toBeLessThanOrEqual(25);
@@ -140,7 +146,7 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
   it(
     "add of one head action takes at most 2 ms",
     () => {
-      const item = [...projectPlan("P", log).items.keys()][0];
+      const item = [...projectPlan(PLAN_ID, log).items.keys()][0];
       const ms = median(
         "add of one head action",
         () => ({ fork: log.fork(), action: oneWrite(log.heads, item, "d1") }),
@@ -158,7 +164,7 @@ describe.runIf(platform === "darwin")("replay budgets on the Mac", () => {
     () => {
       const order = log.order();
       const parent = order[order.length - 5000];
-      const item = [...projectPlan("P", log).items.keys()][1];
+      const item = [...projectPlan(PLAN_ID, log).items.keys()][1];
       const ms = median(
         "add of one remote action 5,000 positions back",
         () => ({ fork: log.fork(), action: oneWrite([parent], item, "d2") }),

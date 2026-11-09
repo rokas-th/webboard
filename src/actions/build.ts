@@ -3,7 +3,7 @@ import { regionKey, workCalendar, type Calendar, type Closure, type Tuning, type
 import { toDay, toIso, type Day, type IsoDate } from "../domain/dates";
 import { derive, schedView, type Derived } from "../domain/derive";
 import { linkKey, type Item, type ItemId, type Link, type PlanState, type Schedule } from "../domain/model";
-import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type PushResult, type RecalResult, type Sched, type SchedView, type Stop } from "../domain/schedule";
+import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type Lock, type PushResult, type RecalResult, type Sched, type SchedView, type Stop } from "../domain/schedule";
 import { newId } from "../log/ids";
 import type { Action, DeviceId, SessionId, UnitKey, Write } from "../log/types";
 import { heldItems } from "../plan/choices";
@@ -491,12 +491,20 @@ const mergedDerived = (ws: readonly Write[]): Map<UnitKey, Write> =>
     return m.set(x.u, earlier === undefined ? x : planRules.mergeDerived(x.u, earlier, x));
   }, new Map<UnitKey, Write>());
 
+const lockedBefore = (ctx: Ctx, view: SchedView, held: ReadonlySet<ItemId>): SchedView => {
+  const before = (id: ItemId): Lock | null => {
+    const status = ctx.view.derived.status.get(id);
+    return status === "done" ? "done" : status === "doing" ? "doing" : held.has(id) ? "held" : null;
+  };
+  return { ...view, items: new Map([...view.items].map(([id, s]): [ItemId, Sched] => [id, s.lock !== null ? s : { ...s, lock: before(id) }])) };
+};
+
 export function withDerived(ctx: Ctx, ownWrites: readonly Write[], roots: readonly ItemId[], held: ReadonlySet<ItemId>): Derivation {
   const plan = ctx.view.plan;
   const after = applyWrites(plan, ownWrites);
   const ownUnits = new Map(ownWrites.map((x): [UnitKey, Write] => [x.u, x]));
   const recal = ownWrites.some(isCalendarWrite) ? recalendar(schedView(plan, held), workCalendar(after.calendar)) : null;
-  const pushResult = roots.length > 0 ? push(schedView(after, held), roots) : null;
+  const pushResult = roots.length > 0 ? push(lockedBefore(ctx, schedView(after, held), held), roots) : null;
   const derivedWrite = (id: ItemId, start: Day | undefined, dur: number | undefined, c: Write["c"]): Write => {
     const u = key.s(id);
     const sc = scheduleOf(itemOf(after, id));

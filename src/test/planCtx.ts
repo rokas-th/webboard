@@ -12,7 +12,7 @@ export const FIXTURE_DEVICES: ReadonlyMap<DeviceId, string> = new Map([
   ["d3", "iPad"],
 ]);
 
-const PLAN_ID = "P";
+export const PLAN_ID = "P";
 
 export function ctxOf(
   log: LogState,

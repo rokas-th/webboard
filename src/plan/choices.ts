@@ -347,7 +347,9 @@ const kindOf = (r: Reader, g: Found): Choice["kind"] => {
   return "items";
 };
 
-const orphanExistence = (r: Reader, d: Deletion, side: Side, u: UnitKey): Existence => {
+const orphanExistence = (r: Reader, d: Deletion, side: Side, others: ReadonlySet<ActionId>, u: UnitKey): Existence => {
+  const st = r.log.unit(u);
+  if (st !== undefined && !others.has(st.from)) throw new Error(`Side ${side.actions[0]} has no value for ${u} while ${u} is live`);
   const ws = r.log.writers(u);
   if (ws.length === 0) throw new Error(`Delete choice on ${u} has no e: writes`);
   const last = ws[ws.length - 1];
@@ -419,7 +421,7 @@ const build = (r: Reader, found: Found, devices: ReadonlyMap<DeviceId, string>):
         const got = valueOn(r, s, others, u);
         if (got !== null) return [[u, got.v]];
         const d = g.deletions.find((x) => key.e(x.item) === u);
-        return d === undefined ? [] : [[u, orphanExistence(r, d, s, u)]];
+        return d === undefined ? [] : [[u, orphanExistence(r, d, s, others, u)]];
       }),
     );
   });
