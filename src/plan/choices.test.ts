@@ -219,6 +219,23 @@ describe("choices", () => {
     expect(sideText(c, "r", plan)).toBe("“Newer” is restored with the iPhone's edit");
   });
 
+  it("simulate(47): a trash apart from a rename of an item whose create another branch reverted gives the rename side a restoring value", () => {
+    const { cs, plan } = run(
+      act("c", ["a0"], item("N", "task", "New", null, "a6", sched("2026-11-16")), mac),
+      act("v", ["c"], [w("a:c", false, "revert")], { dev: "d1", meta: { revert: "c" } }),
+      act("r", ["c"], [w("n:N", "Newer")], iph),
+      act("t", ["c"], [w("e:N", { k: "task", t: true })], ipad),
+    );
+    const c = only(cs);
+    expect(c.kind).toBe("delete");
+    expect(c.units).toEqual(["e:N", "n:N"]);
+    expect(c.sides.map((s) => s.key)).toEqual(["r", "t"]);
+    expect(c.sides.find((s) => s.key === "r")?.values.get("e:N")).toEqual({ k: "task", t: false });
+    expect(c.sides.find((s) => s.key === "t")?.values.get("e:N")).toEqual({ k: "task", t: true });
+    expect(sideText(c, "t", plan)).toBe("“Newer” stays in the Trash");
+    expect(sideText(c, "r", plan)).toBe("“Newer” is restored with the iPhone's edit");
+  });
+
   it("an undo on the Mac against an undo then redo on the iPhone is an activity choice", () => {
     const { cs, held } = run(
       act("b", ["a0"], [w("n:A", "Alpha b")], mac),

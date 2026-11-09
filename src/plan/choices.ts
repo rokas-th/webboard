@@ -348,7 +348,6 @@ const kindOf = (r: Reader, g: Found): Choice["kind"] => {
 };
 
 const orphanExistence = (r: Reader, d: Deletion, side: Side, u: UnitKey): Existence => {
-  if (r.log.unit(u) !== undefined) throw new Error(`Side ${side.actions[0]} has no value for ${u} while ${u} is live`);
   const ws = r.log.writers(u);
   if (ws.length === 0) throw new Error(`Delete choice on ${u} has no e: writes`);
   const last = ws[ws.length - 1];

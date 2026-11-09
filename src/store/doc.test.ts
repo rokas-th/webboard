@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { newId } from "../log/ids";
 import type { Action, Cause, Write } from "../log/types";
+import { bigLog } from "../test/fixtures/bigLog";
 import { LOCAL, PlanDoc, decodeAction, encodeAction } from "./doc";
 
 const send = (from: PlanDoc, to: PlanDoc): void => {
@@ -277,61 +277,8 @@ describe("onActions", () => {
 });
 
 describe("size", () => {
-  const seeded = (seed: number) => {
-    let s = seed >>> 0;
-    return (): number => {
-      s = (s + 0x6d2b79f5) >>> 0;
-      let t = s;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  };
-
-  const mix = (count: number): Action[] => {
-    const rnd = seeded(1);
-    const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)];
-    const items = Array.from({ length: 200 }, newId);
-    const devs = [newId(), newId(), newId()];
-    const sessions = Array.from({ length: 20 }, newId);
-    const writeOf = (): Write => {
-      const item = pick(items);
-      const r = rnd();
-      if (r < 0.5) {
-        const day = 1 + Math.floor(rnd() * 28);
-        return {
-          u: `s:${item}`,
-          v: { start: `2026-11-${String(day).padStart(2, "0")}`, dur: 1 + Math.floor(rnd() * 10), status: pick(["todo", "doing", "done"]), progress: Math.floor(rnd() * 100), horizon: pick(["now", "next", "later"]) },
-          c: pick(["own", "own", "push"] as const),
-        };
-      }
-      if (r < 0.7) return { u: `p:${item}`, v: { parent: pick(items), order: `a${Math.floor(rnd() * 100)}` }, c: "own" };
-      if (r < 0.85) return { u: `n:${item}`, v: pick(["Review", "Plan file format", "Design pass", "Ship beta"]), c: "own" };
-      return { u: `l:${item}>${pick(items)}`, v: { type: "FS", lag: Math.floor(rnd() * 3) }, c: "own" };
-    };
-    const sizeOf = (): number => {
-      const r = rnd();
-      return r < 0.6 ? 1 : r < 0.85 ? 2 : r < 0.95 ? 4 : 8;
-    };
-    return Array.from({ length: count }).reduce<Action[]>((acc) => {
-      const prev = acc[acc.length - 1];
-      return [
-        ...acc,
-        {
-          id: newId(),
-          dev: pick(devs),
-          ses: pick(sessions),
-          at: 1_762_600_000_000 + acc.length * 60_000,
-          par: prev ? [prev.id] : [],
-          lbl: pick(["Moved “Review”", "Renamed “Design pass”", "Linked “Ship beta” after “Review”", "Scheduled “Plan file format” from 16 Nov."]),
-          w: Array.from({ length: sizeOf() }, writeOf),
-        },
-      ];
-    }, []);
-  };
-
   it("1,000 actions of the mix average at most 250 B each", () => {
-    const actions = mix(1000);
+    const { actions } = bigLog(1000, 1);
     const doc = fresh();
     actions.forEach((a) => doc.append(a, []));
     const mean = Y.encodeStateAsUpdate(doc.ydoc).byteLength / 1000;
