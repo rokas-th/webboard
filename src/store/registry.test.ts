@@ -92,7 +92,9 @@ const closeAll = async (): Promise<void> => {
 };
 
 const forget = (r: Registry): void => {
-  opened.splice(opened.indexOf(r), 1);
+  const at = opened.indexOf(r);
+  if (at === -1) throw new Error("forget: this registry was not opened by open()");
+  opened.splice(at, 1);
 };
 
 afterEach(closeAll);
@@ -1048,6 +1050,8 @@ describe("Registry: reloadFromServer", () => {
     expect([...r.failures().keys()]).toEqual(["P"]);
     expect(cb).toHaveBeenCalled();
     expect(loadsOf(from, "P")).toBe(0);
+    expect(codeOf(await rejection(r.doc("P")))).toBe("store.corrupt");
+    expect(loadsOf(from, "P")).toBe(1);
     await closeAll();
 
     const f = corruptIndex();
@@ -1210,6 +1214,82 @@ describe("Registry: lifecycle and failures", () => {
     expect(await isClosed(old[0])).toBe(true);
     expect(appendsTo(from, "P")).toHaveLength(0);
     expect(r.failures().has("P")).toBe(false);
+  });
+
+  it("a dirty load that settles after reloadFromServer writes nothing", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    const plan = seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    const held = hold("store_load");
+    const stale = r.doc("P");
+    await flush();
+    await r.reloadFromServer("P");
+    const current = await r.doc("P");
+    const from = tauri.calls.length;
+    held.resolve(encodeLoad({ records: [Y.encodeStateAsUpdate(plan)], lastSeq: 1 }));
+    expect(await stale).toBe(current);
+    await flush();
+    expect(appendsTo(from, "P")).toHaveLength(0);
+    expect(callsOf(from, "store_compact").filter((c) => xdoc(c) === "P")).toHaveLength(0);
+    const old = (await persistedOf("P")).filter((d) => d !== current);
+    expect(old).toHaveLength(1);
+    expect(await isClosed(old[0])).toBe(true);
+    expect(r.failures().has("P")).toBe(false);
+    expect(current.ydoc.getMap("actions").size).toBe(0);
+  });
+
+  it("no load starts while reloadFromServer waits for the set-aside", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    const heldLoad = hold("store_load");
+    const stale = r.doc("P");
+    await flush();
+    const from = tauri.calls.length;
+    const heldAside = hold("store_set_aside");
+    const reloading = r.reloadFromServer("P");
+    await flush();
+    expect(callsOf(from, "store_set_aside").map((c) => c.args)).toEqual([{ doc: "P" }]);
+    heldLoad.resolve(e.mem.answers.store_load({ doc: "P" }));
+    const joined = r.doc("P");
+    await flush();
+    expect(loadsOf(from, "P")).toBe(0);
+    heldAside.resolve(e.mem.answers.store_set_aside({ doc: "P" }));
+    await reloading;
+    expect(loadsOf(from, "P")).toBe(1);
+    const current = await r.doc("P");
+    expect(await stale).toBe(current);
+    expect(await joined).toBe(current);
+    expect(current.ydoc.getMap("actions").size).toBe(0);
+    await flush();
+    expect(loadsOf(from, "P")).toBe(1);
+    expect(appendsTo(from, "P")).toHaveLength(0);
+    expect(callsOf(from, "store_compact").filter((c) => xdoc(c) === "P")).toHaveLength(0);
+  });
+
+  it("an index retry replaces its recorded failure only with the new outcome", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedIndex(e.mem, "ix-S1", [ixAct("s1", [], [ip("R", false)])]);
+    e.mem.fail("store_load", "ix-S1", { code: "store.io", message: "Space disk full." });
+    const r = await open();
+    await flush();
+    expect(r.indexErrorDoc()).toBe("ix-S1");
+    e.mem.fail("store_load", "ix-S1", { code: "store.io", message: "Space disk still full." });
+    await r.retryIndex();
+    expect(r.indexErrorDoc()).toBe("ix-S1");
+    expect(r.indexError()?.message).toBe("Space disk still full.");
+    e.mem.recover("store_load", "ix-S1");
+    const broke = new Error("index broke");
+    vi.spyOn(IndexDoc, "open").mockRejectedValueOnce(broke);
+    expect(await rejection(r.retryIndex())).toBe(broke);
+    expect(r.indexErrorDoc()).toBe("ix-S1");
+    expect(r.indexError()?.message).toBe("Space disk still full.");
+    await r.retryIndex();
+    expect(r.indexError()).toBeNull();
+    expect(r.indexErrorDoc()).toBeNull();
   });
 
   it("close during a held warm load", async () => {

@@ -264,7 +264,7 @@ export class Registry {
 
   private async adopt(id: string, p: Promise<PersistedDoc>, d: PersistedDoc, record: boolean): Promise<PersistedDoc> {
     if (this.closed || this.memo.get(id) !== p) {
-      await d.close();
+      await d.discard();
       if (this.closed) throw new RegistryClosed(id);
       return this.load(id, record);
     }
@@ -559,9 +559,16 @@ export class Registry {
       await d.retry();
       return;
     }
-    this.indexFailed.delete(id);
     if (id === LOCAL_INDEX) throw new Error("The local plan list failed without a loaded document");
-    this.spaces.set(id, await this.openIndex(id));
+    let ix: IndexDoc;
+    try {
+      ix = await this.openIndex(id);
+    } catch (e) {
+      if (e instanceof AppError) this.indexFailed.set(id, e);
+      throw e;
+    }
+    this.indexFailed.delete(id);
+    this.spaces.set(id, ix);
   }
 
   spaceReadOnly(): boolean {
@@ -572,24 +579,33 @@ export class Registry {
     this.usable();
     if (this.spaceReadOnly()) throw new Refused(READ_ONLY);
     if (docId === LOCAL_INDEX) throw new Error("The local plan list is not loaded from the server");
-    await this.release(docId);
+    const p: Promise<PersistedDoc> = this.setAside(docId).then(
+      () =>
+        openPersisted(docId).then(
+          (d) => this.adopt(docId, p, d, true),
+          (e: unknown) => this.loadFailed(docId, p, true, e, []),
+        ),
+      (e: unknown) => this.loadFailed(docId, p, false, e, []),
+    );
+    this.memo.set(docId, p);
+    await p;
+    if (docId.startsWith(SPACE_PREFIX)) this.spaces.set(docId, await this.openIndex(docId));
+    this.notify();
+  }
+
+  private async setAside(id: string): Promise<void> {
+    await this.release(id);
     try {
-      await call<null>("store_set_aside", { doc: docId });
+      await call<null>("store_set_aside", { doc: id });
     } catch (e) {
       if (e instanceof AppError) {
-        this.record(docId, e);
+        this.record(id, e);
         this.notify();
       }
       throw e;
     }
-    this.failed.delete(docId);
-    this.indexFailed.delete(docId);
-    if (docId.startsWith(SPACE_PREFIX)) {
-      this.spaces.set(docId, await this.openIndex(docId));
-    } else {
-      await this.doc(docId);
-    }
-    this.notify();
+    this.failed.delete(id);
+    this.indexFailed.delete(id);
   }
 
   private async release(id: string): Promise<void> {
@@ -598,7 +614,7 @@ export class Registry {
     const ix = this.spaces.get(id);
     const d = this.loaded.get(id);
     const before = d?.error() ?? null;
-    this.detach(id);
+    this.unhook(id);
     if (ix !== undefined) {
       this.spaces.delete(id);
       if (d === undefined) throw new Error(`Index ${id} is open without a loaded document`);
@@ -612,10 +628,14 @@ export class Registry {
   }
 
   private detach(id: string): void {
+    this.unhook(id);
+    this.memo.delete(id);
+  }
+
+  private unhook(id: string): void {
     this.docOffs.get(id)?.();
     this.docOffs.delete(id);
     this.loaded.delete(id);
-    this.memo.delete(id);
   }
 
   settingsError(): AppError | null {

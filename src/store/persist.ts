@@ -14,6 +14,7 @@ export interface PersistedDoc {
   flush(): Promise<void>;
   compact(): Promise<void>;
   close(): Promise<void>;
+  discard(): Promise<void>;
 }
 
 const LOAD_ORIGIN: unique symbol = Symbol("LOAD_ORIGIN");
@@ -102,6 +103,8 @@ export async function openPersisted(id: string): Promise<PersistedDoc> {
   let dirty = load.records.length > 0;
   let bytesSince = load.records.reduce((n, r) => n + r.length, 0);
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let inFlight: Promise<AppError | null> | null = null;
+  let discarding: Promise<void> | null = null;
 
   const halt = (e: AppError): void => {
     failure = e;
@@ -132,7 +135,10 @@ export async function openPersisted(id: string): Promise<PersistedDoc> {
     try {
       while (queue.length > 0 && failure === null) {
         const op = queue[0];
-        const e = await send(op);
+        const sending = send(op);
+        inFlight = sending;
+        const e = await sending;
+        inFlight = null;
         if (e !== null) {
           halt(e);
         } else {
@@ -225,6 +231,23 @@ export async function openPersisted(id: string): Promise<PersistedDoc> {
         timer = null;
       }
       return settled();
+    },
+    discard() {
+      if (discarding !== null) return discarding;
+      closed = true;
+      listeners.clear();
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      const gone = new AppError("store.closed", `Document ${id} was discarded`);
+      queue
+        .splice(inFlight === null ? 0 : 1)
+        .flatMap((op) => op.waiters)
+        .forEach((w) => w.reject(gone));
+      const outcomeIgnored = (): void => undefined;
+      discarding = inFlight === null ? Promise.resolve() : inFlight.then(outcomeIgnored);
+      return discarding;
     },
   };
 }

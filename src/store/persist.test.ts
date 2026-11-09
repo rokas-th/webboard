@@ -288,6 +288,76 @@ describe("openPersisted", () => {
     });
     await expect(openPersisted("p1")).rejects.toMatchObject({ code: "store.corrupt", message: "seg-1.log: bad record" });
   });
+
+  it("discard on a dirty load never compacts", async () => {
+    const source = new Y.Doc();
+    const records: Uint8Array[] = [];
+    source.on("update", (u: Uint8Array) => records.push(u));
+    source.getMap("m").set("a", 1);
+    resetTauri({ store_load: () => encodeLoad({ records, lastSeq: 5 }), store_compact: () => null, store_append: () => null });
+    const p = await openPersisted("p1");
+    await p.discard();
+    await vi.advanceTimersByTimeAsync(COMPACT_EVERY_MS * 2);
+    expect(writes()).toEqual([]);
+    let thrown: unknown = null;
+    try {
+      p.ydoc.getMap("m").set("b", 2);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(AppError);
+    expect(thrown).toMatchObject({ code: "store.closed", message: "Document p1 was edited after close" });
+    await expect(p.compact()).rejects.toMatchObject({ code: "store.closed" });
+    await vi.advanceTimersByTimeAsync(COMPACT_EVERY_MS * 2);
+    expect(writes()).toEqual([]);
+  });
+
+  it("discard rejects queued appends and waits for the one in flight", async () => {
+    resetTauri({ store_load: () => encodeLoad({ lastSeq: 7 }), store_append: () => null, store_compact: () => null });
+    const p = await openPersisted("p1");
+    const first = hold("store_append");
+    p.ydoc.getMap("m").set("a", 1);
+    await settle();
+    const inFlight = p.flush();
+    p.ydoc.getMap("m").set("b", 2);
+    p.ydoc.getMap("m").set("c", 3);
+    const queued = p.flush();
+    const queuedOutcome = queued.then(
+      () => null,
+      (e: unknown) => e,
+    );
+    let done = false;
+    const discarded = p.discard().then(() => {
+      done = true;
+    });
+    const gone = await queuedOutcome;
+    expect(gone).toBeInstanceOf(AppError);
+    expect(gone).toMatchObject({ code: "store.closed", message: "Document p1 was discarded" });
+    await settle();
+    expect(done).toBe(false);
+    first.resolve(null);
+    await discarded;
+    await inFlight;
+    await vi.advanceTimersByTimeAsync(COMPACT_EVERY_MS * 2);
+    expect(writes().map((c) => [c.cmd, Number(headerOf(c, "x-seq"))])).toEqual([["store_append", 8]]);
+  });
+
+  it("discard resolves when the op in flight fails and tells no listener", async () => {
+    resetTauri({ store_load: () => encodeLoad({ lastSeq: 7 }), store_append: () => null });
+    const p = await openPersisted("p1");
+    const heard: AppError[] = [];
+    p.onError((e) => heard.push(e));
+    const first = hold("store_append");
+    p.ydoc.getMap("m").set("a", 1);
+    await settle();
+    const discarded = p.discard();
+    expect(p.discard()).toBe(discarded);
+    first.reject({ code: "store.io", message: "disk full" });
+    await expect(discarded).resolves.toBeUndefined();
+    await settle();
+    expect(heard).toEqual([]);
+    expect(writes()).toHaveLength(1);
+  });
 });
 
 describe("callBytes", () => {
