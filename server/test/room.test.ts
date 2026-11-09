@@ -202,7 +202,7 @@ describe('Room', () => {
     expect(await socket.closed).toEqual({ code: 1007, reason: 'Malformed message' });
   });
 
-  it('closes with 1011 and logs when the server cannot answer', async () => {
+  it('closes with 4500 and logs when the server cannot answer', async () => {
     const doc = 'send-failure';
     const logged = vi.spyOn(console, 'error');
     const socket = await raw(doc, DEV_A);
@@ -215,7 +215,7 @@ describe('Room', () => {
       });
     });
     socket.ws.send(emptyStep1());
-    expect(await socket.closed).toEqual({ code: 1011, reason: 'Server error' });
+    expect(await socket.closed).toEqual({ code: 4500, reason: 'Server error' });
     expect(
       logged.mock.calls.some(
         (call) =>

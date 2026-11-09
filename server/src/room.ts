@@ -100,7 +100,11 @@ export class Room extends YServer {
       await this.receive(conn, message);
     } catch (error) {
       console.error(`Room ${this.name} failed while handling a message:`, error);
-      conn.close(1011, 'Server error');
+      try {
+        conn.close(4500, 'Server error');
+      } catch (closing) {
+        console.error(`Room ${this.name} could not close the socket after that failure:`, closing);
+      }
     }
   }
 
