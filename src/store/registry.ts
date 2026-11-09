@@ -10,7 +10,7 @@ import type { ActionId, DeviceId } from "../log/types";
 import { PlanIncomplete, projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { region as regionCodec, validateWrite } from "../plan/units";
-import { notifyEach, systemClock, type Clock } from "../services/clock";
+import { collected, notifyEach, systemClock, type Clock } from "../services/clock";
 import { HolidayService } from "../services/holidays";
 import { AppError, call } from "../services/ipc";
 import { PlanDoc } from "./doc";
@@ -118,6 +118,13 @@ const sameDevices = (a: ReadonlyMap<DeviceId, string>, b: ReadonlyMap<DeviceId, 
 
 const afterEither = (): void => undefined;
 
+export class RegistryClosed extends Error {
+  constructor(id: string) {
+    super(`The registry closed while ${id} was loading`);
+    this.name = "RegistryClosed";
+  }
+}
+
 interface Tracker {
   log: LogState;
   projected: boolean;
@@ -149,6 +156,7 @@ export class Registry {
   private settingsQueue: Promise<void> = Promise.resolve();
   private indexRepairPending = false;
   private closed = false;
+  private closing: Promise<void> | null = null;
 
   private constructor(clock: Clock, settings: Settings, device: { deviceId: DeviceId; platform: DeviceInfo["platform"] }) {
     this.clock = clock;
@@ -175,9 +183,8 @@ export class Registry {
   }
 
   private async start(): Promise<void> {
-    const local = await IndexDoc.open(LOCAL_INDEX, this.deviceId, (id) => this.doc(id));
+    const local = await this.openIndex(LOCAL_INDEX);
     this.localIx = local;
-    this.indexRepairPending = this.loadedDoc(LOCAL_INDEX).repairedTornTail;
     if (!local.devices().has(this.deviceId)) {
       local.nameDevice(this.deviceId, defaultDeviceName(this.platform, Math.min(window.screen.width, window.screen.height)));
     }
@@ -191,9 +198,15 @@ export class Registry {
     ids.filter((id) => !isIndexDoc(id) && id !== PROBE && !listed.has(id)).forEach((id) => local.addPlan(id));
   }
 
+  private async openIndex(id: string): Promise<IndexDoc> {
+    const ix = await IndexDoc.open(id, this.deviceId, (d) => this.doc(d));
+    if (this.loadedDoc(id).repairedTornTail) this.indexRepairPending = true;
+    return ix;
+  }
+
   private async openSpace(id: string): Promise<IndexDoc | null> {
     try {
-      const ix = await IndexDoc.open(id, this.deviceId, (d) => this.doc(d));
+      const ix = await this.openIndex(id);
       this.spaces.set(id, ix);
       return ix;
     } catch (e) {
@@ -242,45 +255,55 @@ export class Registry {
     const memo = this.memo.get(id);
     if (memo !== undefined) return memo;
     const p: Promise<PersistedDoc> = openPersisted(id).then(
-      async (d) => {
-        if (this.closed) {
-          await d.close();
-          throw new Error(`The registry closed while ${id} was loading`);
-        }
-        this.attach(id, d);
-        return d;
-      },
-      (e: unknown) => {
-        if (this.memo.get(id) === p) this.memo.delete(id);
-        if (record && e instanceof AppError) {
-          this.record(id, e);
-          this.notify();
-        }
-        throw e;
-      },
+      (d) => this.adopt(id, p, d, record),
+      (e: unknown) => this.loadFailed(id, p, record, e, []),
     );
     this.memo.set(id, p);
     return p;
   }
 
-  private attach(id: string, d: PersistedDoc): void {
-    this.loaded.set(id, d);
-    const offError = d.onError((e) => {
-      if (!isIndexDoc(id)) this.failed.set(id, e);
-      this.notify();
-    });
-    if (isIndexDoc(id)) {
-      this.docOffs.set(id, offError);
-      return;
+  private async adopt(id: string, p: Promise<PersistedDoc>, d: PersistedDoc, record: boolean): Promise<PersistedDoc> {
+    if (this.closed || this.memo.get(id) !== p) {
+      await d.close();
+      if (this.closed) throw new RegistryClosed(id);
+      return this.load(id, record);
     }
-    const offTracker = this.track(id, d);
-    this.docOffs.set(id, () => {
-      offError();
-      offTracker();
-    });
+    try {
+      this.attach(id, d);
+    } catch (e) {
+      this.detach(id);
+      const closing = await d.close().then(
+        (): unknown[] => [],
+        (c: unknown) => [c],
+      );
+      return this.loadFailed(id, p, record, e, closing);
+    }
+    return d;
   }
 
-  private track(id: PlanId, d: PersistedDoc): () => void {
+  private loadFailed(id: string, p: Promise<PersistedDoc>, record: boolean, e: unknown, also: readonly unknown[]): never {
+    if (this.memo.get(id) === p) this.memo.delete(id);
+    if (record && e instanceof AppError) {
+      this.record(id, e);
+      this.notify();
+    }
+    throw collected([e, ...also], "failures while loading " + id);
+  }
+
+  private attach(id: string, d: PersistedDoc): void {
+    const offs: (() => void)[] = [];
+    this.loaded.set(id, d);
+    this.docOffs.set(id, () => offs.splice(0).forEach((off) => off()));
+    offs.push(
+      d.onError((e) => {
+        if (!isIndexDoc(id)) this.failed.set(id, e);
+        this.notify();
+      }),
+    );
+    if (!isIndexDoc(id)) this.track(id, d, offs);
+  }
+
+  private track(id: PlanId, d: PersistedDoc, offs: (() => void)[]): void {
     const map = d.ydoc.getMap("actions");
     const tracker: Tracker = { log: new LogState(planRules), projected: false, off: () => map.unobserve(observer) };
     const feed = (ids: readonly string[]): void => {
@@ -290,11 +313,11 @@ export class Registry {
     const observer = (event: Y.YMapEvent<unknown>): void => feed([...event.keysChanged]);
     this.trackers.set(id, tracker);
     map.observe(observer);
-    feed([...map.keys()]);
-    return () => {
+    offs.push(() => {
       tracker.off();
       if (this.trackers.get(id) === tracker) this.trackers.delete(id);
-    };
+    });
+    feed([...map.keys()]);
   }
 
   private project(id: PlanId, tracker: Tracker): void {
@@ -316,11 +339,7 @@ export class Registry {
     if (this.settings.names[id] === name) return false;
     this.settings = { ...this.settings, names: { ...this.settings.names, [id]: name } };
     void this.writeSettings().then(
-      () => {
-        if (this.settingsFailure === null) return;
-        this.settingsFailure = null;
-        this.notify();
-      },
+      () => undefined,
       (e: unknown) => {
         if (!(e instanceof AppError)) throw e;
         this.settingsFailure = e;
@@ -330,10 +349,15 @@ export class Registry {
     return true;
   }
 
-  private writeSettings(): Promise<void> {
+  private writeSettings(): Promise<boolean> {
     const run = this.settingsQueue.then(() => call<null>("settings_write", { settings: this.settings }));
     this.settingsQueue = run.then(afterEither, afterEither);
-    return run.then(afterEither);
+    return run.then(() => {
+      if (this.settingsFailure === null) return false;
+      this.settingsFailure = null;
+      this.notify();
+      return true;
+    });
   }
 
   private deps(): SessionDeps {
@@ -460,8 +484,14 @@ export class Registry {
 
   async setLastRegion(r: RegionRef): Promise<void> {
     this.usable();
+    const previous = this.settings.lastRegion;
     this.settings = { ...this.settings, lastRegion: r };
-    await this.writeSettings();
+    try {
+      await this.writeSettings();
+    } catch (e) {
+      if (this.settings.lastRegion === r) this.settings = { ...this.settings, lastRegion: previous };
+      throw e;
+    }
   }
 
   async warm(): Promise<void> {
@@ -470,6 +500,7 @@ export class Registry {
       if (this.closed) return;
       if (this.memo.has(id) || this.failed.has(id)) continue;
       await this.doc(id).then(afterEither, (e: unknown) => {
+        if (e instanceof RegistryClosed) return;
         if (!(e instanceof AppError) || this.failed.get(id) !== e) throw e;
       });
     }
@@ -491,11 +522,10 @@ export class Registry {
     const d = this.loaded.get(id);
     this.failed.delete(id);
     this.notify();
-    if (d !== undefined) {
-      await d.retry();
-      return;
-    }
-    await this.doc(id);
+    const attempt = d === undefined ? this.doc(id).then(afterEither) : d.retry();
+    await attempt.then(afterEither, (e: unknown) => {
+      if (!(e instanceof AppError) || this.failed.get(id) !== e) throw e;
+    });
   }
 
   private indexStates(): [string, AppError | null][] {
@@ -515,8 +545,12 @@ export class Registry {
     const failing = this.indexStates().flatMap(([id, e]) => (e === null ? [] : [id]));
     const results = await Promise.allSettled(failing.map((id) => this.retryIndexDoc(id)));
     this.notify();
-    const rejected = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
-    if (rejected !== undefined) throw rejected.reason;
+    const thrown = results.flatMap((r, i) => (r.status === "rejected" && !this.indexRecorded(failing[i], r.reason) ? [r.reason] : []));
+    if (thrown.length > 0) throw collected(thrown, "plan-list retries failed");
+  }
+
+  private indexRecorded(id: string, e: unknown): boolean {
+    return e instanceof AppError && (this.indexFailed.get(id) === e || this.loaded.get(id)?.error() === e);
   }
 
   private async retryIndexDoc(id: string): Promise<void> {
@@ -527,7 +561,7 @@ export class Registry {
     }
     this.indexFailed.delete(id);
     if (id === LOCAL_INDEX) throw new Error("The local plan list failed without a loaded document");
-    this.spaces.set(id, await IndexDoc.open(id, this.deviceId, (x) => this.doc(x)));
+    this.spaces.set(id, await this.openIndex(id));
   }
 
   spaceReadOnly(): boolean {
@@ -551,7 +585,7 @@ export class Registry {
     this.failed.delete(docId);
     this.indexFailed.delete(docId);
     if (docId.startsWith(SPACE_PREFIX)) {
-      this.spaces.set(docId, await IndexDoc.open(docId, this.deviceId, (id) => this.doc(id)));
+      this.spaces.set(docId, await this.openIndex(docId));
     } else {
       await this.doc(docId);
     }
@@ -563,13 +597,18 @@ export class Registry {
     if (session !== undefined) await session.close();
     const ix = this.spaces.get(id);
     const d = this.loaded.get(id);
+    const before = d?.error() ?? null;
     this.detach(id);
     if (ix !== undefined) {
       this.spaces.delete(id);
       if (d === undefined) throw new Error(`Index ${id} is open without a loaded document`);
-      await this.closing(ix.close(), d);
     }
-    if (d !== undefined) await this.closing(d.close(), d);
+    if (d === undefined) return;
+    try {
+      await (ix === undefined ? d.close() : ix.close());
+    } catch (e) {
+      if (before === null || e !== before) throw e;
+    }
   }
 
   private detach(id: string): void {
@@ -579,30 +618,22 @@ export class Registry {
     this.memo.delete(id);
   }
 
-  private async closing(done: Promise<void>, d: PersistedDoc): Promise<void> {
-    try {
-      await done;
-    } catch (e) {
-      if (e !== d.error()) throw e;
-    }
-  }
-
   settingsError(): AppError | null {
     return this.settingsFailure;
   }
 
   async retrySettings(): Promise<void> {
     this.usable();
-    let failure: AppError | null = null;
+    let notified: boolean;
     try {
-      await this.writeSettings();
+      notified = await this.writeSettings();
     } catch (e) {
       if (!(e instanceof AppError)) throw e;
-      failure = e;
+      this.settingsFailure = e;
+      this.notify();
+      return;
     }
-    this.settingsFailure = failure;
-    this.notify();
-    if (failure !== null) throw failure;
+    if (!notified) this.notify();
   }
 
   takeIndexRepairNotice(): string | null {
@@ -611,16 +642,23 @@ export class Registry {
     return INDEX_REPAIRED;
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    if (this.closing === null) this.closing = this.shutdown();
+    return this.closing;
+  }
+
+  private async shutdown(): Promise<void> {
     this.closed = true;
     this.offLocal?.();
     this.offLocal = null;
-    await Promise.all([...this.sessions.values()].map((s) => s.close()));
+    const sessions = await Promise.allSettled([...this.sessions.values()].map(async (s) => s.close()));
     const indexes = [...(this.localIx === null ? [] : [this.localIx]), ...this.spaces.values()];
-    await Promise.all(indexes.map((ix) => this.closing(ix.close(), this.loadedDoc(ix.id))));
+    const indexDocs = await Promise.allSettled(indexes.map(async (ix) => ix.close()));
     const docs = [...this.loaded];
     docs.forEach(([id]) => this.detach(id));
-    await Promise.all(docs.map(([, d]) => this.closing(d.close(), d)));
+    this.memo.clear();
+    const planDocs = await Promise.allSettled(docs.map(async ([, d]) => d.close()));
+    const thrown = [...new Set([...sessions, ...indexDocs, ...planDocs].flatMap((r) => (r.status === "rejected" ? [r.reason] : [])))];
+    if (thrown.length > 0) throw collected(thrown, "documents failed to close");
   }
 }

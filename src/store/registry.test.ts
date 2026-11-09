@@ -15,14 +15,18 @@ import { act } from "../test/act";
 import { CH_ZH_2026, CH_ZH_2027, FETCHED_AT } from "../test/fixtures/calendars";
 import { encodeLoad, memoryStore, type MemoryStore } from "../test/fixtures/store";
 import { ctxOf } from "../test/planCtx";
-import { resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
+import { hold, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
 import { decodeAction, encodeAction, PlanDoc } from "./doc";
 import { readActions } from "./read-actions";
 import { IndexDoc } from "./index-doc";
 import { openPersisted, type PersistedDoc } from "./persist";
-import { defaultDeviceName, Registry } from "./registry";
+import { defaultDeviceName, Registry, RegistryClosed } from "./registry";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
+vi.mock("./persist", async (importOriginal) => {
+  const m = await importOriginal<typeof import("./persist")>();
+  return { ...m, openPersisted: vi.fn(m.openPersisted) };
+});
 
 const TODAY = "2026-11-09";
 const ZH: RegionRef = { src: "openholidays", country: "CH", subdivision: "CH-ZH" };
@@ -87,9 +91,34 @@ const closeAll = async (): Promise<void> => {
   await Promise.all(opened.splice(0).map((r) => r.close()));
 };
 
+const forget = (r: Registry): void => {
+  opened.splice(opened.indexOf(r), 1);
+};
+
 afterEach(closeAll);
 
-beforeEach(() => resetTauri({}));
+afterEach(() => {
+  Reflect.deleteProperty(window.screen, "width");
+  Reflect.deleteProperty(window.screen, "height");
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+beforeEach(() => {
+  resetTauri({});
+  vi.mocked(openPersisted).mockClear();
+});
+
+const persistedOf = async (doc: string): Promise<PersistedDoc[]> =>
+  Promise.all(vi.mocked(openPersisted).mock.calls.flatMap(([id], i) => (id === doc ? [vi.mocked(openPersisted).mock.results[i].value] : [])));
+
+const isClosed = async (d: PersistedDoc): Promise<boolean> =>
+  d.compact().then(
+    () => false,
+    (e: unknown) => e instanceof AppError && e.code === "store.closed",
+  );
 
 const flush = async (): Promise<void> => {
   await new Promise<void>((r) => setTimeout(r, 0));
@@ -181,9 +210,11 @@ function remoteRaw(local: Y.Doc, id: ActionId, raw: unknown): void {
   Y.applyUpdate(local, Y.encodeStateAsUpdate(r, Y.encodeStateVector(local)));
 }
 
-const headsOf = (ydoc: Y.Doc): ActionId[] => {
+const headsOf = (ydoc: Y.Doc, unreadableIds: readonly ActionId[] = []): ActionId[] => {
   const log = new LogState({ same: (_u, a, b) => JSON.stringify(a) === JSON.stringify(b), mergeDerived: (u) => { throw new Error(u); } });
-  log.add(readActions(ydoc.getMap("actions").entries(), () => undefined).ok);
+  const { ok, unreadable } = readActions(ydoc.getMap("actions").entries(), () => undefined);
+  expect(unreadable.map((u) => u.id)).toEqual(unreadableIds);
+  log.add(ok);
   return [...log.heads];
 };
 
@@ -363,8 +394,11 @@ describe("Registry: creating plans", () => {
     expect(planOf(r, "P").name).toBe("Bridge");
     expect(r.settingsError()?.code).toBe("settings.io");
     e.state.writeFail = { code: "settings.io", message: "second" };
-    expect(codeOf(await rejection(r.retrySettings()))).toBe("settings.io");
+    const cb = vi.fn();
+    r.subscribe(cb);
+    await r.retrySettings();
     expect(r.settingsError()?.message).toBe("second");
+    expect(cb).toHaveBeenCalled();
     e.state.writeFail = null;
     const from = tauri.calls.length;
     await r.retrySettings();
@@ -481,7 +515,6 @@ describe("Registry: sessions and devices", () => {
     env({ platform: "ios" });
     const pad = await open();
     expect(pad.device.name).toBe("iPad");
-    setScreen(0, 0);
   });
 
   it("defaultDeviceName", () => {
@@ -647,7 +680,7 @@ describe("IndexDoc", () => {
     const cb = vi.fn();
     r.subscribe(cb);
     const local = (await r.doc("local")).ydoc;
-    remoteRaw(local, "id-W", encodeAction(act("id-W", headsOf(local), [own("ip:P", 5)], { dev: "dev-B" })));
+    remoteRaw(local, "id-W", encodeAction(act("id-W", headsOf(local, ["id-M"]), [own("ip:P", 5)], { dev: "dev-B" })));
     expect(cb).toHaveBeenCalled();
     expect(r.indexUnreadable()).toEqual([
       expected[0].message,
@@ -886,7 +919,7 @@ describe("Registry: listing and loading", () => {
     await r.warm();
     expect(r.failures().get("P")?.code).toBe("store.locked");
     e.mem.fail("store_load", "P", { code: "store.corrupt", message: "P: a record is damaged" });
-    expect(codeOf(await rejection(r.retryPlan("P")))).toBe("store.corrupt");
+    await r.retryPlan("P");
     expect(r.failures().get("P")?.code).toBe("store.corrupt");
     expect([...r.failures().keys()].filter((k) => k === "P")).toHaveLength(1);
     e.mem.recover("store_load", "P");
@@ -1029,5 +1062,271 @@ describe("Registry: reloadFromServer", () => {
     expect(ri.indexErrorDoc()).toBe("ix-S1");
     await flush();
     expect(callsOf(from2, "store_append")).toHaveLength(0);
+  });
+});
+
+describe("Registry: lifecycle and failures", () => {
+  const REPAIRED = "The last change to the plan list before WebBoard closed was not saved.";
+
+  it("index repair notice from a space index", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing());
+    seedIndex(e.mem, "ix-S1", [ixAct("s1", [], [ip("R", false)])]);
+    tauri.answers.store_load = (args, o) => {
+      if (docOfArgs({ cmd: "store_load", args, options: o }) === "ix-S1") return encodeLoad({ torn: true, lastSeq: 0 });
+      return e.mem.answers.store_load(args, o);
+    };
+    const r = await open();
+    expect(r.indexError()).toBeNull();
+    expect(r.takeIndexRepairNotice()).toBe(REPAIRED);
+    expect(r.takeIndexRepairNotice()).toBeNull();
+    await closeAll();
+
+    const f = env();
+    seedIndex(f.mem, "local", listing());
+    seedIndex(f.mem, "ix-S1", [ixAct("s1", [], [ip("R", false)])]);
+    f.mem.fail("store_load", "ix-S1", { code: "store.io", message: "Disk full." });
+    const g = await open();
+    expect(g.indexErrorDoc()).toBe("ix-S1");
+    expect(g.takeIndexRepairNotice()).toBeNull();
+    tauri.answers.store_load = (args, o) => {
+      if (docOfArgs({ cmd: "store_load", args, options: o }) === "ix-S1") return encodeLoad({ torn: true, lastSeq: 0 });
+      return f.mem.answers.store_load(args, o);
+    };
+    await g.retryIndex();
+    expect(g.indexError()).toBeNull();
+    expect(g.takeIndexRepairNotice()).toBe(REPAIRED);
+    expect(g.takeIndexRepairNotice()).toBeNull();
+  });
+
+  it("close reports a failed final compact", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    await r.warm();
+    e.mem.fail("store_compact", "P", { code: "store.io", message: "Disk full." });
+    const err = await rejection(r.close());
+    forget(r);
+    expect(err).toBeInstanceOf(AppError);
+    expect(err).toMatchObject({ code: "store.io", message: "Disk full." });
+  });
+
+  it("reloadFromServer discards a doc that failed to save", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha", { items: ["A"] });
+    const r = await open();
+    await r.warm();
+    await flush();
+    e.mem.fail("store_append", "P", { code: "store.corrupt", message: "P: a record is damaged" });
+    const ydoc = (await r.doc("P")).ydoc;
+    remote(ydoc, () => ({ t: "rename", item: itemNamed(ydoc, "A"), name: "North" }));
+    await flush();
+    expect(r.failures().get("P")?.code).toBe("store.corrupt");
+    await r.reloadFromServer("P");
+    expect(r.failures().has("P")).toBe(false);
+    expect((await r.doc("P")).ydoc.getMap("actions").size).toBe(0);
+  });
+
+  it("reloadFromServer reports a failure that first happens while discarding", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    await r.warm();
+    e.mem.fail("store_compact", "P", { code: "store.io", message: "Disk full." });
+    const from = tauri.calls.length;
+    const err = await rejection(r.reloadFromServer("P"));
+    expect(codeOf(err)).toBe("store.io");
+    expect(callsOf(from, "store_set_aside")).toHaveLength(0);
+  });
+
+  it("close closes every document when a session close fails", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    const s = await r.session("P");
+    const broke = new Error("session broke");
+    vi.spyOn(s, "close").mockRejectedValue(broke);
+    const from = tauri.calls.length;
+    const err = await rejection(r.close());
+    forget(r);
+    expect(err).toBe(broke);
+    await flush();
+    expect(callsOf(from, "store_compact").map(xdoc).sort()).toEqual(["P", "local"]);
+    const docs = [...(await persistedOf("local")), ...(await persistedOf("P"))];
+    expect(docs).toHaveLength(2);
+    expect(await Promise.all(docs.map(isClosed))).toEqual([true, true]);
+    expect(await rejection(r.close())).toBe(broke);
+  });
+
+  it("close collects every failure", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    await r.warm();
+    e.mem.fail("store_compact", "local", { code: "store.io", message: "Local disk full." });
+    e.mem.fail("store_compact", "P", { code: "store.io", message: "Plan disk full." });
+    const err = await rejection(r.close());
+    forget(r);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).toMatchObject({ message: "2 documents failed to close; the first: Local disk full." });
+    expect(err).toHaveProperty("cause.code", "store.io");
+  });
+
+  it("index close keeps its failure", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    const ix = await IndexDoc.open("local", "dev-A", openPersisted);
+    e.mem.fail("store_compact", "local", { code: "store.io", message: "Disk full." });
+    const first = await rejection(ix.close());
+    expect(codeOf(first)).toBe("store.io");
+    expect(await rejection(ix.close())).toBe(first);
+  });
+
+  it("a load that settles after reloadFromServer is closed", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    const plan = seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    const held = hold("store_load");
+    const stale = r.doc("P");
+    await flush();
+    await r.reloadFromServer("P");
+    const current = await r.doc("P");
+    expect(current.ydoc.getMap("actions").size).toBe(0);
+    const from = tauri.calls.length;
+    held.resolve(encodeLoad({ snapshot: Y.encodeStateAsUpdate(plan), lastSeq: 1 }));
+    expect(await stale).toBe(current);
+    await flush();
+    expect(planOf(r, "P").loaded).toBe(false);
+    const docs = await persistedOf("P");
+    expect(docs).toHaveLength(2);
+    const old = docs.filter((d) => d !== current);
+    expect(old).toHaveLength(1);
+    expect(await isClosed(old[0])).toBe(true);
+    expect(appendsTo(from, "P")).toHaveLength(0);
+    expect(r.failures().has("P")).toBe(false);
+  });
+
+  it("close during a held warm load", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    const from = tauri.calls.length;
+    const held = hold("store_load");
+    const warming = r.warm();
+    await flush();
+    expect(loadsOf(from, "P")).toBe(1);
+    await r.close();
+    held.resolve(e.mem.answers.store_load({ doc: "P" }));
+    await warming;
+    const docs = await persistedOf("P");
+    expect(docs).toHaveLength(1);
+    expect(await isClosed(docs[0])).toBe(true);
+    expect(() => r.doc("P")).toThrow("The registry is closed");
+    expect(RegistryClosed.prototype).toBeInstanceOf(Error);
+    expect(new RegistryClosed("P").message).toBe("The registry closed while P was loading");
+  });
+
+  it("a load whose attach throws leaves nothing attached", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    const boom = new Error("subscriber broke");
+    const cb = vi.fn(() => {
+      throw boom;
+    });
+    const off = r.subscribe(cb);
+    const err = await rejection(r.doc("P"));
+    off();
+    expect(err).toBe(boom);
+    expect(cb).toHaveBeenCalled();
+    expect(planOf(r, "P").loaded).toBe(false);
+    const [first] = await persistedOf("P");
+    expect(await isClosed(first)).toBe(true);
+    const from = tauri.calls.length;
+    const again = await r.doc("P");
+    expect(loadsOf(from, "P")).toBe(1);
+    expect(again).not.toBe(first);
+    expect(planOf(r, "P").loaded).toBe(true);
+  });
+
+  it("retryIndex rejects only with a fault it could not record", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedIndex(e.mem, "ix-S1", [ixAct("s1", [], [ip("R", false)])]);
+    e.mem.fail("store_load", "ix-S1", { code: "store.io", message: "Space disk full." });
+    const r = await open();
+    await flush();
+    e.mem.fail("store_append", "local", { code: "store.io", message: "Local disk full." });
+    r.trashPlan("P");
+    await flush();
+    expect(r.indexErrorDoc()).toBe("local");
+    const cb = vi.fn();
+    r.subscribe(cb);
+    await r.retryIndex();
+    expect(r.indexError()?.message).toBe("Local disk full.");
+    expect(cb).toHaveBeenCalled();
+    e.mem.recover("store_load", "ix-S1");
+    const broke = new Error("index broke");
+    vi.spyOn(IndexDoc, "open").mockRejectedValueOnce(broke);
+    cb.mockClear();
+    const err = await rejection(r.retryIndex());
+    expect(err).toBe(broke);
+    expect(r.indexError()?.message).toBe("Local disk full.");
+    expect(r.indexErrorDoc()).toBe("local");
+    expect(cb).toHaveBeenCalled();
+    const held = r.indexError();
+    forget(r);
+    expect(await rejection(r.close())).toBe(held);
+  });
+
+  it("setLastRegion rolls back when its write fails", async () => {
+    const e = env();
+    const r = await open({ clock: fixedClock(TODAY) });
+    e.state.writeFail = { code: "settings.io", message: "Could not save settings.json: disk full" };
+    expect(codeOf(await rejection(r.setLastRegion(ZH)))).toBe("settings.io");
+    expect(r.settingsError()).toBeNull();
+    e.state.writeFail = null;
+    const from = tauri.calls.length;
+    const id = await r.createPlan("A");
+    expect(callsOf(from, "holidays_year")).toHaveLength(0);
+    expect(new Map([...new PlanDoc((await r.doc(id)).ydoc).actions()][0].w.map((x) => [x.u, x.v])).get("cr")).toBeNull();
+  });
+
+  it("a successful settings write clears the settings error", async () => {
+    const e = env();
+    const r = await open({ clock: fixedClock(TODAY) });
+    e.state.writeFail = { code: "settings.io", message: "Could not save settings.json: disk full" };
+    await r.createPlan("Beta");
+    await flush();
+    expect(r.settingsError()?.code).toBe("settings.io");
+    e.state.writeFail = null;
+    const cb = vi.fn();
+    r.subscribe(cb);
+    await r.setLastRegion(ZH);
+    expect(r.settingsError()).toBeNull();
+    expect(cb).toHaveBeenCalled();
+  });
+
+  it("a remote device name must be normalised", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", [
+      ixAct("a1", [], [ip("P", false)]),
+      ixAct("id-S", ["a1"], [own("dn:dev-B", "  ")], "dev-B", "Name device"),
+      ixAct("id-T", ["a1"], [own("dn:dev-B", "a\nb")], "dev-B", "Name device"),
+    ]);
+    const ix = await IndexDoc.open("local", "dev-A", openPersisted);
+    const bad = (id: string) => ({ id, message: "A change to the plan list from Device dev- could not be read: Malformed value for “dn:dev-B”. Update WebBoard on this device." });
+    expect(ix.unreadable()).toEqual([bad("id-S"), bad("id-T")]);
+    expect(ix.devices()).toEqual(new Map());
+    expect(ix.plans()).toEqual([{ id: "P", trashed: false }]);
+    await ix.close();
   });
 });

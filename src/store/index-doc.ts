@@ -41,11 +41,13 @@ const LABEL = {
 const isTrash = (v: unknown): v is { t: boolean } =>
   typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length === 1 && "t" in v && typeof v.t === "boolean";
 
+const isDeviceName = (v: unknown): boolean => typeof v === "string" && v.trim().length > 0 && normalizeName(v) === v;
+
 function checkIndexWrite(w: Write): void {
   const plan = w.u.startsWith(PLAN) && w.u.length > PLAN.length;
   const device = w.u.startsWith(DEVICE) && w.u.length > DEVICE.length;
   if (!plan && !device) throw new Error(`Unknown unit key “${w.u}”`);
-  if (plan ? !isTrash(w.v) : typeof w.v !== "string" || w.v.length === 0) throw new Error(`Malformed value for “${w.u}”`);
+  if (plan ? !isTrash(w.v) : !isDeviceName(w.v)) throw new Error(`Malformed value for “${w.u}”`);
   if (w.c !== "own") throw new Error(`${w.u}: ${w.c} cannot write this unit`);
 }
 
@@ -65,7 +67,7 @@ export class IndexDoc {
   private readonly bad = new Map<ActionId, Bad>();
   private readonly devOf = new Map<ActionId, DeviceId>();
   private readonly subscribers = new Set<() => void>();
-  private closed = false;
+  private closing: Promise<void> | null = null;
 
   private constructor(id: string, dev: DeviceId, doc: PersistedDoc) {
     this.id = id;
@@ -147,7 +149,7 @@ export class IndexDoc {
   }
 
   private append(lbl: string, w: readonly Write[]): void {
-    if (this.closed) throw new Error(`Index ${this.id} is closed`);
+    if (this.closing !== null) throw new Error(`Index ${this.id} is closed`);
     w.forEach(checkIndexWrite);
     const action: Action = { id: newId(), dev: this.dev, ses: this.ses, at: Date.now(), par: [...this.log.heads], lbl, w };
     this.planDoc.append(action, []);
@@ -190,11 +192,12 @@ export class IndexDoc {
     };
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    this.actionMap.unobserve(this.observer);
-    this.subscribers.clear();
-    await this.doc.close();
+  close(): Promise<void> {
+    if (this.closing === null) {
+      this.actionMap.unobserve(this.observer);
+      this.subscribers.clear();
+      this.closing = this.doc.close();
+    }
+    return this.closing;
   }
 }

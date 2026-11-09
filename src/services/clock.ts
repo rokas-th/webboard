@@ -17,10 +17,13 @@ export function notifyEach(subscribers: Iterable<() => void>): void {
       return [e];
     }
   });
-  if (thrown.length === 0) return;
-  if (thrown.length === 1) throw thrown[0];
+  if (thrown.length > 0) throw collected(thrown, "subscribers threw");
+}
+
+export function collected(thrown: readonly unknown[], what: string): unknown {
+  if (thrown.length === 1) return thrown[0];
   const first = thrown[0];
-  throw Object.assign(new Error(`${thrown.length} subscribers threw; the first: ${first instanceof Error ? first.message : String(first)}`), { cause: first });
+  return Object.assign(new Error(`${thrown.length} ${what}; the first: ${first instanceof Error ? first.message : String(first)}`), { cause: first });
 }
 
 function makeSystemClock(): Clock {
