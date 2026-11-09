@@ -48,7 +48,7 @@ const goneSet = (plan: PlanState): ReadonlySet<ItemId> => {
   return new Set([...gone].filter(([, g]) => g).map(([id]) => id));
 };
 
-const lockOf = (status: Status, held: boolean): Lock | null =>
+export const lockOf = (status: Status | undefined, held: boolean): Lock | null =>
   status === "done" ? "done" : status === "doing" ? "doing" : held ? "held" : null;
 
 const basis = (plan: PlanState, held: ReadonlySet<ItemId>): Basis => {

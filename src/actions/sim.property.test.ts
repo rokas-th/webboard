@@ -268,6 +268,11 @@ describe("simulated devices", () => {
     expect(run(188).stalePops).toBeGreaterThan(0);
   });
 
+  it("simulate(1605) completes: a delete choice over an item created inside the trashed group resolves", () => {
+    const sim = run(1605);
+    expect(sim.built.filter((b) => b.kind === "resolve" && b.choice?.kind === "delete").length).toBeGreaterThan(0);
+  });
+
   it(
     "the runs exercise clashes, resolutions, undo, pushes into held items' neighbours, restores and note races",
     () => {

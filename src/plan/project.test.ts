@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { applyWrites, childrenOf, liveLinks, PlanIncomplete, projectPlan, trashRoots } from "./project";
+import { applySchedules, applyWrites, childrenOf, liveLinks, PlanIncomplete, projectPlan, trashRoots } from "./project";
 import { planRules } from "./rules";
 import { derive } from "../domain/derive";
 import { LogState } from "../log/state";
@@ -337,5 +337,33 @@ describe("applyWrites", () => {
     const writes = [w("n:C", "First"), w("n:C", "Second")];
     expect(() => applyWrites(projectPlan("P", log), writes)).toThrow(new Error("applyWrites: n:C written twice"));
     expect(log.fork().add([act("h1", log.heads, writes)]).refused.map((r) => r.id)).toEqual(["h1"]);
+  });
+});
+
+describe("applySchedules", () => {
+  const moves: Write[] = [w("s:C", sched("2026-11-18", 4)), w("s:D", sched("2026-11-24", 2))];
+
+  it("equals projectPlan after adding schedule writes", () => {
+    const log = groups();
+    const a = act("h1", log.heads, moves);
+    expect(applySchedules(projectPlan("P", log), a.w)).toEqual(projectPlan("P", withAction(log, a)));
+  });
+
+  it("makes a plan applyWrites takes", () => {
+    const log = groups();
+    const a = act("h1", log.heads, moves);
+    const b = act("h2", ["h1"], [w("n:C", "Spec it"), w("e:G", { k: "group", t: true })]);
+    const moved = applySchedules(projectPlan("P", log), a.w);
+    expect(applyWrites(moved, b.w)).toEqual(projectPlan("P", withAction(withAction(log, a), b)));
+  });
+
+  it("refuses writes other than schedules, a group's schedule, a task under one day and a plan it did not project", () => {
+    const plan = projectPlan("P", groups());
+    expect(() => applySchedules(plan, [w("n:C", "X")])).toThrow(new Error("applySchedules cannot apply n:C"));
+    expect(() => applySchedules(plan, [w("s:G", sched("2026-11-16"))])).toThrow(new Error("Group G has a schedule"));
+    expect(() => applySchedules(plan, [w("s:C", sched("2026-11-16", 0))])).toThrow(new Error("Task C has a duration under 1 working day"));
+    expect(() => applySchedules(plan, [w("s:N", sched("2026-11-16"))])).toThrow(new Error("applySchedules: no item N"));
+    expect(() => applySchedules(plan, [moves[0], moves[0]])).toThrow(new Error("applySchedules: s:C written twice"));
+    expect(() => applySchedules({ ...plan }, moves)).toThrow(new Error("applySchedules needs a plan made by projectPlan or applyWrites"));
   });
 });

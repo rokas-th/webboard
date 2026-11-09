@@ -1,13 +1,13 @@
 import { generateKeyBetween } from "fractional-indexing";
 import { regionKey, workCalendar, type Calendar, type Closure, type Tuning, type WorkCalendar } from "../domain/calendar";
 import { toDay, toIso, type Day, type IsoDate } from "../domain/dates";
-import { derive, schedView, type Derived } from "../domain/derive";
+import { derive, lockOf, schedView, type Derived } from "../domain/derive";
 import { linkKey, type Item, type ItemId, type Link, type PlanState, type Schedule } from "../domain/model";
-import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type Lock, type PushResult, type RecalResult, type Sched, type SchedView, type Stop } from "../domain/schedule";
+import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type PushResult, type RecalResult, type Sched, type SchedView, type Stop } from "../domain/schedule";
 import { newId } from "../log/ids";
 import type { Action, DeviceId, SessionId, UnitKey, Write } from "../log/types";
 import { heldItems } from "../plan/choices";
-import { applyWrites, childrenOf, liveLinks } from "../plan/project";
+import { applySchedules, applyWrites, childrenOf, liveLinks } from "../plan/project";
 import { planRules } from "../plan/rules";
 import * as codec from "../plan/units";
 import { key, validateWrite } from "../plan/units";
@@ -492,13 +492,12 @@ const mergedDerived = (ws: readonly Write[]): Map<UnitKey, Write> =>
     return m.set(x.u, earlier === undefined ? x : planRules.mergeDerived(x.u, earlier, x));
   }, new Map<UnitKey, Write>());
 
-const lockedBefore = (ctx: Ctx, view: SchedView, held: ReadonlySet<ItemId>): SchedView => {
-  const before = (id: ItemId): Lock | null => {
-    const status = ctx.view.derived.status.get(id);
-    return status === "done" ? "done" : status === "doing" ? "doing" : held.has(id) ? "held" : null;
-  };
-  return { ...view, items: new Map([...view.items].map(([id, s]): [ItemId, Sched] => [id, s.lock !== null ? s : { ...s, lock: before(id) }])) };
-};
+const lockedBefore = (ctx: Ctx, view: SchedView, held: ReadonlySet<ItemId>): SchedView => ({
+  ...view,
+  items: new Map(
+    [...view.items].map(([id, s]): [ItemId, Sched] => [id, s.lock !== null ? s : { ...s, lock: lockOf(ctx.view.derived.status.get(id), held.has(id)) }]),
+  ),
+});
 
 const startsOnly = (plan: PlanState, ownWrites: readonly Write[]): ReadonlyMap<ItemId, Schedule> | null => {
   const moved = new Map<ItemId, Schedule>();
@@ -531,20 +530,9 @@ const movedView = (plan: PlanState, held: ReadonlySet<ItemId>, moved: ReadonlyMa
   };
 };
 
-const withSchedules = (plan: PlanState, moved: ReadonlyMap<ItemId, Schedule>): PlanState => ({
-  ...plan,
-  items: new Map(
-    [...plan.items].map(([id, it]): [ItemId, Item] => {
-      const next = moved.get(id);
-      return [id, next === undefined ? it : { ...it, schedule: next }];
-    }),
-  ),
-});
-
-const afterAll = (plan: PlanState, writes: readonly Write[]): PlanState => {
-  const moved = startsOnly(plan, writes);
-  return moved === null ? applyWrites(plan, writes) : withSchedules(plan, moved);
-};
+export function planAfter(plan: PlanState, writes: readonly Write[]): PlanState {
+  return startsOnly(plan, writes) === null ? applyWrites(plan, writes) : applySchedules(plan, writes);
+}
 
 export function withDerived(ctx: Ctx, ownWrites: readonly Write[], roots: readonly ItemId[], held: ReadonlySet<ItemId>): Derivation {
   const plan = ctx.view.plan;
@@ -620,7 +608,7 @@ export function buildAction(ctx: Ctx, intent: Intent): Built {
   const draft = draftOf(ctx, intent);
   if (draft.own.every((x) => sameAsCurrent(ctx, x))) throw new Refused(refusal.nothing);
   const first = withDerived(ctx, draft.own, draft.roots, ctx.view.held);
-  const firstAfter = afterAll(plan, first.writes);
+  const firstAfter = planAfter(plan, first.writes);
   const firstNext = derive(firstAfter, ctx.view.held, ctx.view.today);
   const years = newHolidayYears(ctx, draft.own, firstAfter, firstNext);
   const calendarWrites = [...draft.own.filter(isCalendarWrite), ...years];

@@ -1,6 +1,6 @@
 import type { Calendar, Closure, HolidayYear, Tuning } from "../domain/calendar";
 import type { IsoDate } from "../domain/dates";
-import type { Baseline, BaselineId, Item, ItemId, ItemKind, Link, LinkKey, PlanId, PlanState } from "../domain/model";
+import type { Baseline, BaselineId, Item, ItemId, ItemKind, Link, LinkKey, PlanId, PlanState, Schedule } from "../domain/model";
 import type { LogState } from "../log/state";
 import type { UnitKey, Write } from "../log/types";
 import { decodeAs, decodeUnit, parseKey, validateWrite, type UnitKind } from "./units";
@@ -207,6 +207,37 @@ export function applyWrites(plan: PlanState, w: readonly Write[]): PlanState {
     live.set(x.u, x.v);
   });
   return build(plan.id, { live, latest: t.latest });
+}
+
+export function applySchedules(plan: PlanState, w: readonly Write[]): PlanState {
+  const t = tables.get(plan);
+  if (t === undefined) throw new Error("applySchedules needs a plan made by projectPlan or applyWrites");
+  const live = new Map(t.live);
+  const moved = new Map<ItemId, Schedule>();
+  w.forEach((x) => {
+    const k = parseKey(x.u);
+    if (k.kind !== "s") throw new Error(`applySchedules cannot apply ${x.u}`);
+    if (moved.has(k.arg)) throw new Error(`applySchedules: ${x.u} written twice`);
+    const it = plan.items.get(k.arg);
+    if (it === undefined) throw new Error(`applySchedules: no item ${k.arg}`);
+    if (it.kind === "group") throw new Error(`Group ${k.arg} has a schedule`);
+    validateWrite(x);
+    const schedule = decodeAs("sched", x.u, x.v);
+    if (it.kind === "task" && schedule.dur < 1) throw new Error(`Task ${k.arg} has a duration under 1 working day`);
+    moved.set(k.arg, schedule);
+    live.set(x.u, x.v);
+  });
+  const next: PlanState = {
+    ...plan,
+    items: new Map(
+      [...plan.items].map(([id, it]): [ItemId, Item] => {
+        const schedule = moved.get(id);
+        return [id, schedule === undefined ? it : { ...it, schedule }];
+      }),
+    ),
+  };
+  tables.set(next, { live, latest: t.latest });
+  return next;
 }
 
 export function childrenOf(plan: PlanState, parent: ItemId | null): readonly Item[] {

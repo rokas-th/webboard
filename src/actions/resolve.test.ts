@@ -645,3 +645,50 @@ describe("sides with no value of their own", () => {
     expect(after.view.choices).toEqual([]);
   });
 });
+
+describe("an item created inside a group trashed apart (Ruling A'')", () => {
+  const TRASHED: Write[] = [...item("G", "group", "Phase", null, "a0"), ...item("A", "task", "A", "G", "a0", sched("2026-11-16", 2))];
+  const trash = act("t", ["a0"], [w("e:G", { k: "group", t: true })], mac);
+  const create = act("c", ["a0"], item("X", "task", "Extra", "G", "a1", sched("2026-11-18", 2)), iph);
+
+  it("seed 1605: picking the trash side keeps the group trashed and leaves the created item in the Trash with its creator's values", () => {
+    const ctx = ctxFrom(TRASHED, trash, create);
+    const c = only(ctx);
+    expect(c.kind).toBe("delete");
+    expect(c.units).toEqual(["e:G", "n:X", "p:X", "s:X"]);
+    const was = snapshot(ctx.log);
+    const b = buildResolve(ctx, c, { side: "t" }, ON);
+    expect(b.action.w).toEqual([w("e:G", { k: "group", t: true }, "resolution")]);
+    expect(b.action.lbl).toBe("Kept the Mac version of 2 items");
+    expect(b.toast).toBe("Kept the Mac version of 2 items.");
+    const rp = previewResolve(ctx, c, { side: "t" }, ON);
+    expect(rp.preview).toEqual(b.preview);
+    expect(rp.rows.map((r) => r.item)).toEqual(["G", "X"]);
+    expect(snapshot(ctx.log)).toEqual(was);
+    const after = applied(ctx, b);
+    expect(after.view.plan.items.get("G")?.trashed).toBe(true);
+    expect(after.view.plan.items.get("X")?.trashed).toBe(true);
+    expect(after.view.plan.items.get("X")?.name).toBe("Extra");
+    expect(after.view.plan.items.get("X")?.place).toEqual({ parent: "G", order: "a1" });
+    expect(after.view.plan.items.get("X")?.schedule).toEqual({ start: "2026-11-18", dur: 2, status: "todo", progress: 0, horizon: "later" });
+    expect(after.view.choices).toEqual([]);
+  });
+
+  it("seed 1605: picking the creating side restores the group with the created item live", () => {
+    const ctx = ctxFrom(TRASHED, trash, create);
+    const c = only(ctx);
+    const b = buildResolve(ctx, c, { side: "c" }, ON);
+    expect(b.action.w).toEqual([
+      w("e:G", { k: "group", t: false }, "resolution"),
+      w("n:X", "Extra", "resolution"),
+      w("p:X", ["G", "a1"], "resolution"),
+      w("s:X", sched("2026-11-18", 2), "resolution"),
+    ]);
+    const after = applied(ctx, b);
+    expect(after.view.plan.items.get("G")?.trashed).toBe(false);
+    expect(after.view.plan.items.get("X")?.trashed).toBe(false);
+    expect(after.view.plan.items.get("X")?.name).toBe("Extra");
+    expect(after.view.plan.items.get("X")?.place).toEqual({ parent: "G", order: "a1" });
+    expect(after.view.choices).toEqual([]);
+  });
+});

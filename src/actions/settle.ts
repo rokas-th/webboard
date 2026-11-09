@@ -14,7 +14,7 @@ export const isCalendarWrite = (x: Write): boolean => CALENDAR_UNITS.has(parseKe
 
 export const unique = <T>(xs: readonly T[]): T[] => [...new Set(xs)];
 
-const ITEM_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["e", "n", "s", "p", "r"]);
+export const ITEM_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["e", "n", "s", "p", "r"]);
 
 export const itemOfUnit = (u: UnitKey): ItemId | null => {
   const k = parseKey(u);

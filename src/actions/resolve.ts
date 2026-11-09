@@ -12,7 +12,7 @@ import { decodeAs, parseKey, validateWrite } from "../plan/units";
 import { previewOf, withDerived, type Derivation } from "./build";
 import { calendarSuffix, items, toastOf } from "./copy";
 import type { Built, Ctx, Preview } from "./intents";
-import { forkWith, subjectOf, unique } from "./settle";
+import { forkWith, ITEM_KINDS, subjectOf, unique } from "./settle";
 
 export { settleText } from "./settle";
 
@@ -69,16 +69,14 @@ const valueApart = (ctx: Ctx, u: UnitKey, others: ReadonlySet<ActionId>): { v: u
   return { v: x.v };
 };
 
-const valueOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): unknown => {
-  if (side.values.has(u)) return side.values.get(u);
+const valueOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): { v: unknown } | null => {
+  if (side.values.has(u)) return { v: side.values.get(u) };
   const others = othersOf(choice, side);
   if (isActivity(u)) {
     const without = ctx.log.valueWithout(u, others);
-    return without === undefined ? true : without.value;
+    return { v: without === undefined ? true : without.value };
   }
-  const got = valueApart(ctx, u, others);
-  if (got === null) throw new Error(`Side ${side.key} of choice ${choice.id} has no value for ${u}`);
-  return got.v;
+  return valueApart(ctx, u, others);
 };
 
 const latestOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): unknown => {
@@ -91,6 +89,17 @@ const latestOn = (ctx: Ctx, choice: Choice, side: ChoiceSide, u: UnitKey): unkno
   if (got === null) throw new Error(`Unit ${u} of choice ${choice.id} has no value on side ${side.key}`);
   return got.v;
 };
+
+const draftOf = (ctx: Ctx, choice: Choice, w: readonly Write[]): Action => ({
+  id: newId(),
+  dev: ctx.dev,
+  ses: ctx.ses,
+  at: ctx.now,
+  par: [...ctx.log.heads],
+  lbl: "",
+  w,
+  meta: { resolves: choice.id },
+});
 
 const combined = (chosen: readonly Write[], rest: readonly Write[]): Write[] => {
   const taken = new Set(chosen.map((x) => x.u));
@@ -112,7 +121,11 @@ const ownWrites = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): 
     if (!choice.units.includes(u)) throw new Error(`Unit ${u} is not in choice ${choice.id}`);
     sideOf(choice, s);
   });
-  const chosen = choice.units.map((u) => resolution(u, valueOn(ctx, choice, sideOf(choice, perUnit.get(u) ?? picked.key), u)));
+  const valued = choice.units.map((u) => {
+    const side = sideOf(choice, perUnit.get(u) ?? picked.key);
+    return { u, side, got: valueOn(ctx, choice, side, u) };
+  });
+  const chosen = valued.flatMap(({ u, got }) => (got === null ? [] : [resolution(u, got.v)]));
   const extras =
     choice.kind !== "resolutions"
       ? []
@@ -137,7 +150,17 @@ const ownWrites = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): 
             return resolution(x.u, before.v);
           }),
       );
-  return combined(chosen, [...extras, ...returns]);
+  const all = combined(chosen, [...extras, ...returns]);
+  const missing = valued.filter(({ got }) => got === null);
+  if (missing.length === 0) return all;
+  const plan = all.length === 0 ? ctx.view.plan : projectPlan(ctx.view.plan.id, forkWith(ctx.log, draftOf(ctx, choice, all)));
+  missing.forEach(({ u, side }) => {
+    const k = parseKey(u);
+    if (!ITEM_KINDS.has(k.kind) || plan.items.get(k.arg)?.trashed !== true) {
+      throw new Error(`Side ${side.key} of choice ${choice.id} has no value for ${u}`);
+    }
+  });
+  return all;
 };
 
 interface Resolved {
@@ -181,16 +204,7 @@ const resolved = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): R
   const d: Derivation = withDerived(ctx, planWrites, roots, held);
   const w = [...d.writes, ...activity];
   w.forEach(validateWrite);
-  const draft: Action = {
-    id: newId(),
-    dev: ctx.dev,
-    ses: ctx.ses,
-    at: ctx.now,
-    par: [...ctx.log.heads],
-    lbl: "",
-    w,
-    meta: { resolves: choice.id },
-  };
+  const draft = draftOf(ctx, choice, w);
   const after = projectPlan(plan.id, forkWith(ctx.log, draft));
   const preview = previewOf(ctx, after, d, []);
   const lbl = labelOf(ctx, choice, sideOf(choice, pick.side), w, after, preview);

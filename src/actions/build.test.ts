@@ -5,11 +5,11 @@ import { derive } from "../domain/derive";
 import type { Conflict } from "../domain/schedule";
 import { LogState } from "../log/state";
 import type { Action, Cause, Write } from "../log/types";
-import { projectPlan } from "../plan/project";
+import { applyWrites, projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { act } from "../test/act";
 import { ctxOf, FIXTURE_DEVICES } from "../test/planCtx";
-import { buildAction, initialAction, normalizeName, withDerived } from "./build";
+import { buildAction, initialAction, normalizeName, planAfter, withDerived } from "./build";
 import { HeldRefused, Refused, type Built, type Ctx, type Intent } from "./intents";
 
 const TODAY = "2026-11-09";
@@ -181,6 +181,16 @@ describe("buildAction: push", () => {
     expect(b.action.lbl).toBe("Moved “Plan file format” later by 6 working days; 2 moved, stopped at in progress “Review”");
     expect(units(b)).toEqual(["s:PFF", "s:Spec", "s:Build"]);
     expect(b.preview.conflictsAfter).toBe(1);
+  });
+
+  it("makes an after plan of a move that applyWrites takes", () => {
+    const ctx = chain();
+    const b = buildAction(ctx, { t: "move", items: ["PFF"], days: 6 });
+    const after = planAfter(ctx.view.plan, b.action.w);
+    const next = applyWrites(after, [w("n:Spec", "Spec it")]);
+    const log = ctx.log.fork();
+    expect(log.add([b.action, act("h1", [b.action.id], [w("n:Spec", "Spec it")])]).refused).toEqual([]);
+    expect(next).toEqual(projectPlan(ctx.view.plan.id, log));
   });
 
   it("seed 2147483625: a link into a milestone stored as in progress stops at it instead of moving it", () => {
