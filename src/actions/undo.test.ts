@@ -180,7 +180,7 @@ describe("buildUndo", () => {
     expect(u.action.meta).toEqual({ undo: m1.action.id });
     expect(u.preview.kept).toEqual(["“Plan review” was changed since on the iPhone — kept"]);
     expect(u.action.lbl).toBe("Undid: Moved “Plan review” later by 2 working days");
-    expect(u.toast).toBe("Undid: Moved “Plan review” later by 2 working days. “Plan review” was changed since on the iPhone — kept");
+    expect(u.toast).toBe("Undid: Moved “Plan review” later by 2 working days. “Plan review” was changed since on the iPhone — kept.");
     ctx = applied(ctx, u);
     expect(valueOf(ctx, "s:PR")).toEqual(m2.action.w[0].v);
   });

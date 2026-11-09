@@ -126,7 +126,7 @@ const built = (ctx: Ctx, w: readonly Write[], lbl: string, meta: NonNullable<Act
   const after = projectPlan(ctx.view.plan.id, fork);
   const flipped = fork.order().filter((id) => delta.activity.has(id));
   const kept = keptLines(ctx, fork, after, flipped);
-  return { action, newNotes: [], toast: toastOf(lbl, kept), preview: previewOf(ctx, after, { push: null, recal: null }, kept) };
+  return { action, newNotes: [], toast: toastOf(lbl, kept.map((k) => k + ".")), preview: previewOf(ctx, after, { push: null, recal: null }, kept) };
 };
 
 const labelOf = (ctx: Ctx, target: Action): string => {
