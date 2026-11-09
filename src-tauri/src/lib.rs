@@ -1,3 +1,5 @@
+mod commands;
+
 #[cfg(all(not(debug_assertions), any(target_os = "macos", target_os = "linux")))]
 fn raise_running_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::Manager;
@@ -26,6 +28,19 @@ pub fn run() {
     let builder = builder.plugin(single_instance_guard());
 
     builder
+        .setup(|app| {
+            use tauri::Manager;
+            let docs = app.path().app_data_dir()?.join("docs");
+            app.manage(webboard_core::store::Store::new(docs));
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::store::store_load,
+            commands::store::store_append,
+            commands::store::store_compact,
+            commands::store::store_list,
+            commands::store::store_set_aside
+        ])
         .run(tauri::generate_context!())
         .expect("error while running WebBoard");
 }

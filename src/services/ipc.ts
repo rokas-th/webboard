@@ -26,3 +26,11 @@ export async function call<T>(cmd: string, args?: InvokeArgs, options?: InvokeOp
     throw new AppError("ipc.failed", `${cmd}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
+
+const shapeOf = (x: unknown): string => (x === null ? "null" : Array.isArray(x) ? "an array" : x instanceof Uint8Array ? "a Uint8Array" : typeof x);
+
+export async function callBytes(cmd: string, args?: InvokeArgs, options?: InvokeOptions): Promise<Uint8Array> {
+  const out = await call<unknown>(cmd, args, options);
+  if (out instanceof ArrayBuffer) return new Uint8Array(out);
+  throw new AppError("ipc.shape", `${cmd} answered ${shapeOf(out)} instead of raw bytes`);
+}

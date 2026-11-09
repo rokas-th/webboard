@@ -6,7 +6,7 @@ export interface Call {
   options: InvokeOptions | undefined;
 }
 
-export type Answer = (args: InvokeArgs | undefined) => unknown;
+export type Answer = (args: InvokeArgs | undefined, options?: InvokeOptions) => unknown;
 
 export const tauri = {
   calls: [] as Call[],
@@ -33,7 +33,7 @@ export function invoke(cmd: string, args?: InvokeArgs, options?: InvokeOptions):
     return Promise.reject(new Error(`no fixture answers ${cmd}`));
   }
   try {
-    return Promise.resolve(answer(args));
+    return Promise.resolve(answer(args, options));
   } catch (e) {
     return Promise.reject(e);
   }

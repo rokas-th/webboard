@@ -632,28 +632,34 @@ fn check_id(id: &str) -> Result<()> {
     }
 }
 
-#[derive(Debug)]
+type DocTable = HashMap<String, Arc<Mutex<DocStore>>>;
+
+#[derive(Debug, Clone)]
 pub struct Store {
     root: PathBuf,
-    docs: Mutex<HashMap<String, Arc<Mutex<DocStore>>>>,
+    docs: Arc<Mutex<DocTable>>,
 }
 
 impl Store {
     pub fn new(root: PathBuf) -> Self {
         Self {
             root,
-            docs: Mutex::new(HashMap::new()),
+            docs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub fn doc(&self, id: &str) -> Result<Arc<Mutex<DocStore>>> {
-        check_id(id)?;
-        let mut docs = self.docs.lock().map_err(|_| {
+    fn table(&self) -> Result<std::sync::MutexGuard<'_, DocTable>> {
+        self.docs.lock().map_err(|_| {
             CommandError::new(
                 "store.io",
                 "The document table is unusable after an earlier panic; restart WebBoard.",
             )
-        })?;
+        })
+    }
+
+    pub fn doc(&self, id: &str) -> Result<Arc<Mutex<DocStore>>> {
+        check_id(id)?;
+        let mut docs = self.table()?;
         match docs.entry(id.to_string()) {
             Entry::Occupied(e) => Ok(Arc::clone(e.get())),
             Entry::Vacant(v) => {
@@ -661,6 +667,51 @@ impl Store {
                 Ok(Arc::clone(v.insert(Arc::new(Mutex::new(doc)))))
             }
         }
+    }
+
+    pub fn set_aside(&self, id: &str, secs: u64) -> Result<()> {
+        check_id(id)?;
+        let mut docs = self.table()?;
+        drop(docs.remove(id));
+        let dir = self.root.join(id);
+        if !dir.is_dir() {
+            return Err(CommandError::new("store.io", format!("no document {id}")));
+        }
+        let target = self.root.join(format!("{id}.bad-{secs}"));
+        if target.exists() {
+            return Err(CommandError::new(
+                "store.io",
+                format!("{} already exists", target.display()),
+            ));
+        }
+        let path = dir.join(LOCK);
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|e| io_error("Could not open", &path, e))?;
+        match lock.try_lock() {
+            Ok(()) => Ok(()),
+            Err(TryLockError::WouldBlock) => Err(locked_error(id)),
+            Err(TryLockError::Error(e)) => Err(io_error("Could not lock", &path, e)),
+        }?;
+        fs::rename(&dir, &target).map_err(|e| {
+            CommandError::new(
+                "store.io",
+                format!(
+                    "Could not move {} to {}: {e}",
+                    dir.display(),
+                    target.display()
+                ),
+            )
+        })?;
+        sync_dir(&self.root)?;
+        lock.unlock()
+            .map_err(|e| io_error("Could not unlock", &target.join(LOCK), e))?;
+        drop(docs);
+        Ok(())
     }
 
     pub fn list(&self) -> Result<Vec<String>> {
@@ -1145,6 +1196,64 @@ mod tests {
                 fs::remove_dir(docs.join(name)).unwrap();
             });
         assert_eq!(store.list().unwrap(), ["ab12"]);
+    }
+
+    #[test]
+    fn set_aside_names_the_second() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let store = Store::new(docs.clone());
+        append_range(&mut store.doc("P").unwrap().lock().unwrap(), 1..=2);
+        store.doc("Q").unwrap();
+        let before = fs::read(docs.join("P").join("seg-1.log")).unwrap();
+        store.set_aside("P", 1_700_000_000).unwrap();
+        assert!(docs.join("P.bad-1700000000").is_dir());
+        assert!(!docs.join("P").exists());
+        assert_eq!(
+            fs::read(docs.join("P.bad-1700000000").join("seg-1.log")).unwrap(),
+            before
+        );
+        assert_eq!(store.list().unwrap(), ["Q"]);
+
+        store.doc("P").unwrap();
+        let e = store.set_aside("P", 1_700_000_000).unwrap_err();
+        assert_eq!(e.code, "store.io");
+        assert!(
+            e.message.ends_with("docs/P.bad-1700000000 already exists"),
+            "{}",
+            e.message
+        );
+        assert!(docs.join("P").is_dir());
+        assert_eq!(store.list().unwrap(), ["P", "Q"]);
+
+        assert_eq!(
+            store.set_aside("R", 1_700_000_000).unwrap_err(),
+            CommandError::new("store.io", "no document R")
+        );
+        assert_eq!(store.set_aside("a b", 1).unwrap_err().code, "store.io");
+        let l = store.doc("P").unwrap().lock().unwrap().load().unwrap();
+        assert_eq!(l.last_seq, 0);
+    }
+
+    #[test]
+    fn set_aside_refuses_locked() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let store = Store::new(docs.clone());
+        [("P", PLAN_LOCKED), ("local", PLAN_LIST_LOCKED)]
+            .iter()
+            .for_each(|(id, message)| {
+                let dir = docs.join(id);
+                spawn_child("hold", &dir, SEGMENT_MAX_BYTES, "", || {
+                    assert_eq!(
+                        store.set_aside(id, 1_700_000_000).unwrap_err(),
+                        CommandError::new("store.locked", *message)
+                    );
+                    assert!(dir.is_dir());
+                });
+                assert!(dir.is_dir());
+                assert!(!docs.join(format!("{id}.bad-1700000000")).exists());
+            });
     }
 
     fn snapshot_body(seqs: std::ops::RangeInclusive<u64>) -> Vec<u8> {
