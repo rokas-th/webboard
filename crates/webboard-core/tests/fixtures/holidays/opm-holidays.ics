@@ -1,0 +1,1193 @@
+BEGIN:VCALENDAR
+PRODID:-//github.com/rianjs/ical.net//NONSGML ical.net 2.2//EN
+VERSION:2.0
+X-WR-CALNAME:OPM United States Holidays
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20210101
+SEQUENCE:0
+SUMMARY:New Year's Day
+UID:9cbdc12e-cc51-43c8-aeaa-8b1692b2761d
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20210118
+SEQUENCE:0
+SUMMARY:Birthday of Martin Luther King\, Jr.
+UID:906628b7-8650-4d75-b45f-4bd1347b9200
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Inauguration Day" in se
+ ction 6103(c) of title 5 of the United States Code\, which is the law tha
+ t specifies holidays for Federal employees. Federal employees in the Wash
+ ington\, DC\, area are entitled to a holiday on the day a President is in
+ augurated on January 20th for each fourth year after 1965.\n\nOPM.gov URL
+ : https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/ta
+ bs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20210120
+SEQUENCE:0
+SUMMARY:Inauguration Day
+UID:cf2da1bd-5344-4b30-8c78-57b9f6bb6659
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Washington’s Birthday" 
+ in section 6103(a) of title 5 of the United States Code\, which is the la
+ w that specifies holidays for Federal employees. Though other institution
+ s such as state and local governments and private businesses may use othe
+ r names\, it is our policy to always refer to holidays by the names desig
+ nated in the law.\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversig
+ ht/pay-leave/federal-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20210215
+SEQUENCE:0
+SUMMARY:Washington’s Birthday
+UID:16f1d2a7-8340-4dcc-8f02-e80ce5b04ed5
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20210531
+SEQUENCE:0
+SUMMARY:Memorial Day
+UID:b8c30b76-cd43-4ea3-bf44-0eef21570125
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20210618
+SEQUENCE:0
+SUMMARY:Juneteenth National Independence Day
+UID:85e107d9-43e0-4c78-ab13-dfae80a2ea4a
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20210705
+SEQUENCE:0
+SUMMARY:Independence Day
+UID:07ac7df6-d7e7-4963-a909-80ed96c3812a
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20210906
+SEQUENCE:0
+SUMMARY:Labor Day
+UID:64d0f8b4-6536-40a2-bc15-abf6014c4226
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20211011
+SEQUENCE:0
+SUMMARY:Columbus Day
+UID:b44dc2e2-7bf6-4e91-a80a-b5fae496c99f
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20211111
+SEQUENCE:0
+SUMMARY:Veterans Day
+UID:476c93dd-e74e-44a9-81ce-0b04212a90cc
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20211125
+SEQUENCE:0
+SUMMARY:Thanksgiving Day
+UID:3ffa8f8a-a518-493d-8df9-95ae29ffb061
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2021/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20211224
+SEQUENCE:0
+SUMMARY:Christmas Day
+UID:19f424f4-1042-429d-8b4b-d60549f05b84
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20211231
+SEQUENCE:0
+SUMMARY:New Year's Day
+UID:fc4ebd29-d02e-4269-af14-80ebd65034d3
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20220117
+SEQUENCE:0
+SUMMARY:Birthday of Martin Luther King\, Jr.
+UID:a0149a86-1801-48e1-8acb-5e792a791592
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Washington’s Birthday" 
+ in section 6103(a) of title 5 of the United States Code\, which is the la
+ w that specifies holidays for Federal employees. Though other institution
+ s such as state and local governments and private businesses may use othe
+ r names\, it is our policy to always refer to holidays by the names desig
+ nated in the law.\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversig
+ ht/pay-leave/federal-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20220221
+SEQUENCE:0
+SUMMARY:Washington’s Birthday
+UID:7d93d6dd-94dc-476d-8a11-eeb0781a113c
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20220530
+SEQUENCE:0
+SUMMARY:Memorial Day
+UID:9a99f0a2-ee90-4744-9710-0574687960a8
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20220620
+SEQUENCE:0
+SUMMARY:Juneteenth National Independence Day
+UID:fcef2900-335e-4650-b52d-9268127508e7
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20220704
+SEQUENCE:0
+SUMMARY:Independence Day
+UID:b51d97eb-735e-463a-bde9-7c8bce388e5d
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20220905
+SEQUENCE:0
+SUMMARY:Labor Day
+UID:9dcf7b29-f6e3-4321-bbbc-dcb96d8f34a6
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20221010
+SEQUENCE:0
+SUMMARY:Columbus Day
+UID:31235c4f-2525-48ea-b26f-1cf187642850
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20221111
+SEQUENCE:0
+SUMMARY:Veterans Day
+UID:21fd719d-7e62-4609-a5dc-ebb24de9ae2a
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20221124
+SEQUENCE:0
+SUMMARY:Thanksgiving Day
+UID:f75e5c35-73f8-4b94-9284-7cddf928e87c
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2022/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20221226
+SEQUENCE:0
+SUMMARY:Christmas Day
+UID:b0e590bb-d43b-4922-a936-4257755d61e2
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20230102
+SEQUENCE:0
+SUMMARY:New Year’s Day
+UID:c41f2b85-bf21-4fc4-8ed1-9b26ed4efa3e
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20230116
+SEQUENCE:0
+SUMMARY:Birthday of Martin Luther King\, Jr.
+UID:b8b13486-1431-4bb5-a803-18130890b469
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Washington’s Birthday" 
+ in section 6103(a) of title 5 of the United States Code\, which is the la
+ w that specifies holidays for Federal employees. Though other institution
+ s such as state and local governments and private businesses may use othe
+ r names\, it is our policy to always refer to holidays by the names desig
+ nated in the law.\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversig
+ ht/pay-leave/federal-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20230220
+SEQUENCE:0
+SUMMARY:Washington’s Birthday
+UID:68682e49-c016-46c5-b6b9-c3ae69eaaaa9
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20230529
+SEQUENCE:0
+SUMMARY:Memorial Day
+UID:232a7625-6525-4035-9b14-901e87b3e272
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20230619
+SEQUENCE:0
+SUMMARY:Juneteenth National Independence Day
+UID:03d3c27d-7ac0-48b2-b9d7-891f2ea8e799
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20230704
+SEQUENCE:0
+SUMMARY:Independence Day
+UID:c0e18668-524e-48b9-8c7c-6a9aa06c4106
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20230904
+SEQUENCE:0
+SUMMARY:Labor Day
+UID:fcfa93bf-9850-40ac-b9eb-0e67cc1974e4
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20231009
+SEQUENCE:0
+SUMMARY:Columbus Day
+UID:333dc544-db4e-4748-9ceb-4589cdb0ebdd
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20231110
+SEQUENCE:0
+SUMMARY:Veterans Day
+UID:4bd1a0f1-0cf7-4944-bdb6-86a4570e9849
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20231123
+SEQUENCE:0
+SUMMARY:Thanksgiving Day
+UID:af68d9b8-1596-403e-93c5-b59e3bbfcbf4
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2023/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20231225
+SEQUENCE:0
+SUMMARY:Christmas Day
+UID:f16aedda-4455-4d08-8951-0a518bbce5cb
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20240101
+SEQUENCE:0
+SUMMARY:New Year’s Day
+UID:57e082f9-6777-487a-a03a-87f1dd4f266a
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20240115
+SEQUENCE:0
+SUMMARY:Birthday of Martin Luther King\, Jr.
+UID:297249ea-622e-4315-be33-f4625d4b5543
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Washington’s Birthday" 
+ in section 6103(a) of title 5 of the United States Code\, which is the la
+ w that specifies holidays for Federal employees. Though other institution
+ s such as state and local governments and private businesses may use othe
+ r names\, it is our policy to always refer to holidays by the names desig
+ nated in the law.\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversig
+ ht/pay-leave/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20240219
+SEQUENCE:0
+SUMMARY:Washington’s Birthday
+UID:5f8f2d33-3aa0-4884-adc0-dadddc944df7
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20240527
+SEQUENCE:0
+SUMMARY:Memorial Day
+UID:a2975f1a-e1d5-4dc6-9554-f62a43a611d6
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20240619
+SEQUENCE:0
+SUMMARY:Juneteenth National Independence Day
+UID:f99c3176-e94a-4a67-8b07-82799adc454d
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20240704
+SEQUENCE:0
+SUMMARY:Independence Day
+UID:3ba5d93e-d6b4-418a-abef-b1f17439f3a0
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20240902
+SEQUENCE:0
+SUMMARY:Labor Day
+UID:81a5ab52-68a5-4a80-9fba-324d1b39c3bb
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20241014
+SEQUENCE:0
+SUMMARY:Columbus Day
+UID:614c7a63-9709-46cd-8cae-e73a1a2270af
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20241111
+SEQUENCE:0
+SUMMARY:Veterans Day
+UID:a6906cd7-9861-47a4-ba44-878b31b2210f
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20241128
+SEQUENCE:0
+SUMMARY:Thanksgiving Day
+UID:7a610874-4536-4bac-a605-1ab1251a229e
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2024/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20241225
+SEQUENCE:0
+SUMMARY:Christmas Day
+UID:009e592c-43a7-4715-a502-02c6f69a2da3
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20250101
+SEQUENCE:0
+SUMMARY:New Year’s Day
+UID:cb74c3b7-84e6-471d-8d8d-41c73116c481
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20250120
+SEQUENCE:0
+SUMMARY:Birthday of Martin Luther King\, Jr.
+UID:0261d8b5-7b4f-489e-856a-a8cd990a8d8b
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Inauguration Day" in se
+ ction 6103(c) of title 5 of the United States Code\, which is the law tha
+ t specifies holidays for Federal employees. Federal employees in the Wash
+ ington\, DC\, area are entitled to a holiday on the day a President is in
+ augurated on January 20th for each fourth year after 1965.\n\nOPM.gov URL
+ : https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/ta
+ bs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20250120
+SEQUENCE:0
+SUMMARY:Inauguration Day
+UID:c8537d44-4ec8-4eb8-8863-2895cc0d6c21
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Washington's Birthday" 
+ in section 6103(a) of title 5 of the United States Code\, which is the la
+ w that specifies holidays for Federal employees. Though other institution
+ s such as state and local governments and private businesses may use othe
+ r names\, it is our policy to always refer to holidays by the names desig
+ nated in the law.\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversig
+ ht/pay-leave/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20250217
+SEQUENCE:0
+SUMMARY:Washington’s Birthday
+UID:3377bcce-5a62-41b9-b828-3e9a66e218b7
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20250526
+SEQUENCE:0
+SUMMARY:Memorial Day
+UID:8236c9ae-ceca-4a39-8eca-3fe3b4551529
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20250619
+SEQUENCE:0
+SUMMARY:Juneteenth National Independence Day
+UID:c8944640-e171-4e64-af57-268c59077f9f
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20250704
+SEQUENCE:0
+SUMMARY:Independence Day
+UID:25d26425-b662-4edb-bb84-dbd7964c0b69
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20250901
+SEQUENCE:0
+SUMMARY:Labor Day
+UID:cb7f095a-319f-4ff8-8a0c-00ce4ef40d1d
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20251013
+SEQUENCE:0
+SUMMARY:Columbus Day
+UID:a0ad2796-73cc-4cdd-9f44-bf4ce6326274
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20251111
+SEQUENCE:0
+SUMMARY:Veterans Day
+UID:a7dc5f4c-ed6b-4b20-b3e0-331e15ca4e02
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20251127
+SEQUENCE:0
+SUMMARY:Thanksgiving Day
+UID:512b6917-9cd5-4e52-925d-de25a8883f21
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2025/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20251225
+SEQUENCE:0
+SUMMARY:Christmas Day
+UID:f470f89c-3385-4469-8b02-80a91d42f00d
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20260101
+SEQUENCE:0
+SUMMARY:New Year’s Day
+UID:eac791f3-3d12-43bf-8d73-a7a3f3a20a07
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20260119
+SEQUENCE:0
+SUMMARY:Birthday of Martin Luther King\, Jr.
+UID:bec3d912-9f9a-4d0b-9257-511e062e47c5
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Washington’s Birthday" 
+ in section 6103(a) of title 5 of the United States Code\, which is the la
+ w that specifies holidays for Federal employees. Though other institution
+ s such as state and local governments and private businesses may use othe
+ r names\, it is our policy to always refer to holidays by the names desig
+ nated in the law.\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversig
+ ht/pay-leave/federal-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20260216
+SEQUENCE:0
+SUMMARY:Washington’s Birthday
+UID:b0f4eb90-50e5-4348-90cd-3f1782faeeca
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20260525
+SEQUENCE:0
+SUMMARY:Memorial Day
+UID:d103acc0-ae7a-4987-9d60-006951f5fa63
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20260619
+SEQUENCE:0
+SUMMARY:Juneteenth National Independence Day
+UID:6abd1dac-d015-44ba-b09f-2cae1042352b
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20260703
+SEQUENCE:0
+SUMMARY:Independence Day
+UID:cac47e70-4823-4ecc-9a5b-e15b04501c82
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20260907
+SEQUENCE:0
+SUMMARY:Labor Day
+UID:15ce541f-35d0-4bf1-9a98-62d338107b90
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20261012
+SEQUENCE:0
+SUMMARY:Columbus Day
+UID:6b0b2cd2-ad9f-498d-a312-061dc05af70f
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20261111
+SEQUENCE:0
+SUMMARY:Veterans Day
+UID:0286536c-4941-45ed-9c15-5ca7367eb3c4
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20261126
+SEQUENCE:0
+SUMMARY:Thanksgiving Day
+UID:7518363b-c626-478c-962e-1279ccb5c9f2
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2026/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20261225
+SEQUENCE:0
+SUMMARY:Christmas Day
+UID:1d6e26a7-e323-4150-8563-d32ca167db80
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20270101
+SEQUENCE:0
+SUMMARY:New Year’s Day
+UID:c79fdcab-c025-49f8-a4b5-b057e8443ed0
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20270118
+SEQUENCE:0
+SUMMARY:Birthday of Martin Luther King\, Jr.
+UID:2fa79ae7-0a45-480b-96f9-158a78a67f2b
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Washington’s Birthday" 
+ in section 6103(a) of title 5 of the United States Code\, which is the la
+ w that specifies holidays for Federal employees. Though other institution
+ s such as state and local governments and private businesses may use othe
+ r names\, it is our policy to always refer to holidays by the names desig
+ nated in the law.\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversig
+ ht/pay-leave/federal-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20270215
+SEQUENCE:0
+SUMMARY:Washington’s Birthday
+UID:6523d261-d396-492e-b050-bb60b5060df7
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20270531
+SEQUENCE:0
+SUMMARY:Memorial Day
+UID:684dc38c-9c95-412f-ae4b-b3fa86d4f5ad
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20270618
+SEQUENCE:0
+SUMMARY:Juneteenth National Independence Day
+UID:ba755049-66cf-4fb4-820b-9a90dda099a3
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20270705
+SEQUENCE:0
+SUMMARY:Independence Day
+UID:becbb51e-9f2f-49fe-bf39-360fd3ef6ace
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20270906
+SEQUENCE:0
+SUMMARY:Labor Day
+UID:a4f302b8-6314-41b0-b0a6-3877fe73f0a8
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20271011
+SEQUENCE:0
+SUMMARY:Columbus Day
+UID:52449e76-8383-470d-9ef9-4830c87310ae
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20271111
+SEQUENCE:0
+SUMMARY:Veterans Day
+UID:faba4f9d-769e-497c-8016-afa429660ce3
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20271125
+SEQUENCE:0
+SUMMARY:Thanksgiving Day
+UID:8acfce01-4d98-4ba3-85db-c3749ff632b3
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2027/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20271224
+SEQUENCE:0
+SUMMARY:Christmas Day
+UID:5bff3bf5-e939-4372-828c-1cffeaf19e22
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays - "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20271231
+SEQUENCE:0
+SUMMARY:New Year’s Day
+UID:8f3f4254-307a-443c-922b-f0c55823fa9f
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20280117
+SEQUENCE:0
+SUMMARY:Birthday of Martin Luther King\, Jr.
+UID:3931fa12-1662-48a6-a111-c1512b3293d8
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Washington's Birthday" 
+ in section 6103(a) of title 5 of the United States Code\, which is the la
+ w that specifies holidays for Federal employees. Though other institution
+ s such as state and local governments and private businesses may use othe
+ r names\, it is our policy to always refer to holidays by the names desig
+ nated in the law.\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversig
+ ht/pay-leave/federal-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20280221
+SEQUENCE:0
+SUMMARY:Washington’s Birthday
+UID:23be7f53-122e-4324-bc55-1bbd148d70b2
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20280529
+SEQUENCE:0
+SUMMARY:Memorial Day
+UID:b04dbb54-5fec-417e-9d96-7c5f22f834b6
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20280619
+SEQUENCE:0
+SUMMARY:Juneteenth National Independence Day
+UID:20d39a41-158d-4e90-a537-f368e623d8b8
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20280704
+SEQUENCE:0
+SUMMARY:Independence Day
+UID:797fc225-0e10-45c2-ae29-ed79374c92d7
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20280904
+SEQUENCE:0
+SUMMARY:Labor Day
+UID:441a1b01-adcd-4c6f-84da-eb9f002eaf2d
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20281009
+SEQUENCE:0
+SUMMARY:Columbus Day
+UID:822b6019-6d34-4835-b73d-b04482ccef6d
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays - "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20281110
+SEQUENCE:0
+SUMMARY:Veterans Day
+UID:34bf6586-bc72-414f-8cfd-7afff4a8ae65
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20281123
+SEQUENCE:0
+SUMMARY:Thanksgiving Day
+UID:7ed8409b-528e-482a-833b-63d6925f0c2b
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2028/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20281225
+SEQUENCE:0
+SUMMARY:Christmas Day
+UID:560d48af-b194-43a4-ae75-bd57c4ebaf28
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20290101
+SEQUENCE:0
+SUMMARY:New Year’s Day
+UID:40630193-f57d-4c34-8c4b-6819af3078e4
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20290115
+SEQUENCE:0
+SUMMARY:Birthday of Martin Luther King\, Jr.
+UID:79bb421f-0c86-4ba1-a491-3a7e1dabf598
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Washington’s Birthday" 
+ in section 6103(a) of title 5 of the United States Code\, which is the la
+ w that specifies holidays for Federal employees. Though other institution
+ s such as state and local governments and private businesses may use othe
+ r names\, it is our policy to always refer to holidays by the names desig
+ nated in the law.\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversig
+ ht/pay-leave/federal-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20290219
+SEQUENCE:0
+SUMMARY:Washington’s Birthday
+UID:9aabbea8-a8ed-49fc-afac-40dae6982169
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20290528
+SEQUENCE:0
+SUMMARY:Memorial Day
+UID:a846e198-5b0b-42cd-8221-5ad8bf3bd7ab
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20290619
+SEQUENCE:0
+SUMMARY:Juneteenth National Independence Day
+UID:7ba2f019-a4e6-4afb-a296-c7d70a769f33
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20290704
+SEQUENCE:0
+SUMMARY:Independence Day
+UID:a1a1b098-9e86-4f28-8c7b-2b6c4a2b38ee
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20290903
+SEQUENCE:0
+SUMMARY:Labor Day
+UID:7d9df0d9-4a94-4376-8aee-2ebaa677c621
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20291008
+SEQUENCE:0
+SUMMARY:Columbus Day
+UID:92d01a1e-db24-46be-908e-badd534e3b13
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nIf a holiday falls on a Saturday\, for most Federal em
+ ployees\, the preceding Friday will be treated as a holiday for pay and l
+ eave purposes. (See 5 U.S.C. 6103(b).) If a holiday falls on a Sunday\, f
+ or most Federal employees\, the following Monday will be treated as a hol
+ iday for pay and leave purposes. (See Section 3(a) of Executive Order 115
+ 82\, February 11\, 1971.) See also our Federal Holidays – "In Lieu Of" De
+ termination Fact Sheet at https://www.opm.gov/policy-data-oversight/pay-l
+ eave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination
+ .\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-leave/fed
+ eral-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20291112
+SEQUENCE:0
+SUMMARY:Veterans Day
+UID:35e6f7bb-77f9-405e-9d99-be6327837c31
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20291122
+SEQUENCE:0
+SUMMARY:Thanksgiving Day
+UID:70ec3c66-4b47-4444-8f3c-09a6ff091fde
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2029/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20291225
+SEQUENCE:0
+SUMMARY:Christmas Day
+UID:abc3099e-64bb-49d5-881d-9a0892998001
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20300101
+SEQUENCE:0
+SUMMARY:New Year’s Day
+UID:4df70927-5739-4542-a3ad-6ac55690baed
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20300121
+SEQUENCE:0
+SUMMARY:Birthday of Martin Luther King\, Jr.
+UID:5fd080b7-9996-4617-bf73-b95c0c067fe1
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:Notes:\nThis holiday is designated as "Washington’s Birthday" 
+ in section 6103(a) of title 5 of the United States Code\, which is the la
+ w that specifies holidays for Federal employees. Though other institution
+ s such as state and local governments and private businesses may use othe
+ r names\, it is our policy to always refer to holidays by the names desig
+ nated in the law.\n\nOPM.gov URL: https://www.opm.gov/policy-data-oversig
+ ht/pay-leave/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20300218
+SEQUENCE:0
+SUMMARY:Washington’s Birthday
+UID:40b94a02-c403-4760-828d-73593021da96
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20300527
+SEQUENCE:0
+SUMMARY:Memorial Day
+UID:e9ccb412-c86e-4f16-bb6f-510bf0db12dd
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20300619
+SEQUENCE:0
+SUMMARY:Juneteenth National Independence Day
+UID:52a2504b-f8b3-4988-b08d-f23ecad9aae8
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20300704
+SEQUENCE:0
+SUMMARY:Independence Day
+UID:ebc6c58e-94a3-45e7-a309-98fc86f461b5
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20300902
+SEQUENCE:0
+SUMMARY:Labor Day
+UID:8c5cac99-8727-4154-abff-3f62c4cc7655
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20301014
+SEQUENCE:0
+SUMMARY:Columbus Day
+UID:e73f5311-7513-4008-9aab-e6d8ed9a1068
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20301111
+SEQUENCE:0
+SUMMARY:Veterans Day
+UID:cd7ec691-e416-47c6-8b3c-ee3c3a7b33e3
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20301128
+SEQUENCE:0
+SUMMARY:Thanksgiving Day
+UID:952f549f-e9d4-442e-a8f5-d83243732555
+END:VEVENT
+BEGIN:VEVENT
+DESCRIPTION:OPM.gov URL: https://www.opm.gov/policy-data-oversight/pay-lea
+ ve/federal-holidays/tabs/2030/
+DTSTAMP:20261108T084719Z
+DTSTART;VALUE=DATE:20301225
+SEQUENCE:0
+SUMMARY:Christmas Day
+UID:d7a9ae79-8ba6-4f68-90a7-24c4e57dcd39
+END:VEVENT
+END:VCALENDAR

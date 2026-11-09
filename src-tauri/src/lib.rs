@@ -30,8 +30,15 @@ pub fn run() {
     builder
         .setup(|app| {
             use tauri::Manager;
+            use webboard_core::holidays::{Holidays, Sources};
             let docs = app.path().app_data_dir()?.join("docs");
             app.manage(webboard_core::store::Store::new(docs));
+            let holidays = Holidays::new(
+                app.path().app_data_dir()?.join("holidays"),
+                Sources::official(),
+            )
+            .map_err(|e| format!("{}: {}", e.code, e.message))?;
+            app.manage(holidays);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -39,7 +46,11 @@ pub fn run() {
             commands::store::store_append,
             commands::store::store_compact,
             commands::store::store_list,
-            commands::store::store_set_aside
+            commands::store::store_set_aside,
+            commands::holidays::holidays_countries,
+            commands::holidays::holidays_subdivisions,
+            commands::holidays::holidays_year,
+            commands::holidays::holidays_ics_preview
         ])
         .run(tauri::generate_context!())
         .expect("error while running WebBoard");
