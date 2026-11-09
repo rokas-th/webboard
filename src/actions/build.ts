@@ -13,6 +13,7 @@ import * as codec from "../plan/units";
 import { key, parseKey, validateWrite, type UnitKind } from "../plan/units";
 import { fmtShort, items, label, pushSuffix, q, refusal, sentence, toastOf } from "./copy";
 import { HeldRefused, Refused, type Built, type Ctx, type Intent, type Preview } from "./intents";
+import { settleText } from "./resolve";
 
 export interface Derivation {
   writes: readonly Write[];
@@ -568,7 +569,8 @@ export function buildAction(ctx: Ctx, intent: Intent): Built {
   const preview = previewOf(ctx, applyWrites(plan, d.writes), d, []);
   const lbl = draft.label(d, preview);
   const action: Action = { id: newId(), dev: ctx.dev, ses: ctx.ses, at: ctx.now, par: [...ctx.log.heads], lbl, w: d.writes };
-  return { action, newNotes: draft.newNotes, toast: toastOf(lbl, draft.sentences), preview };
+  const settled = settleText(ctx, d.writes);
+  return { action, newNotes: draft.newNotes, toast: toastOf(lbl, settled === null ? draft.sentences : [...draft.sentences, settled]), preview };
 }
 
 export function initialAction(a: { dev: DeviceId; ses: SessionId; now: number; name: string; calendar: Calendar }): Action {
