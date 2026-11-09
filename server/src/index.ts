@@ -26,6 +26,10 @@ const MAX_BODY_BYTES = 4096;
 const SPACE_NAME = 'space';
 const ROOM_PATH = /^\/parties\/room\/[^/]+$/;
 const JSON_TYPE = 'application/json';
+const BEARER = /^Bearer (.+)$/i;
+const PROPS_HEADER = 'x-partykit-props';
+const CONNECTION_PARAM = '_pk';
+const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
 
 const NOT_CONFIGURED = 'The server has no setup secret. Run wrangler secret put SETUP_SECRET.';
 const NOT_FOUND = 'There is nothing at this address on the WebBoard server.';
@@ -63,7 +67,8 @@ function space(env: Env): DurableObjectStub<Space> {
 
 function bearer(req: Request): string | null {
   const header = req.headers.get('Authorization');
-  return header !== null && header.startsWith('Bearer ') && header.length > 'Bearer '.length ? header.slice('Bearer '.length) : null;
+  const match = header === null ? null : BEARER.exec(header);
+  return match === null ? null : match[1];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -73,7 +78,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parse(body: Uint8Array): Record<string, unknown> | null {
   let value: unknown;
   try {
-    value = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(body));
+    value = JSON.parse(UTF8.decode(body));
   } catch (error) {
     if (error instanceof SyntaxError || error instanceof TypeError) {
       return null;
@@ -242,8 +247,10 @@ async function admit(req: Request, lobby: Lobby<Env>, env: Env): Promise<Request
     return answer(consumed);
   }
   url.searchParams.delete('ticket');
+  url.searchParams.delete(CONNECTION_PARAM);
   const forwarded = new Request(url.toString(), req);
   forwarded.headers.set(DEVICE_HEADER, consumed.value.deviceId);
+  forwarded.headers.delete(PROPS_HEADER);
   return forwarded;
 }
 
