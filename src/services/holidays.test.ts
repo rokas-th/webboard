@@ -18,8 +18,11 @@ vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 
 const CHZH: RegionRef = { src: "openholidays", country: "CH", subdivision: "CH-ZH" };
 const RK = "oh:CH:CH-ZH";
-const TODAY_NOON = Date.parse("2026-11-09T12:00:00Z");
-const FETCHED_TODAY = "2026-11-09T11:00:00Z";
+const OTHER: RegionRef = { src: "openholidays", country: "CH", subdivision: "CH-BE" };
+const TODAY_NOON = new Date(2026, 10, 9, 12).getTime();
+const FETCHED_TODAY = new Date(2026, 10, 9, 11).toISOString();
+const LAST_FETCHED = new Date(2026, 10, 1, 9).toISOString();
+const TRIED = new Date(2026, 10, 8, 14, 5).getTime();
 const PREVIEW: Preview = { itemsChanged: 0, endsChanged: 0, movedLater: 0, stopped: [], conflictsAfter: 0, kept: [] };
 
 const DAYS_2028: readonly HolidayDay[] = [
@@ -34,7 +37,7 @@ const NEW_2027: readonly HolidayDay[] = [
 
 const CAL_2027: Calendar = {
   ...CH_ZH,
-  holidays: new Map([[2027, { ...CH_ZH_2027, fetchedAt: "2026-11-01T09:00:00Z" }]]),
+  holidays: new Map([[2027, { ...CH_ZH_2027, fetchedAt: LAST_FETCHED }]]),
 };
 
 const withYear = (cal: Calendar, year: number, days: readonly HolidayDay[], fetchedAt: string): Calendar => ({
@@ -60,6 +63,28 @@ const fail = (code: string, message: string): never => {
 };
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+
+type RejectionListener = (reason: unknown) => void;
+
+declare const process: {
+  listeners(event: "unhandledRejection"): RejectionListener[];
+  removeAllListeners(event: "unhandledRejection"): void;
+  on(event: "unhandledRejection", l: RejectionListener): void;
+  once(event: "unhandledRejection", l: RejectionListener): void;
+};
+
+const nextUnhandled = (): Promise<unknown> => {
+  const saved = process.listeners("unhandledRejection");
+  process.removeAllListeners("unhandledRejection");
+  return new Promise((resolve) => {
+    process.once("unhandledRejection", (reason) => {
+      saved.forEach((l) => process.on("unhandledRejection", l));
+      resolve(reason);
+    });
+  });
+};
+
+const BAD_SHAPE: Answer = () => ({ days: null, fetchedAt: "x", fromCache: false, coverage: null });
 
 function stub(calendar: Calendar, missing: number[], preview: (i: Intent) => Preview = () => PREVIEW) {
   const state = { calendar, missing };
@@ -199,8 +224,91 @@ describe("missing years", () => {
     const { host } = stub(CH_ZH, [2028], () => {
       throw new Error("boom");
     });
+    const sub = vi.fn();
+    svc.subscribe(sub);
     await expect(svc.load(PLAN_ID, host, 2028)).rejects.toThrow("boom");
-    expect(svc.notices(PLAN_ID).some((n) => n.k === "ready")).toBe(false);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(2);
+  });
+
+  it("preview throws on a cached merge", async () => {
+    resetTauri({ holidays_year: yearAnswer(() => ({ days: DAYS_2028 })) });
+    const svc = new HolidayService();
+    const { host } = stub(CH_ZH, [2028], () => {
+      throw new Error("boom");
+    });
+    svc.onMissing(PLAN_ID, host, [2028], "merge");
+    expect(svc.notices(PLAN_ID)).toEqual([{ k: "notLoaded", year: 2028 }]);
+    await svc.warm(CHZH, [2028]);
+    const sub = vi.fn();
+    svc.subscribe(sub);
+    expect(() => svc.onMissing(PLAN_ID, host, [2028], "merge")).toThrow("boom");
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
+  });
+
+  it("an unexpected answer shape rejects and leaves no loading notice", async () => {
+    resetTauri({ holidays_year: BAD_SHAPE });
+    const svc = new HolidayService();
+    await expect(svc.draftYears(CHZH, [2028])).rejects.toMatchObject({ code: "ipc.shape", message: "holidays_year answered an unexpected shape for oh:CH:CH-ZH 2028" });
+    expect(svc.cached(RK, 2028)).toBeNull();
+    const { host } = stub(CH_ZH, [2028]);
+    const sub = vi.fn();
+    svc.subscribe(sub);
+    const rejected = nextUnhandled();
+    svc.onMissing(PLAN_ID, host, [2028], "own");
+    expect(svc.notices(PLAN_ID)).toEqual([{ k: "loading", year: 2028 }]);
+    expect(await rejected).toMatchObject({ code: "ipc.shape" });
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(2);
+    expect(svc.cached(RK, 2028)).toBeNull();
+  });
+
+  it("no region and no missing years records nothing", () => {
+    const svc = new HolidayService();
+    const sub = vi.fn();
+    svc.subscribe(sub);
+    const { host } = stub({ ...CH_ZH, region: null }, []);
+    svc.onMissing(PLAN_ID, host, [], "own");
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).not.toHaveBeenCalled();
+  });
+
+  it("missing years without a region throw", () => {
+    const svc = new HolidayService();
+    const { host } = stub({ ...CH_ZH, region: null }, [2028, 2029]);
+    expect(() => svc.onMissing(PLAN_ID, host, [2028, 2029], "merge")).toThrow(`Plan ${PLAN_ID} has no holiday region but 2028, 2029 are missing`);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+  });
+
+  it("a repeated onMissing for a failed year changes nothing", async () => {
+    resetTauri({ holidays_year: () => fail("holidays.offline", "Offline.") });
+    const svc = new HolidayService(() => TRIED);
+    const { host } = stub(CH_ZH, [2028]);
+    svc.onMissing(PLAN_ID, host, [2028], "own");
+    await flush();
+    const list = svc.notices(PLAN_ID);
+    expect(only(list).k).toBe("failed");
+    const sub = vi.fn();
+    svc.subscribe(sub);
+    svc.onMissing(PLAN_ID, host, [2028], "own");
+    svc.onMissing(PLAN_ID, host, [2028], "merge");
+    expect(sub).not.toHaveBeenCalled();
+    expect(svc.notices(PLAN_ID)).toBe(list);
+    expect(yearCalls(0)).toBe(1);
+  });
+
+  it("a repeated merge onMissing for a notLoaded year changes nothing", () => {
+    const svc = new HolidayService();
+    const { host } = stub(CH_ZH, [2028]);
+    svc.onMissing(PLAN_ID, host, [2028], "merge");
+    const list = svc.notices(PLAN_ID);
+    expect(list).toEqual([{ k: "notLoaded", year: 2028 }]);
+    const sub = vi.fn();
+    svc.subscribe(sub);
+    svc.onMissing(PLAN_ID, host, [2028], "merge");
+    expect(sub).not.toHaveBeenCalled();
+    expect(svc.notices(PLAN_ID)).toBe(list);
   });
 });
 
@@ -236,6 +344,24 @@ describe("beyond coverage", () => {
     expect(t.text).toBe("Holidays for 2031 not available — open calendar");
     expect(t.action).toBe("calendar");
     expect(`${t.text} ${t.detail}`).not.toMatch(/no holidays|0 days/);
+  });
+
+  it.each([
+    ["holidays.io", "The holiday cache could not be written."],
+    ["holidays.http", "OpenHolidays answered 500."],
+    ["holidays.parse", "OpenHolidays answered something unreadable."],
+    ["ipc.failed", "holidays_year: kaput"],
+  ])("%s opens the calendar", async (code, message) => {
+    resetTauri({ holidays_year: () => fail(code, message) });
+    const svc = new HolidayService(() => TRIED);
+    const { host } = stub(CH_ZH, [2031]);
+    svc.onMissing(PLAN_ID, host, [2031], "own");
+    await flush();
+    expect(noticeText(only(svc.notices(PLAN_ID)))).toEqual({
+      text: "Holidays for 2031 not loaded — open calendar",
+      action: "calendar",
+      detail: `${message} Tried 2026-11-08 14:05.`,
+    });
   });
 
   it.each([
@@ -310,7 +436,7 @@ describe("refresh", () => {
     expect(freshCalls(from)).toBe(0);
 
     now += 24 * 3600 * 1000;
-    fetchedAt = "2026-11-10T11:00:00Z";
+    fetchedAt = new Date(2026, 10, 10, 11).toISOString();
     await svc.refresh(PLAN_ID, host);
     expect(freshCalls(from)).toBe(1);
     await svc.refresh(PLAN_ID, host);
@@ -329,6 +455,69 @@ describe("refresh", () => {
     expect(freshCalls(0)).toBe(1);
     const n = only(svc.notices(PLAN_ID));
     expect(n.k === "changed" && n.count).toBe(2);
+  });
+
+  const refreshFailedNotice = async (preview?: (i: Intent) => Preview) => {
+    resetTauri({ holidays_year: yearAnswer((a) => (a.fresh ? fail("holidays.offline", "Offline.") : { days: OLD_2027 })) });
+    const svc = new HolidayService(() => TODAY_NOON);
+    const s = stub(CAL_2027, [], preview);
+    await svc.refresh(PLAN_ID, s.host);
+    const n = only(svc.notices(PLAN_ID));
+    expect(n.k).toBe("refreshFailed");
+    const sub = vi.fn();
+    svc.subscribe(sub);
+    return { svc, ...s, n, sub };
+  };
+
+  const NEW_ANSWER = { days: NEW_2027, fetchedAt: FETCHED_TODAY, fromCache: false, coverage: [2020, 2030] };
+
+  it("a forced retry after a region change drops its notice", async () => {
+    const { svc, host, state, sub } = await refreshFailedNotice();
+    const h = hold("holidays_year");
+    const p = svc.load(PLAN_ID, host, 2027);
+    state.calendar = { ...state.calendar, region: OTHER };
+    h.resolve(NEW_ANSWER);
+    await p;
+    expect(svc.notices(PLAN_ID).some((n) => n.year === 2027)).toBe(false);
+    expect(sub).toHaveBeenCalledTimes(1);
+  });
+
+  it("a forced retry dismissed in flight records nothing", async () => {
+    const { svc, host, sub } = await refreshFailedNotice();
+    const h = hold("holidays_year");
+    const p = svc.load(PLAN_ID, host, 2027);
+    svc.dismiss(PLAN_ID, 2027);
+    expect(sub).toHaveBeenCalledTimes(1);
+    h.resolve(NEW_ANSWER);
+    await p;
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
+  });
+
+  it("preview throws on a forced retry", async () => {
+    const { svc, host, sub } = await refreshFailedNotice(() => {
+      throw new Error("boom");
+    });
+    resetTauri({ holidays_year: yearAnswer(() => ({ days: NEW_2027, fetchedAt: FETCHED_TODAY })) });
+    await expect(svc.load(PLAN_ID, host, 2027)).rejects.toThrow("boom");
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
+  });
+
+  it("a slow cache answer does not replace a fresher year", async () => {
+    const svc = new HolidayService(() => TODAY_NOON);
+    const h = hold("holidays_year");
+    const draft = svc.draftYears(CHZH, [2027]);
+    tauri.answers.holidays_year = yearAnswer(() => ({ days: NEW_2027, fetchedAt: FETCHED_TODAY }));
+    const { host } = stub(CAL_2027, []);
+    await svc.refresh(PLAN_ID, host);
+    expect(freshCalls(0)).toBe(1);
+    expect(svc.cached(RK, 2027)?.fetchedAt).toBe(FETCHED_TODAY);
+    h.resolve({ days: OLD_2027, fetchedAt: new Date(2026, 10, 9, 8).toISOString(), fromCache: true, coverage: [2020, 2030] });
+    const got = await draft;
+    expect(svc.cached(RK, 2027)?.fetchedAt).toBe(FETCHED_TODAY);
+    expect(svc.cached(RK, 2027)?.days).toEqual(NEW_2027);
+    expect(got.get(2027)).toBe(svc.cached(RK, 2027));
   });
 
   it("second plan same day", async () => {
@@ -519,13 +708,28 @@ describe("reconcile (refinement 42)", () => {
     expect(sub).toHaveBeenCalledTimes(1);
   });
 
-  it("reconcile keeps a ready whose days differ from the plan's", async () => {
-    const { svc, host, state, n, sub } = await readyNotice();
+  it("reconcile drops a ready whose year moved on", async () => {
+    const { svc, host, state, sub } = await readyNotice();
     state.calendar = withYear(CH_ZH, 2028, DAYS_2028.map((d, i) => (i === 0 ? { ...d, name: "Neujahr" } : d)), "2026-12-01T00:00:00Z");
     state.missing = [];
     svc.reconcile(PLAN_ID, host);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
+  });
+
+  it("a ready notice whose year is untouched stays", async () => {
+    const { svc, host, n, sub } = await readyNotice();
+    svc.reconcile(PLAN_ID, host);
     expect(svc.notices(PLAN_ID)).toEqual([n]);
     expect(sub).not.toHaveBeenCalled();
+  });
+
+  it("reconcile drops a ready when the plan's region changes", async () => {
+    const { svc, host, state, sub } = await readyNotice();
+    state.calendar = { ...state.calendar, region: OTHER };
+    svc.reconcile(PLAN_ID, host);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
   });
 
   const changedNotice = async () => {
@@ -548,12 +752,69 @@ describe("reconcile (refinement 42)", () => {
     expect(sub).toHaveBeenCalledTimes(1);
   });
 
-  it("reconcile keeps a changed whose days differ from the plan's", async () => {
-    const { svc, host, state, n, sub } = await changedNotice();
+  it("reconcile drops a changed whose year moved on", async () => {
+    const { svc, host, state, sub } = await changedNotice();
     state.calendar = withYear(CAL_2027, 2027, NEW_2027.map((d, i) => (i === 0 ? { ...d, name: "Neujahr" } : d)), "2026-12-01T00:00:00Z");
+    svc.reconcile(PLAN_ID, host);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
+  });
+
+  it("a changed notice whose year is untouched stays", async () => {
+    const { svc, host, state, n, sub } = await changedNotice();
+    state.calendar = withYear(CAL_2027, 2027, OLD_2027, "2026-12-01T00:00:00Z");
     svc.reconcile(PLAN_ID, host);
     expect(svc.notices(PLAN_ID)).toEqual([n]);
     expect(sub).not.toHaveBeenCalled();
+  });
+
+  it("reconcile drops a changed when the plan loses its region", async () => {
+    const { svc, host, state, sub } = await changedNotice();
+    state.calendar = { ...state.calendar, region: null };
+    svc.reconcile(PLAN_ID, host);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconcile drops a changed when the plan's region changes", async () => {
+    const { svc, host, state, sub } = await changedNotice();
+    state.calendar = { ...state.calendar, region: OTHER };
+    svc.reconcile(PLAN_ID, host);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
+  });
+
+  const refreshFailed = async () => {
+    resetTauri({ holidays_year: () => fail("holidays.offline", "Offline.") });
+    const svc = new HolidayService(() => TODAY_NOON);
+    const s = stub(CAL_2027, []);
+    await svc.refresh(PLAN_ID, s.host);
+    const n = only(svc.notices(PLAN_ID));
+    expect(n.k).toBe("refreshFailed");
+    const sub = vi.fn();
+    svc.subscribe(sub);
+    return { svc, ...s, n, sub };
+  };
+
+  it("a refreshFailed notice whose year is untouched stays", async () => {
+    const { svc, host, n, sub } = await refreshFailed();
+    svc.reconcile(PLAN_ID, host);
+    expect(svc.notices(PLAN_ID)).toEqual([n]);
+    expect(sub).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, (cal: Calendar) => Calendar]>([
+    ["the plan loses its region", (cal) => ({ ...cal, region: null })],
+    ["the plan's region changes", (cal) => ({ ...cal, region: OTHER })],
+    ["its year is removed", (cal) => ({ ...cal, holidays: new Map() })],
+    ["its year comes from another region", (cal) => ({ ...cal, holidays: new Map([[2027, { ...CH_ZH_2027, region: "oh:CH:CH-BE", fetchedAt: LAST_FETCHED }]]) })],
+    ["its year carries another fetchedAt", (cal) => withYear(cal, 2027, OLD_2027, FETCHED_TODAY)],
+  ])("reconcile drops a refreshFailed when %s", async (_, change) => {
+    const { svc, host, state, sub } = await refreshFailed();
+    state.calendar = change(state.calendar);
+    svc.reconcile(PLAN_ID, host);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
   });
 
   it("late fetch after drop", async () => {

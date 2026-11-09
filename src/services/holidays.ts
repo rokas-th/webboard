@@ -31,6 +31,8 @@ interface Entry {
   notice: HolidayNotice;
 }
 
+const TRANSIENT: ReadonlySet<string> = new Set(["holidays.offline", "holidays.rate_limited"]);
+
 const NOT_AVAILABLE: ReadonlySet<string> = new Set(["holidays.unsupported", "holidays.out_of_range"]);
 
 const NO_NOTICES: readonly HolidayNotice[] = Object.freeze([]);
@@ -61,9 +63,9 @@ export function noticeText(n: HolidayNotice): { text: string; action: "review" |
       return { text: `${n.count} ${n.count === 1 ? "day" : "days"} changed in the official calendar for ${n.year}`, action: "review", detail: null };
     case "failed": {
       const detail = `${n.error.message} Tried ${timeOf(n.at)}.`;
-      return NOT_AVAILABLE.has(n.error.code)
-        ? { text: `Holidays for ${n.year} not available — open calendar`, action: "calendar", detail }
-        : { text: `Holidays for ${n.year} not loaded — retry`, action: "retry", detail };
+      if (TRANSIENT.has(n.error.code)) return { text: `Holidays for ${n.year} not loaded — retry`, action: "retry", detail };
+      if (NOT_AVAILABLE.has(n.error.code)) return { text: `Holidays for ${n.year} not available — open calendar`, action: "calendar", detail };
+      return { text: `Holidays for ${n.year} not loaded — open calendar`, action: "calendar", detail };
     }
     case "refreshFailed":
       return { text: `Holidays for ${n.year} not checked — retry`, action: "retry", detail: `${n.error.message} Last fetched ${dayOf(n.fetchedAt)}.` };
@@ -84,6 +86,25 @@ export function diffDays(a: readonly HolidayDay[], b: readonly HolidayDay[]): nu
 const slot = (region: string, year: number): string => `${region}\u0000${year}`;
 
 const sameYear = (year: number, a: HolidayYear | null, b: HolidayYear | null): boolean => planRules.same(key.ch(year), a, b);
+
+const unchanged = (a: HolidayNotice | undefined, b: HolidayNotice): boolean => {
+  if (a === undefined || a.k !== b.k || a.year !== b.year) return false;
+  if (a.k === "failed" && b.k === "failed") return a.error === b.error && a.at === b.at;
+  return a.k === "loading" || a.k === "notLoaded";
+};
+
+const isYearAnswer = (a: unknown): a is YearAnswer =>
+  typeof a === "object" &&
+  a !== null &&
+  "days" in a &&
+  Array.isArray(a.days) &&
+  "fetchedAt" in a &&
+  typeof a.fetchedAt === "string" &&
+  !Number.isNaN(Date.parse(a.fetchedAt)) &&
+  "fromCache" in a &&
+  typeof a.fromCache === "boolean" &&
+  "coverage" in a &&
+  (a.coverage === null || (Array.isArray(a.coverage) && a.coverage.length === 2 && a.coverage.every(Number.isInteger)));
 
 export class HolidayService {
   private readonly now: () => number;
@@ -129,34 +150,25 @@ export class HolidayService {
 
   onMissing(plan: PlanId, host: HolidayHost, years: readonly number[], cause: "own" | "merge"): void {
     const region = host.view().plan.calendar.region;
-    if (region === null) return;
-    const rk = regionKey(region);
+    if (region === null) {
+      if (years.length === 0) return;
+      throw new Error(`Plan ${plan} has no holiday region but ${years.join(", ")} are missing`);
+    }
     const todo = [...new Set(years)].filter((y) => {
       const k = this.entry(plan, y)?.notice.k;
       return k !== "loading" && k !== "ready";
     });
-    const fetches: number[] = [];
-    const changed = todo.map((y) => {
-      const cachedYear = this.cached(rk, y);
-      if (cachedYear !== null) {
-        if (cause === "own") return false;
-        return this.arrive(plan, host, region, y, null, cachedYear);
-      }
-      const failure = this.failures.get(slot(rk, y));
-      if (failure !== undefined) {
-        this.put(plan, { k: "failed", year: y, error: failure.error, coverage: this.coverage.get(rk) ?? null, at: failure.at });
-        return true;
-      }
-      if (cause === "merge") {
-        this.put(plan, { k: "notLoaded", year: y });
-        return true;
-      }
-      this.put(plan, { k: "loading", year: y });
-      fetches.push(y);
-      return true;
-    });
+    const started: number[] = [];
+    let changed: boolean[];
+    try {
+      changed = todo.map((y) => this.missingYear(plan, host, region, y, cause, started));
+    } catch (e) {
+      started.forEach((y) => this.drop(plan, y));
+      this.notify();
+      throw e;
+    }
     if (changed.some((c) => c)) this.notify();
-    fetches.forEach((y) => {
+    started.forEach((y) => {
       void this.fetchMissing(plan, host, region, y);
     });
   }
@@ -196,19 +208,26 @@ export class HolidayService {
     if (m === undefined) return;
     const view = host.view();
     const missing = new Set(view.derived.missingYears);
+    const region = view.plan.calendar.region;
+    const rk = region === null ? null : regionKey(region);
     const settled = [...m.values()]
       .map((e) => e.notice)
       .filter((n) => {
+        const planYear = view.plan.calendar.holidays.get(n.year) ?? null;
         switch (n.k) {
           case "loading":
           case "notLoaded":
           case "failed":
             return !missing.has(n.year);
           case "ready":
-          case "changed":
-            return n.intent.t === "calendar" && sameYear(n.year, n.intent.next.holidays.get(n.year) ?? null, view.plan.calendar.holidays.get(n.year) ?? null);
+          case "changed": {
+            if (n.intent.t !== "calendar" || n.intent.base === undefined) throw new Error(`Holiday notice for ${n.year} carries no calendar intent with a base`);
+            const next = n.intent.next.holidays.get(n.year) ?? null;
+            const before = n.intent.base.holidays.get(n.year) ?? null;
+            return sameYear(n.year, next, planYear) || !sameYear(n.year, before, planYear) || rk === null || next === null || next.region !== rk;
+          }
           case "refreshFailed":
-            return false;
+            return rk === null || planYear === null || planYear.region !== rk || planYear.fetchedAt !== n.fetchedAt;
         }
       });
     settled.forEach((n) => this.drop(plan, n.year));
@@ -228,19 +247,45 @@ export class HolidayService {
     return new Map(answers);
   }
 
-  private async fetchMissing(plan: PlanId, host: HolidayHost, region: RegionRef, year: number): Promise<void> {
+  private missingYear(plan: PlanId, host: HolidayHost, region: RegionRef, year: number, cause: "own" | "merge", started: number[]): boolean {
     const rk = regionKey(region);
-    const token = this.entry(plan, year);
     const cachedYear = this.cached(rk, year);
-    const r: Fetched = cachedYear !== null ? { ok: true, year: cachedYear } : await this.fetch(region, year, false);
-    if (token === undefined || this.entry(plan, year) !== token) return;
-    if (r.ok) {
-      if (this.arrive(plan, host, region, year, token, r.year)) this.notify();
-      return;
+    if (cachedYear !== null) {
+      if (cause === "own") return false;
+      const before = this.entry(plan, year);
+      try {
+        return this.arrive(plan, host, region, year, null, cachedYear);
+      } catch (e) {
+        if (before !== undefined && this.entry(plan, year) === before) this.drop(plan, year);
+        throw e;
+      }
     }
-    this.failures.set(slot(rk, year), { error: r.error, at: r.at });
-    this.put(plan, { k: "failed", year, error: r.error, coverage: this.coverage.get(rk) ?? null, at: r.at });
-    this.notify();
+    const failure = this.failures.get(slot(rk, year));
+    if (failure !== undefined) return this.write(plan, { k: "failed", year, error: failure.error, coverage: this.coverage.get(rk) ?? null, at: failure.at });
+    if (cause === "merge") return this.write(plan, { k: "notLoaded", year });
+    this.put(plan, { k: "loading", year });
+    started.push(year);
+    return true;
+  }
+
+  private async fetchMissing(plan: PlanId, host: HolidayHost, region: RegionRef, year: number): Promise<void> {
+    const token = this.entry(plan, year);
+    try {
+      const rk = regionKey(region);
+      const cachedYear = this.cached(rk, year);
+      const r: Fetched = cachedYear !== null ? { ok: true, year: cachedYear } : await this.fetch(region, year, false);
+      if (token === undefined || this.entry(plan, year) !== token) return;
+      if (r.ok) {
+        if (this.arrive(plan, host, region, year, token, r.year)) this.notify();
+        return;
+      }
+      this.failures.set(slot(rk, year), { error: r.error, at: r.at });
+      this.put(plan, { k: "failed", year, error: r.error, coverage: this.coverage.get(rk) ?? null, at: r.at });
+      this.notify();
+    } catch (e) {
+      this.abandon(plan, year, token);
+      throw e;
+    }
   }
 
   private arrive(plan: PlanId, host: HolidayHost, region: RegionRef, year: number, token: Entry | null, fetched: HolidayYear): boolean {
@@ -255,34 +300,44 @@ export class HolidayService {
   }
 
   private async refreshYear(plan: PlanId, host: HolidayHost, region: RegionRef, year: number, forced: boolean): Promise<void> {
-    const rk = regionKey(region);
-    const s = slot(rk, year);
-    const today = localToday(new Date(this.now()));
-    const held = this.refreshFailures.get(s);
-    const c = this.cached(rk, year);
-    const r: Fetched = forced
-      ? await this.fetch(region, year, true)
-      : held !== undefined && localToday(new Date(held.at)) === today
-        ? { ok: false, error: held.error, at: held.at }
-        : c !== null && dayOf(c.fetchedAt) === today
-          ? { ok: true, year: c }
-          : await this.fetch(region, year, true);
-    const base = host.view().plan.calendar;
-    const planYear = base.holidays.get(year) ?? null;
-    if (base.region === null || regionKey(base.region) !== rk || planYear === null || planYear.region !== rk) return;
-    if (!r.ok) {
-      this.put(plan, { k: "refreshFailed", year, error: r.error, at: r.at, fetchedAt: planYear.fetchedAt });
+    const token = this.entry(plan, year);
+    try {
+      const rk = regionKey(region);
+      const s = slot(rk, year);
+      const today = localToday(new Date(this.now()));
+      const held = this.refreshFailures.get(s);
+      const c = this.cached(rk, year);
+      const r: Fetched = forced
+        ? await this.fetch(region, year, true)
+        : held !== undefined && localToday(new Date(held.at)) === today
+          ? { ok: false, error: held.error, at: held.at }
+          : c !== null && dayOf(c.fetchedAt) === today
+            ? { ok: true, year: c }
+            : await this.fetch(region, year, true);
+      if (this.entry(plan, year) !== token) return;
+      const base = host.view().plan.calendar;
+      const planYear = base.holidays.get(year) ?? null;
+      if (base.region === null || regionKey(base.region) !== rk || planYear === null || planYear.region !== rk) {
+        if (this.drop(plan, year)) this.notify();
+        return;
+      }
+      if (!r.ok) {
+        this.put(plan, { k: "refreshFailed", year, error: r.error, at: r.at, fetchedAt: planYear.fetchedAt });
+        this.notify();
+        return;
+      }
+      if (sameYear(year, r.year, planYear)) {
+        if (this.drop(plan, year)) this.notify();
+        return;
+      }
+      const intent = this.intentFor(base, year, r.year);
+      const preview = host.preview(intent);
+      this.put(plan, { k: "changed", year, count: diffDays(planYear.days, r.year.days), intent, preview });
       this.notify();
-      return;
+    } catch (e) {
+      this.abandon(plan, year, token);
+      throw e;
     }
-    if (sameYear(year, r.year, planYear)) {
-      if (this.drop(plan, year)) this.notify();
-      return;
-    }
-    const intent = this.intentFor(base, year, r.year);
-    const preview = host.preview(intent);
-    this.put(plan, { k: "changed", year, count: diffDays(planYear.days, r.year.days), intent, preview });
-    this.notify();
   }
 
   private intentFor(base: Calendar, year: number, fetched: HolidayYear): Intent {
@@ -304,8 +359,8 @@ export class HolidayService {
   private async request(region: RegionRef, year: number, fresh: boolean): Promise<Fetched> {
     const rk = regionKey(region);
     const s = slot(rk, year);
-    const answer = await call<YearAnswer>("holidays_year", { region, year, fresh }).then(
-      (a): YearAnswer | AppError => a,
+    const answer = await call<unknown>("holidays_year", { region, year, fresh }).then(
+      (a): unknown => a,
       (e: unknown): AppError => {
         if (e instanceof AppError) return e;
         throw e;
@@ -316,16 +371,29 @@ export class HolidayService {
       if (fresh) this.refreshFailures.set(s, failure);
       return { ok: false, ...failure };
     }
+    if (!isYearAnswer(answer)) throw new AppError("ipc.shape", `holidays_year answered an unexpected shape for ${rk} ${year}`);
     const got: HolidayYear = { region: rk, year, days: answer.days, fetchedAt: answer.fetchedAt };
-    this.cache.set(s, got);
+    const prev = this.cache.get(s);
+    const kept = prev !== undefined && Date.parse(prev.fetchedAt) > Date.parse(got.fetchedAt) ? prev : got;
+    this.cache.set(s, kept);
     if (answer.coverage !== null) this.coverage.set(rk, { from: answer.coverage[0], to: answer.coverage[1] });
     this.failures.delete(s);
     if (fresh) this.refreshFailures.delete(s);
-    return { ok: true, year: got };
+    return { ok: true, year: kept };
   }
 
   private entry(plan: PlanId, year: number): Entry | undefined {
     return this.entries.get(plan)?.get(year);
+  }
+
+  private write(plan: PlanId, notice: HolidayNotice): boolean {
+    if (unchanged(this.entry(plan, notice.year)?.notice, notice)) return false;
+    this.put(plan, notice);
+    return true;
+  }
+
+  private abandon(plan: PlanId, year: number, token: Entry | undefined): void {
+    if (token !== undefined && this.entry(plan, year) === token && this.drop(plan, year)) this.notify();
   }
 
   private put(plan: PlanId, notice: HolidayNotice): void {
