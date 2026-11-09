@@ -1,45 +1,92 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, type FocusEvent, type KeyboardEvent } from "react";
 import type { PlanId } from "../../domain/model";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { exportFlow, importFlow } from "./fileFlows";
 
-export function PlanMenu(p: { session: PlanSession; registry: Registry; onOpen(id: PlanId): void }) {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
+const mounted = (b: HTMLButtonElement | null, missing: string): HTMLButtonElement => {
+  if (b === null) throw new Error(missing);
+  return b;
+};
+
+function moved(key: string, at: number, n: number): number | null {
+  if (key === "Home") return 0;
+  if (key === "End") return n - 1;
+  if (key === "ArrowDown") return at < 0 ? 0 : (at + 1) % n;
+  if (key === "ArrowUp") return at < 0 ? n - 1 : (at - 1 + n) % n;
+  return null;
+}
+
+export function PlanMenu(p: {
+  session: PlanSession;
+  registry: Registry;
+  open: boolean;
+  onOpenChange(open: boolean): void;
+  onOpen(id: PlanId): void;
+}) {
+  const { open, onOpenChange } = p;
   const toggle = useRef<HTMLButtonElement>(null);
-  const first = useRef<HTMLButtonElement>(null);
+  const exportItem = useRef<HTMLButtonElement>(null);
+  const importItem = useRef<HTMLButtonElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+
+  const items = (): HTMLButtonElement[] => [
+    mounted(exportItem.current, "PlanMenu opened without its first item"),
+    mounted(importItem.current, "PlanMenu opened without its last item"),
+  ];
 
   useEffect(() => {
     if (!open) return;
-    first.current?.focus();
+    mounted(exportItem.current, "PlanMenu opened without its first item").focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     const away = (e: PointerEvent): void => {
       if (e.target instanceof Node && box.current !== null && box.current.contains(e.target)) return;
-      setOpen(false);
+      onOpenChange(false);
     };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
-  }, [open]);
+  }, [open, onOpenChange]);
+
+  const close = (): void => {
+    onOpenChange(false);
+    mounted(toggle.current, "PlanMenu without its toggle").focus();
+  };
 
   const onKey = (e: KeyboardEvent): void => {
-    if (e.key !== "Escape") return;
+    if (!open) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      return;
+    }
+    const list = items();
+    const to = moved(e.key, list.findIndex((b) => b === document.activeElement), list.length);
+    if (to === null) return;
     e.preventDefault();
-    setOpen(false);
-    toggle.current?.focus();
+    list[to].focus();
+  };
+
+  const onLeave = (e: FocusEvent<HTMLDivElement>): void => {
+    if (!open) return;
+    if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+    onOpenChange(false);
   };
 
   const exportPlan = (): void => {
-    setOpen(false);
+    onOpenChange(false);
     void exportFlow(p.session);
   };
 
   const importPlan = (): void => {
-    setOpen(false);
+    onOpenChange(false);
     void importFlow(p.registry, p.onOpen);
   };
 
   return (
-    <div className="plan-menu" ref={box} onKeyDown={onKey}>
+    <div className="plan-menu" ref={box} onKeyDown={onKey} onBlur={onLeave} onMouseDown={(e) => e.preventDefault()}>
       <button
         type="button"
         ref={toggle}
@@ -47,16 +94,16 @@ export function PlanMenu(p: { session: PlanSession; registry: Registry; onOpen(i
         aria-label="Plan menu"
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => (open ? close() : onOpenChange(true))}
       >
         ⋯
       </button>
       {open && (
         <div className="plan-menu-list" role="menu" aria-label="Plan">
-          <button type="button" role="menuitem" ref={first} className="choice-row" onClick={exportPlan}>
+          <button type="button" role="menuitem" ref={exportItem} className="choice-row" onClick={exportPlan}>
             Export plan…
           </button>
-          <button type="button" role="menuitem" className="choice-row" onClick={importPlan}>
+          <button type="button" role="menuitem" ref={importItem} className="choice-row" onClick={importPlan}>
             Import plan…
           </button>
         </div>

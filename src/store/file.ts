@@ -250,19 +250,21 @@ function missingId(item: ItemId, what: string): never {
   throw new Error(`Item ${item} has ${what} but no new id`);
 }
 
-export async function exportPlan(session: PlanSession): Promise<string | null> {
+export async function exportPlan(session: PlanSession): Promise<{ path: string; unreadable: number } | null> {
   const path = await save({ defaultPath: session.view().plan.name + ".webboard", filters: FILTERS });
   if (path === null) return null;
-  const { id, name } = session.view().plan;
+  const view = session.view();
+  const { id, name } = view.plan;
   const u = session.encodeState();
+  const unreadable = view.unreadable.length + view.pending;
   const body = encodeWbx({ planId: id, name, exportedAt: new Date(Date.now()).toISOString(), updateLength: u.length }, u);
   await call<null>("file_write", body, { headers: { "x-path": encodeURIComponent(path) } });
-  return path;
+  return { path, unreadable };
 }
 
 export const fileNameOf = (path: string): string => {
   const last = path.slice(path.lastIndexOf("/") + 1);
-  return path.startsWith(FILE_PREFIX) ? decodeURIComponent(last) : last;
+  return path.slice(0, FILE_PREFIX.length).toLowerCase() === FILE_PREFIX ? decodeURIComponent(last) : last;
 };
 
 export async function importPlan(registry: Registry): Promise<PlanId | null> {

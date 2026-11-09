@@ -106,6 +106,7 @@ export function Shell(p: ShellProps) {
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
   const [main, setMainState] = useState<Main>({ k: "none" });
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const selected = useRef(ui.plan);
   const mainRef = useRef<Main>(main);
   const creatingRef = useRef(false);
@@ -282,6 +283,11 @@ export function Shell(p: ShellProps) {
       });
   };
 
+  const importPlan = (): void => {
+    setImporting(true);
+    void importFlow(registry, (id) => select(id)).finally(() => setImporting(false));
+  };
+
   const plans = registry.plans();
   const listingOf = (id: PlanId): PlanListing | undefined => plans.find((l) => l.id === id);
 
@@ -383,8 +389,8 @@ export function Shell(p: ShellProps) {
         <div className="empty-state">
           <div className="empty-actions">
             <NewPlanButton creating={creating} onNew={newPlan} />
-            <button type="button" onClick={() => void importFlow(registry, (id) => select(id))}>
-              Import plan…
+            <button type="button" disabled={importing} onClick={importPlan}>
+              {importing ? <span className="dim">Importing…</span> : "Import plan…"}
             </button>
           </div>
         </div>
@@ -417,7 +423,9 @@ export function Shell(p: ShellProps) {
           session={session}
           local={registry.device.name}
           onChoose={(choice) => openChoice(choice)}
-          menu={<PlanMenu session={session} registry={registry} onOpen={(id) => select(id)} />}
+          menu={(open, setOpen) => (
+            <PlanMenu session={session} registry={registry} open={open} onOpenChange={setOpen} onOpen={(id) => select(id)} />
+          )}
         >
           <HolidayState session={session} registry={registry} clock={p.clock} />
         </PlanHead>

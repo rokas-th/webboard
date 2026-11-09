@@ -20,19 +20,21 @@ async function shown<T>(work: Promise<T>): Promise<Outcome<T>> {
 
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-export async function exportFlow(session: PlanSession): Promise<void> {
+const exporting = new Map<PlanSession, Promise<void>>();
+let importing: Promise<void> | null = null;
+
+async function exportOnce(session: PlanSession): Promise<void> {
   const written = await shown(exportPlan(session));
   if (!written.ok || written.value === null) return;
-  const view = session.view();
-  const unreadable = view.unreadable.length + view.pending;
+  const { path, unreadable } = written.value;
   toast(
     unreadable === 0
-      ? `Exported to ${fileNameOf(written.value)}`
+      ? `Exported to ${fileNameOf(path)}`
       : `Exported. This file holds ${count(unreadable, "action", "actions")} this app cannot read yet, so Import will refuse it until they are resolved.`,
   );
 }
 
-export async function importFlow(registry: Registry, open: (id: PlanId) => void): Promise<void> {
+async function importOnce(registry: Registry, open: (id: PlanId) => void): Promise<void> {
   const imported = await shown(importPlan(registry));
   if (!imported.ok || imported.value === null) return;
   const id = imported.value;
@@ -43,4 +45,21 @@ export async function importFlow(registry: Registry, open: (id: PlanId) => void)
   const conflicts = countedConflicts(view).length;
   const name = `Imported “${view.plan.name}”`;
   toast(conflicts === 0 ? name : `${name} — ${count(conflicts, "conflict", "conflicts")} to fix`);
+}
+
+export function exportFlow(session: PlanSession): Promise<void> {
+  const running = exporting.get(session);
+  if (running !== undefined) return running;
+  const run = exportOnce(session).finally(() => exporting.delete(session));
+  exporting.set(session, run);
+  return run;
+}
+
+export function importFlow(registry: Registry, open: (id: PlanId) => void): Promise<void> {
+  if (importing !== null) return importing;
+  const run = importOnce(registry, open).finally(() => {
+    importing = null;
+  });
+  importing = run;
+  return run;
 }

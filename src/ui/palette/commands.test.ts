@@ -146,6 +146,21 @@ describe("commands()", () => {
     ]);
   });
 
+  it("lists the File commands together: New plan, Export plan…, Import plan…", async () => {
+    const t = await made(SMALL);
+    const h = harness(t, { selected: "a" }, ["p2"]);
+    const all = commands(h.ctx);
+    const at = all.findIndex((c) => c.group === "File");
+    expect(all.slice(at, at + 3).map((c) => [c.id, c.group])).toEqual([
+      ["new-plan", "File"],
+      ["export", "File"],
+      ["import", "File"],
+    ]);
+    expect(all.filter((c) => c.group === "File")).toHaveLength(3);
+    const none: CommandCtx = { ...h.ctx, session: null, run: null, undo: null, redo: null };
+    expect(commands(none).filter((c) => c.group === "File").map((c) => c.id)).toEqual(["new-plan", "import"]);
+  });
+
   it("runs export through exportFlow once, on the open session", async () => {
     const t = await made(SMALL);
     const h = harness(t);

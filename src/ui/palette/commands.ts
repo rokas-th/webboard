@@ -202,7 +202,6 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
       },
     },
     ...conflict,
-    { id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session) },
     {
       id: "undo",
       group: "Edit",
@@ -240,12 +239,15 @@ export function commands(ctx: CommandCtx): Command[] {
         run: () => ctx.select(l.id),
       }),
     );
+  const session = ctx.session;
+  const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session) }];
   const always: Command[] = [
     { id: "new-plan", group: "File", label: "New plan", run: () => ctx.newPlan() },
+    ...exportCommand,
     { id: "import", group: "File", label: "Import plan…", run: () => void importFlow(ctx.registry, (id) => ctx.select(id)) },
     ...openPlans,
     { id: "palette", group: "Help", label: "Command palette", keys: ctx.mac ? "⌘K" : "Ctrl K", run: () => ctx.setUi({ dialog: { t: "palette" } }) },
     { id: "about", group: "Help", label: "About WebBoard", run: () => ctx.setUi({ dialog: { t: "about" } }) },
   ];
-  return ctx.session === null ? always : [...planCommands(ctx, ctx.session), ...always];
+  return session === null ? always : [...planCommands(ctx, session), ...always];
 }

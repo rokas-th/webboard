@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { sideText } from "../../plan/choices";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { CalendarBanner } from "../choices/CalendarBanner";
@@ -7,16 +7,26 @@ import { orderedSides } from "../choices/order";
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-export function PlanHead(p: { session: PlanSession; local: string; onChoose(choice: string): void; menu?: ReactNode; children?: ReactNode }) {
+type Popover = "choices" | "menu" | null;
+
+export function PlanHead(p: {
+  session: PlanSession;
+  local: string;
+  onChoose(choice: string): void;
+  menu?: (open: boolean, setOpen: (open: boolean) => void) => ReactNode;
+  children?: ReactNode;
+}) {
   const view = usePlanView(p.session);
-  const [listOpen, setListOpen] = useState(false);
+  const [popover, setPopover] = useState<Popover>(null);
   const plan = view.plan;
   const none = view.choices.length === 0;
+  const listOpen = popover === "choices";
   useEffect(() => {
-    if (none) setListOpen(false);
+    if (none) setPopover((o) => (o === "choices" ? null : o));
   }, [none]);
+  const setMenuOpen = useCallback((open: boolean) => setPopover((o) => (open ? "menu" : o === "menu" ? null : o)), []);
   const choose = (id: string): void => {
-    setListOpen(false);
+    setPopover(null);
     p.onChoose(id);
   };
   return (
@@ -37,7 +47,7 @@ export function PlanHead(p: { session: PlanSession; local: string; onChoose(choi
           {view.choices.length > 0 && (
             <span className="chip chip-amber">
               {plural(view.choices.length, "open choice", "open choices")} ·{" "}
-              <button type="button" className="chip-button" aria-expanded={listOpen} onClick={() => setListOpen(!listOpen)}>
+              <button type="button" className="chip-button" aria-expanded={listOpen} onClick={() => setPopover(listOpen ? null : "choices")}>
                 Choose…
               </button>
             </span>
@@ -45,7 +55,7 @@ export function PlanHead(p: { session: PlanSession; local: string; onChoose(choi
           <HeadCounts view={view} onChoose={choose} />
         </div>
       </div>
-      {p.menu}
+      {p.menu === undefined ? null : p.menu(popover === "menu", setMenuOpen)}
       {listOpen && view.choices.length > 0 && (
         <ul className="choice-list" aria-label="Open choices">
           {view.choices.map((c) => (

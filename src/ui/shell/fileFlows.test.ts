@@ -1,4 +1,4 @@
-import { save } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PlanId } from "../../domain/model";
 import { AppError } from "../../services/ipc";
@@ -7,7 +7,7 @@ import { exportPlan, importPlan } from "../../store/file";
 import type { PlanSession } from "../../store/session";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { testRegistry } from "../../test/shell";
-import { tauri, type Call } from "../../test/tauriMock";
+import { hold, tauri, type Call } from "../../test/tauriMock";
 import { clearToasts, toast } from "../common/Toast";
 import { exportFlow, importFlow } from "./fileFlows";
 
@@ -30,6 +30,7 @@ afterEach(async () => {
   vi.mocked(importPlan).mockClear();
   vi.mocked(toast).mockClear();
   vi.mocked(save).mockReset();
+  vi.mocked(openDialog).mockReset();
   vi.restoreAllMocks();
   await Promise.all(sessions.splice(0).map((s) => s.close()));
 });
@@ -71,7 +72,7 @@ function deferred<T>(): { promise: Promise<T>; resolve(v: T): void } {
 describe("exportFlow", () => {
   it("toasts the file name once the plan is written", async () => {
     const t = await made([{ name: "A", start: "2026-11-10" }]);
-    vi.mocked(exportPlan).mockResolvedValueOnce(PATH);
+    vi.mocked(exportPlan).mockResolvedValueOnce({ path: PATH, unreadable: 0 });
     await exportFlow(t.session);
     expect(vi.mocked(exportPlan).mock.calls).toEqual([[t.session]]);
     expect(toasts()).toEqual([["Exported to MESA 1.0.webboard"]]);
@@ -135,9 +136,64 @@ describe("exportFlow", () => {
       ["Exported. This file holds 2 actions this app cannot read yet, so Import will refuse it until they are resolved."],
     ]);
   });
+  it("reports the unreadable count of the state it encoded, not of a view that changed during the write", async () => {
+    const t = await made([{ name: "A", start: "2026-11-10" }], { answers: { file_write: () => null } });
+    vi.mocked(save).mockResolvedValueOnce(PATH);
+    const held = hold("file_write");
+    const from = tauri.calls.length;
+    const flow = exportFlow(t.session);
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(tauri.calls.slice(from).filter((c) => c.cmd === "file_write")).toHaveLength(1);
+    t.doc.ydoc.getMap("actions").set("x1", RAW_X1);
+    expect(t.session.view().unreadable).toHaveLength(1);
+    held.resolve(null);
+    await flow;
+    expect(toasts()).toEqual([["Exported to MESA 1.0.webboard"]]);
+  });
+
+  it("opens one save dialog for two exports of a session at once, and its own for another session", async () => {
+    const t = await made([{ name: "A", start: "2026-11-10" }]);
+    const u = await made([{ name: "B", start: "2026-11-10" }]);
+    const picks = [deferred<string | null>(), deferred<string | null>()];
+    vi.mocked(save).mockReturnValueOnce(picks[0].promise).mockReturnValueOnce(picks[1].promise);
+    const first = exportFlow(t.session);
+    const second = exportFlow(t.session);
+    const other = exportFlow(u.session);
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(second).toBe(first);
+    expect(vi.mocked(save)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(exportPlan).mock.calls).toEqual([[t.session], [u.session]]);
+    picks.forEach((p) => p.resolve(null));
+    await Promise.all([first, second, other]);
+    vi.mocked(save).mockResolvedValueOnce(null);
+    await exportFlow(t.session);
+    expect(vi.mocked(save)).toHaveBeenCalledTimes(3);
+    expect(toasts()).toEqual([]);
+  });
 });
 
 describe("importFlow", () => {
+  it("opens one open dialog for two imports at once, and a new one once it settles", async () => {
+    const t = await named([{ name: "A", start: "2026-11-10" }]);
+    const registry = testRegistry(t);
+    const pick = deferred<string | null>();
+    vi.mocked(openDialog).mockReturnValueOnce(pick.promise);
+    const open = vi.fn<(id: PlanId) => void>();
+    const first = importFlow(registry, open);
+    const second = importFlow(registry, open);
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(second).toBe(first);
+    expect(vi.mocked(openDialog)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(importPlan)).toHaveBeenCalledTimes(1);
+    pick.resolve(null);
+    await Promise.all([first, second]);
+    vi.mocked(openDialog).mockResolvedValueOnce(null);
+    await importFlow(registry, open);
+    expect(vi.mocked(openDialog)).toHaveBeenCalledTimes(2);
+    expect(open).not.toHaveBeenCalled();
+    expect(toasts()).toEqual([]);
+  });
+
   it("opens the imported plan and names it", async () => {
     const t = await named([{ name: "A", start: "2026-11-10" }]);
     const id = t.session.view().plan.id;

@@ -17,7 +17,7 @@ import { memoryStore } from "../test/fixtures/store";
 import { VALID_WEBBOARD } from "../test/fixtures/webboard";
 import { resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
 import { decodeAction, PlanDoc } from "./doc";
-import { buildImport, decodeWbx, encodeWbx, exportPlan, importPlan, type ImportResult } from "./file";
+import { buildImport, decodeWbx, encodeWbx, exportPlan, fileNameOf, importPlan, type ImportResult } from "./file";
 import { Registry } from "./registry";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
@@ -191,7 +191,7 @@ describe("export", () => {
     session.apply({ t: "create", kind: "task", name: "Survey", parent: null, after: null, start: TODAY });
     vi.mocked(save).mockResolvedValue("/Users/a/Bridge.webboard");
     const from = tauri.calls.length;
-    expect(await exportPlan(session)).toBe("/Users/a/Bridge.webboard");
+    expect(await exportPlan(session)).toEqual({ path: "/Users/a/Bridge.webboard", unreadable: 0 });
     expect(vi.mocked(save).mock.calls).toEqual([[{ defaultPath: "Bridge.webboard", filters: [{ name: "WebBoard plan", extensions: ["webboard"] }] }]]);
     const writes = callsOf(from, "file_write");
     expect(writes).toHaveLength(1);
@@ -222,7 +222,7 @@ describe("export", () => {
     await flush();
     session.apply({ t: "planName", name: "Viaduct" });
     pick("/Users/a/Bridge.webboard");
-    expect(await saved).toBe("/Users/a/Bridge.webboard");
+    expect(await saved).toEqual({ path: "/Users/a/Bridge.webboard", unreadable: 0 });
     const body = callsOf(from, "file_write")[0].args;
     if (!(body instanceof Uint8Array)) throw new Error("file_write carried no bytes");
     const { header, update } = decodeWbx(body);
@@ -494,6 +494,12 @@ describe("import reads by header", () => {
     if (id === null) throw new Error("importPlan resolved null");
     expect(xpath(callsOf(from, "file_read")[0])).toBe(encodeURIComponent(url));
     expect((await reg.session(id)).history()[0].label).toBe("Imported from My Plan.webboard");
+  });
+
+  it("decodes the file name of a file:// URL whatever the case of its scheme", () => {
+    expect(fileNameOf("FILE:///private/var/mobile/My%20x.webboard")).toBe("My x.webboard");
+    expect(fileNameOf("File:///private/var/mobile/My%20x.webboard")).toBe("My x.webboard");
+    expect(fileNameOf("/Users/x/My%20x.webboard")).toBe("My%20x.webboard");
   });
 
   it("cancel reads nothing", async () => {

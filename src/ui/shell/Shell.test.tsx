@@ -104,6 +104,17 @@ const lastUi = () => {
   return r.value[0];
 };
 
+const setUiNow = (patch: Partial<UiState>): void => {
+  const results = vi.mocked(useUi).mock.results;
+  const r = results[results.length - 1];
+  if (r === undefined || r.type !== "return") throw new Error("useUi has not returned");
+  act(() => r.value[1](patch));
+};
+
+const menuToggle = (): HTMLElement => screen.getByRole("button", { name: "Plan menu" });
+
+const menuItems = (): HTMLElement[] => within(screen.getByRole("menu", { name: "Plan" })).getAllByRole("menuitem");
+
 const entry = (name: string): HTMLElement => {
   const nav = screen.getByRole("navigation", { name: "Plans" });
   return within(nav).getByText(name).closest("li") ?? (() => { throw new Error("no entry " + name); })();
@@ -221,19 +232,80 @@ describe("Shell on testSession(MESA_SEED)", () => {
     await settle();
   });
 
-  it("closes the ⋯ menu on Esc without touching the selection", async () => {
+  it("closes the ⋯ menu on Esc without touching the selection, and a second Esc on ⋯ deselects", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
     render(ui);
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: "Plan menu" }));
-    const menu = screen.getByRole("menu", { name: "Plan" });
-    expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: "Export plan…" }));
+    setUiNow({ selected: "t3" });
+    expect(lastUi().selected).toBe("t3");
+    fireEvent.click(menuToggle());
+    expect(document.activeElement).toBe(menuItems()[0]);
     act(() => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     });
     expect(screen.queryByRole("menu")).toBeNull();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Plan menu" }));
+    expect(document.activeElement).toBe(menuToggle());
+    expect(lastUi().selected).toBe("t3");
+    act(() => {
+      fireEvent.keyDown(menuToggle(), { key: "Escape" });
+    });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(lastUi().selected).toBeNull();
+  });
+
+  it("moves focus through the ⋯ menu with the arrow keys, Home and End, wrapping", async () => {
+    const t = await made(MESA_SEED);
+    const { ui } = shellFor(t);
+    render(ui);
+    await settle();
+    setUiNow({ selected: "t3" });
+    fireEvent.click(menuToggle());
+    const [exportItem, importItem] = menuItems();
+    expect(document.activeElement).toBe(exportItem);
+    const press = (key: string): boolean => {
+      let kept = true;
+      act(() => {
+        kept = fireEvent.keyDown(document.activeElement ?? document.body, { key });
+      });
+      return kept;
+    };
+    expect(press("ArrowDown")).toBe(false);
+    expect(document.activeElement).toBe(importItem);
+    expect(press("ArrowDown")).toBe(false);
+    expect(document.activeElement).toBe(exportItem);
+    expect(press("ArrowUp")).toBe(false);
+    expect(document.activeElement).toBe(importItem);
+    expect(press("Home")).toBe(false);
+    expect(document.activeElement).toBe(exportItem);
+    expect(press("End")).toBe(false);
+    expect(document.activeElement).toBe(importItem);
+    expect(screen.getByRole("menu", { name: "Plan" })).toBeTruthy();
+    expect(lastUi().selected).toBe("t3");
+  });
+
+  it("closes the ⋯ menu when focus leaves it, and keeps it while focus moves between its items", async () => {
+    const t = await made(MESA_SEED);
+    const { ui } = shellFor(t);
+    render(ui);
+    await settle();
+    fireEvent.click(menuToggle());
+    const [exportItem, importItem] = menuItems();
+    act(() => {
+      fireEvent.focusOut(exportItem, { relatedTarget: importItem });
+    });
+    expect(screen.getByRole("menu", { name: "Plan" })).toBeTruthy();
+    act(() => {
+      fireEvent.focusOut(importItem, { relatedTarget: menuToggle() });
+    });
+    expect(screen.getByRole("menu", { name: "Plan" })).toBeTruthy();
+    expect(fireEvent.mouseDown(importItem)).toBe(false);
+    expect(screen.getByRole("menu", { name: "Plan" })).toBeTruthy();
+    act(() => {
+      fireEvent.focusOut(importItem, { relatedTarget: screen.getByRole("button", { name: "⌘K" }) });
+    });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(menuToggle().getAttribute("aria-expanded")).toBe("false");
   });
 
   it("reads Ctrl K off macOS", async () => {
@@ -538,6 +610,24 @@ describe("PlanHead", () => {
     expect(chip()).toBe("1 open choice · Choose…");
     expect(screen.queryByRole("list", { name: "Open choices" })).toBeNull();
     await p.session.close();
+  });
+
+  it("keeps one head popover open: ⋯ closes the choice list and Choose… closes the menu", async () => {
+    const t = await made(A, { clashes: [NAME_CLASH] });
+    const { ui } = shellFor(t);
+    render(ui);
+    await settle();
+    const choose = screen.getByRole("button", { name: "Choose…" });
+    fireEvent.click(choose);
+    expect(screen.queryByRole("list", { name: "Open choices" })).not.toBeNull();
+    fireEvent.click(menuToggle());
+    expect(screen.queryByRole("menu", { name: "Plan" })).not.toBeNull();
+    expect(screen.queryByRole("list", { name: "Open choices" })).toBeNull();
+    expect(choose.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(choose);
+    expect(screen.queryByRole("list", { name: "Open choices" })).not.toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(menuToggle().getAttribute("aria-expanded")).toBe("false");
   });
 
   it("opens the choice holding the held items", async () => {
@@ -1063,6 +1153,50 @@ describe("Shell on Registry.open", () => {
     expect(within(main).queryByRole("button", { name: "New plan" })).toBeNull();
     expect(within(main).queryByRole("button", { name: "Import plan…" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it.each(["cancel", "AppError"])("shows Importing… on the empty state's Import plan… until an import ending in %s settles", async (end) => {
+    resetTauri({ ...memoryStore().answers, settings_read: () => null, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
+    const registry = await opened();
+    const pending = deferred<PlanId | null>();
+    vi.mocked(importPlan).mockReturnValueOnce(pending.promise);
+    render(shellOn(registry));
+    await settle();
+    const main = document.querySelector("main.main");
+    if (!(main instanceof HTMLElement)) throw new Error("no main");
+    fireEvent.click(within(main).getByRole("button", { name: "Import plan…" }));
+    await settle();
+    const busy = within(main).getByRole("button", { name: "Importing…" });
+    expect(busy.hasAttribute("disabled")).toBe(true);
+    expect(busy.querySelector(".dim")?.textContent).toBe("Importing…");
+    fireEvent.click(busy);
+    expect(importPlan).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      if (end === "cancel") pending.resolve(null);
+      else pending.reject(new AppError("import.foreign", "This file is not a WebBoard plan."));
+    });
+    await settle();
+    const idle = within(main).getByRole("button", { name: "Import plan…" });
+    expect(idle.hasAttribute("disabled")).toBe(false);
+    expect(within(main).queryByRole("button", { name: "Importing…" })).toBeNull();
+    expect(toastTexts()).toEqual(end === "cancel" ? [] : ["This file is not a WebBoard plan."]);
+  });
+
+  it("opens the plan the ⋯ menu's import names through the rail's selection", async () => {
+    const s = await store(["Alpha", "Beta"], { lastRegion: ZH });
+    const registry = await opened();
+    render(shellOn(registry));
+    await settle();
+    expect(currentName()).toBe("Alpha");
+    vi.mocked(importFlow).mockResolvedValueOnce(undefined);
+    fireEvent.click(menuToggle());
+    fireEvent.click(within(screen.getByRole("menu", { name: "Plan" })).getByRole("menuitem", { name: "Import plan…" }));
+    const calls = vi.mocked(importFlow).mock.calls;
+    expect(calls.map((c) => c[0])).toEqual([registry]);
+    act(() => calls[0][1](s.ids[1]));
+    await settle();
+    expect(currentName()).toBe("Beta");
+    expect(slot("timeline")).not.toBeNull();
   });
 
   it.each(["empty state", "sidebar"])("shows Creating… while a plan is created from the %s", async (from) => {
