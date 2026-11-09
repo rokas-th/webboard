@@ -581,10 +581,12 @@ export class Registry {
     if (docId === LOCAL_INDEX) throw new Error("The local plan list is not loaded from the server");
     const p: Promise<PersistedDoc> = this.setAside(docId).then(
       () =>
-        openPersisted(docId).then(
-          (d) => this.adopt(docId, p, d, true),
-          (e: unknown) => this.loadFailed(docId, p, true, e, []),
-        ),
+        this.closed
+          ? this.loadFailed(docId, p, false, new RegistryClosed(docId), [])
+          : openPersisted(docId).then(
+              (d) => this.adopt(docId, p, d, true),
+              (e: unknown) => this.loadFailed(docId, p, true, e, []),
+            ),
       (e: unknown) => this.loadFailed(docId, p, false, e, []),
     );
     this.memo.set(docId, p);

@@ -1269,6 +1269,23 @@ describe("Registry: lifecycle and failures", () => {
     expect(callsOf(from, "store_compact").filter((c) => xdoc(c) === "P")).toHaveLength(0);
   });
 
+  it("a reload whose set-aside ends after close loads nothing", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    await r.doc("P");
+    const from = tauri.calls.length;
+    const heldAside = hold("store_set_aside");
+    const reloading = r.reloadFromServer("P");
+    await flush();
+    const closing = r.close();
+    heldAside.resolve(e.mem.answers.store_set_aside({ doc: "P" }));
+    await expect(reloading).rejects.toBeInstanceOf(RegistryClosed);
+    await closing;
+    expect(loadsOf(from, "P")).toBe(0);
+  });
+
   it("an index retry replaces its recorded failure only with the new outcome", async () => {
     const e = env();
     seedIndex(e.mem, "local", listing("P"));
