@@ -67,6 +67,7 @@ struct OpenSegment {
 struct State {
     snapshot_seq: u64,
     last_seq: u64,
+    last_record: Option<Vec<u8>>,
     segments: Vec<Segment>,
     open: Option<OpenSegment>,
 }
@@ -256,6 +257,7 @@ fn later_record(tail: &[u8], after: Option<u64>) -> Option<(usize, u64)> {
 struct Scan {
     snapshot_seq: u64,
     last: Option<u64>,
+    last_record: Option<Vec<u8>>,
     records: Vec<(u64, Vec<u8>)>,
     torn: bool,
 }
@@ -270,6 +272,7 @@ impl Scan {
             ));
         }
         let mut offset = 0usize;
+        let mut last_payload: Option<&[u8]> = None;
         while offset < bytes.len() {
             match parse_record(&bytes[offset..]) {
                 Parsed::Record { seq, payload, size } => {
@@ -289,6 +292,7 @@ impl Scan {
                         ));
                     }
                     self.last = Some(seq);
+                    last_payload = Some(payload);
                     if seq > self.snapshot_seq {
                         self.records.push((seq, payload.to_vec()));
                     }
@@ -324,6 +328,9 @@ impl Scan {
                 }
             }
         }
+        if let Some(payload) = last_payload {
+            self.last_record = Some(payload.to_vec());
+        }
         Ok(offset as u64)
     }
 }
@@ -334,6 +341,7 @@ fn scan(dir: &Path) -> Result<(State, Loaded)> {
     let mut scanned = Scan {
         snapshot_seq,
         last: None,
+        last_record: None,
         records: Vec::new(),
         torn: false,
     };
@@ -363,6 +371,7 @@ fn scan(dir: &Path) -> Result<(State, Loaded)> {
         .transpose()?;
     let Scan {
         last,
+        last_record,
         records,
         torn,
         ..
@@ -372,6 +381,7 @@ fn scan(dir: &Path) -> Result<(State, Loaded)> {
         State {
             snapshot_seq,
             last_seq,
+            last_record,
             segments,
             open,
         },
@@ -513,10 +523,19 @@ impl DocStore {
             ..
         } = self;
         let state = ensure(dir, state, torn_unreported)?;
+        if seq == state.last_seq && state.last_record.as_deref() == Some(bytes) {
+            return Ok(());
+        }
         if seq <= state.last_seq {
             return Err(CommandError::new(
                 "store.seq",
                 format!("seq {seq} is not after {}", state.last_seq),
+            ));
+        }
+        if state.last_seq == 0 && seq > 1 {
+            return Err(CommandError::new(
+                "store.seq",
+                format!("seq {seq} into an empty document"),
             ));
         }
         let record = encode_record(seq, bytes, len);
@@ -557,6 +576,7 @@ impl DocStore {
             Ok(()) => {
                 open.len += size;
                 state.last_seq = seq;
+                state.last_record = Some(bytes.to_vec());
                 Ok(())
             }
             Err(e) => match open.file.set_len(open.len) {
@@ -612,6 +632,9 @@ impl DocStore {
             sync_dir(dir)?;
         }
         state.segments = kept.into_iter().map(|(seg, _)| seg).collect();
+        if state.segments.is_empty() {
+            state.last_record = None;
+        }
         state.snapshot_seq = seq;
         Ok(())
     }
@@ -672,7 +695,6 @@ impl Store {
     pub fn set_aside(&self, id: &str, secs: u64) -> Result<()> {
         check_id(id)?;
         let mut docs = self.table()?;
-        drop(docs.remove(id));
         let dir = self.root.join(id);
         if !dir.is_dir() {
             return Err(CommandError::new("store.io", format!("no document {id}")));
@@ -684,32 +706,46 @@ impl Store {
                 format!("{} already exists", target.display()),
             ));
         }
-        let path = dir.join(LOCK);
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&path)
-            .map_err(|e| io_error("Could not open", &path, e))?;
-        match lock.try_lock() {
-            Ok(()) => Ok(()),
-            Err(TryLockError::WouldBlock) => Err(locked_error(id)),
-            Err(TryLockError::Error(e)) => Err(io_error("Could not lock", &path, e)),
-        }?;
-        fs::rename(&dir, &target).map_err(|e| {
-            CommandError::new(
+        if docs.get(id).is_some_and(|d| Arc::strong_count(d) > 1) {
+            return Err(CommandError::new(
+                "store.locked",
+                format!("Plan {id} is still being saved in this window; try again."),
+            ));
+        }
+        let held = match docs.remove(id) {
+            Some(doc) => Held::Doc(doc),
+            None => Held::File(lock_dir(&dir, id)?),
+        };
+        if let Err(e) = fs::rename(&dir, &target) {
+            if let Held::Doc(doc) = held {
+                docs.insert(id.to_string(), doc);
+            }
+            return Err(CommandError::new(
                 "store.io",
                 format!(
                     "Could not move {} to {}: {e}",
                     dir.display(),
                     target.display()
                 ),
+            ));
+        }
+        sync_dir(&self.root).map_err(|e| {
+            CommandError::new(
+                "store.io",
+                format!(
+                    "{} was moved to {}, but {}",
+                    dir.display(),
+                    target.display(),
+                    e.message
+                ),
             )
         })?;
-        sync_dir(&self.root)?;
-        lock.unlock()
-            .map_err(|e| io_error("Could not unlock", &target.join(LOCK), e))?;
+        match held {
+            Held::Doc(doc) => drop(doc),
+            Held::File(lock) => lock
+                .unlock()
+                .map_err(|e| io_error("Could not unlock", &target.join(LOCK), e))?,
+        }
         drop(docs);
         Ok(())
     }
@@ -745,6 +781,27 @@ impl Store {
                 "folder is neither a plan nor a set-aside plan",
             )),
         }
+    }
+}
+
+enum Held {
+    Doc(Arc<Mutex<DocStore>>),
+    File(File),
+}
+
+fn lock_dir(dir: &Path, id: &str) -> Result<File> {
+    let path = dir.join(LOCK);
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|e| io_error("Could not open", &path, e))?;
+    match lock.try_lock() {
+        Ok(()) => Ok(lock),
+        Err(TryLockError::WouldBlock) => Err(locked_error(id)),
+        Err(TryLockError::Error(e)) => Err(io_error("Could not lock", &path, e)),
     }
 }
 
@@ -807,12 +864,60 @@ mod tests {
     fn seq_must_increase() {
         let tmp = TempDir::new().unwrap();
         let mut s = DocStore::open(tmp.path()).unwrap();
+        append_range(&mut s, 1..=2);
         s.append(3, b"a").unwrap();
         assert_eq!(
             s.append(3, b"b").unwrap_err(),
             CommandError::new("store.seq", "seq 3 is not after 3")
         );
-        assert_eq!(s.load().unwrap().records, vec![(3, b"a".to_vec())]);
+        assert_eq!(seqs(&s.load().unwrap()), [1, 2, 3]);
+        assert_eq!(s.load().unwrap().records[2], (3, b"a".to_vec()));
+    }
+
+    #[test]
+    fn resend_of_the_last_record_is_accepted() {
+        let tmp = TempDir::new().unwrap();
+        let mut s = DocStore::open(tmp.path()).unwrap();
+        append_range(&mut s, 1..=2);
+        let before = fs::read(tmp.path().join("seg-1.log")).unwrap();
+        s.append(2, &payload(2)).unwrap();
+        assert_eq!(fs::read(tmp.path().join("seg-1.log")).unwrap(), before);
+        assert_eq!(
+            s.append(2, b"other").unwrap_err(),
+            CommandError::new("store.seq", "seq 2 is not after 2")
+        );
+        assert_eq!(
+            s.append(1, &payload(1)).unwrap_err(),
+            CommandError::new("store.seq", "seq 1 is not after 2")
+        );
+        drop(s);
+        let mut s = DocStore::open(tmp.path()).unwrap();
+        s.append(2, &payload(2)).unwrap();
+        assert_eq!(
+            s.append(2, b"other").unwrap_err(),
+            CommandError::new("store.seq", "seq 2 is not after 2")
+        );
+        assert_eq!(fs::read(tmp.path().join("seg-1.log")).unwrap(), before);
+        assert_eq!(seqs(&s.load().unwrap()), [1, 2]);
+        s.compact(2, b"S").unwrap();
+        assert_eq!(
+            s.append(2, &payload(2)).unwrap_err(),
+            CommandError::new("store.seq", "seq 2 is not after 2")
+        );
+    }
+
+    #[test]
+    fn empty_doc_starts_at_seq_one() {
+        let tmp = TempDir::new().unwrap();
+        let mut s = DocStore::open(tmp.path()).unwrap();
+        assert_eq!(
+            s.append(2, &payload(2)).unwrap_err(),
+            CommandError::new("store.seq", "seq 2 into an empty document")
+        );
+        assert_eq!(seg_names(tmp.path()), Vec::<String>::new());
+        s.append(1, &payload(1)).unwrap();
+        s.append(3, &payload(3)).unwrap();
+        assert_eq!(seqs(&s.load().unwrap()), [1, 3]);
     }
 
     #[test]
@@ -1233,6 +1338,59 @@ mod tests {
         assert_eq!(store.set_aside("a b", 1).unwrap_err().code, "store.io");
         let l = store.doc("P").unwrap().lock().unwrap().load().unwrap();
         assert_eq!(l.last_seq, 0);
+    }
+
+    #[test]
+    fn set_aside_keeps_the_entry_when_a_check_fails() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let store = Store::new(docs.clone());
+        append_range(&mut store.doc("P").unwrap().lock().unwrap(), 1..=2);
+        let entry = Arc::downgrade(store.table().unwrap().get("P").unwrap());
+        fs::create_dir(docs.join("P.bad-1700000000")).unwrap();
+        let e = store.set_aside("P", 1_700_000_000).unwrap_err();
+        assert_eq!(e.code, "store.io");
+        assert!(e.message.ends_with("already exists"), "{}", e.message);
+        let kept = entry.upgrade().expect("the table entry was dropped");
+        assert!(Arc::ptr_eq(&store.doc("P").unwrap(), &kept));
+        drop(kept);
+        store
+            .doc("P")
+            .unwrap()
+            .lock()
+            .unwrap()
+            .append(3, &payload(3))
+            .unwrap();
+        assert_eq!(
+            seqs(&store.doc("P").unwrap().lock().unwrap().load().unwrap()),
+            [1, 2, 3]
+        );
+        store.set_aside("P", 1_700_000_001).unwrap();
+        assert!(docs.join("P.bad-1700000001").join("seg-1.log").is_file());
+        assert!(!store.table().unwrap().contains_key("P"));
+    }
+
+    #[test]
+    fn set_aside_refuses_a_doc_in_use() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let store = Store::new(docs.clone());
+        let held = store.doc("P").unwrap();
+        append_range(&mut held.lock().unwrap(), 1..=2);
+        assert_eq!(
+            store.set_aside("P", 1_700_000_000).unwrap_err(),
+            CommandError::new(
+                "store.locked",
+                "Plan P is still being saved in this window; try again."
+            )
+        );
+        assert!(docs.join("P").is_dir());
+        assert!(!docs.join("P.bad-1700000000").exists());
+        assert!(Arc::ptr_eq(&store.doc("P").unwrap(), &held));
+        drop(held);
+        store.set_aside("P", 1_700_000_000).unwrap();
+        assert!(docs.join("P.bad-1700000000").is_dir());
+        assert!(!docs.join("P").exists());
     }
 
     #[test]

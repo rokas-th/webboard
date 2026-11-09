@@ -35,6 +35,8 @@ export interface MemoryStore {
 
 const lastSeqOf = (d: MemoryDoc): number => d.records.length > 0 ? d.records[d.records.length - 1][0] : d.snapshotSeq;
 
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+
 function docArg(args: InvokeArgs | undefined): string {
   const doc = args !== undefined && !(args instanceof Uint8Array) && !(args instanceof ArrayBuffer) && !Array.isArray(args) ? args.doc : undefined;
   if (typeof doc !== "string") throw new Error(`memoryStore: expected { doc }, got ${String(args)}`);
@@ -74,8 +76,7 @@ export function memoryStore(): MemoryStore {
     store_load: (args) => {
       const id = docArg(args);
       check("store_load", id);
-      const d = docs.get(id);
-      if (d === undefined) return encodeLoad({ lastSeq: 0 });
+      const d = docOf(id);
       return encodeLoad({ snapshot: d.snapshot, records: d.records.map(([, r]) => r), lastSeq: lastSeqOf(d) });
     },
     store_append: (args, options) => {
@@ -84,7 +85,10 @@ export function memoryStore(): MemoryStore {
       check("store_append", doc);
       const d = docOf(doc);
       const last = lastSeqOf(d);
+      const tail = d.records.length > 0 ? d.records[d.records.length - 1] : undefined;
+      if (tail !== undefined && tail[0] === seq && sameBytes(tail[1], bytes)) return null;
       if (seq <= last) throw { code: "store.seq", message: `seq ${seq} is not after ${last}` };
+      if (last === 0 && seq > 1) throw { code: "store.seq", message: `seq ${seq} into an empty document` };
       d.records.push([seq, bytes]);
       return null;
     },

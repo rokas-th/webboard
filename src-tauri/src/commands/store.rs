@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,11 +22,13 @@ struct Write {
     bytes: Vec<u8>,
 }
 
-fn header<'a>(request: &'a Request<'_>, name: &str) -> Option<Cow<'a, str>> {
-    request
+fn header<'a>(request: &'a Request<'_>, name: &str, code: &str) -> Result<&'a str> {
+    let value = request
         .headers()
         .get(name)
-        .map(|v| String::from_utf8_lossy(v.as_bytes()))
+        .ok_or_else(|| CommandError::new(code, format!("missing {name} header")))?;
+    std::str::from_utf8(value.as_bytes())
+        .map_err(|_| CommandError::new(code, format!("header {name} is not UTF-8")))
 }
 
 fn write_of(cmd: &str, request: &Request<'_>) -> Result<Write> {
@@ -38,11 +39,8 @@ fn write_of(cmd: &str, request: &Request<'_>) -> Result<Write> {
             format!("{cmd} expects raw bytes"),
         )),
     }?;
-    let doc = header(request, "x-doc")
-        .ok_or_else(|| CommandError::new("store.io", "missing x-doc header"))?
-        .into_owned();
-    let seq = header(request, "x-seq")
-        .ok_or_else(|| CommandError::new("store.seq", "missing x-seq header"))?;
+    let doc = header(request, "x-doc", "store.io")?.to_string();
+    let seq = header(request, "x-seq", "store.seq")?;
     let seq = seq
         .parse::<u64>()
         .map_err(|_| CommandError::new("store.seq", format!("x-seq is not a number: {seq}")))?;
@@ -301,6 +299,29 @@ mod tests {
                 error("store.io", "missing x-doc header")
             );
         });
+        assert!(!h.docs.exists());
+    }
+
+    #[test]
+    fn non_utf8_header_refused() {
+        let h = harness();
+        [("x-doc", "store.io"), ("x-seq", "store.seq")]
+            .iter()
+            .for_each(|(name, code)| {
+                let mut req = request(
+                    "store_append",
+                    InvokeBody::Raw(b"u".to_vec()),
+                    &[("x-doc", "p1"), ("x-seq", "1")],
+                );
+                req.headers.insert(
+                    *name,
+                    tauri::http::HeaderValue::from_bytes(&[0x70, 0xff]).unwrap(),
+                );
+                assert_eq!(
+                    get_ipc_response(&h.webview, req).unwrap_err(),
+                    error(code, &format!("header {name} is not UTF-8"))
+                );
+            });
         assert!(!h.docs.exists());
     }
 

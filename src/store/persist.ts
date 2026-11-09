@@ -35,6 +35,7 @@ function decodeLoad(id: string, bytes: Uint8Array): Load {
   if (seq > BigInt(Number.MAX_SAFE_INTEGER)) throw bad(`last seq ${seq} is too large`);
   const count = view.getUint32(9, true);
   if (count < 1) throw bad("no snapshot entry");
+  if (count * 4 > bytes.length - 13) throw bad(`count ${count} does not fit in ${bytes.length - 13} bytes`);
   const { entries, end } = Array.from({ length: count }).reduce<{ entries: Uint8Array[]; end: number }>(
     (acc, _, i) => {
       if (acc.end + 4 > bytes.length) throw bad(`entry ${i} of ${count} is cut short`);
@@ -59,7 +60,22 @@ function rebuild(id: string, load: Load): Y.Doc {
   } catch (e) {
     throw new AppError("store.corrupt", `${id}: a stored update could not be read: ${e instanceof Error ? e.message : String(e)}`);
   }
+  if (ydoc.store.pendingStructs !== null || ydoc.store.pendingDs !== null) {
+    throw new AppError("store.corrupt", `${id}: stored updates reference missing state`);
+  }
   return ydoc;
+}
+
+function listenerFailure(thrown: unknown[]): unknown {
+  if (thrown.length === 1) return thrown[0];
+  const first = thrown[0];
+  return Object.assign(new Error(`${thrown.length} onError listeners threw; the first: ${first instanceof Error ? first.message : String(first)}`), { cause: first });
+}
+
+function raise(e: unknown): void {
+  setTimeout(() => {
+    throw e;
+  }, 0);
 }
 
 interface Waiter {
@@ -90,23 +106,47 @@ export async function openPersisted(id: string): Promise<PersistedDoc> {
   const halt = (e: AppError): void => {
     failure = e;
     queue.flatMap((op) => op.waiters.splice(0)).forEach((w) => w.reject(e));
-    [...listeners].forEach((cb) => cb(e));
+    const thrown = [...listeners].flatMap((cb) => {
+      try {
+        cb(e);
+        return [];
+      } catch (x) {
+        return [x];
+      }
+    });
+    if (thrown.length > 0) throw listenerFailure(thrown);
+  };
+
+  const send = async (op: Op): Promise<AppError | null> => {
+    try {
+      await call<null>(op.cmd, op.bytes, { headers: { "x-doc": id, "x-seq": String(op.seq) } });
+      return null;
+    } catch (e) {
+      return e instanceof AppError ? e : new AppError("ipc.failed", `${op.cmd}: ${String(e)}`);
+    }
   };
 
   const run = async (): Promise<void> => {
     if (running) return;
     running = true;
-    while (queue.length > 0 && failure === null) {
-      const op = queue[0];
-      try {
-        await call<null>(op.cmd, op.bytes, { headers: { "x-doc": id, "x-seq": String(op.seq) } });
-        queue.shift();
-        op.waiters.forEach((w) => w.resolve());
-      } catch (e) {
-        halt(e instanceof AppError ? e : new AppError("ipc.failed", `${op.cmd}: ${String(e)}`));
+    try {
+      while (queue.length > 0 && failure === null) {
+        const op = queue[0];
+        const e = await send(op);
+        if (e !== null) {
+          halt(e);
+        } else {
+          queue.shift();
+          op.waiters.forEach((w) => w.resolve());
+        }
       }
+    } finally {
+      running = false;
     }
-    running = false;
+  };
+
+  const start = (): void => {
+    run().catch(raise);
   };
 
   const settled = (): Promise<void> => {
@@ -118,7 +158,7 @@ export async function openPersisted(id: string): Promise<PersistedDoc> {
 
   const enqueue = (op: Omit<Op, "waiters">): void => {
     queue.push({ ...op, waiters: [] });
-    void run();
+    start();
   };
 
   const enqueueCompact = (): void => {
@@ -131,6 +171,7 @@ export async function openPersisted(id: string): Promise<PersistedDoc> {
 
   const onUpdate = (update: Uint8Array, origin: unknown): void => {
     if (origin === LOAD_ORIGIN) return;
+    if (closed) throw new AppError("store.closed", `Document ${id} was edited after close`);
     lastSeq += 1;
     enqueue({ cmd: "store_append", seq: lastSeq, bytes: update });
     dirty = true;
@@ -158,19 +199,18 @@ export async function openPersisted(id: string): Promise<PersistedDoc> {
     retry() {
       failure = null;
       const done = settled();
-      void run();
+      start();
       return done;
     },
     flush: settled,
     compact() {
-      if (closed) return Promise.reject(new Error(`Document ${id} is closed`));
+      if (closed) return Promise.reject(new AppError("store.closed", `Document ${id} is closed`));
       enqueueCompact();
       return settled();
     },
     close() {
       if (closed) return settled();
       closed = true;
-      ydoc.off("update", onUpdate);
       if (dirty) {
         enqueueCompact();
       } else if (timer !== null) {

@@ -24,6 +24,16 @@ function remoteUpdate(f: (d: Y.Doc) => void): Uint8Array {
   return out;
 }
 
+function present<T>(x: T | undefined, what: string): T {
+  if (x === undefined) throw new Error(`missing ${what}`);
+  return x;
+}
+
+function bodyOf(c: Call): Uint8Array {
+  if (!(c.args instanceof Uint8Array)) throw new Error(`${c.cmd} was not sent raw bytes`);
+  return c.args;
+}
+
 async function settle(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
@@ -92,9 +102,9 @@ describe("openPersisted", () => {
     expect(seqs("store_compact")).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
     expect(seqs("store_compact")).toEqual([9]);
-    const compact = tauri.calls.find((c) => c.cmd === "store_compact");
-    expect(headerOf(compact!, "x-doc")).toBe("p1");
-    expect(compact!.args).toEqual(Y.encodeStateAsUpdate(p.ydoc));
+    const compact = present(tauri.calls.find((c) => c.cmd === "store_compact"), "store_compact call");
+    expect(headerOf(compact, "x-doc")).toBe("p1");
+    expect(compact.args).toEqual(Y.encodeStateAsUpdate(p.ydoc));
     await vi.advanceTimersByTimeAsync(COMPACT_EVERY_MS * 3);
     expect(seqs("store_compact")).toEqual([9]);
   });
@@ -108,7 +118,9 @@ describe("openPersisted", () => {
     expect(seqs("store_compact")).toEqual([]);
     text.insert(0, "y".repeat(600_000));
     await settle();
-    expect(600_000 * 2).toBeGreaterThan(COMPACT_AFTER_BYTES);
+    const sizes = tauri.calls.filter((c) => c.cmd === "store_append").map((c) => bodyOf(c).length);
+    expect(sizes[0]).toBeLessThan(COMPACT_AFTER_BYTES);
+    expect(sizes[0] + sizes[1]).toBeGreaterThanOrEqual(COMPACT_AFTER_BYTES);
     expect(seqs("store_compact")).toEqual([2]);
     expect(tauri.calls.map((c) => c.cmd)).toEqual(["store_load", "store_append", "store_append", "store_compact"]);
     await vi.advanceTimersByTimeAsync(COMPACT_EVERY_MS * 2);
@@ -157,9 +169,106 @@ describe("openPersisted", () => {
       ["store_compact", 9],
     ]);
     expect(tauri.calls[tauri.calls.length - 1].args).toEqual(Y.encodeStateAsUpdate(p.ydoc));
-    p.ydoc.getMap("m").set("c", 3);
+    const edit = (): unknown => {
+      try {
+        p.ydoc.getMap("m").set("c", 3);
+        return null;
+      } catch (e) {
+        return e;
+      }
+    };
+    const thrown = edit();
+    expect(thrown).toBeInstanceOf(AppError);
+    expect(thrown).toMatchObject({ code: "store.closed", message: "Document p1 was edited after close" });
+    await expect(p.compact()).rejects.toMatchObject({ code: "store.closed", message: "Document p1 is closed" });
     await vi.advanceTimersByTimeAsync(COMPACT_EVERY_MS * 2);
     expect(writes()).toHaveLength(3);
+  });
+
+  it("a throwing onError listener does not stop the queue", async () => {
+    let failing = true;
+    resetTauri({
+      store_load: () => encodeLoad({ lastSeq: 7 }),
+      store_append: () => {
+        if (failing) throw { code: "store.io", message: "disk full" };
+        return null;
+      },
+    });
+    const p = await openPersisted("p1");
+    const second: AppError[] = [];
+    p.onError(() => {
+      throw new Error("listener broke");
+    });
+    p.onError((e) => second.push(e));
+    p.ydoc.getMap("m").set("a", 1);
+    await expect(vi.advanceTimersByTimeAsync(0)).rejects.toThrow("listener broke");
+    expect(second).toHaveLength(1);
+    expect(second[0]).toMatchObject({ code: "store.io", message: "disk full" });
+    p.ydoc.getMap("m").set("b", 2);
+    failing = false;
+    await p.retry();
+    expect(seqs("store_append")).toEqual([8, 8, 9]);
+    expect(p.error()).toBeNull();
+    expect(second).toHaveLength(1);
+  });
+
+  it("every onError listener runs and the throws are counted", async () => {
+    resetTauri({
+      store_load: () => encodeLoad({ lastSeq: 0 }),
+      store_append: () => {
+        throw { code: "store.io", message: "disk full" };
+      },
+    });
+    const p = await openPersisted("p1");
+    const ran: string[] = [];
+    p.onError(() => {
+      ran.push("one");
+      throw new Error("first broke");
+    });
+    p.onError(() => {
+      ran.push("two");
+      throw new Error("second broke");
+    });
+    p.ydoc.getMap("m").set("a", 1);
+    await expect(vi.advanceTimersByTimeAsync(0)).rejects.toThrow("2 onError listeners threw; the first: first broke");
+    expect(ran).toEqual(["one", "two"]);
+    expect(p.error()).toMatchObject({ code: "store.io" });
+  });
+
+  it("a loaded doc with records compacts on the timer", async () => {
+    const source = new Y.Doc();
+    const records: Uint8Array[] = [];
+    source.on("update", (u: Uint8Array) => records.push(u));
+    source.getMap("m").set("a", 1);
+    source.getMap("m").set("b", 2);
+    resetTauri({ store_load: () => encodeLoad({ records, lastSeq: 5 }), store_compact: () => null });
+    const p = await openPersisted("p1");
+    await vi.advanceTimersByTimeAsync(COMPACT_EVERY_MS - 1);
+    expect(writes()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(writes().map((c) => [c.cmd, Number(headerOf(c, "x-seq"))])).toEqual([["store_compact", 5]]);
+    const body = bodyOf(present(writes()[0], "store_compact call"));
+    expect(body).toEqual(Y.encodeStateAsUpdate(p.ydoc));
+    const rebuilt = new Y.Doc();
+    Y.applyUpdate(rebuilt, body);
+    expect(rebuilt.getMap("m").toJSON()).toEqual({ a: 1, b: 2 });
+  });
+
+  it("stored updates that reference missing state are corrupt", async () => {
+    const source = new Y.Doc();
+    const records: Uint8Array[] = [];
+    source.on("update", (u: Uint8Array) => records.push(u));
+    source.getMap("m").set("a", 1);
+    source.getMap("m").set("b", 2);
+    resetTauri({ store_load: () => encodeLoad({ records: [records[1]], lastSeq: 2 }) });
+    await expect(openPersisted("p1")).rejects.toMatchObject({ code: "store.corrupt", message: "p1: stored updates reference missing state" });
+  });
+
+  it("a record count larger than the answer is refused", async () => {
+    const bytes = new Uint8Array(encodeLoad({ lastSeq: 0 }));
+    new DataView(bytes.buffer).setUint32(9, 0xffffffff, true);
+    resetTauri({ store_load: () => bytes.buffer });
+    await expect(openPersisted("p1")).rejects.toMatchObject({ code: "ipc.shape", message: "store_load p1: count 4294967295 does not fit in 4 bytes" });
   });
 
   it("a load failure rejects with its AppError", async () => {
