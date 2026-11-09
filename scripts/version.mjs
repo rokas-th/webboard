@@ -186,19 +186,19 @@ async function write(root, next, lock) {
     process.stdout.write("version: --no-lock, lockfiles left alone\n");
     return;
   }
-  run(root, "cargo", ["check", "--workspace"]);
-  run(root, "npm", ["install", "--package-lock-only"]);
-  run(join(root, "server"), "npm", ["install", "--package-lock-only"]);
+  run(root, "cargo", ["check", "--workspace"], "Cargo.lock");
+  run(root, "npm", ["install", "--package-lock-only"], "the root package-lock.json");
+  run(join(root, "server"), "npm", ["install", "--package-lock-only"], "server/package-lock.json");
   await check(root, next);
 }
 
-/** @param {string} cwd @param {string} cmd @param {string[]} args */
-function run(cwd, cmd, args) {
+/** @param {string} cwd @param {string} cmd @param {string[]} args @param {string} lockfile */
+function run(cwd, cmd, args, lockfile) {
   process.stdout.write(`  $ ${cmd} ${args.join(" ")}\n`);
   const r = spawnSync(cmd, args, { cwd, stdio: "inherit" });
   if (r.error !== undefined || r.status !== 0) {
     process.stderr.write(
-      `version: ${cmd} ${args.join(" ")} failed (${r.error?.message ?? `exit ${r.status}`}) — the lockfiles were not regenerated\n`,
+      `version: ${cmd} ${args.join(" ")} failed in ${cwd} (${r.error?.message ?? `exit ${r.status}`}) — ${lockfile} was not regenerated\n`,
     );
     process.exit(1);
   }

@@ -1,20 +1,21 @@
 import * as decoding from 'lib0/decoding';
+import * as encoding from 'lib0/encoding';
 import type { Connection, ConnectionContext, WSMessage } from 'partyserver';
 import { YServer } from 'y-partyserver';
+import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 import { CHUNK_BYTES, COMPACT_DELAY_MS, DEVICE_HEADER, MAX_MESSAGE_BYTES } from './limits';
+import { blob, int } from './sql';
 
 const MESSAGE_SYNC = 0;
-const SYNC_STEP_2 = 1;
-const SYNC_UPDATE = 2;
+const MESSAGE_AWARENESS = 1;
 const DEVICE_ID = /^[A-Za-z0-9_-]{11}$/;
 
-function blob(value: SqlStorageValue): Uint8Array {
-  if (!(value instanceof ArrayBuffer)) {
-    throw new Error(`Room storage holds a ${typeof value} where a BLOB belongs`);
-  }
-  return new Uint8Array(value);
-}
+type Frame =
+  | { kind: 'step1'; decoder: decoding.Decoder }
+  | { kind: 'update'; update: Uint8Array }
+  | { kind: 'awareness' }
+  | { kind: 'unknown' };
 
 function concat(parts: readonly Uint8Array[]): Uint8Array {
   const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
@@ -44,16 +45,24 @@ function isEmptyUpdate(update: Uint8Array): boolean {
   return update.length === 2 && update[0] === 0 && update[1] === 0;
 }
 
-function syncUpdate(bytes: Uint8Array): Uint8Array | null {
+function readFrame(bytes: Uint8Array): Frame {
   const decoder = decoding.createDecoder(bytes);
-  if (decoding.readVarUint(decoder) !== MESSAGE_SYNC) {
-    return null;
+  const type = decoding.readVarUint(decoder);
+  if (type === MESSAGE_AWARENESS) {
+    decoding.readVarUint8Array(decoder);
+    return { kind: 'awareness' };
   }
-  const kind = decoding.readVarUint(decoder);
-  if (kind !== SYNC_STEP_2 && kind !== SYNC_UPDATE) {
-    return null;
+  if (type !== MESSAGE_SYNC) {
+    return { kind: 'unknown' };
   }
-  return decoding.readVarUint8Array(decoder);
+  const subtype = decoding.readVarUint(decoder);
+  if (subtype === syncProtocol.messageYjsSyncStep1) {
+    return { kind: 'step1', decoder };
+  }
+  if (subtype === syncProtocol.messageYjsSyncStep2 || subtype === syncProtocol.messageYjsUpdate) {
+    return { kind: 'update', update: decoding.readVarUint8Array(decoder) };
+  }
+  return { kind: 'unknown' };
 }
 
 export class Room extends YServer {
@@ -75,7 +84,7 @@ export class Room extends YServer {
     const sql = this.ctx.storage.sql;
     const snapshot = concat(sql.exec('SELECT data FROM snapshot ORDER BY part').toArray().map((row) => blob(row.data)));
     const rows = sql.exec('SELECT id, data FROM updates ORDER BY id, part').toArray();
-    const updates = [...Map.groupBy(rows, (row) => row.id).values()].map((parts) =>
+    const updates = [...Map.groupBy(rows, (row) => int(row, 'id')).values()].map((parts) =>
       concat(parts.map((row) => blob(row.data))),
     );
     if (snapshot.length > 0) {
@@ -87,8 +96,20 @@ export class Room extends YServer {
   }
 
   async onMessage(conn: Connection, message: WSMessage): Promise<void> {
+    try {
+      await this.receive(conn, message);
+    } catch (error) {
+      console.error(`Room ${this.name} failed while handling a message:`, error);
+      conn.close(1011, 'Server error');
+    }
+  }
+
+  private async receive(conn: Connection, message: WSMessage): Promise<void> {
+    if (conn.readyState !== WebSocket.READY_STATE_OPEN) {
+      return;
+    }
     if (typeof message === 'string') {
-      this.handleMessage(conn, message);
+      conn.close(1007, 'Malformed message');
       return;
     }
     const bytes = bytesOf(message);
@@ -96,40 +117,82 @@ export class Room extends YServer {
       conn.close(4413, 'Message too large');
       return;
     }
-    let update: Uint8Array | null;
+    let frame: Frame;
     try {
-      update = syncUpdate(bytes);
-      if (update !== null && !isEmptyUpdate(update)) {
-        Y.decodeUpdate(update);
-      }
+      frame = readFrame(bytes);
     } catch (error) {
-      console.error('Room refused a malformed update:', error);
-      conn.close(1007, 'Malformed update');
+      console.error(`Room ${this.name} refused a malformed message:`, error);
+      conn.close(1007, 'Malformed message');
       return;
     }
-    if (update === null || isEmptyUpdate(update)) {
+    if (frame.kind === 'unknown') {
+      conn.close(1007, 'Malformed message');
+      return;
+    }
+    if (frame.kind === 'awareness') {
       this.handleMessage(conn, message);
       return;
     }
+    if (frame.kind === 'step1') {
+      this.answerStep1(conn, frame.decoder);
+      return;
+    }
+    if (!isEmptyUpdate(frame.update)) {
+      await this.store(conn, frame.update);
+    }
+  }
+
+  private answerStep1(conn: Connection, decoder: decoding.Decoder): void {
+    const reply = encoding.createEncoder();
+    encoding.writeVarUint(reply, MESSAGE_SYNC);
     try {
-      this.append(update);
+      syncProtocol.readSyncStep1(decoder, reply, this.document);
     } catch (error) {
-      console.error('Room could not store an update:', error);
+      console.error(`Room ${this.name} refused a malformed sync step 1:`, error);
+      conn.close(1007, 'Malformed message');
+      return;
+    }
+    conn.send(encoding.toUint8Array(reply));
+  }
+
+  private async store(conn: Connection, update: Uint8Array): Promise<void> {
+    try {
+      Y.decodeUpdate(update);
+    } catch (error) {
+      console.error(`Room ${this.name} refused a malformed update:`, error);
+      conn.close(1007, 'Malformed update');
+      return;
+    }
+    let id: number;
+    try {
+      id = this.append(update);
+    } catch (error) {
+      console.error(`Room ${this.name} could not store an update:`, error);
       conn.close(4500, 'Server could not store the update');
       return;
     }
-    Y.applyUpdate(this.document, update, conn);
+    try {
+      Y.applyUpdate(this.document, update, conn);
+    } catch (error) {
+      this.ctx.storage.transactionSync(() => {
+        this.ctx.storage.sql.exec('DELETE FROM updates WHERE id = ?', id);
+      });
+      console.error(`Room ${this.name} could not apply update ${id} and dropped it:`, error);
+      conn.close(1007, 'Malformed update');
+      return;
+    }
     this.stateBytes += update.length;
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(Date.now() + COMPACT_DELAY_MS);
     }
   }
 
-  private append(update: Uint8Array): void {
+  private append(update: Uint8Array): number {
     const sql = this.ctx.storage.sql;
-    this.ctx.storage.transactionSync(() => {
-      const id = sql.exec<{ next: number }>('SELECT COALESCE(MAX(id), 0) + 1 AS next FROM updates').one().next;
+    return this.ctx.storage.transactionSync(() => {
+      const id = int(sql.exec('SELECT COALESCE(MAX(id), 0) + 1 AS next FROM updates').one(), 'next');
       chunks(update).forEach((data, part) => sql.exec('INSERT INTO updates (id, part, data) VALUES (?, ?, ?)', id, part, data));
+      return id;
     });
   }
 
@@ -149,6 +212,9 @@ export class Room extends YServer {
       return;
     }
     if (this.stateBytes > MAX_MESSAGE_BYTES) {
+      this.compact();
+    }
+    if (this.stateBytes > MAX_MESSAGE_BYTES) {
       conn.close(4413, 'Too large to sync');
       return;
     }
@@ -156,15 +222,20 @@ export class Room extends YServer {
   }
 
   onAlarm(): void {
+    this.compact();
+  }
+
+  private compact(): void {
     const sql = this.ctx.storage.sql;
-    this.ctx.storage.transactionSync(() => {
-      const maxId = sql.exec<{ maxId: number }>('SELECT COALESCE(MAX(id), 0) AS maxId FROM updates').one().maxId;
+    const compacted = this.ctx.storage.transactionSync(() => {
+      const maxId = int(sql.exec('SELECT COALESCE(MAX(id), 0) AS maxId FROM updates').one(), 'maxId');
       const encoded = Y.encodeStateAsUpdate(this.document);
       sql.exec('DELETE FROM snapshot');
       chunks(encoded).forEach((data, part) => sql.exec('INSERT INTO snapshot (part, data) VALUES (?, ?)', part, data));
       sql.exec('DELETE FROM updates WHERE id <= ?', maxId);
-      this.stateBytes = encoded.length;
+      return encoded.length;
     });
+    this.stateBytes = compacted;
   }
 
   async closeDevice(deviceId: string): Promise<number> {

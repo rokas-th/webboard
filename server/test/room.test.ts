@@ -1,9 +1,12 @@
 import { env, evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { getServerByName } from 'partyserver';
-import { describe, expect, it } from 'vitest';
+import * as encoding from 'lib0/encoding';
+import { describe, expect, it, vi } from 'vitest';
+import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 import { CHUNK_BYTES, DEVICE_HEADER, MAX_MESSAGE_BYTES } from '../src/limits';
 import type { Room } from '../src/room';
+import { int } from '../src/sql';
 import { connectDoc, type TestClient } from './client';
 
 const DEV_A = 'devA0000000';
@@ -23,6 +26,26 @@ function stubOf(doc: string): DurableObjectStub<Room> {
   return env.Room.get(env.Room.idFromName(doc));
 }
 
+interface RawSocket {
+  ws: WebSocket;
+  greeted: Promise<void>;
+  closed: Promise<{ code: number; reason: string }>;
+}
+
+async function raw(doc: string, device: string): Promise<RawSocket> {
+  const response = await opener(doc, device)();
+  const ws = response.webSocket;
+  if (ws === null) {
+    throw new Error(`The server answered ${response.status} instead of a WebSocket`);
+  }
+  ws.accept();
+  const greeted = new Promise<void>((resolve) => ws.addEventListener('message', () => resolve()));
+  const closed = new Promise<{ code: number; reason: string }>((resolve) =>
+    ws.addEventListener('close', (event) => resolve({ code: event.code, reason: event.reason })),
+  );
+  return { ws, greeted, closed };
+}
+
 async function join(doc: string, device: string, ydoc?: Y.Doc): Promise<TestClient> {
   const client = await connectDoc(opener(doc, device), ydoc);
   await client.synced;
@@ -36,6 +59,27 @@ async function closeAll(...clients: TestClient[]): Promise<void> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function within<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  const { promise: timeout, reject } = Promise.withResolvers<never>();
+  const timer = setTimeout(() => reject(new Error(`${what} took over ${ms} ms`)), ms);
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function emptyStep1(): Uint8Array {
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, 0);
+  syncProtocol.writeSyncStep1(encoder, new Y.Doc());
+  return encoding.toUint8Array(encoder);
+}
+
+function isEmptyStep2(frame: Uint8Array): boolean {
+  return frame.length === 5 && [0, 1, 2, 0, 0].every((byte, i) => frame[i] === byte);
 }
 
 async function until(check: () => boolean | Promise<boolean>, what: string, ms = 10_000): Promise<void> {
@@ -68,9 +112,7 @@ function writeMany(client: TestClient, prefix: string, count: number, labelBytes
 
 async function count(doc: string, table: 'updates' | 'snapshot'): Promise<number> {
   return runInDurableObject(stubOf(doc), (_room, state) =>
-    state.storage.sql
-      .exec<{ n: number }>(`SELECT COUNT(DISTINCT ${table === 'updates' ? 'id' : 'part'}) AS n FROM ${table}`)
-      .one().n,
+    int(state.storage.sql.exec(`SELECT COUNT(DISTINCT ${table === 'updates' ? 'id' : 'part'}) AS n FROM ${table}`).one(), 'n'),
   );
 }
 
@@ -135,34 +177,82 @@ describe('Room', () => {
 
   it('refuses a malformed update with 1007', async () => {
     const doc = 'malformed';
-    const response = await opener(doc, DEV_A)();
-    const ws = response.webSocket;
-    if (ws === null) {
-      throw new Error('no WebSocket');
-    }
-    ws.accept();
-    const closed = new Promise<{ code: number; reason: string }>((resolve) =>
-      ws.addEventListener('close', (event) => resolve({ code: event.code, reason: event.reason })),
-    );
-    ws.send(new Uint8Array([0, 2, 3, 255, 255, 255]));
-    expect(await closed).toEqual({ code: 1007, reason: 'Malformed update' });
+    const socket = await raw(doc, DEV_A);
+    socket.ws.send(new Uint8Array([0, 2, 3, 255, 255, 255]));
+    expect(await socket.closed).toEqual({ code: 1007, reason: 'Malformed update' });
     expect(await count(doc, 'updates')).toBe(0);
+  });
+
+  it.each([
+    ['an unknown sync subtype', [0, 7]],
+    ['a truncated sync step 1', [0, 0, 5]],
+    ['an unknown message type', [9]],
+    ['a truncated awareness frame', [1, 5]],
+  ])('refuses %s with 1007', async (_what, bytes) => {
+    const doc = 'refuse-' + bytes.join('-');
+    const socket = await raw(doc, DEV_A);
+    socket.ws.send(new Uint8Array(bytes));
+    expect(await socket.closed).toEqual({ code: 1007, reason: 'Malformed message' });
+    expect(await count(doc, 'updates')).toBe(0);
+  });
+
+  it('refuses a string frame with 1007', async () => {
+    const socket = await raw('refuse-string', DEV_A);
+    socket.ws.send('__YPS:hello');
+    expect(await socket.closed).toEqual({ code: 1007, reason: 'Malformed message' });
+  });
+
+  it('closes with 1011 and logs when the server cannot answer', async () => {
+    const doc = 'send-failure';
+    const logged = vi.spyOn(console, 'error');
+    const socket = await raw(doc, DEV_A);
+    await socket.greeted;
+    await runInDurableObject(stubOf(doc), (room: Room) => {
+      [...room.getConnections('d:' + DEV_A)].forEach((conn) => {
+        conn.send = () => {
+          throw new Error('forced send failure');
+        };
+      });
+    });
+    socket.ws.send(emptyStep1());
+    expect(await socket.closed).toEqual({ code: 1011, reason: 'Server error' });
+    expect(
+      logged.mock.calls.some(
+        (call) =>
+          String(call[0]).includes(doc) && call.some((arg) => arg instanceof Error && arg.message === 'forced send failure'),
+      ),
+    ).toBe(true);
+    logged.mockRestore();
+  });
+
+  it('drops the stored row and refuses with 1007 when an update cannot be applied', async () => {
+    const doc = 'unapplied';
+    const a = await join(doc, DEV_A);
+    await runInDurableObject(stubOf(doc), (room: Room) => {
+      const map = room.document.getMap('actions');
+      const fail = (): void => {
+        map.unobserve(fail);
+        throw new Error('forced integration failure');
+      };
+      map.observe(fail);
+    });
+    actions(a).set('a1', { lbl: 'one' });
+    expect(await a.closed).toEqual({ code: 1007, reason: 'Malformed update' });
+    expect(await count(doc, 'updates')).toBe(0);
+    const c = await join(doc, DEV_C);
+    await closeAll(c);
+    await evictDurableObject(stubOf(doc), { webSockets: 'close' });
+    const d = await join(doc, DEV_C);
+    expect(await count(doc, 'updates')).toBe(0);
+    await closeAll(d);
   });
 
   it('closes a message over MAX_MESSAGE_BYTES with 4413', async () => {
     const doc = 'oversized-message';
     const a = await join(doc, DEV_A);
-    const response = await opener(doc, DEV_B)();
-    const ws = response.webSocket;
-    if (ws === null) {
-      throw new Error('no WebSocket');
-    }
-    ws.accept();
-    const closed = new Promise<{ code: number; reason: string }>((resolve) =>
-      ws.addEventListener('close', (event) => resolve({ code: event.code, reason: event.reason })),
-    );
-    ws.send(new Uint8Array(MAX_MESSAGE_BYTES + 1));
-    expect(await closed).toEqual({ code: 4413, reason: 'Message too large' });
+    const socket = await raw(doc, DEV_B);
+    socket.ws.send(new Uint8Array(MAX_MESSAGE_BYTES + 1));
+    expect(await socket.closed).toEqual({ code: 4413, reason: 'Message too large' });
     expect(await count(doc, 'updates')).toBe(0);
     await closeAll(a);
   });
@@ -182,6 +272,7 @@ describe('Room', () => {
     const copy = new Y.Doc();
     Y.applyUpdate(copy, Y.encodeStateAsUpdate(a.ydoc));
     const again = await join(doc, DEV_C, copy);
+    await until(() => again.sent.some(isEmptyStep2), 'C to send an empty sync step 2');
     await sleep(200);
     expect(await count(doc, 'updates')).toBe(rows + 1);
     await closeAll(a, back, again);
@@ -197,7 +288,10 @@ describe('Room', () => {
     writeMany(a, 'big', 2_500, 1_000);
     await until(async () => (await count(doc, 'updates')) > 0, 'the update to be stored');
     const parts = await runInDurableObject(stubOf(doc), (_room, state) =>
-      state.storage.sql.exec<{ id: number; part: number }>('SELECT id, part FROM updates ORDER BY id, part').toArray(),
+      state.storage.sql
+        .exec('SELECT id, part FROM updates ORDER BY id, part')
+        .toArray()
+        .map((row) => ({ id: int(row, 'id'), part: int(row, 'part') })),
     );
     expect(parts).toEqual([
       { id: 1, part: 0 },
@@ -221,9 +315,9 @@ describe('Room', () => {
     const { encoded, sizes } = await runInDurableObject(stubOf(doc), (room: Room, state) => ({
       encoded: Y.encodeStateAsUpdate(room.document).length,
       sizes: state.storage.sql
-        .exec<{ size: number }>('SELECT length(data) AS size FROM snapshot ORDER BY part')
+        .exec('SELECT length(data) AS size FROM snapshot ORDER BY part')
         .toArray()
-        .map((row) => row.size),
+        .map((row) => int(row, 'size')),
     }));
     expect(encoded).toBeGreaterThan(2_000_000);
     expect(sizes.length).toBe(Math.ceil(encoded / CHUNK_BYTES));
@@ -242,8 +336,13 @@ describe('Room', () => {
     const a = await join(doc, DEV_A);
     expect(await stubOf(doc).closeDevice(DEV_A)).toBe(1);
     expect(await a.closed).toEqual({ code: 4403, reason: 'Device removed' });
+    const logged = vi.spyOn(console, 'error');
     const again = await connectDoc(opener(doc, DEV_A));
     expect(await again.closed).toEqual({ code: 4403, reason: 'Device removed' });
+    await expect(again.synced).rejects.toThrow('closed 4403 Device removed before sync');
+    await sleep(200);
+    expect(logged.mock.calls.filter((call) => String(call[0]).startsWith(`Room ${doc}`))).toEqual([]);
+    logged.mockRestore();
   });
 
   it('a restored device connects again', async () => {
@@ -262,19 +361,37 @@ describe('Room', () => {
     const doc = 'no-header';
     const missing = await connectDoc(opener(doc, null));
     expect((await missing.closed).code).toBe(1011);
+    expect(missing.errors.join('\n')).toContain(DEVICE_HEADER);
     const invalid = await connectDoc(opener(doc, 'short'));
     expect((await invalid.closed).code).toBe(1011);
+    expect(invalid.errors.join('\n')).toContain(DEVICE_HEADER);
   });
 
   it('refuses a connect when the stored plan is over MAX_MESSAGE_BYTES with 4413', async () => {
     const doc = 'oversized-plan';
     const a = await join(doc, DEV_A);
-    await runInDurableObject(stubOf(doc), (room: Room) => {
-      room.stateBytes = MAX_MESSAGE_BYTES + 1;
-    });
+    const writes = MAX_MESSAGE_BYTES / MIB + 1;
+    Array.from({ length: writes }, (_, i) => writeMany(a, `m${i}-`, 1, MIB - 256));
+    await until(async () => (await count(doc, 'updates')) === writes, 'every 1 MiB write to be stored', 30_000);
     const c = await connectDoc(opener(doc, DEV_C));
     expect(await c.closed).toEqual({ code: 4413, reason: 'Too large to sync' });
+    expect(await count(doc, 'updates')).toBe(0);
+    expect(await stateBytes(doc)).toBeGreaterThan(MAX_MESSAGE_BYTES);
     await closeAll(a);
+  });
+
+  it('compacts before refusing a connect whose rewrites passed MAX_MESSAGE_BYTES', async () => {
+    const doc = 'rewrites';
+    const a = await join(doc, DEV_A);
+    const rewrites = MAX_MESSAGE_BYTES / MIB + 1;
+    Array.from({ length: rewrites }, () => actions(a).set('big', { lbl: randomText(MIB) }));
+    await until(async () => (await count(doc, 'updates')) === rewrites, 'every rewrite to be stored', 30_000);
+    expect(await stateBytes(doc)).toBeGreaterThan(MAX_MESSAGE_BYTES);
+    const c = await join(doc, DEV_C);
+    expect(actions(c).get('big')).toEqual(actions(a).get('big'));
+    expect(await count(doc, 'updates')).toBe(0);
+    expect(await stateBytes(doc)).toBeLessThan(2 * MIB);
+    await closeAll(a, c);
   });
 
   it('sends a first sync just under MAX_MESSAGE_BYTES', async () => {
@@ -290,12 +407,7 @@ describe('Room', () => {
     await closeAll(a);
     const started = Date.now();
     const c = await connectDoc(opener(doc, DEV_C));
-    await Promise.race([
-      c.synced,
-      sleep(20_000).then(() => {
-        throw new Error('first sync took over 20 s');
-      }),
-    ]);
+    await within(c.synced, 20_000, 'the first sync');
     expect(Date.now() - started).toBeLessThan(20_000);
     expect(actions(c).size).toBe(writes);
     await closeAll(c);

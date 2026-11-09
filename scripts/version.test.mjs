@@ -12,6 +12,9 @@ const CURRENT = JSON.parse(await readFile(join(REPO, "package.json"), "utf8")).v
 const CURRENT_RE = CURRENT.replaceAll(".", "\\.");
 const NEXT = `${Number(CURRENT.split(".")[0]) + 1}.0.0`;
 const NEXT_RE = NEXT.replaceAll(".", "\\.");
+const [MAJOR, MINOR, PATCH] = CURRENT.split(".").map(Number);
+const PATCHED = `${MAJOR}.${MINOR}.${PATCH + 1}`;
+const PATCHED_RE = PATCHED.replaceAll(".", "\\.");
 
 const FILES = [
   "package.json",
@@ -103,13 +106,38 @@ test("--check names server/package.json when only it is bumped", async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
 
-  await edit(root, "server/package.json", `"version": "${CURRENT}"`, `"version": "0.1.1"`);
+  await edit(root, "server/package.json", `"version": "${CURRENT}"`, `"version": "${PATCHED}"`);
 
   const r = version(root, ["--check"]);
   assert.notEqual(r.status, 0, "a bumped server/package.json must not pass --check");
-  assert.match(r.stdout, /! 0\.1\.1 {2}server\/package\.json \(version\)/);
+  assert.match(r.stdout, new RegExp(`! ${PATCHED_RE} {2}server/package\\.json \\(version\\)`));
   assert.match(r.stderr, /1 of 11 places disagree/);
 });
+
+for (const [failing, named, other] of [
+  ["root", "the root package-lock\\.json", "server/package-lock\\.json"],
+  ["server", "server/package-lock\\.json", "the root package-lock\\.json"],
+]) {
+  test(`a failed ${failing} lock regeneration names that lockfile only`, async (t) => {
+    const root = await fixture();
+    const bin = await mkdtemp(join(tmpdir(), "webboard-version-bin-"));
+    t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(bin, { recursive: true, force: true })]));
+    await writeFile(join(bin, "cargo"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    await writeFile(
+      join(bin, "npm"),
+      `#!/bin/sh\ncase "$(pwd -P)" in\n  */server) [ "${failing}" = server ] && exit 1 ;;\n  *) [ "${failing}" = root ] && exit 1 ;;\nesac\nexit 0\n`,
+      { mode: 0o755 },
+    );
+
+    const r = spawnSync(process.execPath, [TOOL, "--root", root, NEXT], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    });
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, new RegExp(`${named} was not regenerated`));
+    assert.doesNotMatch(r.stderr, new RegExp(other));
+  });
+}
 
 test("a value the tool cannot read fails loudly instead of reading as up to date", async (t) => {
   const root = await fixture();

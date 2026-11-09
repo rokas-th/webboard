@@ -7,6 +7,8 @@ export interface TestClient {
   ydoc: Y.Doc;
   synced: Promise<void>;
   closed: Promise<{ code: number; reason: string }>;
+  errors: string[];
+  sent: Uint8Array[];
   close(): void;
 }
 
@@ -28,19 +30,30 @@ export async function connectDoc(open: () => Promise<Response>, ydoc: Y.Doc = ne
   ws.accept();
   ws.binaryType = 'arraybuffer';
   const remote = Symbol('remote');
-  const { promise: synced, resolve: markSynced } = Promise.withResolvers<void>();
+  const errors: string[] = [];
+  const sent: Uint8Array[] = [];
+  const send = (bytes: Uint8Array): void => {
+    sent.push(bytes);
+    ws.send(bytes);
+  };
+  const { promise: synced, resolve: markSynced, reject: failSync } = Promise.withResolvers<void>();
+  synced.catch(() => undefined);
   const closed = new Promise<{ code: number; reason: string }>((resolve) => {
-    ws.addEventListener('close', (event) => resolve({ code: event.code, reason: event.reason }));
+    ws.addEventListener('close', (event) => {
+      failSync(new Error(`closed ${event.code} ${event.reason} before sync`));
+      resolve({ code: event.code, reason: event.reason });
+    });
   });
   const onUpdate = (update: Uint8Array, origin: unknown): void => {
     if (origin !== remote && ws.readyState === WebSocket.READY_STATE_OPEN) {
-      ws.send(frame((encoder) => syncProtocol.writeUpdate(encoder, update)));
+      send(frame((encoder) => syncProtocol.writeUpdate(encoder, update)));
     }
   };
   ydoc.on('update', onUpdate);
   void closed.then(() => ydoc.off('update', onUpdate));
   ws.addEventListener('message', (event) => {
     if (typeof event.data === 'string') {
+      errors.push(event.data);
       return;
     }
     const decoder = decoding.createDecoder(new Uint8Array(event.data));
@@ -51,12 +64,12 @@ export async function connectDoc(open: () => Promise<Response>, ydoc: Y.Doc = ne
     encoding.writeVarUint(encoder, MESSAGE_SYNC);
     const kind = syncProtocol.readSyncMessage(decoder, encoder, ydoc, remote);
     if (encoding.length(encoder) > 1) {
-      ws.send(encoding.toUint8Array(encoder));
+      send(encoding.toUint8Array(encoder));
     }
     if (kind === syncProtocol.messageYjsSyncStep2) {
       markSynced();
     }
   });
-  ws.send(frame((encoder) => syncProtocol.writeSyncStep1(encoder, ydoc)));
-  return { ydoc, synced, closed, close: () => ws.close(1000, 'done') };
+  send(frame((encoder) => syncProtocol.writeSyncStep1(encoder, ydoc)));
+  return { ydoc, synced, closed, errors, sent, close: () => ws.close(1000, 'done') };
 }
