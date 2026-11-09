@@ -78,6 +78,8 @@ pub struct DocStore {
     _lock: File,
     state: Option<State>,
     torn_unreported: bool,
+    #[cfg(test)]
+    fail_next_append: bool,
 }
 
 pub(crate) fn locked_error(id: &str) -> CommandError {
@@ -182,10 +184,13 @@ fn read_snapshot(dir: &Path) -> Result<(u64, Vec<u8>)> {
 
 fn segment_first(name: &OsStr, dir: &Path) -> Option<Result<u64>> {
     let digits = name.to_str()?.strip_prefix("seg-")?.strip_suffix(".log")?;
+    let not_a_number = || corrupt(&dir.join(name), "segment name is not seg-<number>.log");
     Some(
-        digits
-            .parse::<u64>()
-            .map_err(|_| corrupt(&dir.join(name), "segment name is not seg-<number>.log")),
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            Err(not_a_number())
+        } else {
+            digits.parse::<u64>().map_err(|_| not_a_number())
+        },
     )
 }
 
@@ -227,36 +232,82 @@ fn truncate(path: &Path, len: u64) -> Result<()> {
         .map_err(|e| io_error("Could not cut the torn record from", path, e))
 }
 
-fn scan(dir: &Path) -> Result<(State, Loaded)> {
-    let (snapshot_seq, snapshot) = read_snapshot(dir)?;
-    let mut segments = list_segments(dir)?;
-    let mut records = Vec::new();
-    let mut last: Option<u64> = None;
-    let mut torn = false;
-    let mut last_len = 0u64;
-    let count = segments.len();
-    for (i, seg) in segments.iter().enumerate() {
+fn torn_path(seg: &Path, offset: usize) -> PathBuf {
+    let mut name = seg.as_os_str().to_os_string();
+    name.push(format!(".torn-{offset}"));
+    PathBuf::from(name)
+}
+
+fn save_torn(dir: &Path, seg: &Path, offset: usize, tail: &[u8]) -> Result<()> {
+    let path = torn_path(seg, offset);
+    File::create(&path)
+        .and_then(|mut f| f.write_all(tail).and_then(|()| f.sync_all()))
+        .map_err(|e| io_error("Could not keep the torn record in", &path, e))?;
+    sync_dir(dir)
+}
+
+fn later_record(tail: &[u8], after: Option<u64>) -> Option<(usize, u64)> {
+    (1..tail.len()).find_map(|i| match parse_record(&tail[i..]) {
+        Parsed::Record { seq, .. } if after.is_none_or(|prev| seq > prev) => Some((i, seq)),
+        _ => None,
+    })
+}
+
+struct Scan {
+    snapshot_seq: u64,
+    last: Option<u64>,
+    records: Vec<(u64, Vec<u8>)>,
+    torn: bool,
+}
+
+impl Scan {
+    fn segment(&mut self, dir: &Path, seg: &Segment, is_last: bool) -> Result<u64> {
         let bytes = fs::read(&seg.path).map_err(|e| io_error("Could not read", &seg.path, e))?;
-        let is_last = i + 1 == count;
+        if bytes.is_empty() && !is_last {
+            return Err(corrupt(
+                &seg.path,
+                &format!("segment is empty, but it should start at seq {}", seg.first),
+            ));
+        }
         let mut offset = 0usize;
         while offset < bytes.len() {
             match parse_record(&bytes[offset..]) {
                 Parsed::Record { seq, payload, size } => {
-                    if let Some(prev) = last.filter(|prev| seq <= *prev) {
+                    if offset == 0 && seq != seg.first {
+                        return Err(corrupt(
+                            &seg.path,
+                            &format!(
+                                "first record has seq {seq}, but the segment is named for seq {}",
+                                seg.first
+                            ),
+                        ));
+                    }
+                    if let Some(prev) = self.last.filter(|prev| seq <= *prev) {
                         return Err(corrupt(
                             &seg.path,
                             &format!("record at offset {offset} has seq {seq}, not after {prev}"),
                         ));
                     }
-                    last = Some(seq);
-                    if seq > snapshot_seq {
-                        records.push((seq, payload.to_vec()));
+                    self.last = Some(seq);
+                    if seq > self.snapshot_seq {
+                        self.records.push((seq, payload.to_vec()));
                     }
                     offset += size;
                 }
                 Parsed::Short | Parsed::BadCrc { reaches_end: true } if is_last => {
+                    let tail = &bytes[offset..];
+                    if let Some((at, seq)) = later_record(tail, self.last) {
+                        return Err(corrupt(
+                            &seg.path,
+                            &format!(
+                                "record at offset {offset} is damaged, but an intact record with seq {seq} follows at offset {}",
+                                offset + at
+                            ),
+                        ));
+                    }
+                    save_torn(dir, &seg.path, offset, tail)?;
                     truncate(&seg.path, offset as u64)?;
-                    torn = true;
+                    self.torn = true;
                     break;
                 }
                 Parsed::Short => {
@@ -273,28 +324,49 @@ fn scan(dir: &Path) -> Result<(State, Loaded)> {
                 }
             }
         }
-        last_len = offset as u64;
+        Ok(offset as u64)
     }
-    if last_len == 0 {
-        if let Some(seg) = segments.pop() {
-            fs::remove_file(&seg.path)
-                .map_err(|e| io_error("Could not remove the empty segment", &seg.path, e))?;
-            sync_dir(dir)?;
-        }
+}
+
+fn scan(dir: &Path) -> Result<(State, Loaded)> {
+    let (snapshot_seq, snapshot) = read_snapshot(dir)?;
+    let mut segments = list_segments(dir)?;
+    let mut scanned = Scan {
+        snapshot_seq,
+        last: None,
+        records: Vec::new(),
+        torn: false,
+    };
+    let count = segments.len();
+    let mut lens = segments
+        .iter()
+        .enumerate()
+        .map(|(i, seg)| scanned.segment(dir, seg, i + 1 == count))
+        .collect::<Result<Vec<u64>>>()?;
+    if lens.last() == Some(&0) {
+        let seg = segments.pop().expect("a segment per length");
+        lens.pop();
+        fs::remove_file(&seg.path)
+            .map_err(|e| io_error("Could not remove the empty segment", &seg.path, e))?;
+        sync_dir(dir)?;
     }
     let open = segments
         .last()
-        .map(|seg| {
+        .zip(lens.last())
+        .map(|(seg, &len)| {
             OpenOptions::new()
                 .append(true)
                 .open(&seg.path)
-                .map(|file| OpenSegment {
-                    file,
-                    len: last_len,
-                })
+                .map(|file| OpenSegment { file, len })
                 .map_err(|e| io_error("Could not open", &seg.path, e))
         })
         .transpose()?;
+    let Scan {
+        last,
+        records,
+        torn,
+        ..
+    } = scanned;
     let last_seq = last.map_or(snapshot_seq, |l| l.max(snapshot_seq));
     Ok((
         State {
@@ -366,6 +438,15 @@ fn pause_mid_append(file: &mut File, record: &[u8], dir: &Path) -> io::Result<()
     Ok(())
 }
 
+#[cfg(test)]
+fn injected_fault(file: &mut File, record: &[u8], fail: bool) -> io::Result<()> {
+    if fail {
+        file.write_all(&record[..record.len() / 2])?;
+        return Err(io::Error::other("injected append fault"));
+    }
+    Ok(())
+}
+
 impl DocStore {
     pub fn open(dir: &Path) -> Result<Self> {
         Self::open_with(dir, SEGMENT_MAX_BYTES)
@@ -388,6 +469,8 @@ impl DocStore {
                 _lock: lock,
                 state: None,
                 torn_unreported: false,
+                #[cfg(test)]
+                fail_next_append: false,
             }),
             Err(TryLockError::WouldBlock) => Err(locked_error(&doc_id(dir))),
             Err(TryLockError::Error(e)) => Err(io_error("Could not lock", &path, e)),
@@ -425,6 +508,8 @@ impl DocStore {
             segment_max,
             state,
             torn_unreported,
+            #[cfg(test)]
+            fail_next_append,
             ..
         } = self;
         let state = ensure(dir, state, torn_unreported)?;
@@ -461,9 +546,12 @@ impl DocStore {
         #[cfg(test)]
         pause_mid_append(&mut open.file, &record, dir)
             .map_err(|e| io_error("Could not append to", path, e))?;
-        match open
-            .file
-            .write_all(&record)
+        #[cfg(test)]
+        let ready = injected_fault(&mut open.file, &record, std::mem::take(fail_next_append));
+        #[cfg(not(test))]
+        let ready = io::Result::Ok(());
+        match ready
+            .and_then(|()| open.file.write_all(&record))
             .and_then(|()| open.file.sync_data())
         {
             Ok(()) => {
@@ -590,12 +678,29 @@ impl Store {
             .collect::<Result<Vec<_>>>()?
             .into_iter()
             .filter(|(_, is_dir)| *is_dir)
-            .filter_map(|(name, _)| name.to_str().map(str::to_string))
-            .filter(|name| check_id(name).is_ok())
-            .collect::<Vec<_>>();
+            .map(|(name, _)| self.listed_id(&name))
+            .filter_map(Result::transpose)
+            .collect::<Result<Vec<_>>>()?;
         ids.sort();
         Ok(ids)
     }
+
+    fn listed_id(&self, name: &OsStr) -> Result<Option<String>> {
+        match name.to_str() {
+            Some(id) if check_id(id).is_ok() => Ok(Some(id.to_string())),
+            Some(name) if is_set_aside(name) => Ok(None),
+            _ => Err(corrupt(
+                &self.root.join(name),
+                "folder is neither a plan nor a set-aside plan",
+            )),
+        }
+    }
+}
+
+fn is_set_aside(name: &str) -> bool {
+    name.rsplit_once(".bad-").is_some_and(|(id, secs)| {
+        check_id(id).is_ok() && !secs.is_empty() && secs.bytes().all(|b| b.is_ascii_digit())
+    })
 }
 
 #[cfg(test)]
@@ -614,7 +719,7 @@ mod tests {
         let mut names: Vec<String> = fs::read_dir(dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
-            .filter(|n| n.starts_with("seg-"))
+            .filter(|n| n.starts_with("seg-") && n.ends_with(".log"))
             .collect();
         names.sort();
         names
@@ -667,6 +772,7 @@ mod tests {
             append_range(&mut s, 1..=5);
             s.compact(3, b"S").unwrap();
             s.append(6, &payload(6)).unwrap();
+            assert_eq!(seg_names(tmp.path()), ["seg-1.log", "seg-6.log"]);
         }
         let mut s = DocStore::open(tmp.path()).unwrap();
         let l = s.load().unwrap();
@@ -794,6 +900,253 @@ mod tests {
         assert_eq!(l.encode(), want);
     }
 
+    fn raw_records(seqs: impl IntoIterator<Item = u64>) -> Vec<u8> {
+        seqs.into_iter()
+            .flat_map(|q| {
+                let p = payload(q);
+                encode_record(q, &p, u32::try_from(p.len()).unwrap())
+            })
+            .collect()
+    }
+
+    fn torn_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .filter(|n| n.contains(".torn-"))
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn corrupt_load(dir: &Path) -> CommandError {
+        let e = DocStore::open(dir).unwrap().load().unwrap_err();
+        assert_eq!(e.code, "store.corrupt", "{}", e.message);
+        e
+    }
+
+    fn seg1_full_and_empty_seg4(dir: &Path) -> Vec<u8> {
+        {
+            let mut s = DocStore::open_with(dir, 54).unwrap();
+            append_range(&mut s, 1..=3);
+        }
+        File::create(dir.join("seg-4.log")).unwrap();
+        let seg1 = fs::read(dir.join("seg-1.log")).unwrap();
+        assert_eq!(seg1.len(), 54);
+        seg1
+    }
+
+    #[test]
+    fn empty_last_segment_reopens_the_previous_at_its_length() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+        let seg1 = seg1_full_and_empty_seg4(dir);
+        let mut s = DocStore::open_with(dir, 54).unwrap();
+        let l = s.load().unwrap();
+        assert!(!l.torn);
+        assert_eq!(seqs(&l), vec![1, 2, 3]);
+        assert_eq!(seg_names(dir), ["seg-1.log"]);
+        append_range(&mut s, 4..=5);
+        assert_eq!(fs::read(dir.join("seg-1.log")).unwrap(), seg1);
+        assert_eq!(seg_names(dir), ["seg-1.log", "seg-4.log"]);
+        assert_eq!(seqs(&s.load().unwrap()), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn append_failure_after_reopen_keeps_acked_records() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+        let seg1 = seg1_full_and_empty_seg4(dir);
+        let mut s = DocStore::open_with(dir, 54).unwrap();
+        s.load().unwrap();
+        s.fail_next_append = true;
+        let e = s.append(4, &payload(4)).unwrap_err();
+        assert_eq!(e.code, "store.io");
+        assert!(e.message.contains("injected append fault"), "{}", e.message);
+        assert_eq!(fs::read(dir.join("seg-1.log")).unwrap(), seg1);
+        append_range(&mut s, 4..=5);
+        assert_eq!(fs::read(dir.join("seg-1.log")).unwrap(), seg1);
+        assert_eq!(seg_names(dir), ["seg-1.log", "seg-4.log"]);
+        let l = s.load().unwrap();
+        assert!(!l.torn);
+        assert_eq!(seqs(&l), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn append_failure_cuts_back_to_the_acked_length() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+        let seg1 = seg1_full_and_empty_seg4(dir);
+        let mut s = DocStore::open(dir).unwrap();
+        s.load().unwrap();
+        s.fail_next_append = true;
+        assert_eq!(s.append(4, &payload(4)).unwrap_err().code, "store.io");
+        assert_eq!(fs::read(dir.join("seg-1.log")).unwrap(), seg1);
+        s.append(4, &payload(4)).unwrap();
+        assert_eq!(seg_names(dir), ["seg-1.log"]);
+        assert_eq!(fs::read(dir.join("seg-1.log")).unwrap().len(), 72);
+        drop(s);
+        let l = DocStore::open(dir).unwrap().load().unwrap();
+        assert!(!l.torn);
+        assert_eq!(
+            l.records,
+            (1..=4).map(|q| (q, payload(q))).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn flipped_len_bit_in_last_segment_is_corrupt() {
+        let tmp = TempDir::new().unwrap();
+        {
+            let mut s = DocStore::open(tmp.path()).unwrap();
+            append_range(&mut s, 1..=5);
+        }
+        let seg = tmp.path().join("seg-1.log");
+        let mut bytes = fs::read(&seg).unwrap();
+        bytes[18 + 11] ^= 0x01;
+        fs::write(&seg, &bytes).unwrap();
+        let e = corrupt_load(tmp.path());
+        assert!(e.message.contains("seg-1.log"), "{}", e.message);
+        assert!(e.message.contains("offset 18"), "{}", e.message);
+        assert!(e.message.contains("seq 3"), "{}", e.message);
+        assert_eq!(fs::read(&seg).unwrap(), bytes);
+        assert_eq!(torn_names(tmp.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn torn_tail_is_kept_aside() {
+        let tmp = TempDir::new().unwrap();
+        {
+            let mut s = DocStore::open(tmp.path()).unwrap();
+            append_range(&mut s, 1..=3);
+        }
+        let seg = tmp.path().join("seg-1.log");
+        let cut = raw_records([4])[..10].to_vec();
+        let mut bytes = fs::read(&seg).unwrap();
+        bytes.extend_from_slice(&cut);
+        fs::write(&seg, &bytes).unwrap();
+        let l = DocStore::open(tmp.path()).unwrap().load().unwrap();
+        assert!(l.torn);
+        assert_eq!(seqs(&l), vec![1, 2, 3]);
+        assert_eq!(fs::read(&seg).unwrap(), bytes[..54]);
+        assert_eq!(torn_names(tmp.path()), ["seg-1.log.torn-54"]);
+        assert_eq!(fs::read(tmp.path().join("seg-1.log.torn-54")).unwrap(), cut);
+        let mut s = DocStore::open(tmp.path()).unwrap();
+        let l = s.load().unwrap();
+        assert!(!l.torn);
+        assert_eq!(seqs(&l), vec![1, 2, 3]);
+        s.append(4, &payload(4)).unwrap();
+        assert_eq!(seqs(&s.load().unwrap()), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn segment_name_must_be_digits() {
+        ["seg-+7.log", "seg-abc.log", "seg-.log", "seg-7a.log"]
+            .iter()
+            .for_each(|name| {
+                let tmp = TempDir::new().unwrap();
+                fs::write(tmp.path().join(name), raw_records([7])).unwrap();
+                let e = corrupt_load(tmp.path());
+                assert!(e.message.contains(name), "{}", e.message);
+            });
+    }
+
+    #[test]
+    fn segment_first_seq_must_match_its_name() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("seg-5.log"), raw_records([1, 2])).unwrap();
+        let e = corrupt_load(tmp.path());
+        assert!(e.message.contains("seg-5.log"), "{}", e.message);
+        assert!(e.message.contains("named for seq 5"), "{}", e.message);
+    }
+
+    #[test]
+    fn duplicate_segment_starts_are_corrupt() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("seg-1.log"), raw_records([1])).unwrap();
+        fs::write(tmp.path().join("seg-01.log"), raw_records([1])).unwrap();
+        let e = corrupt_load(tmp.path());
+        assert!(
+            e.message.contains("two segments start at seq 1"),
+            "{}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn empty_earlier_segment_is_corrupt() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("seg-1.log"), b"").unwrap();
+        fs::write(tmp.path().join("seg-4.log"), raw_records([4])).unwrap();
+        let e = corrupt_load(tmp.path());
+        assert!(e.message.contains("seg-1.log"), "{}", e.message);
+        assert!(e.message.contains("segment is empty"), "{}", e.message);
+    }
+
+    #[test]
+    fn bad_snapshot_is_corrupt() {
+        let mut short = MAGIC.to_vec();
+        short.extend_from_slice(&[0; 7]);
+        let mut bad_magic = b"XBS1".to_vec();
+        bad_magic.extend_from_slice(&3u64.to_le_bytes());
+        [short, bad_magic].iter().for_each(|bytes| {
+            let tmp = TempDir::new().unwrap();
+            fs::write(tmp.path().join(SNAPSHOT), bytes).unwrap();
+            let e = corrupt_load(tmp.path());
+            assert!(e.message.contains("snapshot.bin"), "{}", e.message);
+        });
+    }
+
+    #[test]
+    fn seq_must_increase_across_segments() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("seg-1.log"), raw_records([1, 2])).unwrap();
+        fs::write(tmp.path().join("seg-2.log"), raw_records([2])).unwrap();
+        let e = corrupt_load(tmp.path());
+        assert!(e.message.contains("seg-2.log"), "{}", e.message);
+        assert!(e.message.contains("seq 2, not after 2"), "{}", e.message);
+    }
+
+    #[test]
+    fn short_record_in_earlier_segment_is_corrupt() {
+        let tmp = TempDir::new().unwrap();
+        let mut first = raw_records([1, 2]);
+        first.extend_from_slice(&raw_records([3])[..10]);
+        fs::write(tmp.path().join("seg-1.log"), &first).unwrap();
+        fs::write(tmp.path().join("seg-5.log"), raw_records([5])).unwrap();
+        let e = corrupt_load(tmp.path());
+        assert!(e.message.contains("seg-1.log"), "{}", e.message);
+        assert!(
+            e.message.contains("offset 36 is cut short"),
+            "{}",
+            e.message
+        );
+        assert_eq!(fs::read(tmp.path().join("seg-1.log")).unwrap(), first);
+        assert_eq!(torn_names(tmp.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn list_refuses_unknown_folders() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let store = Store::new(docs.clone());
+        store.doc("ab12").unwrap();
+        fs::create_dir(docs.join("ab12.bad-123")).unwrap();
+        fs::write(docs.join("stray.txt"), b"").unwrap();
+        fs::write(docs.join(".DS_Store"), b"").unwrap();
+        assert_eq!(store.list().unwrap(), ["ab12"]);
+        ["ab12 (1)", "ab12.bad-", "ab12.bad-12x", "a b.bad-1"]
+            .iter()
+            .for_each(|name| {
+                fs::create_dir(docs.join(name)).unwrap();
+                let e = store.list().unwrap_err();
+                assert_eq!(e.code, "store.corrupt");
+                assert!(e.message.contains(name), "{}", e.message);
+                fs::remove_dir(docs.join(name)).unwrap();
+            });
+        assert_eq!(store.list().unwrap(), ["ab12"]);
+    }
+
     fn snapshot_body(seqs: std::ops::RangeInclusive<u64>) -> Vec<u8> {
         seqs.map(|q| format!("u{q}"))
             .collect::<Vec<_>>()
@@ -843,6 +1196,11 @@ mod tests {
                 arm();
                 ack(&mut s, 11);
             }
+            "roll" => {
+                (1..=9).for_each(|seq| ack(&mut s, seq));
+                arm();
+                ack(&mut s, 10);
+            }
             other => panic!("unknown child mode {other}"),
         }
     }
@@ -872,9 +1230,12 @@ mod tests {
         let marker = dir.join("paused");
         let start = Instant::now();
         while !marker.exists() {
-            if child.try_wait().unwrap().is_some() || start.elapsed() > Duration::from_secs(10) {
-                child.kill().unwrap();
-                let out = child.wait_with_output().unwrap();
+            let exited = child
+                .try_wait()
+                .unwrap_or_else(|e| panic!("child {mode}: try_wait failed: {e}"))
+                .is_some();
+            if exited || start.elapsed() > Duration::from_secs(10) {
+                let out = stop_child(child, mode);
                 panic!(
                     "child {mode} did not pause within 10 s ({}): {}",
                     out.status,
@@ -884,12 +1245,30 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(while_paused));
-        child.kill().unwrap();
-        let out = child.wait_with_output().unwrap();
+        let out = stop_child(child, mode);
         if let Err(p) = checked {
             std::panic::resume_unwind(p);
         }
         String::from_utf8(out.stdout).unwrap()
+    }
+
+    fn stop_child(mut child: std::process::Child, mode: &str) -> std::process::Output {
+        let running = child
+            .try_wait()
+            .unwrap_or_else(|e| panic!("child {mode}: try_wait failed: {e}"))
+            .is_none();
+        let killed = if running { child.kill() } else { Ok(()) };
+        let out = child
+            .wait_with_output()
+            .unwrap_or_else(|e| panic!("child {mode}: wait failed: {e}"));
+        if let Err(e) = killed {
+            panic!(
+                "child {mode}: kill failed: {e} ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        out
     }
 
     fn acks(stdout: &str) -> BTreeSet<u64> {
@@ -956,6 +1335,55 @@ mod tests {
             s.append(11, &payload(11)).unwrap();
         }
         let l = DocStore::open(dir).unwrap().load().unwrap();
+        assert!(!l.torn);
+        assert_eq!(
+            l.records,
+            (1..=11).map(|q| (q, payload(q))).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn kill_mid_roll_keeps_acked_records() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+        let acked = acks(&spawn_child("roll", dir, 54, "append-mid", || {}));
+        assert_eq!(acked, (1..=9).collect());
+        assert_eq!(
+            seg_names(dir),
+            ["seg-1.log", "seg-10.log", "seg-4.log", "seg-7.log"]
+        );
+        let before: Vec<Vec<u8>> = ["seg-1.log", "seg-4.log", "seg-7.log"]
+            .iter()
+            .map(|n| fs::read(dir.join(n)).unwrap())
+            .collect();
+        {
+            let mut s = DocStore::open_with(dir, 54).unwrap();
+            let l = s.load().unwrap();
+            assert!(l.torn);
+            assert_eq!(seqs(&l), (1..=9).collect::<Vec<_>>());
+        }
+        assert_eq!(seg_names(dir), ["seg-1.log", "seg-4.log", "seg-7.log"]);
+        assert_eq!(torn_names(dir), ["seg-10.log.torn-0"]);
+        assert_eq!(
+            fs::read(dir.join("seg-10.log.torn-0")).unwrap(),
+            raw_records([10])[..HEADER + 1]
+        );
+        let mut s = DocStore::open_with(dir, 54).unwrap();
+        assert!(!s.load().unwrap().torn);
+        s.fail_next_append = true;
+        assert_eq!(s.append(10, &payload(10)).unwrap_err().code, "store.io");
+        append_range(&mut s, 10..=11);
+        let after: Vec<Vec<u8>> = ["seg-1.log", "seg-4.log", "seg-7.log"]
+            .iter()
+            .map(|n| fs::read(dir.join(n)).unwrap())
+            .collect();
+        assert_eq!(after, before);
+        assert_eq!(
+            seg_names(dir),
+            ["seg-1.log", "seg-10.log", "seg-4.log", "seg-7.log"]
+        );
+        drop(s);
+        let l = DocStore::open_with(dir, 54).unwrap().load().unwrap();
         assert!(!l.torn);
         assert_eq!(
             l.records,
