@@ -8,7 +8,7 @@ import { noticeText, type HolidayNotice } from "../../services/holidays";
 import { AppError } from "../../services/ipc";
 import { Registry as RealRegistry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
-import { CH_ZH, CH_ZH_2026, holidayDay, holidayYear } from "../../test/fixtures/calendars";
+import { CH_ZH, CH_ZH_2026, CH_ZH_2027, holidayDay, holidayYear } from "../../test/fixtures/calendars";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { emptyYear, seededStore, testRegistry } from "../../test/shell";
 import { tauri, type Answer } from "../../test/tauriMock";
@@ -428,6 +428,35 @@ describe("region sources", () => {
     const cal = t.session.view().plan.calendar;
     expect(cal.region).toEqual({ src: "govuk", division: "scotland" });
     expect([...cal.holidays.values()].filter((y) => y.region === "oh:CH:CH-ZH")).toEqual([]);
+  });
+
+  it("keeps the plan region's years outside the span when the region leaves and comes back", async () => {
+    const y2030 = holidayYear("oh:CH:CH-ZH", 2030, [holidayDay("2030-08-01", "National Day", "public")]);
+    const byYear = new Map([
+      [2026, CH_ZH_2026],
+      [2027, CH_ZH_2027],
+      [2030, y2030],
+    ]);
+    const sameDays: Answer = (args) => {
+      const y = byYear.get(Number(argOf(args, "year")));
+      return { days: y === undefined ? [] : y.days, fetchedAt: "2026-11-09T08:00:00Z", fromCache: false, coverage: [2020, 2030] };
+    };
+    const t = await made([], { calendar: zhPlan({ holidays: byYear }), answers: { holidays_year: sameDays } });
+    const registry = await shown(t);
+    await openDialog();
+    await choose("Holiday source", "govuk");
+    await choose("Division", "scotland");
+    await pickZurich();
+    fireEvent.click(weekday("Fri"));
+    await clickApply();
+    const cal = t.session.view().plan.calendar;
+    expect(cal.region).toEqual(ZH);
+    expect(cal.workdays).toEqual([1, 2, 3, 4]);
+    expect([...cal.holidays.keys()].sort()).toEqual([2026, 2027, 2030]);
+    expect(cal.holidays.get(2030)?.days).toEqual(y2030.days);
+    expect(cal.holidays.get(2026)?.days).toEqual(CH_ZH_2026.days);
+    expect(cal.holidays.get(2027)?.days).toEqual(CH_ZH_2027.days);
+    expect(registry.setLastRegion).not.toHaveBeenCalled();
   });
 });
 
@@ -1047,6 +1076,41 @@ describe("failed years in the day list", () => {
     fireEvent.click(within(missingRow(2027)).getByRole("button", { name: "Load" }));
     await settle();
     expect(load.mock.calls).toEqual([[t.session.view().plan.id, t.session, 2027]]);
+  });
+
+  it("takes a year Load brought into the plan into the open dialog, with no Load left and no write for it on Apply", async () => {
+    const answer2027: Answer = (args) =>
+      argOf(args, "year") === 2027 ? { days: NINE_2027.days, fetchedAt: "2026-11-09T08:00:00Z", fromCache: false, coverage: [2020, 2030] } : pending(args);
+    const t = await made([], { calendar: zhPlan({ holidays: new Map([[2026, CH_ZH_2026]]) }), answers: { holidays_year: answer2027 } });
+    await shown(t);
+    await openDialog();
+    const plan = t.session.view().plan.id;
+    fireEvent.click(within(missingRow(2027)).getByRole("button", { name: "Load" }));
+    await settle();
+    const ready = t.holidays.notices(plan).find((n): n is Extract<HolidayNotice, { k: "ready" | "changed" }> => n.k === "ready" && n.year === 2027);
+    if (ready === undefined) throw new Error("Load left no ready notice for 2027");
+    act(() => {
+      t.session.apply(ready.intent);
+    });
+    await settle();
+    expect(t.holidays.notices(plan)).toEqual([]);
+    expect(t.session.view().plan.calendar.holidays.get(2027)?.days).toEqual(NINE_2027.days);
+    const inSpan = NINE_2027.days.filter((d) => d.date <= "2027-11-09");
+    expect(inSpan.length).toBe(7);
+    inSpan.forEach((d) => expect(dayRow(d.name)).toBeTruthy());
+    expect(inDialog().queryByText(NOT_LOADED(2027))).toBeNull();
+    expect(inDialog().queryByRole("button", { name: "Load" })).toBeNull();
+    expect(impact()).toBe(NONE);
+    expect(applyButton().disabled).toBe(true);
+    const apply = vi.spyOn(t.session, "apply");
+    fireEvent.click(weekday("Fri"));
+    await clickApply();
+    expect(apply).toHaveBeenCalledTimes(1);
+    const intent = apply.mock.calls[0][0];
+    if (intent.t !== "calendar" || intent.base === undefined) throw new Error("Apply ran no calendar intent with a base");
+    expect(intent.next.holidays.get(2027)).toBe(intent.base.holidays.get(2027));
+    expect(t.session.view().plan.calendar.holidays.get(2027)?.days).toEqual(NINE_2027.days);
+    expect(t.session.view().plan.calendar.workdays).toEqual([1, 2, 3, 4]);
   });
 
   it("shows why a picked region's year did not load and loads it again in the dialog (refinement 43)", async () => {

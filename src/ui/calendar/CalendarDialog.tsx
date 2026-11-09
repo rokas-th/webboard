@@ -60,10 +60,22 @@ function refusedText(e: unknown): string {
   throw e;
 }
 
-function keepRegion(holidays: Calendar["holidays"], region: RegionRef | null): Calendar["holidays"] {
+function yearsFor(base: Calendar["holidays"], draft: Calendar["holidays"], region: RegionRef | null): Calendar["holidays"] {
   if (region === null) return new Map();
   const rk = regionKey(region);
-  return new Map([...holidays].filter(([, y]) => y.region === rk));
+  const of = (m: Calendar["holidays"]): [number, HolidayYear][] => [...m].filter(([, y]) => y.region === rk);
+  return new Map([...of(base), ...of(draft)]);
+}
+
+function arrivedYears(seen: Calendar["holidays"], cal: Calendar): [number, HolidayYear][] {
+  if (cal.region === null) return [];
+  const rk = regionKey(cal.region);
+  return [...cal.holidays].filter(([y, h]) => h.region === rk && seen.get(y)?.region !== rk);
+}
+
+function withArrived(cal: Calendar, arrived: readonly [number, HolidayYear][]): Calendar {
+  const added = arrived.filter(([y]) => !cal.holidays.has(y));
+  return added.length === 0 ? cal : { ...cal, holidays: new Map([...cal.holidays, ...added]) };
 }
 
 function previewText(session: PlanSession, view: PlanView, intent: Extract<Intent, { t: "calendar" }>): string {
@@ -89,8 +101,9 @@ export function CalendarBody(p: CalendarProps) {
     useCallback((cb: () => void) => holidays.subscribe(cb), [holidays]),
     () => holidays.notices(view.plan.id),
   );
-  const [base] = useState<Calendar>(() => p.review?.intent.base ?? session.view().plan.calendar);
+  const [base, setBase] = useState<Calendar>(() => p.review?.intent.base ?? session.view().plan.calendar);
   const [draft, setDraft] = useState<Calendar>(() => p.review?.intent.next ?? base);
+  const [seen, setSeen] = useState<Calendar["holidays"]>(() => view.plan.calendar.holidays);
   const [drafted, setDrafted] = useState<ReadonlyMap<string, ReadonlyMap<number, DraftYear>>>(new Map());
   const [regionError, setRegionError] = useState<{ region: RegionRef; message: string } | null>(null);
   const [applied, setApplied] = useState(false);
@@ -98,6 +111,16 @@ export function CalendarBody(p: CalendarProps) {
   const [dayFrom, setDayFrom] = useState("");
   const [dayTo, setDayTo] = useState("");
   const clock = p.clock;
+  const planCal = view.plan.calendar;
+  if (seen !== planCal.holidays) {
+    const arrived = arrivedYears(seen, planCal);
+    setSeen(planCal.holidays);
+    if (arrived.length > 0) {
+      const ownKey = planCal.region === null ? null : regionKey(planCal.region);
+      setBase((c) => withArrived(c, arrived));
+      setDraft((d) => (d.region !== null && regionKey(d.region) === ownKey ? withArrived(d, arrived) : d));
+    }
+  }
   const span = spanOf(view);
   const spanYears = useMemo(() => yearsOf(span.from, span.to), [span.from, span.to]);
 
@@ -136,10 +159,10 @@ export function CalendarBody(p: CalendarProps) {
 
   const pick = useCallback(
     (region: RegionRef | null): void => {
-      setDraft((d) => ({ ...d, region, holidays: keepRegion(d.holidays, region) }));
+      setDraft((d) => ({ ...d, region, holidays: yearsFor(base.holidays, d.holidays, region) }));
       if (region !== null) fetchYears(region, spanYears);
     },
-    [fetchYears, spanYears],
+    [fetchYears, spanYears, base],
   );
 
   const change = (f: (c: Calendar) => Calendar): void => {
