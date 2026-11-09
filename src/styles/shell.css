@@ -664,6 +664,14 @@ button.chip:hover:not(:disabled) {
 }
 
 @media (max-width: 1240px) {
+  .toolbar {
+    gap: 6px;
+  }
+
+  .toolbar > button {
+    padding: 7px 10px;
+  }
+
   .seg-modes {
     position: static;
     transform: none;
@@ -671,6 +679,7 @@ button.chip:hover:not(:disabled) {
 
   .seg-modes button {
     min-width: 0;
+    padding: 4px 8px;
   }
 
   .legend {

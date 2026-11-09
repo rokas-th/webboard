@@ -178,7 +178,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
         </div>
         <div className="card-meta">
           <When view={view} item={item} />
-          {group !== null && <span>{group}</span>}
+          {group !== null && <span className="card-group">{group}</span>}
           {!p.readOnly && (
             <select className="move-to" aria-label="Move to" value={h} onChange={(e) => moveTo(item.id, horizonOf(e.target.value))}>
               {COLUMNS.map((c) => (

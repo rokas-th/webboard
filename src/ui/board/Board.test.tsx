@@ -165,6 +165,7 @@ describe("Board group names", () => {
     ]);
     await board(t);
     expect(all(".card-meta span", card("h")).map((e) => e.textContent)).toEqual(["20 Nov – 24 Nov", "G › H"]);
+    expect(one(".card-meta .card-group", card("h")).textContent).toBe("G › H");
   });
 });
 

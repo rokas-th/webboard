@@ -264,4 +264,19 @@ describe("the Cyberdeck look", () => {
       expect([sel, decls["overflow"], decls["text-overflow"]]).toEqual([sel, "hidden", "ellipsis"]);
     });
   });
+
+  it("keeps a card's group path and a month label on one line with an ellipsis", () => {
+    [".card-meta .card-group", ".tl-month"].forEach((sel) => {
+      const decls = Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+      expect([sel, decls["overflow"], decls["text-overflow"], decls["white-space"]]).toEqual([sel, "hidden", "ellipsis", "nowrap"]);
+    });
+  });
+
+  it("tightens the toolbar below 1240 px so it fits a 1024 px window", () => {
+    const narrow = (sel: string): Decls =>
+      Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 1 && r.conditions[0] === "@media (max-width: 1240px)").map((r) => r.decls));
+    expect(narrow(".toolbar")["gap"]).toBe("6px");
+    expect(narrow(".toolbar > button")["padding"]).toBe("7px 10px");
+    expect(narrow(".seg-modes button")["padding"]).toBe("4px 8px");
+  });
 });
