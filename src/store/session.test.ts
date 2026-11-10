@@ -848,6 +848,30 @@ describe("PlanSession", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it("close withdraws the session as holiday host, so a fetch that lands afterwards touches nothing", async () => {
+    const e = env();
+    const s = await open(e, seedDoc({ calendar: CH_ZH }));
+    await flush();
+    await flush();
+    const held = hold("holidays_year");
+    s.apply({ t: "create", kind: "task", name: "Far", parent: null, after: null, start: "2028-03-01", dur: 2 });
+    expect(e.holidays.notices(ID)).toEqual([{ k: "loading", year: 2028 }]);
+    const preview = vi.spyOn(s, "preview");
+    const sub = vi.fn();
+    e.holidays.subscribe(sub);
+    await s.close();
+    expect(e.holidays.notices(ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
+    const rejected = nextUnhandled();
+    held.resolve({ days: DAYS_2028, fetchedAt: FETCHED_AT, fromCache: false, coverage: [2020, 2030] });
+    await flush();
+    expect(await Promise.race([rejected, flush().then(() => "no rejection")])).toBe("no rejection");
+    expect(preview).not.toHaveBeenCalled();
+    expect(e.holidays.notices(ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
+    expect(e.holidays.cached(RK, 2028)?.days).toEqual(DAYS_2028);
+  });
+
   it("missing at open", async () => {
     const e = env({ answers: { holidays_year: pending() } });
     const onMissing = vi.spyOn(e.holidays, "onMissing");

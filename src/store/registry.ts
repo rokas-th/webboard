@@ -17,6 +17,7 @@ import { LOCAL, PlanDoc } from "./doc";
 import type { ImportResult } from "./file";
 import { IndexDoc } from "./index-doc";
 import { openPersisted, type PersistedDoc } from "./persist";
+import { newPlanId, SPACE_PREFIX } from "./plan-id";
 import { readActions } from "./read-actions";
 import { movePlan } from "../sync/move";
 import { PlanSession, type SessionDeps } from "./session";
@@ -47,7 +48,6 @@ const MOVE_READ_ONLY = "This device was removed from the space. Join again to mo
 const INCOMPLETE = "This plan has not arrived yet; it opens once it syncs.";
 const INDEX_REPAIRED = "The last change to the plan list before WebBoard closed was not saved.";
 const LOCAL_INDEX = "local";
-const SPACE_PREFIX = "ix-";
 const PROBE = "probe";
 
 const isIndexDoc = (id: string): boolean => id === LOCAL_INDEX || id.startsWith(SPACE_PREFIX);
@@ -142,6 +142,7 @@ export class Registry {
   private settings: Settings;
   private localIx: IndexDoc | null = null;
   private offLocal: (() => void) | null = null;
+  private stored: readonly string[] = [];
   private spaceIds: readonly string[] = [];
   private readonly spaces = new Map<string, IndexDoc>();
   private attachedId: string | null = null;
@@ -199,12 +200,17 @@ export class Registry {
     }
     this.lastDevices = local.devices();
     this.offLocal = local.subscribe(() => this.onIndexChange());
-    const ids = parseList(await call<unknown>("store_list"));
-    this.spaceIds = ids.filter((id) => id.startsWith(SPACE_PREFIX));
-    const spaces = await Promise.all(this.spaceIds.map((id) => this.openSpace(id)));
-    if (spaces.some((ix) => ix === null)) return;
-    const listed = new Set([local, ...spaces].flatMap((ix) => (ix === null ? [] : ix.plans().map((p) => p.id))));
-    ids.filter((id) => !isIndexDoc(id) && id !== PROBE && !listed.has(id)).forEach((id) => local.addPlan(id));
+    this.stored = parseList(await call<unknown>("store_list"));
+    this.spaceIds = this.stored.filter((id) => id.startsWith(SPACE_PREFIX));
+    await Promise.all(this.spaceIds.map((id) => this.openSpace(id)));
+    this.adoptOrphans();
+  }
+
+  private adoptOrphans(): void {
+    if (this.spaceIds.some((id) => !this.spaces.has(id))) return;
+    const local = this.local;
+    const listed = new Set([local, ...this.spaces.values()].flatMap((ix) => ix.plans().map((p) => p.id)));
+    this.stored.filter((id) => !isIndexDoc(id) && id !== PROBE && !listed.has(id)).forEach((id) => local.addPlan(id));
   }
 
   private async openIndex(id: string): Promise<IndexDoc> {
@@ -440,6 +446,7 @@ export class Registry {
         this.attaching.delete(id);
         this.indexFailed.delete(id);
         this.putSpace(id, ix);
+        this.adoptOrphans();
         return ix;
       },
       (e: unknown) => {
@@ -492,9 +499,12 @@ export class Registry {
       (s) => {
         const close = s.close.bind(s);
         s.close = async () => {
-          await close();
-          if (this.sessions.get(id) === s) this.sessions.delete(id);
-          if (this.sessionMemo.get(id) === p) this.sessionMemo.delete(id);
+          try {
+            await close();
+          } finally {
+            if (this.sessions.get(id) === s) this.sessions.delete(id);
+            if (this.sessionMemo.get(id) === p) this.sessionMemo.delete(id);
+          }
         };
         this.sessions.set(id, s);
         this.emit();
@@ -565,7 +575,7 @@ export class Registry {
       name,
       calendar: { region, workdays: [1, 2, 3, 4, 5], closures: new Map(), tuning: new Map(), holidays },
     });
-    const id = newId();
+    const id = newPlanId();
     const doc = await this.load(id, false);
     new PlanDoc(doc.ydoc).append(action, []);
     this.addTarget().addPlan(id);
@@ -712,6 +722,7 @@ export class Registry {
     }
     this.indexFailed.delete(id);
     this.putSpace(id, ix);
+    this.adoptOrphans();
   }
 
   spaceReadOnly(): boolean {
@@ -866,6 +877,7 @@ export class Registry {
     docs.forEach(([id]) => this.detach(id));
     this.memo.clear();
     const planDocs = await Promise.allSettled(docs.map(async ([, d]) => d.close()));
+    await this.settingsQueue;
     const thrown = [...new Set([...sessions, ...indexDocs, ...planDocs].flatMap((r) => (r.status === "rejected" ? [r.reason] : [])))];
     if (thrown.length > 0) throw collected(thrown, "documents failed to close");
   }

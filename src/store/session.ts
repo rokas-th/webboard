@@ -440,6 +440,7 @@ export class PlanSession implements HolidayHost {
     if (this.closed) return;
     this.closed = true;
     this.offs.splice(0).forEach((off) => off());
+    this.deps.holidays.forget(this.id, this);
   }
 }
 

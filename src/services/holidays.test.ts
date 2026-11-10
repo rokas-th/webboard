@@ -847,6 +847,58 @@ describe("reconcile (refinement 42)", () => {
     expect(preview).not.toHaveBeenCalled();
   });
 
+  it("forget drops the plan's notices, and a fetch that lands afterwards touches nothing", async () => {
+    const h = hold("holidays_year");
+    const svc = new HolidayService();
+    const { host, preview } = stub(CH_ZH, [2028]);
+    svc.onMissing(PLAN_ID, host, [2028], "own");
+    expect(svc.notices(PLAN_ID)).toEqual([{ k: "loading", year: 2028 }]);
+    const sub = vi.fn();
+    svc.subscribe(sub);
+    svc.forget(PLAN_ID, host);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).toHaveBeenCalledTimes(1);
+    h.resolve({ days: DAYS_2028, fetchedAt: FETCHED_AT, fromCache: false, coverage: [2020, 2030] });
+    await flush();
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(preview).not.toHaveBeenCalled();
+    expect(sub).toHaveBeenCalledTimes(1);
+    const from = tauri.calls.length;
+    const closed = `Plan ${PLAN_ID} was closed; its holidays are no longer tracked`;
+    await expect(svc.load(PLAN_ID, host, 2029)).rejects.toThrow(closed);
+    expect(() => svc.onMissing(PLAN_ID, host, [2029], "own")).toThrow(closed);
+    expect(yearCalls(from)).toBe(0);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+  });
+
+  it("a refresh that lands after its host is forgotten touches nothing", async () => {
+    const h = hold("holidays_year");
+    const svc = new HolidayService(() => TODAY_NOON);
+    const { host, preview } = stub(CAL_2027, []);
+    const refreshing = svc.refresh(PLAN_ID, host);
+    const sub = vi.fn();
+    svc.subscribe(sub);
+    svc.forget(PLAN_ID, host);
+    expect(sub).not.toHaveBeenCalled();
+    h.resolve({ days: NEW_2027, fetchedAt: FETCHED_AT, fromCache: false, coverage: [2020, 2030] });
+    await expect(refreshing).resolves.toBeUndefined();
+    expect(preview).not.toHaveBeenCalled();
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(sub).not.toHaveBeenCalled();
+  });
+
+  it("forget leaves another plan's notices", async () => {
+    hold("holidays_year");
+    const svc = new HolidayService();
+    const mine = stub(CH_ZH, [2028]);
+    const theirs = stub(CH_ZH, [2028]);
+    svc.onMissing(PLAN_ID, mine.host, [2028], "own");
+    svc.onMissing("other-plan", theirs.host, [2028], "merge");
+    svc.forget(PLAN_ID, mine.host);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
+    expect(svc.notices("other-plan")).toEqual([{ k: "notLoaded", year: 2028 }]);
+  });
+
   it("a dismissed notice is gone and its late fetch records nothing", async () => {
     const h = hold("holidays_year");
     const svc = new HolidayService();
@@ -861,6 +913,44 @@ describe("reconcile (refinement 42)", () => {
     await flush();
     expect(svc.notices(PLAN_ID)).toEqual([]);
     expect(sub).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("subscribers", () => {
+  it("a throwing subscriber does not stop the rest, and its throw propagates", async () => {
+    const h = hold("holidays_year");
+    const svc = new HolidayService();
+    const { host } = stub(CH_ZH, [2028]);
+    svc.onMissing(PLAN_ID, host, [2028], "own");
+    const boom = new Error("strip broke");
+    svc.subscribe(() => {
+      throw boom;
+    });
+    const later = vi.fn();
+    svc.subscribe(later);
+    const rejected = nextUnhandled();
+    h.resolve({ days: DAYS_2028, fetchedAt: FETCHED_AT, fromCache: false, coverage: [2020, 2030] });
+    expect(await rejected).toBe(boom);
+    expect(later).toHaveBeenCalledTimes(1);
+    expect(only(svc.notices(PLAN_ID)).k).toBe("ready");
+  });
+
+  it("throws from several subscribers are collected", () => {
+    hold("holidays_year");
+    const svc = new HolidayService();
+    const { host } = stub(CH_ZH, [2028]);
+    svc.onMissing(PLAN_ID, host, [2028], "own");
+    svc.subscribe(() => {
+      throw new Error("one");
+    });
+    const between = vi.fn();
+    svc.subscribe(between);
+    svc.subscribe(() => {
+      throw new Error("two");
+    });
+    expect(() => svc.dismiss(PLAN_ID, 2028)).toThrow("2 subscribers threw; the first: one");
+    expect(between).toHaveBeenCalledTimes(1);
+    expect(svc.notices(PLAN_ID)).toEqual([]);
   });
 });
 

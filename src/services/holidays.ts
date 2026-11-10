@@ -5,6 +5,7 @@ import type { PlanId } from "../domain/model";
 import { planRules } from "../plan/rules";
 import { key } from "../plan/units";
 import type { PlanView } from "../store/doc";
+import { notifyEach } from "./clock";
 import { AppError, call } from "./ipc";
 
 export type HolidayNotice =
@@ -116,6 +117,7 @@ export class HolidayService {
   private readonly inflight = new Map<string, Promise<Fetched>>();
   private readonly entries = new Map<PlanId, Map<number, Entry>>();
   private readonly lists = new Map<PlanId, readonly HolidayNotice[]>();
+  private readonly withdrawn = new WeakSet<HolidayHost>();
   private readonly subscribers = new Set<() => void>();
 
   constructor(now: () => number = Date.now) {
@@ -150,6 +152,7 @@ export class HolidayService {
   }
 
   onMissing(plan: PlanId, host: HolidayHost, years: readonly number[], cause: "own" | "merge"): void {
+    this.hosting(plan, host);
     const region = host.view().plan.calendar.region;
     if (region === null) {
       if (years.length === 0) return;
@@ -175,6 +178,7 @@ export class HolidayService {
   }
 
   async load(plan: PlanId, host: HolidayHost, year: number): Promise<void> {
+    this.hosting(plan, host);
     const region = host.view().plan.calendar.region;
     if (region === null) throw new Error(`Plan ${plan} has no holiday region to load ${year} for`);
     const current = this.entry(plan, year);
@@ -202,6 +206,17 @@ export class HolidayService {
 
   dismiss(plan: PlanId, year: number): void {
     if (this.drop(plan, year)) this.notify();
+  }
+
+  forget(plan: PlanId, host: HolidayHost): void {
+    this.withdrawn.add(host);
+    if (!this.entries.delete(plan)) return;
+    this.relist(plan);
+    this.notify();
+  }
+
+  private hosting(plan: PlanId, host: HolidayHost): void {
+    if (this.withdrawn.has(host)) throw new Error(`Plan ${plan} was closed; its holidays are no longer tracked`);
   }
 
   reconcile(plan: PlanId, host: HolidayHost): void {
@@ -315,7 +330,7 @@ export class HolidayService {
           : c !== null && dayOf(c.fetchedAt) === today
             ? { ok: true, year: c }
             : await this.fetch(region, year, true);
-      if (this.entry(plan, year) !== token) return;
+      if (this.withdrawn.has(host) || this.entry(plan, year) !== token) return;
       const base = host.view().plan.calendar;
       const planYear = base.holidays.get(year) ?? null;
       if (base.region === null || regionKey(base.region) !== rk || planYear === null || planYear.region !== rk) {
@@ -423,6 +438,6 @@ export class HolidayService {
   }
 
   private notify(): void {
-    [...this.subscribers].forEach((cb) => cb());
+    notifyEach(this.subscribers);
   }
 }

@@ -494,6 +494,25 @@ describe("Registry: sessions and devices", () => {
     expect(r.openSessions()[0]).toBe(b);
   });
 
+  it("a session whose close throws is still dropped", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha", { items: ["A"], calendar: { ...PLAIN, region: ZH } });
+    const r = await open({ clock: fixedClock(TODAY) });
+    const s = await r.session("P");
+    await flush();
+    expect(r.holidays.notices("P").map((n) => n.year)).toContain(2026);
+    const boom = new Error("strip broke");
+    const off = r.holidays.subscribe(() => {
+      throw boom;
+    });
+    expect(await rejection(s.close())).toBe(boom);
+    off();
+    expect(r.holidays.notices("P")).toEqual([]);
+    expect(r.openSessions()).toEqual([]);
+    expect(await r.session("P")).not.toBe(s);
+  });
+
   it("devices", async () => {
     const e = env();
     seedIndex(e.mem, "local", listing("P"));
@@ -901,6 +920,38 @@ describe("Registry: listing and loading", () => {
     expect(failing.indexError()?.code).toBe("store.io");
   });
 
+  it("orphan plans are listed once every space index that failed at start opens on retry", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", [ixAct("l1", [], [ip("P", false)])]);
+    seedPlan(e.mem, "P", "Pea");
+    seedPlan(e.mem, "Q", "Queue");
+    seedIndex(e.mem, "ix-S1", [ixAct("s1", [], [ip("R", false)])]);
+    seedPlan(e.mem, "R", "Arr");
+    seedIndex(e.mem, "ix-S2", [ixAct("s2", [], [ip("T", false)])]);
+    seedPlan(e.mem, "T", "Tee");
+    e.mem.fail("store_load", "ix-S1", { code: "store.io", message: "Disk full." });
+    e.mem.fail("store_load", "ix-S2", { code: "store.locked", message: "The plan list is open in another WebBoard process; close it there first." });
+    const r = await open();
+    await flush();
+    expect(r.plans().map((p) => p.id)).toEqual(["P"]);
+    e.mem.recover("store_load", "ix-S1");
+    const from = tauri.calls.length;
+    await r.retryIndex();
+    await flush();
+    expect(r.indexErrorDoc()).toBe("ix-S2");
+    expect(r.plans().map((p) => p.id)).toEqual(["P"]);
+    expect(appendsTo(from, "local")).toHaveLength(0);
+    e.mem.recover("store_load", "ix-S2");
+    await r.retryIndex();
+    await flush();
+    expect(r.indexError()).toBeNull();
+    expect(r.plans().map((p) => p.id)).toEqual(["P", "Q"]);
+    expect(appendsTo(from, "local").flatMap(bodyActions).map((a) => a.w)).toEqual([[ip("Q", false)]]);
+    await r.retryIndex();
+    await flush();
+    expect(appendsTo(from, "local")).toHaveLength(1);
+  });
+
   it("localSpaces", async () => {
     const e = env();
     seedIndex(e.mem, "local", listing());
@@ -1200,6 +1251,30 @@ describe("Registry: lifecycle and failures", () => {
     expect(err).toBeInstanceOf(Error);
     expect(err).toMatchObject({ message: "2 documents failed to close; the first: Local disk full." });
     expect(err).toHaveProperty("cause.code", "store.io");
+  });
+
+  it("close waits for a settings write in flight", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    await r.warm();
+    await flush();
+    const from = tauri.calls.length;
+    const held = hold("settings_write");
+    const writing = r.setSyncedHeads("P", ["h1"]);
+    await flush();
+    expect(callsOf(from, "settings_write")).toHaveLength(1);
+    const done: string[] = [];
+    const closing = r.close().then(() => {
+      done.push("closed");
+    });
+    await flush();
+    expect(done).toEqual([]);
+    held.resolve(null);
+    await Promise.all([closing, writing]);
+    expect(done).toEqual(["closed"]);
+    expect(r.settingsError()).toBeNull();
   });
 
   it("index close keeps its failure", async () => {
@@ -1784,6 +1859,28 @@ describe("Registry: spaces", () => {
     expect(planOf(r, "P").space).toBe(SP);
     expect(r.attachedSpace()).toBe(SP);
     expect(cb).toHaveBeenCalled();
+  });
+
+  it("orphan plans are listed once a space index that failed at start attaches", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing());
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    seedPlan(e.mem, "P", "Pea");
+    seedPlan(e.mem, "Q", "Queue");
+    e.mem.fail("store_load", IX, { code: "store.io", message: "Disk full." });
+    const r = await open();
+    await flush();
+    expect(r.plans()).toEqual([]);
+    e.mem.recover("store_load", IX);
+    const from = tauri.calls.length;
+    await r.attachSpace(SP);
+    await flush();
+    expect(r.indexError()).toBeNull();
+    expect(r.plans().map((p) => [p.id, p.space])).toEqual([
+      ["Q", null],
+      ["P", SP],
+    ]);
+    expect(appendsTo(from, "local").flatMap(bodyActions).map((a) => a.w)).toEqual([[ip("Q", false)]]);
   });
 
   it("the space index's unreadable changes are listed", async () => {

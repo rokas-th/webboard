@@ -11,6 +11,7 @@ import { planRules } from "../plan/rules";
 import { existence, key, parseKey, stateWrites, validateWrite } from "../plan/units";
 import { AppError, call, callBytes } from "../services/ipc";
 import { decodeAction } from "./doc";
+import { newPlanId } from "./plan-id";
 import type { Registry } from "./registry";
 import type { PlanSession } from "./session";
 
@@ -224,7 +225,7 @@ function remap(plan: PlanState, planId: PlanId): { plan: PlanState; idMap: Reado
 export function buildImport(bytes: Uint8Array, fileName: string, dev: DeviceId, ses: SessionId, now: number): ImportResult {
   const { header, update } = decodeWbx(bytes);
   const source = readPlan(header.planId, update);
-  const planId = newId();
+  const planId = newPlanId();
   const { plan, idMap } = remap(source.plan, planId);
   const notes = new Map([...source.notes].map(([item, text]): [ItemId, string] => [idMap.get(item) ?? missingId(item, "a note"), text]));
   const ownTrashed = new Map([...source.ownTrashed].map(([item, t]): [ItemId, boolean] => [idMap.get(item) ?? missingId(item, "an existence unit"), t]));

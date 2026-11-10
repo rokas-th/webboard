@@ -16,7 +16,7 @@ import { act } from "../test/act";
 import { memoryStore } from "../test/fixtures/store";
 import { VALID_WEBBOARD } from "../test/fixtures/webboard";
 import { resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
-import { decodeAction, PlanDoc } from "./doc";
+import { decodeAction, encodeAction, PlanDoc } from "./doc";
 import { buildImport, decodeWbx, encodeWbx, exportPlan, fileNameOf, importPlan, type ImportResult } from "./file";
 import { Registry } from "./registry";
 
@@ -420,6 +420,14 @@ describe("malformed refused", () => {
   new DataView(version2.buffer).setUint32(4, 2, true);
   const zz = fileOf([act("a0", [], [...planHead("Bridge"), own("zz:1", 1)], { dev: "dev-A" })]);
   const zzDamaged = fileOf([act("a0", [], [...planHead("Bridge"), own("zz:1", 1), own("n:T1", 7)], { dev: "dev-A" })]);
+  const unknownMeta = (version: number): Uint8Array => {
+    const doc = new Y.Doc();
+    doc.getMap("actions").set("a0", [...encodeAction(act("a0", [], planHead("Bridge"), { dev: "dev-A" })), { split: "T1" }]);
+    const u = Y.encodeStateAsUpdate(doc);
+    const bytes = encodeWbx({ planId: SOURCE_ID, name: "Bridge", exportedAt: "2026-11-08T14:05:00Z", updateLength: u.length }, u);
+    new DataView(bytes.buffer).setUint32(4, version, true);
+    return bytes;
+  };
   const truncatedText = (n: number, m: number) => `This file is incomplete (${n} of ${m} bytes); export it again.`;
   const cases: [string, Uint8Array, string, string | RegExp][] = [
     ["PNG", Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52]), "import.foreign", "This file is not a WebBoard plan."],
@@ -431,6 +439,8 @@ describe("malformed refused", () => {
     ["inside the header", valid.slice(0, 20), "import.truncated", truncatedText(20, 12 + headerLength)],
     ["10 bytes short", valid.slice(0, valid.length - 10), "import.truncated", truncatedText(valid.length - 10, valid.length)],
     ["version 2", version2, "import.newer", "This file comes from a newer WebBoard (format 2); update WebBoard to open it."],
+    ["an action this WebBoard cannot read", unknownMeta(1), "import.corrupt", "This file is damaged: Action a0 has a malformed meta"],
+    ["the same action in format 2", unknownMeta(2), "import.newer", "This file comes from a newer WebBoard (format 2); update WebBoard to open it."],
     ["broken header JSON", withHeader('{"planId":', update), "import.corrupt", /^This file is damaged: its header is not readable: /],
     ["random update", withHeader(JSON.stringify({ ...decodeWbx(valid).header }), seededBytes(update.length, 20261109)), "import.corrupt", /^This file is damaged: \S/],
     ["extra bytes", Uint8Array.from([...valid, 0, 0]), "import.corrupt", "This file is damaged: 2 bytes follow the plan"],
