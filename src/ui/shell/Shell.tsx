@@ -232,8 +232,7 @@ export function Shell(p: ShellProps) {
       selectedItem.current = null;
       setUi({ selected: null });
       const root = trashRootOf(session, item);
-      const a = session.authorOf("e:" + root);
-      if (a === null) throw new Error(`Shell: trashed item ${root} has no author`);
+      const a = session.trashAuthorOf(root);
       if (a.dev === registry.device.deviceId) return;
       const rootItem = view.plan.items.get(root);
       if (rootItem === undefined) throw new Error(`Shell: no item ${root}`);

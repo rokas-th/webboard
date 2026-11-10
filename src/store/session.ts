@@ -14,7 +14,7 @@ import type { ActionId, DeviceId, SessionId, UnitKey } from "../log/types";
 import { choices, heldItems, type Choice } from "../plan/choices";
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
-import { validateWrite } from "../plan/units";
+import { key, validateWrite } from "../plan/units";
 import { notifyEach, type Clock } from "../services/clock";
 import type { HolidayHost, HolidayService } from "../services/holidays";
 import type { AppError } from "../services/ipc";
@@ -379,6 +379,21 @@ export class PlanSession implements HolidayHost {
     if (unit === undefined) return null;
     const a = this.log.get(unit.from);
     if (a === undefined) throw new Error(`Action ${unit.from} wrote ${u} but is not ready`);
+    return { dev: a.dev, device: deviceName(this.devices, a.dev) };
+  }
+
+  trashAuthorOf(item: ItemId): { dev: DeviceId; device: string } {
+    const live = this.authorOf(key.e(item));
+    if (live !== null) return live;
+    const order = this.log.order();
+    const by = this.log
+      .writers(key.e(item))
+      .map((w) => this.log.unit(key.a(w)))
+      .flatMap((st) => (st !== undefined && st.value === false ? [st.from] : []))
+      .reduce<ActionId | null>((m, x) => (m === null || order.indexOf(x) > order.indexOf(m) ? x : m), null);
+    if (by === null) throw new Error(`Item ${item} is trashed but no action trashed it`);
+    const a = this.log.get(by);
+    if (a === undefined) throw new Error(`Action ${by} trashed ${item} but is not ready`);
     return { dev: a.dev, device: deviceName(this.devices, a.dev) };
   }
 
