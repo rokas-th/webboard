@@ -195,3 +195,22 @@ describe("isTyping", () => {
     expect(isTyping(window, "n")).toBe(false);
   });
 });
+
+describe("keyToCommand: duplicate (product-7)", () => {
+  const sel: KeyState = { ...MAC, selected: true };
+  it("duplicates the selection on ⌘D, never without a selection, while typing, in a dialog or with Shift", () => {
+    expect(keyToCommand(k("d", { metaKey: true }), sel)).toBe("duplicate");
+    expect(keyToCommand(k("D", { metaKey: true }), sel)).toBe("duplicate");
+    expect(keyToCommand(k("d", { metaKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("d", { metaKey: true }), { ...sel, typing: true })).toBeNull();
+    expect(keyToCommand(k("d", { metaKey: true }), { ...sel, dialog: true })).toBeNull();
+    expect(keyToCommand(k("d", { metaKey: true, shiftKey: true }), sel)).toBeNull();
+  });
+
+  it("takes Ctrl+D off macOS and not ⌘D", () => {
+    const pc: KeyState = { ...PC, selected: true };
+    expect(keyToCommand(k("d", { ctrlKey: true }), pc)).toBe("duplicate");
+    expect(keyToCommand(k("d", { metaKey: true }), pc)).toBeNull();
+    expect(keyToCommand(k("d", { ctrlKey: true }), sel)).toBeNull();
+  });
+});

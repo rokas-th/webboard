@@ -22,7 +22,7 @@ import { encodeLoad, memoryStore, type MemoryStore } from "../test/fixtures/stor
 import { ctxOf, PLAN_ID } from "../test/planCtx";
 import { commandsSince, commandsWith, hold, resetTauri, tauri, type Answer } from "../test/tauriMock";
 import { testSession, type TestSession } from "../test/session";
-import { encodeAction, PlanDoc, decodeAction } from "./doc";
+import { encodeAction, LOCAL, PlanDoc, decodeAction } from "./doc";
 import { openPersisted, type PersistedDoc } from "./persist";
 import { PlanSession, usePlanView, type SessionDeps } from "./session";
 
@@ -68,6 +68,7 @@ const DEVICES: ReadonlyMap<DeviceId, string> = new Map([
 interface Seed {
   calendar?: Calendar;
   link?: boolean;
+  bare?: boolean;
 }
 
 const ROOTS = new WeakMap<Y.Doc, ActionId>();
@@ -97,6 +98,10 @@ function seedDoc(o: Seed = {}): Y.Doc {
   const a = build({ t: "create", kind: "task", name: "A", parent: null, after: null, start: "2026-11-09", dur: 3 }).newNotes[0];
   const b = build({ t: "create", kind: "task", name: "B", parent: null, after: null, start: "2026-11-12", dur: 2 }).newNotes[0];
   if (o.link === true) build({ t: "link", from: a, to: b, type: "FS", lag: 0 });
+  if (o.bare === true) {
+    const bare = buildAction(ctxOf(log, "dev-A", TODAY, DEVICES, { ses: "seed" }), { t: "create", kind: "task", name: "Bare", parent: null, after: null, start: null });
+    add(bare.action, []);
+  }
   return ydoc;
 }
 
@@ -1322,5 +1327,56 @@ describe("notifyEach", () => {
     expect(third).toHaveBeenCalledTimes(1);
     expect(err instanceof Error && err.message).toBe("2 subscribers threw; the first: one");
     expect(err).toHaveProperty("cause", one);
+  });
+});
+
+describe("PlanSession: duplicate (product-7)", () => {
+  it("copies the note text into an independent note, and undo and redo take the copy away and back with its text", async () => {
+    const s = await open(env());
+    const a = itemId(s, "A");
+    s.note(a).insert(0, "Measure twice.");
+    const built = s.apply({ t: "duplicate", item: a });
+    const copy = built.newNotes[0];
+    expect(nameOf(s, copy)).toBe("A copy");
+    expect(s.note(copy).toString()).toBe("Measure twice.");
+    s.note(copy).insert(0, "Copy: ");
+    expect(s.note(a).toString()).toBe("Measure twice.");
+    const live = (): string[] => [...s.view().plan.items.values()].filter((i) => !i.trashed).map((i) => i.name).sort();
+    expect(live()).toEqual(["A", "A copy", "B"]);
+    expect(s.undo()).not.toBeNull();
+    expect(live()).toEqual(["A", "B"]);
+    expect(s.redo()).not.toBeNull();
+    expect(live()).toEqual(["A", "A copy", "B"]);
+    expect(s.note(copy).toString()).toBe("Copy: Measure twice.");
+  });
+
+  it("writes the copy and its note text in one local transaction", async () => {
+    const e = env();
+    const s = await open(e);
+    const a = itemId(s, "A");
+    s.note(a).insert(0, "Hinges");
+    const ydoc = lastDoc(e).ydoc;
+    const seen: { local: boolean; texts: string[] }[] = [];
+    const record = (tr: Y.Transaction): void => {
+      seen.push({ local: tr.origin === LOCAL, texts: [...ydoc.getMap("notes").values()].map(String).filter((t) => t !== "") });
+    };
+    ydoc.on("afterTransaction", record);
+    s.apply({ t: "duplicate", item: a });
+    ydoc.off("afterTransaction", record);
+    expect(seen).toEqual([{ local: true, texts: ["Hinges", "Hinges"] }]);
+  });
+
+  it("throws on a source without a note and leaves the actions, notes and undo as they were", async () => {
+    const e = env();
+    const s = await open(e, seedDoc({ bare: true }));
+    const bare = itemId(s, "Bare");
+    const ydoc = lastDoc(e).ydoc;
+    const actions = [...ydoc.getMap("actions").keys()].sort();
+    const notes = [...ydoc.getMap("notes").keys()].sort();
+    const undo = s.canUndo();
+    expect(() => s.apply({ t: "duplicate", item: bare })).toThrow(`Item ${bare} has no note: it was created without one`);
+    expect([...ydoc.getMap("actions").keys()].sort()).toEqual(actions);
+    expect([...ydoc.getMap("notes").keys()].sort()).toEqual(notes);
+    expect(s.canUndo()).toBe(undo);
   });
 });

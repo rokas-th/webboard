@@ -973,3 +973,124 @@ describe("buildAction: the plan's limits (schedule-1)", () => {
     expect(buildAction(ctx, { t: "schedule", item: "Admin", set: { start: "2062-11-16" } }).toast).toBe("Scheduled “Admin” from 16 Nov 2062.");
   });
 });
+
+describe("buildAction: duplicate (product-7)", () => {
+  const TASKS: Write[] = [
+    ...ROOT,
+    ...item("P", "task", "Prep", null, "a0", sched("2026-11-16", 1)),
+    ...item("X", "task", "Fit the worktop", null, "a1", sched("2026-11-17", 4, "done", 100, "now")),
+    w("r:X", { "ticket:x/y#1": "" }),
+    ...item("N", "task", "Next", null, "a2", sched("2026-11-30", 1)),
+    w("l:P>X", ["SS", 2]),
+    w("b:B1", { name: "Before", at: "2026-11-01", dates: { X: { start: "2026-11-10", dur: 4 } } }),
+  ];
+  const KITCHEN: Write[] = [
+    ...ROOT,
+    ...item("P", "task", "Prep", null, "a0", sched("2026-11-16", 1)),
+    ...item("K", "group", "Kitchen", null, "a1"),
+    ...item("A", "task", "Fit", "K", "a0", sched("2026-11-17", 2, "doing", 50)),
+    ...item("B", "task", "Tile", "K", "a1", sched("2026-11-19", 2)),
+    w("e:T", { k: "task", t: true }),
+    w("n:T", "Old"),
+    w("s:T", sched("2026-11-16", 1)),
+    w("p:T", ["K", "a2"]),
+    ...item("I", "group", "Inner", "K", "a3"),
+    ...item("Y", "task", "Grout", "I", "a1", sched(null, 1)),
+    ...item("Z", "milestone", "Sealed", "I", "a1", sched("2026-11-25", 0)),
+    ...item("S", "task", "Ship", null, "a2", sched("2026-11-23", 1)),
+    w("l:P>A", ["FS", 0]),
+    w("l:A>B", ["FS", 1]),
+    w("l:B>S", ["FS", 0]),
+    w("l:T>B", ["FS", 0]),
+  ];
+  const names = (ctx: Ctx, parent: string | null): string[] => childrenOf(ctx.view.plan, parent).map((i) => i.name);
+  const orders = (ctx: Ctx, parent: string | null): string[] => childrenOf(ctx.view.plan, parent).map((i) => i.place.order);
+  const itemNamed = (ctx: Ctx, parent: string | null, name: string) => {
+    const found = childrenOf(ctx.view.plan, parent).find((i) => i.name === name);
+    if (found === undefined) throw new Error(`no ${name} under ${parent ?? "the top level"}`);
+    return found;
+  };
+
+  it("copies a task after the original as a fresh to-do with its dates, without references, baseline or push", () => {
+    const ctx = ctxFrom(TASKS);
+    const b = buildAction(ctx, { t: "duplicate", item: "X" });
+    const copy = b.newNotes[0];
+    expect(b.newNotes).toEqual([copy]);
+    expect(b.noteCopies).toEqual([["X", copy]]);
+    expect(copy).not.toBe("X");
+    expect(b.action.lbl).toBe("Duplicated task “Fit the worktop” as “Fit the worktop copy” with 1 link");
+    expect(units(b).some((u) => u.startsWith("r:"))).toBe(false);
+    expect(units(b).filter((u) => u.startsWith("s:"))).toEqual([`s:${copy}`]);
+    expect(writeOf(b, `s:${copy}`).v).toEqual(sched("2026-11-17", 4, "todo", 0, "now"));
+    const after = applied(ctx, b);
+    expect(names(after, null)).toEqual(["Prep", "Fit the worktop", "Fit the worktop copy", "Next"]);
+    const it = itemNamed(after, null, "Fit the worktop copy");
+    expect(it.id).toBe(copy);
+    expect(it.kind).toBe("task");
+    expect(it.refs).toEqual({});
+    expect(after.view.plan.links.get(`P>${copy}`)).toEqual({ from: "P", to: copy, type: "SS", lag: 2 });
+    expect(after.view.plan.baselines.get("B1")?.dates[copy]).toBeUndefined();
+    expect(after.view.plan.items.get("X")?.schedule).toEqual(ctx.view.plan.items.get("X")?.schedule);
+  });
+
+  it("lands between a tied pair, and one undo restores every key", () => {
+    const TIED: Write[] = [
+      ...ROOT,
+      ...item("A", "task", "A", null, "a1", sched("2026-11-16", 1)),
+      ...item("M", "task", "M", null, "a2", sched("2026-11-16", 1)),
+      ...item("P", "task", "P", null, "a2", sched("2026-11-16", 1)),
+      ...item("Z", "task", "Z", null, "a3", sched("2026-11-16", 1)),
+    ];
+    const ctx = ctxFrom(TIED);
+    const b = buildAction(ctx, { t: "duplicate", item: "M" });
+    const after = applied(ctx, b);
+    expect(names(after, null)).toEqual(["A", "M", "M copy", "P", "Z"]);
+    expect(new Set(orders(after, null)).size).toBe(5);
+    const undone = applied(after, buildUndo(after, b.action.id));
+    expect(names(undone, null)).toEqual(["A", "M", "P", "Z"]);
+    expect(orders(undone, null)).toEqual(["a1", "a2", "a2", "a3"]);
+  });
+
+  it("copies a group's live subtree with new ids, mirrors inside links, keeps incoming and drops outgoing", () => {
+    const ctx = ctxFrom(KITCHEN);
+    const b = buildAction(ctx, { t: "duplicate", item: "K" });
+    expect(b.action.lbl).toBe("Duplicated group “Kitchen” as “Kitchen copy” with 5 items and 2 links");
+    const after = applied(ctx, b);
+    expect(names(after, null)).toEqual(["Prep", "Kitchen", "Kitchen copy", "Ship"]);
+    const k2 = itemNamed(after, null, "Kitchen copy");
+    expect(b.newNotes[0]).toBe(k2.id);
+    expect(names(after, k2.id)).toEqual(["Fit", "Tile", "Inner"]);
+    const a2 = itemNamed(after, k2.id, "Fit");
+    const b2 = itemNamed(after, k2.id, "Tile");
+    const i2 = itemNamed(after, k2.id, "Inner");
+    expect(names(after, i2.id)).toEqual(["Grout", "Sealed"]);
+    const [y2, z2] = childrenOf(after.view.plan, i2.id);
+    expect(y2.place.order < z2.place.order).toBe(true);
+    expect(z2.kind).toBe("milestone");
+    expect(y2.schedule).toEqual({ start: null, dur: 1, status: "todo", progress: 0, horizon: "later" });
+    expect(a2.schedule).toEqual({ start: "2026-11-17", dur: 2, status: "todo", progress: 0, horizon: "later" });
+    expect(k2.schedule).toBeNull();
+    const ids = [k2.id, a2.id, b2.id, i2.id, y2.id, z2.id];
+    expect(new Set(ids).size).toBe(6);
+    expect(ids.some((id) => ctx.view.plan.items.has(id))).toBe(false);
+    expect([...b.newNotes].sort()).toEqual([...ids].sort());
+    expect(b.noteCopies).toEqual([
+      ["K", k2.id],
+      ["A", a2.id],
+      ["B", b2.id],
+      ["I", i2.id],
+      ["Y", y2.id],
+      ["Z", z2.id],
+    ]);
+    const links = units(b).filter((u) => u.startsWith("l:")).sort();
+    expect(links).toEqual([`l:${a2.id}>${b2.id}`, `l:P>${a2.id}`].sort());
+    expect(after.view.plan.links.get(`${a2.id}>${b2.id}`)).toEqual({ from: a2.id, to: b2.id, type: "FS", lag: 1 });
+    expect(units(b).filter((u) => u.startsWith("s:")).sort()).toEqual([`s:${a2.id}`, `s:${b2.id}`, `s:${y2.id}`, `s:${z2.id}`].sort());
+  });
+
+  it("refuses a trashed item and an item inside a trashed group", () => {
+    const ctx = ctxFrom(replaced(KITCHEN, [w("e:I", { k: "group", t: true })]));
+    refusedWith(ctx, { t: "duplicate", item: "T" }, "“Old” is in the Trash. Restore it first.");
+    refusedWith(ctx, { t: "duplicate", item: "Y" }, "“Grout” is inside “Inner”, which is in the Trash. Restore “Inner” first.");
+  });
+});

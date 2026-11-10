@@ -10,6 +10,8 @@ import { FixActions } from "../choices/FixActions";
 import { toast } from "../common/Toast";
 import { planGroupPath } from "../list/groups";
 import { OpenChoice, READ_ONLY, useRun, type Run } from "../run";
+import { duplicateRow } from "../duplicate";
+import { useUiValue } from "../state";
 import { derivedStatus } from "../status";
 import { LinksEditor } from "./LinksEditor";
 import { placeStep } from "./placeStep";
@@ -210,7 +212,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
   );
 }
 
-export function PlaceFields(p: { plan: PlanState; item: Item; readOnly: boolean; run: Run }) {
+export function PlaceFields(p: { plan: PlanState; item: Item; readOnly: boolean; run: Run; onDuplicate?: () => void }) {
   const { plan, item: it } = p;
   const groupId = useId();
   const options = groupOptions(plan, it.id);
@@ -251,6 +253,11 @@ export function PlaceFields(p: { plan: PlanState; item: Item; readOnly: boolean;
           <button type="button" className="button-small" disabled={down === null} onClick={down === null ? undefined : () => p.run.run(down)}>
             Move down
           </button>
+          {p.onDuplicate !== undefined && (
+            <button type="button" className="button-small" onClick={p.onDuplicate}>
+              Duplicate
+            </button>
+          )}
           {it.schedule !== null && it.schedule.start !== null && (
             <button type="button" className="button-small" onClick={() => p.run.run({ t: "schedule", item: it.id, set: { start: null } })}>
               Unschedule
@@ -312,6 +319,7 @@ function FirstChoice(p: { view: PlanView; item: ItemId; local: string }) {
 export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string; mac: boolean; readOnly?: boolean; naming: boolean; onNamed(): void }) {
   const view = usePlanView(p.session);
   const run = useRun(p.session);
+  const { ui, setUi } = useUiValue();
   const root = useRef<HTMLDivElement>(null);
   const { naming, onNamed } = p;
   useEffect(() => {
@@ -338,7 +346,13 @@ export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string
       />
       {it.kind === "group" ? <GroupFields view={view} item={it} /> : <ScheduleFields view={view} item={it} readOnly={readOnly} run={run} />}
       <FixActions view={view} item={it.id} readOnly={readOnly} run={run} />
-      <PlaceFields plan={view.plan} item={it} readOnly={readOnly} run={run} />
+      <PlaceFields
+        plan={view.plan}
+        item={it}
+        readOnly={readOnly}
+        run={run}
+        onDuplicate={() => duplicateRow(run.run, () => p.session.view(), ui, setUi, it.id)}
+      />
       {it.kind !== "group" && <LinksEditor view={view} item={it} readOnly={readOnly} run={run} />}
       <h2>Notes</h2>
       <Note session={p.session} item={it.id} readOnly={readOnly} mac={p.mac} />

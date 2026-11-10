@@ -23,7 +23,8 @@ export type Intent =
   | { t: "baseline"; op: "save"; name: string }
   | { t: "baseline"; op: "rename"; id: BaselineId; name: string }
   | { t: "baseline"; op: "remove"; id: BaselineId }
-  | { t: "planName"; name: string };
+  | { t: "planName"; name: string }
+  | { t: "duplicate"; item: ItemId };
 
 export interface Preview {
   itemsChanged: number;
@@ -34,9 +35,12 @@ export interface Preview {
   kept: readonly string[];
 }
 
+export type NoteCopy = readonly [from: ItemId, to: ItemId];
+
 export interface Built {
   action: Action;
   newNotes: readonly ItemId[];
+  noteCopies?: readonly NoteCopy[];
   toast: string;
   preview: Preview;
 }

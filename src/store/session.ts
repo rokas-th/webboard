@@ -239,7 +239,11 @@ export class PlanSession implements HolidayHost {
   private commit(built: Built, stacks: () => void): Built {
     this.quiet = true;
     try {
-      this.planDoc.append(built.action, built.newNotes);
+      const texts = (built.noteCopies ?? []).map(([from, to]) => [to, this.planDoc.note(from).toString()] as const);
+      this.planDoc.ydoc.transact(() => {
+        this.planDoc.append(built.action, built.newNotes);
+        texts.forEach(([to, text]) => this.planDoc.note(to).insert(0, text));
+      }, LOCAL);
       stacks();
     } catch (e) {
       this.quiet = false;

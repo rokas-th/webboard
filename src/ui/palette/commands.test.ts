@@ -118,7 +118,7 @@ describe("commands()", () => {
     const baseline = [...t.session.view().plan.baselines.keys()][0];
     const h = harness(t, { selected: "a" }, ["p2"]);
     const all = ids(h.ctx);
-    const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash", "today", "select-next", "select-prev"];
+    const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash", "today", "select-next", "select-prev", "duplicate"];
     const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", "zoom-F", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "about"];
     const goTo = ["g1", "a", "b", "one", "m", "u"].map((x) => `goto:${x}`);
     expect([...keyed, ...more, ...goTo].filter((x) => !all.includes(x))).toEqual([]);
@@ -593,5 +593,28 @@ describe("update commands", () => {
   it("without updates (a phone or iPad) neither command is listed", async () => {
     const t = await made(SMALL);
     expect(ids(harness(t).ctx).filter((x) => x.startsWith("update-"))).toEqual([]);
+  });
+});
+
+describe("duplicate (product-7)", () => {
+  it("is offered for a live selection only, with ⌘D on macOS and Ctrl D elsewhere", async () => {
+    const t = await made(SMALL);
+    const d = find(harness(t, { selected: "a" }).ctx, "duplicate");
+    expect([d.label, d.group, d.keys]).toEqual(["Duplicate “A”", "Edit", "⌘D"]);
+    expect(find({ ...harness(t, { selected: "u" }).ctx, mac: false }, "duplicate").keys).toBe("Ctrl D");
+    expect(ids(harness(t).ctx)).not.toContain("duplicate");
+    t.session.apply({ t: "trash", items: ["one"] });
+    expect(ids(harness(t, { selected: "one" }).ctx)).not.toContain("duplicate");
+  });
+
+  it("runs the duplicate intent and selects and follows the copy on the timeline", async () => {
+    const t = await made(SMALL);
+    const apply = vi.spyOn(t.session, "apply");
+    const h = harness(t, { selected: "one" });
+    find(h.ctx, "duplicate").run();
+    expect(created(apply)).toEqual([{ t: "duplicate", item: "one" }]);
+    const copy = childrenOf(t.session.view().plan, null).find((i) => i.name === "One day copy");
+    if (copy === undefined) throw new Error("no copy");
+    expect(h.setUi.mock.calls).toEqual([[{ selected: copy.id, follow: copy.id }]]);
   });
 });

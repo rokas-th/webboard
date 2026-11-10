@@ -7,6 +7,7 @@ import type { Registry } from "../../store/registry";
 import { childrenOf } from "../../plan/project";
 import type { PlanSession } from "../../store/session";
 import type { Updates } from "../../store/updates";
+import { duplicateRow } from "../duplicate";
 import { countedConflicts, goToFirstPatch } from "../choices/HeadCounts";
 import { baselineDefault } from "../panel/Baselines";
 import { placeStep } from "../panel/placeStep";
@@ -129,6 +130,13 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
       run({ t: "trash", items: [sel] });
     },
   };
+  const duplicate: Command = {
+    id: "duplicate",
+    group: "Edit",
+    label: `Duplicate “${it.name}”`,
+    keys: ctx.mac ? "⌘D" : "Ctrl D",
+    run: () => duplicateRow(run, () => session.view(), ctx.ui, ctx.setUi, sel),
+  };
   const nudges = STEPS.map(
     (n): Command => ({
       id: `nudge${signed(n)}`,
@@ -154,9 +162,9 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
     if (step === null) return [];
     return [{ id: `move-${id}`, group: "Edit", label, keys: `${ctx.mac ? "⌥" : "Alt "}${arrow}`, run: () => void run(step) }];
   });
-  if (it.kind === "group") return [...nudges, ...order, trash];
-  if (!dated(it)) return [...order, trash];
-  return [...nudges, ...resizes, ...order, trash];
+  if (it.kind === "group") return [...nudges, ...order, duplicate, trash];
+  if (!dated(it)) return [...order, duplicate, trash];
+  return [...nudges, ...resizes, ...order, duplicate, trash];
 }
 
 function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {

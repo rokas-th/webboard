@@ -31,6 +31,7 @@ function modified(e: KeyInput, s: KeyState): string | null {
   if (s.dialog) return null;
   if (key === "k" && !e.shiftKey) return "palette";
   if (s.typing) return null;
+  if (key === "d" && !e.shiftKey) return s.selected ? "duplicate" : null;
   if (key === "z") return e.shiftKey ? "redo" : "undo";
   if (key === "y" && !s.mac && !e.shiftKey) return "redo";
   return null;

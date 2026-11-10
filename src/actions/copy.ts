@@ -83,6 +83,10 @@ export const label = {
   baselineRemoved: (name: string): string => `Removed baseline ${q(name)}`,
   planRenamed: (name: string): string => `Renamed the plan to ${q(name)}`,
   created: (name: string): string => `Created the plan ${q(name)}`,
+  duplicated: (kind: ItemKind, from: string, to: string, n: number, links: number): string => {
+    const parts = [...(n === 0 ? [] : [items(n)]), ...(links === 0 ? [] : [count(links, "link", "links")])];
+    return `Duplicated ${kind} ${q(from)} as ${q(to)}${parts.length === 0 ? "" : " with " + parts.join(" and ")}`;
+  },
 };
 
 export const sentence = {

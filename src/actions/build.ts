@@ -1,8 +1,8 @@
 import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing";
 import { closureTooLong, regionKey, workCalendar, type Calendar, type Closure, type Tuning, type WorkCalendar } from "../domain/calendar";
 import { FIRST_PLAN_DATE, fmtNear, inPlanWindow, LAST_PLAN_DATE, isCalendarDate, toDay, toIso, type Day, type IsoDate } from "../domain/dates";
-import { derive, lockOf, schedView, type Derived } from "../domain/derive";
-import { linkKey, MAX_LAG, MAX_TASK_DUR, type Item, type ItemId, type Link, type PlanState, type Schedule } from "../domain/model";
+import { derive, goneSet, lockOf, schedView, type Derived } from "../domain/derive";
+import { linkKey, MAX_LAG, MAX_TASK_DUR, type Item, type ItemId, type Link, type Place, type PlanState, type Schedule } from "../domain/model";
 import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type PushResult, type RecalResult, type Sched, type SchedView, type Stop } from "../domain/schedule";
 import { newId } from "../log/ids";
 import type { Action, DeviceId, SessionId, UnitKey, Write } from "../log/types";
@@ -12,7 +12,7 @@ import { planRules } from "../plan/rules";
 import * as codec from "../plan/units";
 import { key, validateWrite } from "../plan/units";
 import { items, label, pushSuffix, q, refusal, sentence, toastOf } from "./copy";
-import { HeldRefused, Refused, type Built, type Ctx, type Intent, type Preview } from "./intents";
+import { HeldRefused, Refused, type Built, type Ctx, type Intent, type NoteCopy, type Preview } from "./intents";
 import { isCalendarWrite, settleText, unique } from "./settle";
 
 export interface Derivation {
@@ -25,6 +25,7 @@ interface Draft {
   own: readonly Write[];
   roots: readonly ItemId[];
   newNotes: readonly ItemId[];
+  noteCopies?: readonly NoteCopy[];
   ownStarts?: readonly UnitKey[];
   label(d: Derivation, preview: Preview): string;
   sentences: readonly string[];
@@ -277,6 +278,55 @@ const fixDraft = (ctx: Ctx, conflict: Conflict, how: "push" | "shorten" | "remov
   };
 };
 
+const duplicateDraft = (ctx: Ctx, id: ItemId): Draft => {
+  const plan = ctx.view.plan;
+  const it = live(plan, id);
+  const gone = goneSet(plan);
+  const kids = (parent: Item): Item[] => childrenOf(plan, parent.id).filter((c) => !gone.has(c.id));
+  const below = (parent: Item): Item[] => kids(parent).flatMap((c) => [c, ...below(c)]);
+  const originals = [it, ...below(it)];
+  const ids = new Map(originals.map((o): [ItemId, ItemId] => [o.id, newId()]));
+  const copyOf = (from: ItemId): ItemId => {
+    const to = ids.get(from);
+    if (to === undefined) throw new Error(`Item ${from} is not copied by this duplicate`);
+    return to;
+  };
+  const ordered = orderAfter(plan, it.place.parent, it.id, null);
+  const places = new Map<ItemId, Place>([
+    [it.id, { parent: it.place.parent, order: ordered.order }],
+    ...originals.flatMap((g) => {
+      const children = kids(g);
+      const keys = generateNKeysBetween(null, null, children.length);
+      return children.map((c, n): [ItemId, Place] => [c.id, { parent: copyOf(g.id), order: keys[n] }]);
+    }),
+  ]);
+  const placeOf = (from: ItemId): Place => {
+    const at = places.get(from);
+    if (at === undefined) throw new Error(`Item ${from} has no place in this duplicate`);
+    return at;
+  };
+  const name = normalizeName(`${it.name} copy`);
+  const itemWrites = originals.flatMap((o) => {
+    const to = copyOf(o.id);
+    return [
+      own(key.e(to), codec.existence.enc({ k: o.kind, t: false })),
+      own(key.n(to), codec.name.enc(o === it ? name : o.name)),
+      own(key.p(to), codec.place.enc(placeOf(o.id))),
+      ...(o.schedule === null ? [] : [schedWrite(to, { ...o.schedule, status: "todo", progress: 0 })]),
+    ];
+  });
+  const links = liveLinks(plan)
+    .filter((l) => ids.has(l.to) && !gone.has(l.from))
+    .map((l) => own(key.l(ids.has(l.from) ? copyOf(l.from) : l.from, copyOf(l.to)), codec.link.enc({ type: l.type, lag: l.lag })));
+  return {
+    own: [...itemWrites, ...ordered.rekeyed, ...links],
+    roots: [],
+    newNotes: originals.map((o) => copyOf(o.id)),
+    noteCopies: originals.map((o): NoteCopy => [o.id, copyOf(o.id)]),
+    ...plain(label.duplicated(it.kind, it.name, name, originals.length - 1, links.length)),
+  };
+};
+
 const SCHEDULE_FIELDS: readonly (keyof Schedule)[] = ["start", "dur", "status", "progress", "horizon"];
 
 const scheduleDraft = (ctx: Ctx, id: ItemId, set: Partial<Schedule>): Draft => {
@@ -490,6 +540,8 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
     }
     case "fix":
       return fixDraft(ctx, intent.conflict, intent.how);
+    case "duplicate":
+      return duplicateDraft(ctx, intent.item);
     case "baseline": {
       if (intent.op === "save") {
         const name = normalizeName(intent.name);
@@ -669,7 +721,13 @@ export function buildAction(ctx: Ctx, intent: Intent): Built {
   const lbl = draft.label(d, preview);
   const action: Action = { id: newId(), dev: ctx.dev, ses: ctx.ses, at: ctx.now, par: [...ctx.log.heads], lbl, w: d.writes };
   const settled = settleText(ctx, d.writes);
-  return { action, newNotes: draft.newNotes, toast: toastOf(lbl, settled === null ? draft.sentences : [...draft.sentences, settled]), preview };
+  return {
+    action,
+    newNotes: draft.newNotes,
+    ...(draft.noteCopies === undefined ? {} : { noteCopies: draft.noteCopies }),
+    toast: toastOf(lbl, settled === null ? draft.sentences : [...draft.sentences, settled]),
+    preview,
+  };
 }
 
 export function initialAction(a: { dev: DeviceId; ses: SessionId; now: number; name: string; calendar: Calendar }): Action {
