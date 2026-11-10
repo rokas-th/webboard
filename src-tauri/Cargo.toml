@@ -7,6 +7,9 @@ edition = "2021"
 name = "webboard_lib"
 crate-type = ["staticlib", "rlib"]
 
+[features]
+probe = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

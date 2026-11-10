@@ -1,6 +1,8 @@
 pub mod device;
 pub mod file;
 pub mod holidays;
+#[cfg(feature = "probe")]
+pub mod probe;
 pub mod settings;
 pub mod store;
 pub mod sync;

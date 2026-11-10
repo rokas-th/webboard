@@ -89,7 +89,14 @@ pub fn run() {
                 std::sync::Arc::new(keychain::OsKeychain),
                 http,
             );
-            app.manage(commands::sync::SyncState::new(dir, client));
+            app.manage(commands::sync::SyncState::new(dir.clone(), client));
+            #[cfg(feature = "probe")]
+            {
+                commands::probe::record(&dir, "ready")
+                    .map_err(|e| format!("{}: {}", e.code, e.message))?;
+                commands::probe::record(&dir, &format!("app_data_dir {}", dir.display()))
+                    .map_err(|e| format!("{}: {}", e.code, e.message))?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -116,7 +123,9 @@ pub fn run() {
             commands::sync::sync_remove_device,
             commands::sync::sync_status,
             commands::sync::sync_mark_revoked,
-            commands::sync::sync_reset
+            commands::sync::sync_reset,
+            #[cfg(feature = "probe")]
+            commands::probe::probe_log
         ])
         .build(tauri::generate_context!())
         .expect("error while building WebBoard")
