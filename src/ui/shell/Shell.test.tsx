@@ -16,7 +16,7 @@ import { deleteClash } from "../../test/fixtures/deleteClash";
 import { memoryStore } from "../../test/fixtures/store";
 import { MESA_SEED, memoryDoc, testSession, type SeedItem, type TestSession } from "../../test/session";
 import { seededStore as store, shellFor } from "../../test/shell";
-import { hold, resetTauri, tauri, type Call } from "../../test/tauriMock";
+import { hold, offeredSettings, resetTauri, tauri, type Call } from "../../test/tauriMock";
 import { orderedSides } from "../choices/order";
 import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
@@ -1122,7 +1122,7 @@ describe("Shell on Registry.open", () => {
   });
 
   it("starts empty with New plan, then creates and opens one", async () => {
-    resetTauri({ ...memoryStore().answers, settings_read: () => null, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
+    resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
     const registry = await opened();
     const createPlan = vi.spyOn(registry, "createPlan");
     render(withSync(shellOn(registry)));
@@ -1145,8 +1145,64 @@ describe("Shell on Registry.open", () => {
     expect(slot("timeline")?.textContent).toBe("No items yet. Add one with + Task.");
   });
 
+  const runPalette = (query: string): void => {
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    });
+    const input = within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("textbox", { name: "Command" });
+    act(() => {
+      fireEvent.change(input, { target: { value: query } });
+    });
+    act(() => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+  };
+
+  it.each(["the empty state's button", "the palette"])("creates the example plan from %s and opens it", async (from) => {
+    resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
+    const registry = await opened();
+    const createExample = vi.spyOn(registry, "createExample");
+    render(withSync(shellOn(registry)));
+    await settle();
+    expectNoTimeline();
+    const main = document.querySelector("main.main");
+    if (!(main instanceof HTMLElement)) throw new Error("no main");
+    if (from === "the palette") runPalette("Create the example plan");
+    else fireEvent.click(within(main).getByRole("button", { name: "Show an example plan" }));
+    await settle();
+    expect(createExample).toHaveBeenCalledTimes(1);
+    expect(currentName()).toBe("Example: Website relaunch");
+    expectTimeline();
+    expect(registry.plans().map((l) => [l.name, l.trashed, l.space])).toEqual([["Example: Website relaunch", false, null]]);
+    expect(within(main).queryByRole("button", { name: "Show an example plan" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("the palette's Create the example plan opens a fresh example while a plan is open", async () => {
+    resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
+    const registry = await opened();
+    const first = await registry.createPlan("Alpha");
+    render(withSync(shellOn(registry)));
+    await settle();
+    expect(currentName()).toBe("Alpha");
+    runPalette("Create the example plan");
+    await settle();
+    expect(currentName()).toBe("Example: Website relaunch");
+    const ids = registry.plans().map((l) => l.id);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe(first);
+    runPalette("Create the example plan");
+    await settle();
+    const after = registry.plans();
+    expect(after.map((l) => l.name)).toEqual(["Alpha", "Example: Website relaunch", "Example: Website relaunch"]);
+    const nav = screen.getByRole("navigation", { name: "Plans" });
+    const current = nav.querySelector('[aria-current="page"]');
+    expect(current?.textContent).toBe("Example: Website relaunch");
+    expect(after.filter((l) => l.space !== null)).toEqual([]);
+  });
+
   it.each(["the empty state's button", "the palette"])("imports a plan from %s and opens it", async (from) => {
-    resetTauri({ ...memoryStore().answers, settings_read: () => null, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
+    resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
     const registry = await opened();
     vi.mocked(importPlan).mockImplementationOnce(async (r) => r.createPlan("MESA 2027"));
     render(withSync(shellOn(registry)));
@@ -1154,7 +1210,7 @@ describe("Shell on Registry.open", () => {
     expectNoTimeline();
     const main = document.querySelector("main.main");
     if (!(main instanceof HTMLElement)) throw new Error("no main");
-    expect(within(main).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…", "Join with a code", "Set up sync"]);
+    expect(within(main).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Show an example plan", "Import plan…", "Join with a code", "Set up sync"]);
     if (from === "the palette") {
       act(() => {
         fireEvent.keyDown(document.body, { key: "k", metaKey: true });
@@ -1181,7 +1237,7 @@ describe("Shell on Registry.open", () => {
   });
 
   it.each(["cancel", "AppError"])("shows Importing… on the empty state's Import plan… until an import ending in %s settles", async (end) => {
-    resetTauri({ ...memoryStore().answers, settings_read: () => null, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
+    resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
     const registry = await opened();
     const pending = deferred<PlanId | null>();
     vi.mocked(importPlan).mockReturnValueOnce(pending.promise);

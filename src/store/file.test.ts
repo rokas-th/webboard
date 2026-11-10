@@ -15,7 +15,7 @@ import { AppError } from "../services/ipc";
 import { act } from "../test/act";
 import { memoryStore } from "../test/fixtures/store";
 import { VALID_WEBBOARD } from "../test/fixtures/webboard";
-import { resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
+import { offeredSettings, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
 import { decodeAction, encodeAction, PlanDoc } from "./doc";
 import { buildImport, decodeWbx, encodeWbx, exportPlan, fileNameOf, importPlan, type ImportResult } from "./file";
 import { Registry } from "./registry";
@@ -150,7 +150,7 @@ const fileState: { read: Uint8Array; written: Call[] } = { read: new Uint8Array(
 
 function env(answers: Record<string, Answer> = {}): void {
   const mem = memoryStore();
-  let settings: unknown = null;
+  let settings: unknown = offeredSettings();
   resetTauri({
     ...mem.answers,
     settings_read: () => settings,

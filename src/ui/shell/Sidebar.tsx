@@ -11,6 +11,14 @@ export function NewPlanButton(p: { creating: boolean; onNew(): void }) {
   );
 }
 
+export function ExampleButton(p: { creating: boolean; onExample(): void }) {
+  return (
+    <button type="button" disabled={p.creating} onClick={p.onExample}>
+      Show an example plan
+    </button>
+  );
+}
+
 interface SidebarProps {
   registry: Registry;
   plans: readonly PlanListing[];

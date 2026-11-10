@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newId } from "../log/ids";
 import { memoryStore } from "../test/fixtures/store";
 import { VALID_WEBBOARD } from "../test/fixtures/webboard";
-import { resetTauri } from "../test/tauriMock";
+import { offeredSettings, resetTauri } from "../test/tauriMock";
 import { buildImport } from "./file";
 import { newPlanId } from "./plan-id";
 import { Registry } from "./registry";
@@ -30,7 +30,7 @@ const opened: Registry[] = [];
 beforeEach(() => {
   resetTauri({
     ...memoryStore().answers,
-    settings_read: () => null,
+    settings_read: offeredSettings,
     settings_write: () => null,
     device_info: () => ({ deviceId: "dev-A", platform: "macos" }),
   });

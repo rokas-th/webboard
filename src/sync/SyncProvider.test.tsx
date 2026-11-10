@@ -187,7 +187,7 @@ describe("SyncProvider", () => {
     await settle();
     const main = document.querySelector("main.main");
     if (!(main instanceof HTMLElement)) throw new Error("no main");
-    expect(within(main).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…", "Join with a code", "Set up sync"]);
+    expect(within(main).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Show an example plan", "Import plan…", "Join with a code", "Set up sync"]);
     expect(chip().textContent).toBe("Local only");
     const before = root();
     await click(within(main).getByRole("button", { name: "Join with a code" }));
@@ -306,7 +306,7 @@ describe("SyncProvider", () => {
     await settle();
     const main = document.querySelector("main.main");
     if (!(main instanceof HTMLElement)) throw new Error("no main");
-    expect(within(main).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…", "Join with a code", "Set up sync"]);
+    expect(within(main).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Show an example plan", "Import plan…", "Join with a code", "Set up sync"]);
     expect(chip()).toBeTruthy();
     expect(toasts()).toEqual(["“Plan P” was moved to the Trash on another device. Restore it from the Trash.", "“Plan R” was moved to the Trash on another device. Restore it from the Trash."]);
     expect(appends).not.toHaveBeenCalled();
@@ -525,7 +525,7 @@ describe("SyncProvider on the phone", () => {
   const closeSync = async (): Promise<void> => {
     await click(within(dialog()).getByRole("button", { name: "Close" }));
   };
-  const EMPTY = ["New plan", "Import plan…", "Join with a code", "Set up sync"];
+  const EMPTY = ["New plan", "Show an example plan", "Import plan…", "Join with a code", "Set up sync"];
 
   it("joining shows the space's plans without a remount", async () => {
     const w = syncWorld({ platform: "ios", names: { L: "Alpha" }, answers: { sync_pair_join: () => SPACE } });

@@ -43,6 +43,7 @@ const FONTS = [
 ];
 
 const EMPTY_PLAN = "No items yet. Add one with + Task.";
+const EXAMPLE_PLAN = "Example: Website relaunch";
 const CALENDAR_BANNER = "The calendar was changed on two devices. Nothing moves until you choose.";
 const PICKED = "Tracking: review results";
 const PICKED_CHOICE = "Tracking: review results and fixes";
@@ -89,6 +90,7 @@ function states() {
     place: null,
     actions: [
       expect(".empty-state button", "New plan"),
+      expect(".empty-state button", "Show an example plan"),
       expect(".empty-state button", "Import plan…"),
       expect(".empty-state button", "Join with a code"),
       expect(".empty-state button", "Set up sync"),
@@ -183,6 +185,32 @@ function states() {
   const UPDATE_AVAILABLE = `WebBoard ${UPDATE_VERSION} is available`;
   const UPDATE_FAILED = `Could not check for updates: ${UPDATE_CHECK_FAILED}`;
   const UPDATE_DOWNLOADING = `Downloading ${UPDATE_VERSION}… 50%`;
+  const exampleHead = expect(".plan-head h1", EXAMPLE_PLAN);
+  add("example/timeline", "example", {
+    sizes: "standard",
+    place: { view: "timeline", zoom: "W" },
+    actions: [viewExpect("timeline"), exampleHead, expect(".tl-row .name", "Visual design"), count(".plan-head .chip-magenta", 0), count(".plan-head .chip-amber", 0)],
+  });
+  add("example/board", "example", {
+    sizes: "standard",
+    place: { view: "board", zoom: "W" },
+    actions: [viewExpect("board"), exampleHead, expect(".card .card-name", "Visual design")],
+  });
+  add("example/list", "example", {
+    sizes: "standard",
+    place: { view: "list", zoom: "W" },
+    actions: [viewExpect("list"), exampleHead, expect(".list .list-name", "QA and fixes")],
+  });
+  add("example/phone-timeline", "example", {
+    sizes: "phone",
+    actions: [
+      expect(".phone-head .phone-plan-name", EXAMPLE_PLAN),
+      click('.phone-views [role="tab"]', "Timeline"),
+      expect('.phone-views [role="tab"][aria-selected="true"]', "Timeline"),
+      expect(".tl-canvas"),
+      expect(".tl-row .name", "Visual design"),
+    ],
+  });
   add("update/current", "mesa", { actions: [viewExpect("timeline"), expect(".sidebar .update-line .update-status", "Up to date · checked 09:00")] });
   add("update/available", "update-available", {
     clip: [UPDATE_AVAILABLE],
@@ -284,6 +312,7 @@ function states() {
       expect(".toolbar button", "Plans"),
       none(".toolbar button", "Plan"),
       expect(".empty-state button", "New plan"),
+      expect(".empty-state button", "Show an example plan"),
       expect(".empty-state button", "Import plan…"),
       expect(".empty-state button", "Join with a code"),
       expect(".empty-state button", "Set up sync"),
@@ -356,6 +385,7 @@ const SIZES = {
   dialog: namesOf([LANDSCAPE[0], ...PORTRAIT]),
   both: namesOf([...DESKTOP, LANDSCAPE[0]]),
   smallest: ["1024x700"],
+  standard: ["1440x920"],
   phone: namesOf(PHONE),
   portrait: namesOf(PORTRAIT),
   landscape: namesOf(LANDSCAPE),
@@ -415,6 +445,7 @@ const SHIM = String.raw`
     }
     if (cmd === "store_load") {
       var doc = args && args.doc;
+      if (!(doc in docs) && P.fixture.newDocs === true) return Promise.resolve(new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]).buffer);
       if (!(doc in docs)) return missing(cmd, "doc " + doc);
       return Promise.resolve(docs[doc].slice().buffer);
     }
@@ -1591,7 +1622,7 @@ async function main() {
     [...new Set(picked.map((s) => s.fixture))].map((name) => {
       const f = built[name];
       if (f === undefined) throw new Error(`layout-probe: no fixture ${name}`);
-      return [name, { docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, base64(b)])), ipc: f.ipc }];
+      return [name, { docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, base64(b)])), ipc: f.ipc, newDocs: f.newDocs === true }];
     }),
   );
 

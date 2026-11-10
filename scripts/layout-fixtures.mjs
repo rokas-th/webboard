@@ -497,7 +497,7 @@ function fixtureOf(plans, o = { trashed: false }) {
     docs,
     ipc: {
       device_info: { deviceId: "mac", platform: "macos" },
-      settings_read: { v: 1, lastRegion: { ...ZH }, names: Object.fromEntries(plans.map((p) => [p.id, p.name])) },
+      settings_read: { v: 1, lastRegion: { ...ZH }, names: Object.fromEntries(plans.map((p) => [p.id, p.name])), exampleOffered: true },
       settings_write: null,
       store_list: Object.keys(docs),
       store_append: null,
@@ -509,6 +509,12 @@ function fixtureOf(plans, o = { trashed: false }) {
       "plugin:event|unlisten": null,
     },
   };
+}
+
+function firstStart() {
+  const f = fixtureOf([]);
+  const settings = Object.fromEntries(Object.entries(f.ipc.settings_read).filter(([k]) => k !== "exampleOffered"));
+  return { ...f, newDocs: true, ipc: { ...f.ipc, settings_read: settings } };
 }
 
 const copyOf = (f) => ({ docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, b.slice()])), ipc: JSON.parse(JSON.stringify(f.ipc)) });
@@ -557,6 +563,7 @@ export function buildFixtures() {
   const unreadable = fixtureOf([mesa(unreadableLog())]);
   const fixtures = {
     empty: fixtureOf([]),
+    example: firstStart(),
     "all-trashed": fixtureOf([mesa(mesaLog("mesaT"))], { trashed: true }),
     "blank-plan": fixtureOf([{ id: PLAN_IDS.blank, name: "Blank plan", log: blankLog() }]),
     mesa: mesaOnMac,

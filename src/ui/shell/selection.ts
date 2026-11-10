@@ -192,6 +192,7 @@ export interface PlanFiles {
   creating: boolean;
   importing: boolean;
   newPlan(raw: string, fail: (message: string) => void): void;
+  newExample(fail: (message: string) => void): void;
   importPlan(): void;
 }
 
@@ -200,6 +201,19 @@ export function usePlanFiles(registry: Registry, open: (id: PlanId) => void): Pl
   const [importing, setImporting] = useState(false);
   const creatingRef = useRef(false);
   const importingRef = useRef(false);
+  const create = (make: () => Promise<PlanId>, fail: (message: string) => void): void => {
+    creatingRef.current = true;
+    setCreating(true);
+    make()
+      .then(
+        (id) => open(id),
+        (e: unknown) => fail(surfaced(e)),
+      )
+      .finally(() => {
+        creatingRef.current = false;
+        setCreating(false);
+      });
+  };
   const newPlan = (raw: string, fail: (message: string) => void): void => {
     if (creatingRef.current) return;
     let name: string;
@@ -209,18 +223,11 @@ export function usePlanFiles(registry: Registry, open: (id: PlanId) => void): Pl
       fail(surfaced(e));
       return;
     }
-    creatingRef.current = true;
-    setCreating(true);
-    registry
-      .createPlan(name)
-      .then(
-        (id) => open(id),
-        (e: unknown) => fail(surfaced(e)),
-      )
-      .finally(() => {
-        creatingRef.current = false;
-        setCreating(false);
-      });
+    create(() => registry.createPlan(name), fail);
+  };
+  const newExample = (fail: (message: string) => void): void => {
+    if (creatingRef.current) return;
+    create(() => registry.createExample(), fail);
   };
   const importPlan = (): void => {
     if (importingRef.current) return;
@@ -231,5 +238,5 @@ export function usePlanFiles(registry: Registry, open: (id: PlanId) => void): Pl
       setImporting(false);
     });
   };
-  return { creating, importing, newPlan, importPlan };
+  return { creating, importing, newPlan, newExample, importPlan };
 }

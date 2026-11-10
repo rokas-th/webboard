@@ -13,6 +13,7 @@ import { fixedClock } from "../services/clock";
 import { decodeAction, encodeAction, PlanDoc } from "../store/doc";
 import { indexRules } from "../store/index-doc";
 import { Registry } from "../store/registry";
+import { encodeLoad } from "./fixtures/store";
 import { MESA_SEED } from "./session";
 import { resetTauri, type Answer } from "./tauriMock";
 
@@ -88,6 +89,7 @@ function answersOf(f: Fixture): Record<string, Answer> {
     ...Object.fromEntries(Object.entries(f.ipc).map(([cmd, v]) => [cmd, answerOf(v)])),
     store_load: (args) => {
       const bytes = f.docs[docArg(args)];
+      if (bytes === undefined && f.newDocs === true) return encodeLoad({ lastSeq: 0 });
       if (bytes === undefined) throw new Error(`fixture has no doc ${docArg(args)}`);
       return bytes.slice().buffer;
     },
@@ -183,6 +185,7 @@ describe("layout fixtures", () => {
       "blank-plan",
       "choices",
       "empty",
+      "example",
       "long-names",
       "mesa",
       "mesa-linux",
@@ -515,8 +518,30 @@ describe("layout fixtures", () => {
     expect(first.kind === "early" && first.succ).toBe("B");
   });
 
+  it("records the example plan as offered in every fixture but example, a first start with no plans whose new docs load empty", async () => {
+    Object.entries(FIXTURES)
+      .filter(([name]) => name !== "example")
+      .forEach(([name, f]) => {
+        expect(f.ipc.settings_read, name).toMatchObject({ exampleOffered: true });
+        expect(f.newDocs, name).toBeUndefined();
+      });
+    const f = fixture("example");
+    expect(f.newDocs).toBe(true);
+    expect(f.ipc.settings_read).toEqual({ v: 1, lastRegion: { src: "openholidays", country: "CH", subdivision: "CH-ZH" }, names: {} });
+    expect(Object.keys(f.docs)).toEqual(["local"]);
+    expect({ ...f.ipc, settings_read: null }).toEqual({ ...fixture("empty").ipc, settings_read: null });
+    resetTauri(answersOf(f));
+    const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
+    openRegistries.push(registry);
+    const [only] = registry.plans();
+    expect(registry.plans().map((p) => [p.name, p.trashed, p.space])).toEqual([["Example: Website relaunch", false, null]]);
+    const view = (await registry.session(only.id)).view();
+    expect(view.derived.conflicts).toEqual([]);
+    expect(view.derived.missingYears).toEqual([]);
+  });
+
   it("opens every plan through the Registry with the fixture's answers, the plan names cached", async () => {
-    for (const [name, f] of Object.entries(FIXTURES)) {
+    for (const [name, f] of Object.entries(FIXTURES).filter(([n]) => n !== "example")) {
       resetTauri(answersOf(f));
       const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
       try {

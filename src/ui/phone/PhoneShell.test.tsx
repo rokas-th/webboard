@@ -14,7 +14,7 @@ import { phoneRegistry } from "../../test/phone";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { seededStore, shellFor, type SeededStore } from "../../test/shell";
-import { resetTauri, tauri } from "../../test/tauriMock";
+import { offeredSettings, resetTauri, tauri } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { OpenChoice } from "../run";
@@ -377,7 +377,7 @@ const showIndex = async (r: { registry: Registry; clock: Clock }, connected = fa
 };
 
 const emptyIndex = async (): Promise<{ registry: Registry; clock: Clock }> => {
-  resetTauri({ ...memoryStore().answers, settings_read: () => null, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "ios" }) });
+  resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "ios" }) });
   return indexOpen();
 };
 
@@ -984,6 +984,30 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     expect(emptyState()).toBeNull();
   });
 
+  it("the empty state's Show an example plan creates the example and opens it", async () => {
+    const r = await emptyIndex();
+    const createExample = vi.spyOn(r.registry, "createExample");
+    await showIndex(r);
+    fireEvent.click(screen.getByRole("button", { name: "Show an example plan" }));
+    await settle();
+    expect(createExample).toHaveBeenCalledTimes(1);
+    listShows("Example: Website relaunch");
+    expect(emptyState()).toBeNull();
+    expect(r.registry.plans().map((l) => [l.name, l.space])).toEqual([["Example: Website relaunch", null]]);
+  });
+
+  it("the empty state shows a failed Show an example plan under the button", async () => {
+    const r = await emptyIndex();
+    failNewDocs(new Set(["local"]));
+    await showIndex(r);
+    fireEvent.click(screen.getByRole("button", { name: "Show an example plan" }));
+    await settle();
+    const state = emptyState();
+    if (state === null) throw new Error("no empty state");
+    expect(within(state).getByText("Disk full.").classList.contains("bad")).toBe(true);
+    expect(document.querySelector(".phone-list")).toBeNull();
+  });
+
   it("the empty state shows a failed New plan under the button", async () => {
     const r = await emptyIndex();
     failNewDocs(new Set(["local"]));
@@ -1021,7 +1045,7 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     await showIndex(r);
     const state = emptyState();
     if (state === null) throw new Error("no empty state");
-    expect(within(state).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…", "Join with a code", "Set up sync"]);
+    expect(within(state).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Show an example plan", "Import plan…", "Join with a code", "Set up sync"]);
     fireEvent.click(within(state).getByRole("button", { name: "Import plan…" }));
     await settle();
     expect(importPlan).toHaveBeenCalledTimes(1);
@@ -2305,7 +2329,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     await mounted(w);
     const empty = emptyState();
     if (empty === null) throw new Error("no empty state");
-    expect(within(empty).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…", "Join with a code", "Set up sync"]);
+    expect(within(empty).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Show an example plan", "Import plan…", "Join with a code", "Set up sync"]);
     expect(within(topBar()).getByRole("button", { name: "Plans" })).toBeTruthy();
     expect(within(topBar()).getByRole("button", { name: NOT_IN_SPACE })).toBe(compact());
     expect(stripText().startsWith(NOT_IN_SPACE)).toBe(true);

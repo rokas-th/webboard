@@ -156,9 +156,53 @@ describe("start failure", () => {
   });
 });
 
+describe("the example plan at the first start", () => {
+  const current = (): string | null => screen.getByRole("navigation", { name: "Plans" }).querySelector('[aria-current="page"]')?.textContent ?? null;
+
+  it("opens the example plan on a device with no plans and no flag", async () => {
+    const s = await seededStore([]);
+    s.state.settings = null;
+    spyOpen();
+    render(<App />);
+    await settle();
+    await settle();
+    expect(current()).toBe("Example: Website relaunch");
+    expect(document.querySelector(".tl-canvas")).not.toBeNull();
+    expect(s.state.settings).toMatchObject({ exampleOffered: true });
+  });
+
+  it("shows a failed flag write as the start failure, and Try again opens the example made before it", async () => {
+    const s = await seededStore([]);
+    s.state.settings = null;
+    const write = tauri.answers.settings_write;
+    if (write === undefined) throw new Error("no settings_write answer");
+    tauri.answers.settings_write = () => {
+      throw { code: "settings.io", message: "Could not save settings.json: disk full" };
+    };
+    const log = logged();
+    const real = Registry.open.bind(Registry);
+    vi.spyOn(Registry, "open").mockImplementation(async (o) => {
+      const r = await real(o);
+      opened.push(Promise.resolve(r));
+      return r;
+    });
+    render(<App />);
+    await settle();
+    expect(screen.getByText("Could not save settings.json: disk full").className).toBe("start-bad");
+    expect(log).toHaveBeenCalledTimes(1);
+    tauri.answers.settings_write = write;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await settle();
+    await settle();
+    expect(current()).toBe("Example: Website relaunch");
+    expect(within(screen.getByRole("navigation", { name: "Plans" })).getAllByText("Example: Website relaunch")).toHaveLength(1);
+    expect(s.state.settings).not.toHaveProperty("exampleOffered");
+  });
+});
+
 it("lists plans before loading them and warms after the first render", async () => {
   const s = await seededStore(["Alpha", "Beta"]);
-  expect(s.state.settings).toEqual({ v: 1, lastRegion: null, names: { [s.ids[0]]: "Alpha", [s.ids[1]]: "Beta" } });
+  expect(s.state.settings).toEqual({ v: 1, lastRegion: null, names: { [s.ids[0]]: "Alpha", [s.ids[1]]: "Beta" }, exampleOffered: true });
   const seen: { sidebar: boolean }[] = [];
   const session = vi.spyOn(Registry.prototype, "session");
   const warm = vi.spyOn(Registry.prototype, "warm").mockImplementation(async () => {

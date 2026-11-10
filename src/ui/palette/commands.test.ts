@@ -57,6 +57,7 @@ interface Harness {
   setUi: ReturnType<typeof vi.fn<(p: Partial<UiState>) => void>>;
   select: ReturnType<typeof vi.fn<(id: string) => void>>;
   newPlan: ReturnType<typeof vi.fn<() => void>>;
+  newExample: ReturnType<typeof vi.fn<() => void>>;
   reveal: ReturnType<typeof vi.fn<(target: string) => void>>;
   open: ReturnType<typeof vi.fn<(choice: string, side?: string) => void>>;
 }
@@ -65,6 +66,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
   const setUi = vi.fn<(p: Partial<UiState>) => void>();
   const select = vi.fn<(id: string) => void>();
   const newPlan = vi.fn<() => void>();
+  const newExample = vi.fn<() => void>();
   const reveal = vi.fn<(target: string) => void>();
   const open = vi.fn<(choice: string, side?: string) => void>();
   const id = t.session.view().plan.id;
@@ -90,10 +92,11 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     clock: t.clock,
     select,
     newPlan,
+    newExample,
     reveal,
     updates: null,
   };
-  return { ctx, setUi, select, newPlan, reveal, open };
+  return { ctx, setUi, select, newPlan, newExample, reveal, open };
 }
 
 const find = (ctx: CommandCtx, id: string) => {
@@ -132,11 +135,11 @@ describe("commands()", () => {
     expect(all.filter((x) => x.startsWith("nudge") || x.startsWith("resize") || x === "trash" || x === "go-first-conflict")).toEqual([]);
   });
 
-  it("holds exactly new-plan, import, the sync commands, open-plan, palette and about with no session", async () => {
+  it("holds exactly new-plan, example-plan, import, the sync commands, open-plan, palette and about with no session", async () => {
     const t = await made(SMALL);
     const h = harness(t, { plan: null }, ["p2"]);
     const ctx: CommandCtx = { ...h.ctx, session: null, run: null, undo: null, redo: null };
-    expect(ids(ctx)).toEqual(["new-plan", "import", "sync-setup", "sync-join", "sync-devices", `open-plan:${t.session.view().plan.id}`, "open-plan:p2", "palette", "about"]);
+    expect(ids(ctx)).toEqual(["new-plan", "example-plan", "import", "sync-setup", "sync-join", "sync-devices", `open-plan:${t.session.view().plan.id}`, "open-plan:p2", "palette", "about"]);
   });
 
   it("holds export and import in the File group with an open plan", async () => {
@@ -148,22 +151,23 @@ describe("commands()", () => {
     ]);
   });
 
-  it("lists the File commands together: New plan, Export plan…, Import plan…, then sync", async () => {
+  it("lists the File commands together: New plan, Create the example plan, Export plan…, Import plan…, then sync", async () => {
     const t = await made(SMALL);
     const h = harness(t, { selected: "a" }, ["p2"]);
     const all = commands(h.ctx);
     const at = all.findIndex((c) => c.group === "File");
-    expect(all.slice(at, at + 6).map((c) => [c.id, c.group])).toEqual([
+    expect(all.slice(at, at + 7).map((c) => [c.id, c.group])).toEqual([
       ["new-plan", "File"],
+      ["example-plan", "File"],
       ["export", "File"],
       ["import", "File"],
       ["sync-setup", "File"],
       ["sync-join", "File"],
       ["sync-devices", "File"],
     ]);
-    expect(all.filter((c) => c.group === "File")).toHaveLength(6);
+    expect(all.filter((c) => c.group === "File")).toHaveLength(7);
     const none: CommandCtx = { ...h.ctx, session: null, run: null, undo: null, redo: null };
-    expect(commands(none).filter((c) => c.group === "File").map((c) => c.id)).toEqual(["new-plan", "import", "sync-setup", "sync-join", "sync-devices"]);
+    expect(commands(none).filter((c) => c.group === "File").map((c) => c.id)).toEqual(["new-plan", "example-plan", "import", "sync-setup", "sync-join", "sync-devices"]);
   });
 
   it.each([
@@ -202,6 +206,17 @@ describe("commands()", () => {
     calls[0][1]("p9");
     expect(h.select.mock.calls).toEqual([["p9"]]);
     expect(exportFlow).not.toHaveBeenCalled();
+  });
+
+  it.each(["with", "without"])("runs Create the example plan through the shell's one path, once, %s a session", async (mode) => {
+    const t = await made(SMALL);
+    const h = harness(t, mode === "with" ? {} : { plan: null });
+    const ctx: CommandCtx = mode === "with" ? h.ctx : { ...h.ctx, session: null, run: null, undo: null, redo: null };
+    const cmd = find(ctx, "example-plan");
+    expect([cmd.label, cmd.group]).toEqual(["Create the example plan", "File"]);
+    cmd.run();
+    expect(h.newExample).toHaveBeenCalledTimes(1);
+    expect(h.newPlan).not.toHaveBeenCalled();
   });
 
   it("runs new-plan through the shell's one path, once", async () => {

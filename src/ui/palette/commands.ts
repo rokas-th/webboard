@@ -33,6 +33,7 @@ export interface CommandCtx {
   clock: Clock;
   select(id: PlanId): void;
   newPlan(): void;
+  newExample(): void;
   reveal(target: ItemId | "today"): void;
   updates: Updates | null;
 }
@@ -254,6 +255,7 @@ export function commands(ctx: CommandCtx): Command[] {
   const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session, ctx.registry.device.platform) }];
   const always: Command[] = [
     { id: "new-plan", group: "File", label: "New plan", run: () => ctx.newPlan() },
+    { id: "example-plan", group: "File", label: "Create the example plan", run: () => ctx.newExample() },
     ...exportCommand,
     { id: "import", group: "File", label: "Import plan…", run: () => void importFlow(ctx.registry, (id) => ctx.select(id)) },
     { id: "sync-setup", group: "File", label: "Set up sync", run: () => ctx.setUi({ dialog: { t: "sync", pane: "setup" } }) },

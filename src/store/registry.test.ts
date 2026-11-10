@@ -15,7 +15,7 @@ import { act } from "../test/act";
 import { CH_ZH_2026, CH_ZH_2027, FETCHED_AT } from "../test/fixtures/calendars";
 import { encodeLoad, memoryStore, type MemoryStore } from "../test/fixtures/store";
 import { ctxOf } from "../test/planCtx";
-import { hold, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
+import { hold, offeredSettings, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
 import { VALID_WEBBOARD } from "../test/fixtures/webboard";
 import { decodeAction, encodeAction, PlanDoc } from "./doc";
 import { buildImport } from "./file";
@@ -65,7 +65,7 @@ interface Env {
 
 function env(o: { settings?: unknown; platform?: "macos" | "linux" | "ios"; holidays?: Answer; answers?: Record<string, Answer>; mem?: MemoryStore } = {}): Env {
   const mem = o.mem ?? memoryStore();
-  const state: Env["state"] = { settings: o.settings ?? null, writeFail: null };
+  const state: Env["state"] = { settings: "settings" in o ? o.settings : offeredSettings(), writeFail: null };
   resetTauri({
     ...mem.answers,
     settings_read: () => state.settings,
@@ -149,7 +149,7 @@ function bodyActions(c: Call): Action[] {
 
 const writesOf = (c: Call): Write[] => bodyActions(c).flatMap((a) => [...a.w]);
 
-function settingsOf(c: Call): { v: number; lastRegion: unknown; names: Record<string, string>; syncedHeads?: unknown } {
+function settingsOf(c: Call): { v: number; lastRegion: unknown; names: Record<string, string>; syncedHeads?: unknown; exampleOffered?: unknown } {
   const s = c.args !== undefined && !(c.args instanceof Uint8Array) && !(c.args instanceof ArrayBuffer) && !Array.isArray(c.args) ? c.args.settings : undefined;
   if (typeof s !== "object" || s === null) throw new Error("settings_write without settings");
   return s as { v: number; lastRegion: unknown; names: Record<string, string> };
@@ -265,7 +265,7 @@ const setScreen = (width: number, height: number): void => {
 
 describe("Registry: creating plans", () => {
   it("createPlan", async () => {
-    env({ settings: { v: 1, lastRegion: ZH, names: {} } });
+    env({ settings: { v: 1, lastRegion: ZH, names: {}, exampleOffered: true } });
     const r = await open({ clock: fixedClock(TODAY) });
     const from = tauri.calls.length;
     const id = await r.createPlan("Beta");
@@ -288,7 +288,7 @@ describe("Registry: creating plans", () => {
   });
 
   it("createPlan warms holidays", async () => {
-    env({ settings: { v: 1, lastRegion: ZH, names: {} }, holidays: serving });
+    env({ settings: { v: 1, lastRegion: ZH, names: {}, exampleOffered: true }, holidays: serving });
     const r = await open({ clock: fixedClock(TODAY) });
     const from = tauri.calls.length;
     const id = await r.createPlan("Beta");
@@ -303,7 +303,7 @@ describe("Registry: creating plans", () => {
   });
 
   it("createPlan offline", async () => {
-    env({ settings: { v: 1, lastRegion: ZH, names: {} } });
+    env({ settings: { v: 1, lastRegion: ZH, names: {}, exampleOffered: true } });
     const r = await open({ clock: fixedClock(TODAY) });
     const id = await r.createPlan("Beta");
     await flush();
@@ -436,7 +436,7 @@ describe("Registry: creating plans", () => {
   });
 
   it("synced heads kept", async () => {
-    env({ settings: { v: 1, lastRegion: null, names: {}, syncedHeads: { P: ["a1", "a2"] } } });
+    env({ settings: { v: 1, lastRegion: null, names: {}, syncedHeads: { P: ["a1", "a2"] }, exampleOffered: true } });
     const r = await open();
     const from = tauri.calls.length;
     const id = await r.createPlan("Beta");
@@ -449,7 +449,7 @@ describe("Registry: creating plans", () => {
   });
 
   it("clock option", async () => {
-    env({ settings: { v: 1, lastRegion: ZH, names: {} } });
+    env({ settings: { v: 1, lastRegion: ZH, names: {}, exampleOffered: true } });
     const r = await open({ clock: fixedClock(TODAY, new Date(2026, 10, 9, 14, 5).getTime()) });
     const id = await r.createPlan("Beta");
     await flush();
@@ -757,7 +757,7 @@ describe("IndexDoc", () => {
 
 describe("Registry: listing and loading", () => {
   it("cached names", async () => {
-    const e = env({ settings: { v: 1, lastRegion: null, names: { P: "Alpha" } } });
+    const e = env({ settings: { v: 1, lastRegion: null, names: { P: "Alpha" }, exampleOffered: true } });
     seedIndex(e.mem, "local", listing("P"));
     seedPlan(e.mem, "P", "Alpha");
     const r = await open();
@@ -852,7 +852,7 @@ describe("Registry: listing and loading", () => {
   });
 
   it("remote rename caches", async () => {
-    const e = env({ settings: { v: 1, lastRegion: null, names: { S: "Bridge" } } });
+    const e = env({ settings: { v: 1, lastRegion: null, names: { S: "Bridge" }, exampleOffered: true } });
     seedIndex(e.mem, "local", listing("S"));
     seedPlan(e.mem, "S", "Bridge", { items: ["A"] });
     const r = await open();
@@ -1548,7 +1548,7 @@ describe("Registry: lifecycle and failures", () => {
 describe("Registry: spaces", () => {
   const SP = "sp000000000";
   const IX = "ix-" + SP;
-  const SPACE_SETTINGS = { v: 1, lastRegion: null, names: {} };
+  const SPACE_SETTINGS = offeredSettings();
 
   const spaceEnv = (o: Parameters<typeof env>[0] = {}): Env => env({ settings: SPACE_SETTINGS, ...o });
 
@@ -2091,5 +2091,205 @@ describe("Registry: spaces", () => {
     expect(r.settingsError()?.code).toBe("settings.io");
     expect(cb).toHaveBeenCalled();
     expect(r.syncedHeads(IX)).toEqual(["b1"]);
+  });
+});
+
+describe("Registry: the example plan", () => {
+  const EXAMPLE = "Example: Website relaunch";
+  const FRESH = { v: 1, lastRegion: null, names: {} };
+  const SP = "sp000000000";
+  const IX = "ix-" + SP;
+
+  const listed = (r: Registry): (readonly [string | null, boolean, string | null])[] => r.plans().map((l) => [l.name, l.trashed, l.space] as const);
+
+  const flagWrites = (from: number): number => settingsWrites(from).filter((s) => s.exampleOffered === true).length;
+
+  async function restart(r: Registry, e: Env): Promise<Registry> {
+    await flush();
+    forget(r);
+    await r.close();
+    env({ settings: e.state.settings, mem: e.mem });
+    return open({ clock: fixedClock(TODAY) });
+  }
+
+  it("a first start with no plans creates the example in local, opens it, then records the flag", async () => {
+    const e = env({ settings: null });
+    const r = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    expect(listed(r)).toEqual([[EXAMPLE, false, null]]);
+    const [p] = r.plans();
+    expect(r.openSessions().map((s) => s.view().plan.id)).toEqual([p.id]);
+    expect(e.state.settings).toEqual({ v: 1, lastRegion: null, names: { [p.id]: EXAMPLE }, exampleOffered: true });
+    const appended = tauri.calls.findIndex((c) => c.cmd === "store_append" && xdoc(c) === p.id);
+    const listedAt = tauri.calls.findIndex((c) => c.cmd === "store_append" && xdoc(c) === "local" && writesOf(c).some((w) => w.u === "ip:" + p.id));
+    const flagged = tauri.calls.findIndex((c) => c.cmd === "settings_write" && settingsOf(c).exampleOffered === true);
+    expect(appended).toBeGreaterThanOrEqual(0);
+    expect(listedAt).toBeGreaterThanOrEqual(0);
+    expect(flagged).toBeGreaterThan(appended);
+    expect(flagWrites(0)).toBe(1);
+  });
+
+  it("writes the example as one root action that History shows alone and nothing can undo or revert", async () => {
+    env({ settings: null });
+    const r = await open({ clock: fixedClock(TODAY) });
+    const [s] = r.openSessions();
+    const history = s.history();
+    expect(history.map((h) => [h.label, h.root, h.active])).toEqual([["Created the example plan", true, true]]);
+    expect(s.canUndo()).toBe(false);
+    expect(s.nextUndo()).toBeNull();
+    expect(s.undo()).toBeNull();
+    expect(() => s.revert(history[0].id)).toThrow("The action that created this plan cannot be reverted.");
+    const kickoff = [...s.view().plan.items.values()].find((i) => i.name === "Kickoff");
+    if (kickoff === undefined) throw new Error("no Kickoff");
+    expect(s.note(kickoff.id).toString()).toBe("Agenda: goals, scope, roles. The slides are in the shared drive.");
+    expect(s.view().derived.conflicts).toEqual([]);
+  });
+
+  it("a start with plans, trashed ones included, creates nothing and records nothing", async () => {
+    const e = env({ settings: FRESH });
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    expect(r.plans().map((l) => l.id)).toEqual(["P"]);
+    expect(flagWrites(0)).toBe(0);
+    expect(r.openSessions()).toEqual([]);
+    await closeAll();
+
+    const t = env({ settings: FRESH });
+    seedIndex(t.mem, "local", [...listing("P"), ixAct("ix-t", ["ix-0"], [ip("P", true)], "dev-A", "Move plan to Trash")]);
+    seedPlan(t.mem, "P", "Alpha");
+    const trashed = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    expect(trashed.plans().map((l) => [l.id, l.trashed])).toEqual([["P", true]]);
+    expect(flagWrites(0)).toBe(0);
+    expect(t.state.settings).toEqual(FRESH);
+  });
+
+  it("a plan listed only in a space index on disk counts, and so does a space index that does not load", async () => {
+    const e = env({ settings: FRESH });
+    seedIndex(e.mem, "local", listing());
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    const r = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    expect(r.plans()).toEqual([]);
+    expect(r.localSpaces()).toEqual([SP]);
+    expect(flagWrites(0)).toBe(0);
+    await closeAll();
+
+    const f = env({ settings: FRESH });
+    seedIndex(f.mem, "local", listing());
+    seedIndex(f.mem, IX, [ixAct("s1", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device")]);
+    f.mem.fail("store_load", IX, { code: "store.io", message: "Disk full." });
+    const failed = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    expect(failed.indexError()?.code).toBe("store.io");
+    expect(failed.plans()).toEqual([]);
+    expect(flagWrites(0)).toBe(0);
+    await closeAll();
+
+    const g = env({ settings: FRESH });
+    seedIndex(g.mem, "local", listing());
+    seedIndex(g.mem, IX, [ixAct("s1", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device")]);
+    const empty = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    expect(listed(empty)).toEqual([[EXAMPLE, false, null]]);
+    expect(flagWrites(0)).toBe(1);
+  });
+
+  it("a flagged start creates nothing", async () => {
+    const e = env({ settings: { ...FRESH, exampleOffered: true } });
+    const r = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    expect(r.plans()).toEqual([]);
+    expect(callsOf(0, "settings_write")).toEqual([]);
+    expect(e.state.settings).toEqual({ ...FRESH, exampleOffered: true });
+  });
+
+  it("an example trashed before a restart stays the only plan, in the Trash", async () => {
+    const e = env({ settings: null });
+    const r = await open({ clock: fixedClock(TODAY) });
+    const [p] = r.plans();
+    r.trashPlan(p.id);
+    const again = await restart(r, e);
+    await flush();
+    expect(again.plans().map((l) => [l.id, l.name, l.trashed])).toEqual([[p.id, EXAMPLE, true]]);
+    expect(again.openSessions()).toEqual([]);
+    expect(flagWrites(0)).toBe(0);
+  });
+
+  it("createExample makes a fresh local example while a space is attached", async () => {
+    env({ settings: { ...FRESH, exampleOffered: true } });
+    const r = await open({ clock: fixedClock(TODAY) });
+    await r.attachSpace(SP);
+    await flush();
+    const from = tauri.calls.length;
+    const a = await r.createExample();
+    const b = await r.createExample();
+    await flush();
+    expect(a).not.toBe(b);
+    expect(appendsTo(from, IX)).toEqual([]);
+    expect(appendsTo(from, "local").flatMap(writesOf).filter((w) => w.u.startsWith("ip:"))).toEqual([ip(a, false), ip(b, false)]);
+    expect([planOf(r, a).space, planOf(r, b).space]).toEqual([null, null]);
+    expect([planOf(r, a).name, planOf(r, b).name]).toEqual([EXAMPLE, EXAMPLE]);
+    const items = (id: string): string[] => {
+      const s = r.openSessions().find((x) => x.view().plan.id === id);
+      if (s === undefined) throw new Error(`no session for ${id}`);
+      return [...s.view().plan.items.keys()];
+    };
+    expect(items(a).filter((x) => items(b).includes(x))).toEqual([]);
+  });
+
+  it("warms this year and next for the example's region, as a new plan does, and puts them in its calendar", async () => {
+    env({ settings: { v: 1, lastRegion: ZH, names: {} }, holidays: serving });
+    const r = await open({ clock: fixedClock(TODAY) });
+    const years = callsOf(0, "holidays_year").map((c) => yearArg(c.args));
+    expect([...new Set(years)].sort()).toEqual([2026, 2027]);
+    const [s] = r.openSessions();
+    expect([...s.view().plan.calendar.holidays.keys()].sort()).toEqual([2026, 2027]);
+    expect(s.view().plan.calendar.region).toEqual(ZH);
+    expect(s.view().derived.conflicts).toEqual([]);
+  });
+
+  it("a failed flag write fails the start, the example stays, and the next start records nothing", async () => {
+    const e = env({ settings: null });
+    e.state.writeFail = { code: "settings.io", message: "Could not save settings.json: disk full" };
+    const err = await rejection(Registry.open({ clock: fixedClock(TODAY) }));
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).message).toBe("Could not save settings.json: disk full");
+    expect(codeOf(err)).toBe("settings.io");
+    expect(e.state.settings).toBeNull();
+    const next = env({ settings: e.state.settings, mem: e.mem });
+    const again = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    const [only, ...more] = again.plans();
+    expect(more).toEqual([]);
+    expect([only.trashed, only.space]).toEqual([false, null]);
+    expect((await again.session(only.id)).view().plan.name).toBe(EXAMPLE);
+    await flush();
+    expect(flagWrites(0)).toBe(0);
+    expect(next.state.settings).toEqual({ v: 1, lastRegion: null, names: { [only.id]: EXAMPLE } });
+  });
+
+  it("a failed example create fails the start and records no flag", async () => {
+    const e = env({ settings: null });
+    const load = tauri.answers.store_load;
+    if (load === undefined) throw new Error("no store_load answer");
+    tauri.answers.store_load = (args, o) => {
+      if (docOfArgs({ cmd: "store_load", args, options: o }) !== "local") throw { code: "store.io", message: "Disk full." };
+      return load(args, o);
+    };
+    const err = await rejection(Registry.open({ clock: fixedClock(TODAY) }));
+    expect(codeOf(err)).toBe("store.io");
+    expect((err as AppError).message).toBe("Disk full.");
+    expect(flagWrites(0)).toBe(0);
+    expect(e.state.settings).toBeNull();
+  });
+
+  it("reads exampleOffered strictly", async () => {
+    env({ settings: { ...FRESH, exampleOffered: "yes" } });
+    const err = await rejection(Registry.open());
+    expect(codeOf(err)).toBe("settings.corrupt");
+    expect((err as AppError).message).toBe("settings.json does not hold WebBoard settings: exampleOffered is not true or false.");
   });
 });

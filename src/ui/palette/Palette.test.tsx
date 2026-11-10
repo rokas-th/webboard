@@ -172,7 +172,7 @@ describe("opening the palette", () => {
     press("k", { metaKey: true });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(document.activeElement).toBe(query());
-    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "HelpCommand palette", "HelpAbout WebBoard"]);
+    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileCreate the example plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "HelpCommand palette", "HelpAbout WebBoard"]);
     press("Escape", {}, query());
     fireEvent.click(button(bar(), "⌘K"));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);

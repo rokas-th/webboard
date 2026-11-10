@@ -37,7 +37,7 @@ import { PlanHead } from "./PlanHead";
 import { PlanMenu } from "./PlanMenu";
 import { ReloadConfirm } from "./ReloadConfirm";
 import { messageOf, restorePlan, usePlanFiles, usePlanSelection } from "./selection";
-import { NewPlanButton, Sidebar } from "./Sidebar";
+import { ExampleButton, NewPlanButton, Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 import { Tray } from "./Tray";
 import { useUpdates, useUpdateState } from "./UpdateLine";
@@ -93,6 +93,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   const files = usePlanFiles(registry, openPlan);
   const { creating, importing, importPlan } = files;
   const newPlan = (): void => files.newPlan("New plan", (message) => toast(message, "bad"));
+  const newExample = (): void => files.newExample((message) => toast(message, "bad"));
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
   const [sheet, setSheet] = useState<CompactSheet>(null);
   const selectedItem = useRef<ItemId | null>(ui.selected);
@@ -182,6 +183,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     clock: p.clock,
     select: openPlan,
     newPlan,
+    newExample,
     reveal,
     updates,
   };
@@ -224,6 +226,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         <div className="empty-state">
           <div className="empty-actions">
             <NewPlanButton creating={creating} onNew={newPlan} />
+            <ExampleButton creating={creating} onExample={newExample} />
             <button type="button" disabled={importing} onClick={importPlan}>
               {importing ? <span className="dim">Importing…</span> : "Import plan…"}
             </button>

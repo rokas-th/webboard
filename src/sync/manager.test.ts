@@ -16,7 +16,7 @@ import { act } from "../test/act";
 import { fakeFactory, type FakeFactory, type FakeProvider } from "../test/fakeProvider";
 import { memoryStore, type MemoryStore } from "../test/fixtures/store";
 import { ctxOf } from "../test/planCtx";
-import { commandsWith, hold, resetTauri, tauri, type Call } from "../test/tauriMock";
+import { commandsWith, hold, offeredSettings, resetTauri, tauri, type Call } from "../test/tauriMock";
 import { chipText, holdsPlan, SyncManager, type SyncState } from "./manager";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
@@ -57,7 +57,7 @@ function world(): World {
   const mem = memoryStore();
   const w: World = {
     mem,
-    settings: { value: { v: 1, lastRegion: null, names: {} } },
+    settings: { value: offeredSettings() },
     status: () => ({ space: SPACE, revoked: false }),
     ticket: () => {
       w.issued += 1;

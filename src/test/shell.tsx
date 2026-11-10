@@ -7,7 +7,7 @@ import { Registry } from "../store/registry";
 import { Shell } from "../ui/shell/Shell";
 import { memoryStore, type MemoryStore } from "./fixtures/store";
 import { TEST_DEVICES, type TestSession } from "./session";
-import { resetTauri, type Answer, type Call } from "./tauriMock";
+import { offeredSettings, resetTauri, type Answer, type Call } from "./tauriMock";
 
 export type TestRegistry = Registry & { notify(): void };
 
@@ -112,7 +112,7 @@ export const emptyYear: Answer = (args) => {
 
 export async function seededStore(names: readonly string[], o: { trash?: readonly number[]; lastRegion?: RegionRef } = {}): Promise<SeededStore> {
   const mem = memoryStore();
-  const state: { settings: unknown } = { settings: null };
+  const state: { settings: unknown } = { settings: offeredSettings() };
   const answers: Record<string, Answer> = {
     ...mem.answers,
     settings_read: () => state.settings,

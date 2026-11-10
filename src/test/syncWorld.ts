@@ -12,7 +12,7 @@ import { act as action } from "./act";
 import type { FakeProvider } from "./fakeProvider";
 import { memoryStore, type MemoryStore } from "./fixtures/store";
 import { ctxOf } from "./planCtx";
-import { resetTauri, type Answer, type Call } from "./tauriMock";
+import { offeredSettings, resetTauri, type Answer, type Call } from "./tauriMock";
 
 export const SP = "sp000000000";
 export const IX = "ix-" + SP;
@@ -51,7 +51,7 @@ export function syncWorld(o: { names?: Record<string, string>; platform?: "macos
   const mem = memoryStore();
   const w: SyncWorld = {
     mem,
-    settings: { value: { v: 1, lastRegion: null, names: o.names ?? {} } },
+    settings: { value: { ...offeredSettings(), names: o.names ?? {} } },
     status: () => ({ space: SPACE, revoked: false }),
     ticket: () => {
       w.issued += 1;

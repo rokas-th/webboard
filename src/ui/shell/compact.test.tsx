@@ -257,7 +257,7 @@ describe('compact shell, data-form="compact"', () => {
     await settle();
     const main = document.querySelector("main.main");
     if (!(main instanceof HTMLElement)) throw new Error("no main");
-    ["New plan", "Import plan…", "Join with a code", "Set up sync"].forEach((n) => expect(within(main).getByRole("button", { name: n })).toBeTruthy());
+    ["New plan", "Show an example plan", "Import plan…", "Join with a code", "Set up sync"].forEach((n) => expect(within(main).getByRole("button", { name: n })).toBeTruthy());
     expect(within(toolbar()).getByRole("button", { name: "Local only" })).toBeTruthy();
     expect(within(toolbar()).getByRole("button", { name: "Plans" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Plan" })).toBeNull();

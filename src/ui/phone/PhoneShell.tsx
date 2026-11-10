@@ -12,7 +12,7 @@ import { ghostIds } from "../ghosts";
 import { OpenChoice } from "../run";
 import { FailedPlanView } from "../shell/PlanFailed";
 import { usePlanFiles, usePlanSelection, type PlanFiles, type PlanMain } from "../shell/selection";
-import { NewPlanButton } from "../shell/Sidebar";
+import { ExampleButton, NewPlanButton } from "../shell/Sidebar";
 import { RemovedBanner } from "../sync/RemovedBanner";
 import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
 import { UiContext, useUi, useUiValue, type DialogState, type SyncPane } from "../state";
@@ -143,6 +143,7 @@ function Main(p: {
   sync: SyncState;
   error: string | null;
   onNew(name: string): void;
+  onExample(): void;
   onSync(pane: SyncPane | null): void;
   open(id: PlanId): void;
   trash(id: PlanId): void;
@@ -153,6 +154,7 @@ function Main(p: {
       <div className="empty-state">
         <div className="empty-actions">
           <NewPlanButton creating={p.files.creating} onNew={() => p.onNew(NEW_PLAN)} />
+          <ExampleButton creating={p.files.creating} onExample={p.onExample} />
           <ImportButton files={p.files} />
           <button type="button" onClick={() => p.onSync("join")}>
             Join with a code
@@ -244,6 +246,10 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
     setEmptyError(null);
     files.newPlan(name, setEmptyError);
   };
+  const exampleFromEmpty = (): void => {
+    setEmptyError(null);
+    files.newExample(setEmptyError);
+  };
   const newFromSheet = (name: string): void => {
     setSheetError(null);
     const shown = sheetShown.current;
@@ -292,6 +298,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
           sync={syncState}
           error={emptyError}
           onNew={newFromEmpty}
+          onExample={exampleFromEmpty}
           onSync={openSync}
           open={open}
           trash={trash}

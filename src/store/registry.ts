@@ -1,12 +1,13 @@
 import type * as Y from "yjs";
 import { initialAction, normalizeName } from "../actions/build";
+import { buildExample, exampleYears } from "../actions/example";
 import { Refused } from "../actions/intents";
-import { regionKey, type HolidayYear, type RegionRef } from "../domain/calendar";
+import { regionKey, type Calendar, type HolidayYear, type RegionRef } from "../domain/calendar";
 import { toDay, yearOf } from "../domain/dates";
 import type { ItemId, PlanId, PlanState } from "../domain/model";
 import { newId } from "../log/ids";
 import { LogState } from "../log/state";
-import type { ActionId, DeviceId } from "../log/types";
+import type { Action, ActionId, DeviceId } from "../log/types";
 import { PlanIncomplete, projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { region as regionCodec, validateWrite } from "../plan/units";
@@ -27,6 +28,7 @@ export interface Settings {
   lastRegion: RegionRef | null;
   names: Record<PlanId, string>;
   syncedHeads?: Record<string, readonly ActionId[]>;
+  exampleOffered?: boolean;
 }
 
 export interface DeviceInfo {
@@ -84,6 +86,7 @@ function parseSettings(raw: unknown): Settings {
   } catch (e) {
     throw bad(`lastRegion is not a region: ${messageOf(e)}`);
   }
+  if ("exampleOffered" in raw && typeof raw.exampleOffered !== "boolean") throw bad("exampleOffered is not true or false");
   const base: Settings = { ...raw, v: 1, lastRegion, names };
   if (!("syncedHeads" in raw)) return base;
   const heads = raw.syncedHeads;
@@ -183,6 +186,7 @@ export class Registry {
     const r = new Registry(clock, opts?.holidays ?? new HolidayService(() => clock.now()), settings, device);
     try {
       await r.start();
+      await r.offerExample();
     } catch (e) {
       await r.close().catch((c: unknown) => {
         throw Object.assign(new Error(`${messageOf(e)} (closing the plan list afterwards failed too: ${messageOf(c)})`), { cause: e, suppressed: c });
@@ -204,6 +208,18 @@ export class Registry {
     this.spaceIds = this.stored.filter((id) => id.startsWith(SPACE_PREFIX));
     await Promise.all(this.spaceIds.map((id) => this.openSpace(id)));
     this.adoptOrphans();
+  }
+
+  private async offerExample(): Promise<void> {
+    if (this.settings.exampleOffered === true) return;
+    const spacesEmpty = this.spaceIds.every((id) => {
+      const ix = this.spaces.get(id);
+      return ix !== undefined && ix.plans().length === 0;
+    });
+    if (this.local.plans().length > 0 || !spacesEmpty) return;
+    await this.createExample();
+    this.settings = { ...this.settings, exampleOffered: true };
+    await this.writeSettings();
   }
 
   private adoptOrphans(): void {
@@ -555,11 +571,8 @@ export class Registry {
       .forEach((ix) => ix.nameDevice(this.deviceId, normal));
   }
 
-  async createPlan(name: string): Promise<PlanId> {
-    this.usable();
+  private async newCalendar(years: readonly number[]): Promise<Calendar> {
     const region = this.settings.lastRegion;
-    const y = yearOf(toDay(this.clock.today()));
-    const years = [y, y + 1];
     if (region !== null) await this.holidays.warm(region, years);
     const rk = region === null ? null : regionKey(region);
     const holidays = new Map(
@@ -568,13 +581,14 @@ export class Registry {
         return h === null ? [] : [[year, h]];
       }),
     );
-    const action = initialAction({
-      dev: this.deviceId,
-      ses: newId(),
-      now: this.clock.now(),
-      name,
-      calendar: { region, workdays: [1, 2, 3, 4, 5], closures: new Map(), tuning: new Map(), holidays },
-    });
+    return { region, workdays: [1, 2, 3, 4, 5], closures: new Map(), tuning: new Map(), holidays };
+  }
+
+  async createPlan(name: string): Promise<PlanId> {
+    this.usable();
+    const y = yearOf(toDay(this.clock.today()));
+    const calendar = await this.newCalendar([y, y + 1]);
+    const action = initialAction({ dev: this.deviceId, ses: newId(), now: this.clock.now(), name, calendar });
     const id = newPlanId();
     const doc = await this.load(id, false);
     new PlanDoc(doc.ydoc).append(action, []);
@@ -586,20 +600,31 @@ export class Registry {
 
   async createPlanFrom(r: ImportResult): Promise<PlanId> {
     this.usable();
-    const id = r.planId;
     const texts = r.newNotes.map((item): [ItemId, string] => {
       const text = r.notes.get(item);
       if (text === undefined) throw new Error(`The import lists a note for ${item} without its text`);
       return [item, text];
     });
+    return this.writePlan(r.planId, { ...r.action, at: this.clock.now() }, r.newNotes, texts, this.addTarget());
+  }
+
+  async createExample(): Promise<PlanId> {
+    this.usable();
+    const today = this.clock.today();
+    const calendar = await this.newCalendar(exampleYears(today));
+    const id = newPlanId();
+    const ex = buildExample({ id, dev: this.deviceId, ses: newId(), now: this.clock.now(), today, calendar });
+    return this.writePlan(id, ex.action, ex.newNotes, [...ex.notes], this.local);
+  }
+
+  private async writePlan(id: PlanId, action: Action, newNotes: readonly ItemId[], texts: readonly (readonly [ItemId, string])[], target: IndexDoc): Promise<PlanId> {
     const doc = await this.load(id, false);
     const planDoc = new PlanDoc(doc.ydoc);
-    const action = { ...r.action, at: this.clock.now() };
     doc.ydoc.transact(() => {
-      planDoc.append(action, r.newNotes);
+      planDoc.append(action, newNotes);
       texts.forEach(([item, text]) => planDoc.note(item).insert(0, text));
     }, LOCAL);
-    this.addTarget().addPlan(id);
+    target.addPlan(id);
     const session = await this.session(id);
     if (this.cacheName(id, session.view().plan.name)) this.emit();
     return id;

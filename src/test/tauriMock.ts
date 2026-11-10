@@ -8,6 +8,13 @@ export interface Call {
 
 export type Answer = (args: InvokeArgs | undefined, options?: InvokeOptions) => unknown;
 
+export const offeredSettings = (): { v: 1; lastRegion: null; names: Record<string, string>; exampleOffered: true } => ({
+  v: 1,
+  lastRegion: null,
+  names: {},
+  exampleOffered: true,
+});
+
 export const DEFAULT_ANSWERS: Readonly<Record<string, Answer>> = {
   sync_status: () => ({ space: null, revoked: false }),
 };
