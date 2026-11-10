@@ -120,6 +120,18 @@ pub async fn sync_reset(sync: State<'_, super::Started<SyncState>>) -> Result<()
     sync.get()?.client.reset().await.map_err(CommandError::from)
 }
 
+#[tauri::command]
+pub async fn sync_purge_plan(
+    sync: State<'_, super::Started<SyncState>>,
+    doc: String,
+) -> Result<()> {
+    sync.get()?
+        .client
+        .purge_plan(&doc)
+        .await
+        .map_err(CommandError::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,7 +172,8 @@ mod tests {
                 sync_remove_device,
                 sync_status,
                 sync_mark_revoked,
-                sync_reset
+                sync_reset,
+                sync_purge_plan
             ])
             .build(mock_context(noop_assets()))
             .expect("mock app");
@@ -262,6 +275,10 @@ mod tests {
         assert_eq!(invoke(&h, "sync_devices", json!({})), not_joined.clone());
         assert_eq!(
             invoke(&h, "sync_remove_device", json!({ "id": "dev00000000" })),
+            not_joined.clone()
+        );
+        assert_eq!(
+            invoke(&h, "sync_purge_plan", json!({ "doc": "pl0000000001" })),
             not_joined.clone()
         );
         assert_eq!(invoke(&h, "sync_mark_revoked", json!({})), not_joined);

@@ -595,6 +595,10 @@ impl SyncClient {
                 body.error, body.message
             )),
             (404, Caller::Claim) => SyncError::new("sync.bad_code", body.message),
+            (410, _) if body.error == "gone" => SyncError::new("sync.gone", body.message),
+            (500, _) if body.error == "purge_pending" => {
+                SyncError::new("sync.purge_pending", body.message)
+            }
             (503, _) if body.error == "not_configured" => {
                 SyncError::new("sync.not_configured", NOT_CONFIGURED)
             }
@@ -712,6 +716,16 @@ impl SyncClient {
     pub async fn remove_device(&self, id: &str) -> Result<(), SyncError> {
         let member = self.member().await?;
         let url = endpoint(&member.server, &["devices", id])?;
+        let request = self.authorised(&member, reqwest::Method::DELETE, &url);
+        let _: IgnoredAny = self
+            .exchange(&url, request, Caller::Member(&member))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn purge_plan(&self, doc: &str) -> Result<(), SyncError> {
+        let member = self.member().await?;
+        let url = endpoint(&member.server, &["plans", doc])?;
         let request = self.authorised(&member, reqwest::Method::DELETE, &url);
         let _: IgnoredAny = self
             .exchange(&url, request, Caller::Member(&member))
@@ -2371,6 +2385,105 @@ mod tests {
         let f = Fixture::new().await;
         fs::create_dir(f.dir.path().join("sync.json")).expect("mkdir");
         f.sync_json();
+    }
+
+    const GONE: &str = "This plan was deleted forever on another device.";
+    const PURGE_PENDING: &str = "The plan is deleted, but the server has not erased its history yet. It tries again every minute.";
+
+    #[tokio::test]
+    async fn purge_plan_sends_a_delete_with_the_token_as_bearer() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        let purge = f
+            .server
+            .mock("DELETE", "/plans/pl0000000001")
+            .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(json!({ "closed": 2 }).to_string())
+            .expect(2)
+            .create_async()
+            .await;
+        let client = f.client();
+        assert_eq!(client.purge_plan("pl0000000001").await, Ok(()));
+        assert_eq!(client.purge_plan("pl0000000001").await, Ok(()));
+        purge.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn purge_plan_needs_a_space_and_makes_no_request_without_one() {
+        let mut f = Fixture::new().await;
+        let mocks = f.nothing().await;
+        assert_eq!(
+            f.client().purge_plan("pl0000000001").await,
+            Err(err("sync.not_joined", NOT_JOINED))
+        );
+        assert_all(mocks).await;
+    }
+
+    #[tokio::test]
+    async fn a_410_gone_is_sync_gone_with_the_servers_message() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        let body = json!({ "error": "gone", "message": GONE });
+        f.answer("DELETE", "/plans/pl0000000001", 410, body.clone())
+            .await;
+        f.answer("POST", "/ticket", 410, body).await;
+        let client = f.client();
+        assert_eq!(
+            client.purge_plan("pl0000000001").await,
+            Err(err("sync.gone", GONE))
+        );
+        assert_eq!(
+            client.ticket("pl0000000001").await.map(|_| ()),
+            Err(err("sync.gone", GONE))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_500_purge_pending_is_sync_purge_pending_with_the_servers_message() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        f.answer(
+            "DELETE",
+            "/plans/pl0000000001",
+            500,
+            json!({ "error": "purge_pending", "message": PURGE_PENDING }),
+        )
+        .await;
+        assert_eq!(
+            f.client().purge_plan("pl0000000001").await,
+            Err(err("sync.purge_pending", PURGE_PENDING))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_410_or_500_with_another_error_stays_sync_http() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        f.answer(
+            "DELETE",
+            "/plans/pl0000000001",
+            500,
+            json!({ "error": "internal", "message": "boom" }),
+        )
+        .await;
+        f.answer(
+            "POST",
+            "/ticket",
+            410,
+            json!({ "error": "other", "message": "elsewhere" }),
+        )
+        .await;
+        let client = f.client();
+        assert_eq!(
+            client.purge_plan("pl0000000001").await,
+            Err(err("sync.http", "Server answered 500 internal: boom"))
+        );
+        assert_eq!(
+            client.ticket("pl0000000001").await.map(|_| ()),
+            Err(err("sync.http", "Server answered 410 other: elsewhere"))
+        );
     }
 
     #[test]

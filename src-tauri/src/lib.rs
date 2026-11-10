@@ -154,6 +154,7 @@ pub fn run() {
             commands::store::store_compact,
             commands::store::store_list,
             commands::store::store_set_aside,
+            commands::store::store_delete,
             commands::holidays::holidays_countries,
             commands::holidays::holidays_subdivisions,
             commands::holidays::holidays_year,
@@ -179,6 +180,7 @@ pub fn run() {
             commands::sync::sync_status,
             commands::sync::sync_mark_revoked,
             commands::sync::sync_reset,
+            commands::sync::sync_purge_plan,
             #[cfg(feature = "probe")]
             commands::probe::probe_log
         ])

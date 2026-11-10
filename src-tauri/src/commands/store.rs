@@ -111,6 +111,12 @@ pub async fn store_set_aside(store: State<'_, Started<Store>>, doc: String) -> R
     blocking("store_set_aside", move || store.set_aside(&doc, secs)).await
 }
 
+#[tauri::command]
+pub async fn store_delete(store: State<'_, Started<Store>>, doc: String) -> Result<()> {
+    let store = store.get()?.clone();
+    blocking("store_delete", move || store.delete(&doc)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,7 +146,8 @@ mod tests {
                 store_append,
                 store_compact,
                 store_list,
-                store_set_aside
+                store_set_aside,
+                store_delete
             ])
             .build(mock_context(noop_assets()))
             .unwrap();
@@ -377,5 +384,48 @@ mod tests {
             .unwrap_err(),
             error("store.io", "no document nope")
         );
+    }
+
+    #[test]
+    fn delete_over_ipc() {
+        let h = harness();
+        append(&h, "p1", "1", b"one").unwrap();
+        append(&h, "p2", "1", b"other").unwrap();
+        invoke(
+            &h,
+            "store_set_aside",
+            InvokeBody::Json(json!({ "doc": "p1" })),
+            &[],
+        )
+        .unwrap();
+        append(&h, "p1", "1", b"again").unwrap();
+        invoke(
+            &h,
+            "store_delete",
+            InvokeBody::Json(json!({ "doc": "p1" })),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(list(&h), ["p2"]);
+        assert_eq!(bad_names(&h.docs), Vec::<String>::new());
+        assert!(!h.docs.join("p1").exists());
+        invoke(
+            &h,
+            "store_delete",
+            InvokeBody::Json(json!({ "doc": "p1" })),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            invoke(
+                &h,
+                "store_delete",
+                InvokeBody::Json(json!({ "doc": "a b" })),
+                &[],
+            )
+            .unwrap_err(),
+            error("store.io", "invalid document id: \"a b\"")
+        );
+        assert_eq!(list(&h), ["p2"]);
     }
 }
