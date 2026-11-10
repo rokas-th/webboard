@@ -5,6 +5,9 @@ import { usePlanView, type PlanSession } from "../../store/session";
 import { HeldChip } from "../choices/HeldChip";
 import { createdItem, createIntent, NEW_NAME } from "../palette/commands";
 import { useRun } from "../run";
+import type { PlanFiles } from "../shell/selection";
+import { useUiValue } from "../state";
+import { PlanSheet } from "./PlanSheet";
 import { useReadOnly } from "./readOnly";
 
 const KINDS: readonly ItemKind[] = ["task", "milestone", "group"];
@@ -71,10 +74,12 @@ function NewItemMenu(p: { disabled: boolean; onPick(kind: ItemKind): void }) {
   );
 }
 
-function PlanTools(p: { session: PlanSession; today(): IsoDate; onChoose(choice: string): void; onCreated(id: ItemId): void }) {
+function PlanTools(p: { session: PlanSession; files: PlanFiles; today(): IsoDate; onChoose(choice: string): void; onCreated(id: ItemId): void }) {
   const view = usePlanView(p.session);
   const readOnly = useReadOnly(p.session);
   const run = useRun(p.session);
+  const { ui } = useUiValue();
+  const [sheet, setSheet] = useState(false);
   const create = (kind: ItemKind): void => {
     const built = run.run(createIntent(p.session, p.today(), kind, { parent: null, after: null }));
     if (built !== null) p.onCreated(createdItem(built));
@@ -90,6 +95,10 @@ function PlanTools(p: { session: PlanSession; today(): IsoDate; onChoose(choice:
       <button type="button" className="button-small" disabled={readOnly || !p.session.canRedo()} onClick={() => run.redo()}>
         Redo
       </button>
+      <button type="button" className="button-small phone-more" aria-label="Plan" aria-haspopup="dialog" onClick={() => setSheet(true)}>
+        ⋯
+      </button>
+      {sheet && ui.dialog === null && <PlanSheet session={p.session} files={p.files} onClose={() => setSheet(false)} />}
     </>
   );
 }
@@ -97,6 +106,7 @@ function PlanTools(p: { session: PlanSession; today(): IsoDate; onChoose(choice:
 export function PhoneTopBar(p: {
   name: string | null;
   session: PlanSession | null;
+  files: PlanFiles;
   today(): IsoDate;
   onPlans(): void;
   onChoose(choice: string): void;
@@ -108,7 +118,7 @@ export function PhoneTopBar(p: {
         Plans
       </button>
       {p.session !== null ? (
-        <PlanTools session={p.session} today={p.today} onChoose={p.onChoose} onCreated={p.onCreated} />
+        <PlanTools key={p.session.view().plan.id} session={p.session} files={p.files} today={p.today} onChoose={p.onChoose} onCreated={p.onCreated} />
       ) : (
         p.name !== null && <span className="phone-plan-name">{p.name}</span>
       )}

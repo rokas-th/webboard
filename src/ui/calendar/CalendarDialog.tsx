@@ -31,6 +31,7 @@ export interface CalendarProps {
   registry: Registry;
   clock: Clock;
   review?: CalendarReview;
+  readOnlyApply?: "disabled" | "absent";
   onClose(): void;
 }
 
@@ -341,9 +342,11 @@ export function CalendarBody(p: CalendarProps) {
         <button type="button" onClick={p.onClose}>
           Cancel
         </button>
-        <button type="button" className="button-primary" disabled={readOnly || applied || unchanged} onClick={apply}>
-          Apply
-        </button>
+        {!(readOnly && p.readOnlyApply === "absent") && (
+          <button type="button" className="button-primary" disabled={readOnly || applied || unchanged} onClick={apply}>
+            Apply
+          </button>
+        )}
       </div>
     </div>
   );

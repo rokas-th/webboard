@@ -46,6 +46,8 @@ const EMPTY_PLAN = "No items yet. Add one with + Task.";
 const CALENDAR_BANNER = "The calendar was changed on two devices. Nothing moves until you choose.";
 const PICKED = "Tracking: review results";
 const PICKED_CHOICE = "Tracking: review results and fixes";
+const STATUS_FIRST = "Holidays for 2031 not loaded — load";
+const STATUS_REFUSED = "Holidays for 2031 not available — open calendar";
 
 const expect = (selector, text) => ({ expect: text === undefined ? [selector] : [selector, text] });
 const count = (selector, n) => ({ count: [selector, n] });
@@ -224,6 +226,38 @@ function states() {
       expect('.sheet[role="dialog"] button.button-primary', "Apply"),
     ],
   });
+  add("phone-plan-sheet", "mesa", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-head button.phone-more", "⋯"),
+      expect('.sheet[role="dialog"] .sheet-title', "Plan"),
+      expect(".plan-sheet h2", "History"),
+      expect(".plan-sheet button", "Export plan…"),
+      expect(".plan-sheet button.about-row", "About WebBoard"),
+    ],
+  });
+  add("phone-status/strip", "phone-status", {
+    sizes: "phone",
+    clip: [LONG_NAMES[0], STATUS_FIRST],
+    clipIn: [".phone-plan-name", ".status-strip .status-text"],
+    actions: [expect(".phone-status .status-strip .status-text", STATUS_FIRST), expect(".phone-status .status-strip .status-more", "· +1 more")],
+  });
+  add("phone-status", "phone-status", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-status .status-strip", `${STATUS_FIRST} · +1 more`),
+      expect('.sheet[role="dialog"] .sheet-title', "Status"),
+      count(".status-lines .status-line", 2),
+      expect(".status-line.note .status-text", STATUS_FIRST),
+      click(".status-line.note .status-actions button", "Load"),
+      expect(".status-line.warn .status-text", STATUS_REFUSED),
+      expect(".status-line.warn .status-actions button", "Change calendar…"),
+      expect(".status-line.magenta .status-text", "1 conflict"),
+      expect(".status-line.magenta .status-actions button", "Go to first conflict"),
+    ],
+  });
   add("touch/full", "mesa", {
     sizes: "landscape",
     actions: [viewExpect("timeline"), expect(".sidebar"), expect(".slot-panel .panel h2", "Plan")],
@@ -367,7 +401,9 @@ const SHIM = String.raw`
     if (a !== null && typeof a === "object" && !Array.isArray(a) && typeof a.__byArg === "string") {
       var k = String(args ? args[a.__byArg] : undefined);
       if (!(k in a.map)) return missing(cmd, a.__byArg + " " + k);
-      return Promise.resolve(JSON.parse(JSON.stringify(a.map[k])));
+      var hit = a.map[k];
+      if (hit !== null && typeof hit === "object" && "__reject" in hit) return Promise.reject(JSON.parse(JSON.stringify(hit.__reject)));
+      return Promise.resolve(JSON.parse(JSON.stringify(hit)));
     }
     return Promise.resolve(JSON.parse(JSON.stringify(a)));
   }

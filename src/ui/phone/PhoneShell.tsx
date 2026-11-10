@@ -3,6 +3,7 @@ import type { ItemId, PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
+import { About } from "../common/About";
 import { toast, Toasts } from "../common/Toast";
 import { ghostIds } from "../ghosts";
 import { OpenChoice } from "../run";
@@ -13,9 +14,12 @@ import { UiContext, useUi, useUiValue, type DialogState } from "../state";
 import { Timeline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { ChoiceSheet } from "./ChoiceSheet";
+import { RevertDialog } from "../panel/History";
 import { ItemSheet } from "./ItemSheet";
 import { PhoneList } from "./PhoneList";
+import { PhoneStatus } from "./PhoneStatus";
 import { PhoneTopBar } from "./PhoneTopBar";
+import { CalendarSheet } from "./PlanSheet";
 import { CreateError, ImportButton, NEW_PLAN, PlansSheet } from "./PlansSheet";
 
 type PhoneView = "list" | "timeline";
@@ -25,7 +29,7 @@ const VIEWS: readonly (readonly [PhoneView, string])[] = [
   ["timeline", "Timeline"],
 ];
 
-function PlanDialog(p: { session: PlanSession; dialog: DialogState; local: string; onClose(): void }): ReactElement {
+function PlanDialog(p: { session: PlanSession; registry: Registry; clock: Clock; dialog: DialogState; local: string; onClose(): void }): ReactElement | null {
   const d = p.dialog;
   switch (d.t) {
     case "choice":
@@ -39,11 +43,14 @@ function PlanDialog(p: { session: PlanSession; dialog: DialogState; local: strin
           onClose={p.onClose}
         />
       );
-    case "sync":
     case "calendar":
-    case "palette":
+      return <CalendarSheet key={p.session.view().plan.id} session={p.session} registry={p.registry} clock={p.clock} onClose={p.onClose} />;
     case "revert":
+      return <RevertDialog key={d.id} session={p.session} id={d.id} frame="sheet" onClose={p.onClose} />;
     case "about":
+      return null;
+    case "sync":
+    case "palette":
       throw new Error(`PhoneShell cannot show dialog ${d.t}`);
   }
 }
@@ -71,7 +78,7 @@ function useSheetLetGo(session: PlanSession, device: string): void {
   );
 }
 
-function OpenPlan(p: { session: PlanSession; registry: Registry }) {
+function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock }) {
   const { ui, setUi } = useUiValue();
   const [view, setView] = useState<PhoneView>("list");
   const base = useId();
@@ -105,7 +112,7 @@ function OpenPlan(p: { session: PlanSession; registry: Registry }) {
         ))}
       </div>
       {dialog !== null ? (
-        <PlanDialog session={p.session} dialog={dialog} local={local} onClose={closeDialog} />
+        <PlanDialog session={p.session} registry={p.registry} clock={p.clock} dialog={dialog} local={local} onClose={closeDialog} />
       ) : (
         selected !== null && (
           <ItemSheet
@@ -125,6 +132,7 @@ function OpenPlan(p: { session: PlanSession; registry: Registry }) {
 
 function Main(p: {
   registry: Registry;
+  clock: Clock;
   main: PlanMain;
   files: PlanFiles;
   error: string | null;
@@ -169,7 +177,7 @@ function Main(p: {
       </div>
     );
   }
-  return <OpenPlan key={m.id} session={m.session} registry={p.registry} />;
+  return <OpenPlan key={m.id} session={m.session} registry={p.registry} clock={p.clock} />;
 }
 
 function listedName(registry: Registry, id: PlanId | null): string | null {
@@ -219,18 +227,25 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
   );
   const trash = (id: PlanId): void => void trashOwn(id);
   const session = main.k === "open" ? main.session : null;
+  const closeDialog = (): void => setUi({ dialog: null });
+  const about = (): void => {
+    closePlans();
+    setUi({ dialog: { t: "about" } });
+  };
   return (
     <OpenChoice.Provider value={openChoice}>
       <div className="app phone">
         <PhoneTopBar
           name={listedName(p.registry, main.k === "empty" ? null : main.id)}
           session={session}
+          files={files}
           today={() => p.clock.today()}
           onPlans={showPlans}
           onChoose={(choice) => openChoice(choice)}
           onCreated={(id) => setUi({ selected: id, naming: id })}
         />
-        <Main registry={p.registry} main={main} files={files} error={emptyError} onNew={newFromEmpty} open={open} trash={trash} />
+        <PhoneStatus session={session} registry={p.registry} clock={p.clock} onOpenItem={(id) => setUi({ selected: id })} />
+        <Main registry={p.registry} clock={p.clock} main={main} files={files} error={emptyError} onNew={newFromEmpty} open={open} trash={trash} />
         {plans && (
           <PlansSheet
             registry={p.registry}
@@ -240,9 +255,11 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
             onNew={newFromSheet}
             onOpen={openPlan}
             onTrash={trash}
+            onAbout={main.k === "empty" ? about : undefined}
             onClose={closePlans}
           />
         )}
+        {ui.dialog !== null && ui.dialog.t === "about" && <About frame="sheet" onClose={closeDialog} />}
         <Toasts />
       </div>
     </OpenChoice.Provider>

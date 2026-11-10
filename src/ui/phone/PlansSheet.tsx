@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { PlanId } from "../../domain/model";
 import type { PlanListing, Registry } from "../../store/registry";
+import { ABOUT_TITLE } from "../common/About";
 import { Sheet } from "../common/Sheet";
 import { FailedPlanView } from "../shell/PlanFailed";
 import { restorePlan, type PlanFiles } from "../shell/selection";
@@ -12,6 +13,14 @@ export function ImportButton(p: { files: PlanFiles }) {
   return (
     <button type="button" disabled={p.files.importing} onClick={p.files.importPlan}>
       {p.files.importing ? <span className="dim">Importing…</span> : "Import plan…"}
+    </button>
+  );
+}
+
+export function AboutRow(p: { onAbout(): void }) {
+  return (
+    <button type="button" className="choice-row about-row" onClick={p.onAbout}>
+      {ABOUT_TITLE}
     </button>
   );
 }
@@ -57,6 +66,7 @@ export function PlansSheet(p: {
   onNew(name: string): void;
   onOpen(id: PlanId): void;
   onTrash(id: PlanId): void;
+  onAbout?: () => void;
   onClose(): void;
 }) {
   const [name, setName] = useState(NEW_PLAN);
@@ -98,6 +108,7 @@ export function PlansSheet(p: {
             </ul>
           </section>
         )}
+        {p.onAbout !== undefined && <AboutRow onAbout={p.onAbout} />}
       </nav>
     </Sheet>
   );

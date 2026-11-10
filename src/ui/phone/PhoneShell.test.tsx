@@ -18,9 +18,18 @@ import { resetTauri, tauri } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { OpenChoice } from "../run";
-import { importFlow } from "../shell/fileFlows";
+import { exportFlow, importFlow } from "../shell/fileFlows";
 import { PLACE_KEY, useUi, type UiState } from "../state";
 import { PhoneShell } from "./PhoneShell";
+import { orderedSides } from "../choices/order";
+import { sideText } from "../../plan/choices";
+import { version } from "../../../package.json";
+import { MESA_SEED } from "../../test/session";
+import { CHOICE_TITLE } from "../choices/pick";
+import { HOLIDAY_ATTRIBUTION } from "../common/About";
+import { calendarSummary } from "../panel/calendarText";
+import { revertText } from "../panel/historyText";
+import type { HistoryEntry } from "../../store/session";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
@@ -29,7 +38,7 @@ vi.mock("../../store/file", async (importOriginal) => {
 });
 vi.mock("../shell/fileFlows", async (importOriginal) => {
   const m = await importOriginal<typeof import("../shell/fileFlows")>();
-  return { ...m, importFlow: vi.fn(m.importFlow) };
+  return { ...m, importFlow: vi.fn(m.importFlow), exportFlow: vi.fn(m.exportFlow) };
 });
 vi.mock("../../log/ids", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../log/ids")>();
@@ -78,6 +87,7 @@ afterEach(async () => {
   vi.mocked(newId).mockReset();
   vi.mocked(importPlan).mockClear();
   vi.mocked(importFlow).mockClear();
+  vi.mocked(exportFlow).mockClear();
   await Promise.all(sessions.splice(0).map((s) => s.close()));
   await Promise.all(registries.splice(0).map((r) => r.close()));
   window.localStorage.clear();
@@ -203,7 +213,7 @@ describe('PhoneShell, data-form="phone"', () => {
     const t = await made();
     await shown(t);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    expect(() => setUiNow({ dialog: { t: "about" } })).toThrow(new Error("PhoneShell cannot show dialog about"));
+    expect(() => setUiNow({ dialog: { t: "palette" } })).toThrow(new Error("PhoneShell cannot show dialog palette"));
   });
 
   it("the read-only Timeline zooms by pinch, and a hold opens the item's sheet", async () => {
@@ -263,6 +273,18 @@ describe('PhoneShell, data-form="phone"', () => {
     const held = view.choices.find((c) => c.units.includes("s:Review"));
     if (held === undefined) throw new Error("fixture: no s:Review choice");
     await shown(t);
+    const strip = document.querySelector(".phone-status .status-strip");
+    if (!(strip instanceof HTMLElement)) throw new Error("no status strip");
+    fireEvent.click(strip);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Status" })).getByRole("button", { name: "2 open choices · Choose…" }));
+    const list = screen.getByRole("dialog", { name: "Open choices" });
+    const local = "iPhone";
+    expect(within(list).getAllByRole("button").filter((b) => b.classList.contains("choice-row")).map((b) => b.textContent)).toEqual(
+      view.choices.map((c) => orderedSides(c, local).map((s) => sideText(c, s.key, view.plan)).join(" or ")),
+    );
+    fireEvent.click(within(list).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Status" })).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     const count = screen.getByRole("button", { name: "1 held" });
     expect(count.classList.contains("chip-amber")).toBe(true);
     fireEvent.click(count);
@@ -1373,5 +1395,346 @@ describe("PhoneShell read-only (Step 4b)", () => {
     openPlans();
     expect(within(planRow("Alpha")).getByRole("button", { name: "Move to Trash" }).hasAttribute("disabled")).toBe(false);
     expect(within(planRow("Gamma")).getByRole("button", { name: "Restore" }).hasAttribute("disabled")).toBe(false);
+  });
+});
+
+const SHEET_SEED: readonly SeedItem[] = [...MESA_SEED, { name: "Old", start: "2026-11-20", dur: 1 }];
+
+const planSheetMade = async (seed: readonly SeedItem[] = SHEET_SEED): Promise<TestSession> => {
+  const t = await testSession(seed);
+  sessions.push(t.session);
+  if (seed.some((s) => s.name === "Old")) t.session.apply({ t: "trash", items: ["Old"] });
+  t.session.apply({ t: "planName", name: "MESA 1.0" });
+  return t;
+};
+
+const openPlanSheet = (): HTMLElement => {
+  fireEvent.click(within(topBar()).getByRole("button", { name: "Plan" }));
+  return screen.getByRole("dialog", { name: "Plan" });
+};
+
+const planSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Plan" });
+
+const nameField = (): HTMLInputElement => {
+  const el = within(planSheet()).getByRole("textbox", { name: "Plan name" });
+  if (!(el instanceof HTMLInputElement)) throw new Error("the plan name is not a field");
+  return el;
+};
+
+const historyRows = (): HTMLElement[] => [...planSheet().querySelectorAll<HTMLElement>(".history li")];
+
+const historyRow = (id: string): HTMLElement => {
+  const el = planSheet().querySelector(`.history li[data-action="${id}"]`);
+  if (!(el instanceof HTMLElement)) throw new Error("no history row " + id);
+  return el;
+};
+
+const sheetLines = (title: string): (string | null)[] => [...screen.getByRole("dialog", { name: title }).querySelectorAll(".revert-text p")].map((p) => p.textContent);
+
+const newestLabel = (t: TestSession): string => {
+  const e = t.session.history()[0];
+  if (e === undefined) throw new Error("no history");
+  return e.label;
+};
+
+describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
+  it("⋯ is absent in the empty state", async () => {
+    await showIndex(await emptyIndex());
+    expect(emptyState()).not.toBeNull();
+    expect(within(topBar()).queryByRole("button", { name: "Plan" })).toBeNull();
+  });
+
+  it("renames the plan from its name field", async () => {
+    const t = await planSheetMade();
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    openPlanSheet();
+    expect(nameField().value).toBe("MESA 1.0");
+    fireEvent.focus(nameField());
+    fireEvent.blur(nameField());
+    fireEvent.change(nameField(), { target: { value: " MESA 1.0 " } });
+    fireEvent.keyDown(nameField(), { key: "Enter" });
+    fireEvent.change(nameField(), { target: { value: "   " } });
+    fireEvent.blur(nameField());
+    expect(apply).not.toHaveBeenCalled();
+    expect(nameField().value).toBe("MESA 1.0");
+    expect(toastTexts()).toEqual([EMPTY_NAME]);
+    fireEvent.change(nameField(), { target: { value: "Roadmap 2" } });
+    fireEvent.keyDown(nameField(), { key: "Enter" });
+    expect(apply.mock.calls.map((c) => c[0])).toEqual([{ t: "planName", name: "Roadmap 2" }]);
+    expect(newestLabel(t)).toBe("Renamed the plan to “Roadmap 2”");
+    expect(topBar().querySelector(".phone-plan-name")?.textContent).toBe("Roadmap 2");
+    fireEvent.change(nameField(), { target: { value: "Roadmap 3" } });
+    fireEvent.blur(nameField());
+    expect(apply.mock.calls.map((c) => c[0])).toEqual([
+      { t: "planName", name: "Roadmap 2" },
+      { t: "planName", name: "Roadmap 3" },
+    ]);
+  });
+
+  it("history times", async () => {
+    const t = await planSheetMade();
+    const entries: HistoryEntry[] = [
+      { id: "x1", label: "Renamed “A” to “B”", device: "Mac", at: new Date(2026, 10, 9, 14, 5).getTime(), active: true, root: false },
+      { id: "x2", label: "Unscheduled “A”", device: "iPhone", at: new Date(2026, 10, 8, 9, 30).getTime(), active: true, root: false },
+    ];
+    vi.spyOn(t.session, "history").mockReturnValue(entries);
+    await shown(t);
+    openPlanSheet();
+    expect(historyRows().map((r) => r.querySelector(".hist-text")?.textContent)).toEqual(["14:05 · Mac · Renamed “A” to “B”", "8 Nov 09:30 · iPhone · Unscheduled “A”"]);
+  });
+
+  it("revert preview names the action first", async () => {
+    const t = await testSession([{ name: "Review", start: "2026-11-10", dur: 2 }]);
+    sessions.push(t.session);
+    const moved = t.session.apply({ t: "move", items: ["Review"], days: 2 });
+    const revert = vi.spyOn(t.session, "revert");
+    await shown(t);
+    openPlanSheet();
+    fireEvent.click(within(historyRow(moved.action.id)).getByRole("button", { name: "Revert this action" }));
+    expect(screen.queryByRole("dialog", { name: "Plan" })).toBeNull();
+    const lines = sheetLines("Revert this action");
+    expect(lines).toEqual(revertText(moved.action.lbl, t.session.previewRevert(moved.action.id)));
+    expect(lines[0]?.startsWith("Moved “Review” later by 2 working days")).toBe(true);
+    expect(lines.join("\n")).not.toContain("0 move later");
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Revert this action" })).getByRole("button", { name: "Apply" }));
+    expect(revert.mock.calls).toEqual([[moved.action.id]]);
+    const r = revert.mock.results[0];
+    if (r === undefined || r.type !== "return") throw new Error("revert did not return");
+    expect(toastTexts()).toContain(r.value.toast);
+    expect(planSheet()).toBeTruthy();
+  });
+
+  it("a revert that changes no dates, then brings it back", async () => {
+    const t = await testSession([{ name: "Review", start: "2026-11-10", dur: 2 }]);
+    sessions.push(t.session);
+    await shown(t);
+    openPlanSheet();
+    fireEvent.click(within(planSheet()).getByRole("button", { name: "Save baseline" }));
+    const saved = t.session.history()[0];
+    expect(saved.label).toBe("Saved baseline “Baseline 9 Nov 2026”");
+    fireEvent.click(within(historyRow(saved.id)).getByRole("button", { name: "Revert this action" }));
+    expect(sheetLines("Revert this action")).toEqual([saved.label, "No item dates change."]);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Revert this action" })).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(within(topBar()).getByRole("button", { name: "Undo" }));
+    expect(historyRow(saved.id).classList.contains("inactive")).toBe(true);
+    const revert = vi.spyOn(t.session, "revert");
+    fireEvent.click(within(historyRow(saved.id)).getByRole("button", { name: "Bring this action back" }));
+    expect(sheetLines("Bring this action back")).toEqual(revertText(saved.label, t.session.previewRevert(saved.id)));
+    expect(sheetLines("Bring this action back")).toEqual([saved.label, "No item dates change."]);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Bring this action back" })).getByRole("button", { name: "Apply" }));
+    expect(revert.mock.calls).toEqual([[saved.id]]);
+    expect(historyRow(saved.id).classList.contains("inactive")).toBe(false);
+    expect(within(historyRow(saved.id)).getByRole("button", { name: "Revert this action" })).toBeTruthy();
+  });
+
+  it("the first entry has no button", async () => {
+    const t = await planSheetMade();
+    await shown(t);
+    openPlanSheet();
+    const entries = t.session.history();
+    const root = entries.filter((e) => e.root);
+    expect(root).toHaveLength(1);
+    expect(within(historyRow(root[0].id)).queryAllByRole("button")).toEqual([]);
+    entries
+      .filter((e) => !e.root)
+      .forEach((e) => expect(within(historyRow(e.id)).getAllByRole("button").map((b) => b.textContent)).toEqual([e.active ? "Revert this action" : "Bring this action back"]));
+  });
+
+  it("reverting a side opens its choice", async () => {
+    const t = await testSession([{ name: "Review", start: "2026-11-10", dur: 2 }]);
+    sessions.push(t.session);
+    const peer = await t.peer("iphone");
+    sessions.push(peer.session);
+    const mine = t.session.apply({ t: "move", items: ["Review"], days: 1 });
+    peer.session.apply({ t: "move", items: ["Review"], days: 2 });
+    peer.sync();
+    const choice = t.session.view().choices.find((c) => c.units.includes("s:Review"));
+    if (choice === undefined) throw new Error("no s:Review choice");
+    const iphone = choice.sides.find((s) => s.label === "iPhone");
+    if (iphone === undefined) throw new Error("no iPhone side");
+    const revert = vi.spyOn(t.session, "revert");
+    const before = [...t.session.history()];
+    await shown(t);
+    openPlanSheet();
+    fireEvent.click(within(historyRow(mine.action.id)).getByRole("button", { name: "Revert this action" }));
+    expect(screen.queryByRole("dialog", { name: "Revert this action" })).toBeNull();
+    expect(lastUi().dialog).toEqual({ t: "choice", id: choice.id, side: iphone.key });
+    const sheet = screen.getByRole("dialog", { name: CHOICE_TITLE });
+    expect(within(sheet).getByRole("radio", { name: "iPhone" }).getAttribute("aria-checked")).toBe("true");
+    expect(revert).not.toHaveBeenCalled();
+    expect(t.session.history()).toEqual(before);
+  });
+
+  it("restores a trashed item", async () => {
+    const t = await planSheetMade();
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    openPlanSheet();
+    const row = planSheet().querySelector('[data-trashed="Old"]');
+    if (!(row instanceof HTMLElement)) throw new Error("no Old in the Trash");
+    expect(row.textContent).toContain("Old");
+    fireEvent.click(within(row).getByRole("button", { name: "Restore" }));
+    expect(apply.mock.calls.map((c) => c[0])).toEqual([{ t: "restore", items: ["Old"] }]);
+  });
+
+  it("shows the calendar summary and opens the calendar in a sheet", async () => {
+    const t = await planSheetMade();
+    await shown(t);
+    openPlanSheet();
+    expect(within(planSheet()).getByText(calendarSummary(t.session.view().plan.calendar))).toBeTruthy();
+    fireEvent.click(within(planSheet()).getByRole("button", { name: "Change calendar…" }));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Calendar"]);
+    expect(screen.getByRole("dialog", { name: "Calendar" }).querySelector(".cal-body")).not.toBeNull();
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Calendar" })).getByRole("button", { name: "Cancel" }));
+    expect(planSheet()).toBeTruthy();
+  });
+
+  it("exports and imports from File", async () => {
+    const t = await planSheetMade();
+    vi.mocked(exportFlow).mockResolvedValueOnce(undefined);
+    vi.mocked(importFlow).mockResolvedValueOnce(undefined);
+    const registry = await phoneRegistry(t);
+    registries.push(registry);
+    render(<PhoneShell registry={registry} clock={t.clock} />);
+    await settle();
+    openPlanSheet();
+    fireEvent.click(within(planSheet()).getByRole("button", { name: "Export plan…" }));
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[t.session]]);
+    fireEvent.click(within(planSheet()).getByRole("button", { name: "Import plan…" }));
+    expect(vi.mocked(importFlow).mock.calls).toHaveLength(1);
+    expect(vi.mocked(importFlow).mock.calls[0][0]).toBe(registry);
+    await settle();
+  });
+
+  it("about", async () => {
+    const t = await planSheetMade();
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    openPlanSheet();
+    fireEvent.click(within(planSheet()).getByRole("button", { name: "About WebBoard" }));
+    const about = screen.getByRole("dialog", { name: "About WebBoard" });
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(about.textContent).toContain(`WebBoard ${version}`);
+    expect(about.textContent).toContain(HOLIDAY_ATTRIBUTION);
+    expect(HOLIDAY_ATTRIBUTION).toBe("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.");
+    fireEvent.click(within(about).getAllByRole("button", { name: "Close" })[0]);
+    expect(lastUi().dialog).toBeNull();
+    expect(planSheet()).toBeTruthy();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("about from the empty state's Plans", async () => {
+    await showIndex(await emptyIndex());
+    openPlans();
+    fireEvent.click(within(plansSheet()).getByRole("button", { name: "About WebBoard" }));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["About WebBoard"]);
+    expect(screen.getByRole("dialog", { name: "About WebBoard" }).textContent).toContain(`WebBoard ${version}`);
+  });
+
+  it("an open plan's Plans has no About row", async () => {
+    const t = await planSheetMade();
+    await shown(t);
+    openPlans();
+    expect(within(plansSheet()).queryByRole("button", { name: "About WebBoard" })).toBeNull();
+  });
+
+  it("baselines on the phone", async () => {
+    const t = await testSession([{ name: "Review", start: "2026-11-10", dur: 2 }]);
+    sessions.push(t.session);
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    openPlanSheet();
+    const save = (): boolean => fireEvent.click(within(planSheet()).getByRole("button", { name: "Save baseline" }));
+    save();
+    expect(apply.mock.calls.map((c) => c[0])).toEqual([{ t: "baseline", op: "save", name: "Baseline 9 Nov 2026" }]);
+    expect(newestLabel(t)).toBe("Saved baseline “Baseline 9 Nov 2026”");
+    const [first] = [...t.session.view().plan.baselines.keys()];
+    const rowOfBaseline = (id: string): HTMLElement => {
+      const el = planSheet().querySelector(`[data-baseline="${id}"]`);
+      if (!(el instanceof HTMLElement)) throw new Error("no baseline row " + id);
+      return el;
+    };
+    expect(within(rowOfBaseline(first)).getByRole("textbox", { name: "Baseline name" })).toBeTruthy();
+    expect(within(rowOfBaseline(first)).getByRole("button", { name: "Show" })).toBeTruthy();
+    expect(within(rowOfBaseline(first)).getByRole("button", { name: "Remove" })).toBeTruthy();
+    act(() => {
+      t.session.apply({ t: "move", items: ["Review"], days: 3 });
+    });
+    const writes = apply.mock.calls.length;
+    fireEvent.click(within(rowOfBaseline(first)).getByRole("button", { name: "Show" }));
+    expect(lastUi().baseline).toBe(first);
+    expect(within(rowOfBaseline(first)).getByRole("button", { name: "Hide" })).toBeTruthy();
+    expect(apply.mock.calls.length).toBe(writes);
+    fireEvent.click(within(planSheet()).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    expect(document.querySelectorAll(".ghost")).toHaveLength(1);
+    expect([...document.querySelectorAll(".bar-label .meta")].map((e) => e.textContent)).toContain("+3d vs baseline");
+    openPlanSheet();
+    fireEvent.click(within(rowOfBaseline(first)).getByRole("button", { name: "Hide" }));
+    expect(lastUi().baseline).toBeNull();
+    expect(document.querySelectorAll(".ghost")).toHaveLength(0);
+    save();
+    const second = [...t.session.view().plan.baselines.keys()].find((k) => k !== first);
+    if (second === undefined) throw new Error("no second baseline");
+    fireEvent.click(within(rowOfBaseline(first)).getByRole("button", { name: "Show" }));
+    fireEvent.click(within(rowOfBaseline(second)).getByRole("button", { name: "Show" }));
+    expect(lastUi().baseline).toBe(second);
+    expect(within(rowOfBaseline(first)).getByRole("button", { name: "Show" })).toBeTruthy();
+    const firstName = (): HTMLElement => within(rowOfBaseline(first)).getByRole("textbox", { name: "Baseline name" });
+    apply.mockClear();
+    fireEvent.change(firstName(), { target: { value: "Baseline 9 Nov 2026" } });
+    fireEvent.blur(firstName());
+    expect(apply).not.toHaveBeenCalled();
+    fireEvent.change(firstName(), { target: { value: "Kickoff" } });
+    fireEvent.keyDown(firstName(), { key: "Enter" });
+    expect(apply.mock.calls.map((c) => c[0])).toEqual([{ t: "baseline", op: "rename", id: first, name: "Kickoff" }]);
+    expect(newestLabel(t)).toBe("Renamed baseline “Baseline 9 Nov 2026” to “Kickoff”");
+    fireEvent.click(within(rowOfBaseline(first)).getByRole("button", { name: "Remove" }));
+    expect(apply.mock.calls.map((c) => c[0])[1]).toEqual({ t: "baseline", op: "remove", id: first });
+    expect(newestLabel(t)).toBe("Removed baseline “Kickoff”");
+  });
+});
+
+describe("PhoneShell read-only plan sheet (Task 5.8 Step 3b)", () => {
+  it("read-only plan sheet", async () => {
+    const t = await planSheetMade();
+    t.session.apply({ t: "baseline", op: "save", name: "Before" });
+    t.session.apply({ t: "move", items: ["t3"], days: 1 });
+    t.session.undo();
+    const apply = vi.spyOn(t.session, "apply");
+    const revert = vi.spyOn(t.session, "revert");
+    const registry = await phoneRegistry(t);
+    registries.push(registry);
+    const restorePlan = vi.spyOn(registry, "restorePlan");
+    render(<PhoneShell registry={registry} clock={t.clock} />);
+    await settle();
+    openPlanSheet();
+    expect(within(planSheet()).getAllByRole("button", { name: "Bring this action back" }).length).toBeGreaterThan(0);
+    expect(within(planSheet()).getAllByRole("button", { name: "Revert this action" }).length).toBeGreaterThan(0);
+    act(() => t.session.setReadOnly(true));
+    const sheet = planSheet();
+    expect(sheet.querySelector("input")).toBeNull();
+    expect(within(sheet).getByLabelText("Plan name").textContent).toBe("MESA 1.0");
+    const old = sheet.querySelector('[data-trashed="Old"]');
+    if (!(old instanceof HTMLElement)) throw new Error("no Old in the Trash");
+    expect(within(old).queryByRole("button", { name: "Restore" })).toBeNull();
+    expect(within(sheet).queryByRole("button", { name: "Revert this action" })).toBeNull();
+    expect(within(sheet).queryByRole("button", { name: "Bring this action back" })).toBeNull();
+    const before = sheet.querySelector("[data-baseline]");
+    if (!(before instanceof HTMLElement)) throw new Error("no baseline row");
+    expect(within(before).getByLabelText("Baseline name").textContent).toBe("Before");
+    expect(within(before).getByRole("button", { name: "Show" })).toBeTruthy();
+    expect(within(sheet).queryByRole("button", { name: "Save baseline" })).toBeNull();
+    expect(within(sheet).queryByRole("button", { name: "Remove" })).toBeNull();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Change calendar…" }));
+    const calendar = screen.getByRole("dialog", { name: "Calendar" });
+    expect(within(calendar).queryByRole("button", { name: "Apply" })).toBeNull();
+    fireEvent.click(within(calendar).getByRole("button", { name: "Cancel" }));
+    expect(apply).not.toHaveBeenCalled();
+    expect(revert).not.toHaveBeenCalled();
+    expect(restorePlan).not.toHaveBeenCalled();
+    act(() => t.session.setReadOnly(false));
+    expect(nameField().value).toBe("MESA 1.0");
   });
 });

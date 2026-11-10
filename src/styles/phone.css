@@ -243,3 +243,130 @@
   font-family: var(--prose);
   font-size: 12.5px;
 }
+
+.phone-more {
+  min-width: 36px;
+  padding: 6px 10px;
+}
+
+.phone-status {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.status-strip {
+  display: flex;
+  align-items: baseline;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  text-align: left;
+  font-family: var(--prose);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+
+.status-strip .status-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-more {
+  flex-shrink: 0;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.status-strip.bad,
+.status-line.bad .status-text,
+.status-strip.magenta,
+.status-line.magenta .status-text {
+  color: var(--magenta);
+}
+
+.status-strip.bad {
+  background: var(--danger-bg);
+}
+
+.status-strip.cyan,
+.status-line.cyan .status-text {
+  color: var(--cyan);
+}
+
+.status-strip.amber,
+.status-line.amber .status-text,
+.status-strip.warn,
+.status-line.warn .status-text {
+  color: var(--amber);
+}
+
+.status-strip.note,
+.status-line.note .status-text {
+  color: var(--dim);
+}
+
+.status-lines,
+.status-choices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.status-line {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--prose);
+  font-size: 12.5px;
+}
+
+.status-detail {
+  color: var(--dim);
+}
+
+.status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-line .line-button {
+  text-align: left;
+  font-size: 12.5px;
+  background: none;
+  border-radius: 0;
+}
+
+.status-choices .choice-row {
+  min-height: 44px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.plan-sheet {
+  padding: 16px 20px 24px;
+}
+
+.calendar-sheet,
+.about-sheet,
+.revert-sheet {
+  padding: 18px 20px 24px;
+}
+
+.about-row {
+  min-height: 44px;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}

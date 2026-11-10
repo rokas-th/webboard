@@ -1,7 +1,7 @@
 import * as Y from "yjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InvokeArgs } from "@tauri-apps/api/core";
-import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, UNREADABLE_ID, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "../../scripts/layout-fixtures.mjs";
+import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, OUT_OF_RANGE, UNREADABLE_ID, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "../../scripts/layout-fixtures.mjs";
 import { normalizeName } from "../actions/build";
 import { LogState } from "../log/state";
 import type { Action, Cause, DeviceId } from "../log/types";
@@ -72,6 +72,7 @@ function answerOf(value: unknown): Answer {
       const arg = isRecord(args) ? args[value.__byArg] : undefined;
       const hit = value.map[String(arg)];
       if (hit === undefined) throw new Error(`fixture has no answer for ${value.__byArg} ${String(arg)}`);
+      if (isRecord(hit) && "__reject" in hit) throw structuredClone(hit.__reject);
       return structuredClone(hit);
     }
     return structuredClone(value);
@@ -187,6 +188,7 @@ describe("layout fixtures", () => {
       "mesa-linux",
       "phone-choice",
       "phone-plans",
+      "phone-status",
       "scale",
       "sync-dialog",
       "sync-receiving",
@@ -467,6 +469,31 @@ describe("layout fixtures", () => {
     const { session } = await opened(f, doc);
     expect(session.view().choices).toHaveLength(2);
     expect(session.view().held.size).toBe(0);
+  });
+
+  it("phone-status holds one early conflict on Build, holiday years through 2030, and an item in 2031 whose year is out of range", async () => {
+    const f = fixture("phone-status");
+    const doc = only(planDocs(f));
+    const d = decoded(f, doc);
+    expect(d.plan.name).toBe(LONG_NAMES[0]);
+    expect([...d.plan.calendar.holidays.keys()].sort()).toEqual([2026, 2027, 2028, 2029, 2030]);
+    expect(d.plan.items.get("C")?.schedule?.start).toBe("2031-03-04");
+    expect(d.cs).toEqual([]);
+    const year = answerOf(ipcOf(f, "holidays_year"));
+    const rejected = ((): unknown => {
+      try {
+        year({ region: d.plan.calendar.region, year: 2031, fresh: false });
+      } catch (e) {
+        return e;
+      }
+      throw new Error("holidays_year 2031 answered");
+    })();
+    expect(rejected).toEqual(OUT_OF_RANGE);
+    expect(OUT_OF_RANGE.code).toBe("holidays.out_of_range");
+    const { session } = await opened(f, doc);
+    const broken = session.view().derived.conflicts.filter((c) => c.kind !== "dayoff");
+    const first = only(broken);
+    expect(first.kind === "early" && first.succ).toBe("B");
   });
 
   it("opens every plan through the Registry with the fixture's answers, the plan names cached", async () => {

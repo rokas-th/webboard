@@ -4,6 +4,7 @@ import { OfferRefused } from "../../actions/undo";
 import type { ActionId } from "../../log/types";
 import { usePlanView, type HistoryEntry, type PlanSession } from "../../store/session";
 import { Dialog } from "../common/Dialog";
+import { Sheet } from "../common/Sheet";
 import { OpenChoice, useExec } from "../run";
 import { useUiValue } from "../state";
 import { historyTime, revertText } from "./historyText";
@@ -62,7 +63,7 @@ export function History(p: { session: PlanSession; readOnly: boolean }) {
 
 type Outlook = { k: "preview"; preview: Preview } | { k: "offer"; choice: string; side: string };
 
-export function RevertDialog(p: { session: PlanSession; id: ActionId; onClose(): void }) {
+export function RevertDialog(p: { session: PlanSession; id: ActionId; frame?: "dialog" | "sheet"; onClose(): void }) {
   const view = usePlanView(p.session);
   const exec = useExec(p.session);
   const open = useContext(OpenChoice);
@@ -83,8 +84,9 @@ export function RevertDialog(p: { session: PlanSession; id: ActionId; onClose():
   const apply = (): void => {
     if (exec(() => p.session.revert(p.id)) !== null) p.onClose();
   };
-  return (
-    <Dialog label={entry.active ? REVERT : BRING_BACK} onClose={p.onClose}>
+  const title = entry.active ? REVERT : BRING_BACK;
+  const body = (
+    <>
       <div className="revert-text">
         {revertText(entry.label, outlook.preview).map((line, i) => (
           <p key={i}>{line}</p>
@@ -98,6 +100,18 @@ export function RevertDialog(p: { session: PlanSession; id: ActionId; onClose():
           Apply
         </button>
       </div>
+    </>
+  );
+  if (p.frame === "sheet") {
+    return (
+      <Sheet open title={title} onClose={p.onClose}>
+        <div className="revert-sheet">{body}</div>
+      </Sheet>
+    );
+  }
+  return (
+    <Dialog label={title} onClose={p.onClose}>
+      {body}
     </Dialog>
   );
 }

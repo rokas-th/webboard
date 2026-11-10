@@ -549,3 +549,46 @@ describe("ItemSheet editing (Step 4)", () => {
     expect(button("Move down").hasAttribute("disabled")).toBe(true);
   });
 });
+
+describe("ItemSheet choices (Task 5.8 Step 2)", () => {
+  it("a delete clash opens from the item's banner", async () => {
+    const t = await made([
+      { id: "S4", name: "Sprint 4", kind: "group" },
+      { name: "Review", parent: "S4", start: "2026-11-10", dur: 2 },
+    ]);
+    const peer = await t.peer("iphone");
+    sessions.push(peer.session);
+    act(() => {
+      t.session.apply({ t: "trash", items: ["S4"] });
+      peer.session.apply({ t: "place", item: "Review", parent: null, after: null });
+      peer.sync();
+    });
+    const view = t.session.view();
+    expect(view.choices).toHaveLength(1);
+    const choice = view.choices[0];
+    expect(choice.kind).toBe("delete");
+    expect(choice.units.filter((u) => u.startsWith("s:"))).toEqual([]);
+    expect(view.held.size).toBe(0);
+    expect(view.plan.items.get("Review")?.place.parent).toBeNull();
+    setScreen(390, 844);
+    const registry = await phoneRegistry(t);
+    registries.push(registry);
+    render(<PhoneShell registry={registry} clock={t.clock} />);
+    await settle();
+    const list = document.querySelector(".phone-list");
+    if (!(list instanceof HTMLElement)) throw new Error("no phone list");
+    const row = within(list).getByText("Review").closest("button");
+    if (row === null) throw new Error("no Review row");
+    fireEvent.click(row);
+    const body = screen.getByRole("dialog", { name: "Review" }).querySelector(".isheet");
+    if (body === null) throw new Error("no item sheet body");
+    const first = body.firstElementChild;
+    if (!(first instanceof HTMLElement)) throw new Error("an empty item sheet");
+    expect(first.classList.contains("choice-banner")).toBe(true);
+    expect(first.querySelector(".banner-text")?.textContent).toBe(bannerText(choice, registry.device.name));
+    expect(bannerText(choice, "Mac")).toBe("Changed on Mac and iPhone. Choose which to keep.");
+    expect(body.querySelectorAll(".choice-banner")).toHaveLength(1);
+    fireEvent.click(within(first).getByRole("button", { name: "Choose" }));
+    expect(uiNow()[0].dialog).toEqual({ t: "choice", id: choice.id });
+  });
+});

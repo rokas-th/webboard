@@ -13,7 +13,10 @@ export const PLAN_IDS = {
   long: "planLong001",
   longRtl: "planLongRtl",
   phone: "planPhone01",
+  status: "planStatus1",
 };
+
+export const OUT_OF_RANGE = { code: "holidays.out_of_range", message: "OpenHolidays has CH holidays for 2020–2030, not 2031" };
 
 export const UNREADABLE_ID = "badIphone01";
 
@@ -416,6 +419,24 @@ function rtlLog() {
   return log;
 }
 
+const EMPTY_YEARS = [2028, 2029, 2030];
+
+const STATUS_ITEMS = [
+  T("A", "Design review", { start: "2026-11-16", dur: 3, horizon: "now" }),
+  T("B", "Build", { start: "2026-11-17", dur: 2, horizon: "now", deps: [fs("A")] }),
+  T("C", "Long-term support review", { start: "2031-03-04", dur: 2, horizon: "later" }),
+];
+
+function statusLog() {
+  const log = new Log("statS", START);
+  log.act({
+    lbl: `Created the plan ${q(LONG.plan)}`,
+    w: [...rootWrites(LONG.plan, ZH), ...EMPTY_YEARS.map((year) => own(`ch:${year}`, { region: ZH_KEY, year, days: [], fetchedAt: FETCHED_AT }))],
+  });
+  addItems(log, STATUS_ITEMS, new Set());
+  return log;
+}
+
 function blankLog() {
   const log = new Log("blank", START);
   log.act({ lbl: `Created the plan ${q("Blank plan")}`, w: rootWrites("Blank plan", ZH) });
@@ -432,6 +453,24 @@ function localIndex(plans, trashed) {
 }
 
 const yearAnswer = (year) => ({ days: HOLIDAYS[year].map((d) => ({ ...d })), fetchedAt: FETCHED_AT, fromCache: true, coverage: [2020, 2030] });
+
+const emptyYearAnswer = () => ({ days: [], fetchedAt: FETCHED_AT, fromCache: true, coverage: [2020, 2030] });
+
+const withStatusYears = (f) => ({
+  ...f,
+  ipc: {
+    ...f.ipc,
+    holidays_year: {
+      __byArg: "year",
+      map: {
+        2026: yearAnswer(2026),
+        2027: yearAnswer(2027),
+        ...Object.fromEntries(EMPTY_YEARS.map((y) => [y, emptyYearAnswer()])),
+        2031: { __reject: { ...OUT_OF_RANGE } },
+      },
+    },
+  },
+});
 
 const COUNTRIES = [
   { code: "AT", name: "Austria", src: "openholidays" },
@@ -530,6 +569,7 @@ export function buildFixtures() {
     unreadable,
     "two-choices": fixtureOf([mesa(twoChoicesLog())]),
     "phone-choice": fixtureOf([{ id: PLAN_IDS.phone, name: "Sprint plan", log: phoneChoiceLog() }]),
+    "phone-status": withStatusYears(fixtureOf([{ id: PLAN_IDS.status, name: LONG.plan, log: statusLog() }])),
     "phone-plans": fixtureOf(
       [mesa(mesaLog("mesaP")), { id: PLAN_IDS.long, name: LONG.plan, log: longLog() }, { id: PLAN_IDS.blank, name: "Blank plan", log: blankLog() }],
       { trashed: [PLAN_IDS.blank] },

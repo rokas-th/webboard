@@ -8,7 +8,7 @@ import { usePlanView, type PlanSession } from "../../store/session";
 import { CalendarDialog, type CalendarReview } from "../calendar/CalendarDialog";
 import { useUiValue } from "../state";
 
-const LABELS: Readonly<Record<"load" | "retry" | "review" | "calendar", string>> = {
+export const NOTICE_LABELS: Readonly<Record<"load" | "retry" | "review" | "calendar", string>> = {
   load: "Load",
   retry: "Try again",
   review: "Review",
@@ -17,7 +17,7 @@ const LABELS: Readonly<Record<"load" | "retry" | "review" | "calendar", string>>
 
 const withBase = (i: Intent): i is { t: "calendar"; next: Calendar; base: Calendar } => i.t === "calendar" && i.base !== undefined;
 
-function reviewOf(n: HolidayNotice): CalendarReview {
+export function reviewOf(n: HolidayNotice): CalendarReview {
   if (n.k !== "ready" && n.k !== "changed") throw new Error(`A ${n.k} notice for ${n.year} has nothing to review`);
   if (!withBase(n.intent)) throw new Error("A review notice needs a calendar intent with base");
   return { year: n.year, intent: n.intent };
@@ -59,7 +59,7 @@ export function HolidayState(p: { session: PlanSession; registry: Registry; cloc
             <span className="notice-text">{t.text}</span>
             {t.action !== null && (
               <button type="button" className="line-button" onClick={() => act(n)}>
-                {LABELS[t.action]}
+                {NOTICE_LABELS[t.action]}
               </button>
             )}
             {t.detail !== null && <span className="notice-detail">{t.detail}</span>}
