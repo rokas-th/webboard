@@ -100,25 +100,30 @@ fn export_name(plan: &str) -> Result<String> {
 }
 
 #[cfg(any(desktop, test))]
-fn with_extension(path: PathBuf) -> PathBuf {
-    let trimmed = match path
+fn with_extension(path: PathBuf) -> Result<PathBuf> {
+    let stem = path
         .file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| n.trim_end_matches('.'))
-    {
-        Some(stem) if !stem.is_empty() => path.with_file_name(stem),
-        _ => path,
-    };
+        .map(|n| {
+            n.to_str()
+                .map(|n| n.trim_end_matches('.').to_string())
+                .ok_or_else(|| io("The chosen file name is not UTF-8."))
+        })
+        .transpose()?
+        .unwrap_or_default();
+    if stem.is_empty() {
+        return Err(io("The chosen file name has no name before the extension."));
+    }
+    let trimmed = path.with_file_name(&stem);
     let has = trimmed
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION));
     if has {
-        return trimmed;
+        return Ok(trimmed);
     }
     let mut text = trimmed.into_os_string();
     text.push(format!(".{EXTENSION}"));
-    PathBuf::from(text)
+    Ok(PathBuf::from(text))
 }
 
 #[cfg(any(desktop, test))]
@@ -153,7 +158,7 @@ fn export_with(
         return Ok(None);
     };
     let picked = picked_path(picked)?;
-    let path = with_extension(picked.clone());
+    let path = with_extension(picked.clone())?;
     let file = utf8_name(&path)?;
     let taken = path != picked
         && path
@@ -749,11 +754,44 @@ mod tests {
         .iter()
         .for_each(|(picked, written)| {
             assert_eq!(
-                with_extension(PathBuf::from(picked)),
+                with_extension(PathBuf::from(picked)).unwrap(),
                 PathBuf::from(written),
                 "{picked}"
             )
         });
+    }
+
+    #[test]
+    fn a_name_of_only_dots_is_refused() {
+        ["/x/...", "/x/.....", "/x/.."].iter().for_each(|picked| {
+            assert_eq!(
+                with_extension(PathBuf::from(picked)).unwrap_err(),
+                CommandError::new(
+                    "file.io",
+                    "The chosen file name has no name before the extension."
+                ),
+                "{picked}"
+            )
+        });
+    }
+
+    #[test]
+    fn export_refuses_a_picked_name_of_only_dots_and_writes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let answer = export_with(
+            "Bridge.webboard",
+            b"WBX1 plan",
+            |_| Some(in_dir(tmp.path(), "...")),
+            never_asked,
+        );
+        assert_eq!(
+            answer.unwrap_err(),
+            CommandError::new(
+                "file.io",
+                "The chosen file name has no name before the extension."
+            )
+        );
+        assert!(names(tmp.path()).is_empty());
     }
 
     #[test]
