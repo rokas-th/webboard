@@ -5,14 +5,15 @@ import type { ItemId, LinkType } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { EMPTY_PLAN } from "../copy";
-import { useRun } from "../run";
+import { useExec, useRun } from "../run";
 import { useUiValue } from "../state";
-import { Chart, itemOf, type DropGhost, type TempLink } from "./Chart";
+import { Chart, itemOf, type DropGhost, type Point, type TempLink, type TouchHost } from "./Chart";
 import { geometry, LEAD, ROW, type Geometry } from "./geometry";
 import { gestureIntent, isClick, startIntent } from "./gesture";
 import { Grid, type Marks, type Placed } from "./Grid";
 import { timelineRows, visibleRange } from "./rows";
 import { Scale } from "./Scale";
+import type { Handle } from "./touch";
 
 type Mode = "move" | "resize" | "start" | "link" | "select" | "blank";
 
@@ -43,10 +44,11 @@ const marksOf = (view: PlanView): Marks => {
 
 const isEmptyPlan = (view: PlanView, rows: number): boolean => rows === 0 && [...view.plan.items.values()].every((i) => i.trashed);
 
-function intentOf(geo: Geometry, d: Drag, dxPx: number): Intent | null {
-  if (d.item === null) return null;
-  if (d.mode === "move" || d.mode === "resize") return gestureIntent(geo, { kind: d.mode, item: d.item, dxPx });
-  if (d.mode === "start") return startIntent(geo, d.item, dxPx);
+const MODE: Readonly<Record<Handle, Mode>> = { body: "move", end: "resize", start: "start", link: "link" };
+
+function intentOf(geo: Geometry, mode: Mode, item: ItemId, dxPx: number): Intent | null {
+  if (mode === "move" || mode === "resize") return gestureIntent(geo, { kind: mode, item, dxPx });
+  if (mode === "start") return startIntent(geo, item, dxPx);
   return null;
 }
 
@@ -69,6 +71,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   const view = usePlanView(p.session);
   const { ui, setUi } = useUiValue();
   const { run } = useRun(p.session);
+  const exec = useExec(p.session);
   const geo = useMemo(() => geometry(view, ui.zoom), [view, ui.zoom]);
   const rows = useMemo(() => timelineRows(view, ui.collapsed), [view, ui.collapsed]);
   const marks = useMemo(() => marksOf(view), [view]);
@@ -150,7 +153,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    if (e.button !== 0 || !(e.target instanceof Element)) return;
+    if (e.pointerType === "touch" || e.button !== 0 || !(e.target instanceof Element)) return;
     const down = { x: e.clientX, y: e.clientY };
     const nub = e.target.closest("[data-nub]");
     const bar = e.target.closest("[data-bar]");
@@ -183,34 +186,60 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     return label;
   };
 
-  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    const d = drag.current;
-    if (d === null || d.item === null || d.mode === "select" || d.mode === "blank") return;
-    const index = indexOf(d.item);
+  const show = (item: ItemId, mode: Mode, dx: number, from: Point, at: Point, lifted: boolean): void => {
+    const index = indexOf(item);
     if (index < 0) {
       cancel();
       return;
     }
-    if (d.mode === "link") {
-      const pt = chartPoint(e);
-      setTemp({ x0: d.from.x, y0: d.from.y, x1: pt.x, y1: pt.y });
+    if (mode === "link") {
+      setTemp({ x0: from.x, y0: from.y, x1: at.x, y1: at.y });
       return;
     }
-    const dx = e.clientX - d.down.x;
-    setDragging(Math.abs(dx) >= 4 ? d.item : null);
-    const intent = intentOf(geo, d, dx);
+    setDragging(lifted || Math.abs(dx) >= 4 ? item : null);
+    const intent = intentOf(geo, mode, item, dx);
     if (intent === null) {
       setGhost(null);
       return;
     }
-    const span = landing(geo, view, d.item, intent);
-    const milestone = itemOf(view, d.item).kind === "milestone";
+    const span = landing(geo, view, item, intent);
+    const milestone = itemOf(view, item).kind === "milestone";
     const left = milestone ? geo.x(span.start) + geo.ppd / 2 - 7 : geo.x(span.start);
     const width = milestone ? 14 : geo.x(span.end) - geo.x(span.start) + geo.ppd;
-    setGhost({ item: d.item, left, width, top: index * ROW + 8, label: previewLabel(intent) });
+    setGhost({ item, left, width, top: index * ROW + 8, label: previewLabel(intent) });
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    const d = drag.current;
+    if (d === null || d.item === null || d.mode === "select" || d.mode === "blank") return;
+    show(d.item, d.mode, e.clientX - d.down.x, d.from, chartPoint(e), false);
+  };
+
+  const touch: TouchHost = {
+    pick: (item) => {
+      if (indexOf(item) >= 0) setDragging(item);
+    },
+    drag: (item, handle, dx, from, at) => show(item, MODE[handle], dx, from, at, true),
+    drop: (item, handle, dx, target) => {
+      cancel();
+      if (indexOf(item) < 0) return;
+      if (handle === "link") {
+        const intent = gestureIntent(geo, { kind: "link", item, dxPx: dx, target: target ?? undefined });
+        if (intent !== null)
+          exec(() => {
+            p.session.preview(intent);
+            return p.session.apply(intent);
+          });
+        return;
+      }
+      const intent = intentOf(geo, MODE[handle], item, dx);
+      if (intent !== null) run(intent);
+    },
+    clear: cancel,
   };
 
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (e.pointerType === "touch") return;
     const d = drag.current;
     cancel();
     if (d === null) return;
@@ -234,7 +263,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
       setUi({ selected: d.item });
       return;
     }
-    const intent = intentOf(geo, d, up.x - d.down.x);
+    const intent = intentOf(geo, d.mode, d.item, up.x - d.down.x);
     if (intent !== null) run(intent);
   };
 
@@ -246,7 +275,9 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={cancel}
+      onPointerCancel={(e) => {
+        if (e.pointerType !== "touch") cancel();
+      }}
     >
       {empty ? (
         <p className="tl-empty">{EMPTY_PLAN}</p>
@@ -268,6 +299,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
               dragging={dragging}
               ghost={ghost}
               temp={temp}
+              touch={touch}
             />
           </div>
         </div>

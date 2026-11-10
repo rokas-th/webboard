@@ -1,4 +1,4 @@
-import { memo, useEffect, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { q, workingDays } from "../../actions/copy";
 import { fmtShort, toDay, toIso, type Day } from "../../domain/dates";
 import { linkKey, type Item, type ItemId } from "../../domain/model";
@@ -10,6 +10,23 @@ import type { Marks, Placed } from "./Grid";
 import { linkPath, type End } from "./linkPath";
 import { dayLabel } from "./dayText";
 import { EARLY } from "./earlyText";
+import { TouchGesture, type GestureEvent, type Handle, type Sample } from "./touch";
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface TouchHost {
+  pick(item: ItemId): void;
+  drag(item: ItemId, handle: Handle, dx: number, from: Point, at: Point): void;
+  drop(item: ItemId, handle: Handle, dx: number, target: ItemId | null): void;
+  clear(): void;
+}
+
+const HIT_PX = 44;
+const HANDLE_INSIDE_PX = 14;
+const ZOOM_ORDER: readonly Zoom[] = ["Q", "M", "W"];
 
 export interface DropGhost {
   item: ItemId;
@@ -66,6 +83,151 @@ interface ChartProps {
   dragging: ItemId | null;
   ghost: DropGhost | null;
   temp: TempLink | null;
+  touch: TouchHost;
+}
+
+const rowAt = (mounted: readonly Placed[], y: number): Placed | null => {
+  const index = Math.floor(y / ROW);
+  const m = mounted.find((r) => r.index === index);
+  return m === undefined || (m.row.kind !== "task" && m.row.kind !== "milestone") ? null : m;
+};
+
+function zoneOf(geo: Geometry, kind: "task" | "milestone", id: ItemId, x: number): Handle | null {
+  const span = spanOf(geo, id);
+  if (kind === "milestone") return Math.abs(x - (geo.x(span.start) + geo.ppd / 2)) < HIT_PX / 2 ? "body" : null;
+  const x0 = geo.x(span.start);
+  const x1 = geo.x(span.end) + geo.ppd;
+  const inside = Math.min(HANDLE_INSIDE_PX, Math.floor((x1 - x0) / 4));
+  const outside = HIT_PX - inside;
+  if (x >= x0 - outside && x < x0 + inside) return "start";
+  if (x >= x1 - inside && x < x1 + outside) return "end";
+  if (x >= x0 + inside && x < x1 - inside) return "body";
+  return null;
+}
+
+function touchHit(mounted: readonly Placed[], geo: Geometry, target: EventTarget, at: Point): { item: ItemId; handle: Handle } | null {
+  if (!(target instanceof Element)) return null;
+  const nub = target.closest("[data-nub]");
+  if (nub instanceof HTMLElement && nub.dataset.nub !== undefined) return { item: nub.dataset.nub, handle: "link" };
+  const row = rowAt(mounted, at.y);
+  if (row !== null) {
+    const kind = row.row.kind === "milestone" ? "milestone" : "task";
+    const zone = zoneOf(geo, kind, row.row.id, at.x);
+    if (zone !== null) return { item: row.row.id, handle: zone };
+  }
+  const bar = target.closest("[data-bar]");
+  return bar instanceof HTMLElement && bar.dataset.bar !== undefined ? { item: bar.dataset.bar, handle: "body" } : null;
+}
+
+const zoomed = (zoom: Zoom, step: 1 | -1): Zoom => ZOOM_ORDER[Math.min(ZOOM_ORDER.length - 1, Math.max(0, ZOOM_ORDER.indexOf(zoom) + step))];
+
+const timer = (ms: number, fn: () => void): (() => void) => {
+  const id = setTimeout(fn, ms);
+  return () => clearTimeout(id);
+};
+
+function useTouch(p: ChartProps): {
+  root: RefObject<HTMLDivElement | null>;
+  handlers: {
+    onPointerDown(e: ReactPointerEvent<HTMLDivElement>): void;
+    onPointerMove(e: ReactPointerEvent<HTMLDivElement>): void;
+    onPointerUp(e: ReactPointerEvent<HTMLDivElement>): void;
+    onPointerCancel(e: ReactPointerEvent<HTMLDivElement>): void;
+  };
+} {
+  const root = useRef<HTMLDivElement>(null);
+  const picked = useRef(false);
+  const downs = useRef(new Map<number, Point>());
+  const last = useRef<{ from: Point; at: Point } | null>(null);
+  const handle = useRef<(events: readonly GestureEvent[]) => void>(() => undefined);
+  const allowPickup = !p.readOnly;
+  const gesture = useMemo(() => new TouchGesture({ allowPickup, schedule: timer, emit: (events) => handle.current(events) }), [allowPickup]);
+  const { setUi, zoom, touch } = p;
+
+  handle.current = (events) =>
+    events.forEach((ev) => {
+      if (ev.k === "tap") setUi({ selected: ev.item });
+      else if (ev.k === "pickup") {
+        picked.current = true;
+        touch.pick(ev.item);
+      } else if (ev.k === "drag") {
+        const l = last.current;
+        if (l === null) throw new Error("Timeline: a touch drag with no position");
+        touch.drag(ev.item, ev.handle, ev.dx, l.from, l.at);
+      } else if (ev.k === "drop") {
+        picked.current = false;
+        touch.drop(ev.item, ev.handle, ev.dx, ev.target);
+      } else if (ev.k === "cancel") {
+        picked.current = false;
+        touch.clear();
+      } else {
+        const next = zoomed(zoom, ev.step);
+        if (next !== zoom) setUi({ zoom: next });
+      }
+    });
+
+  useEffect(() => {
+    const el = root.current;
+    if (el === null) throw new Error("Timeline: no chart");
+    const onTouchMove = (e: TouchEvent): void => {
+      if (picked.current) e.preventDefault();
+    };
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => el.removeEventListener("touchmove", onTouchMove);
+  }, []);
+
+  useEffect(() => {
+    const live = downs.current;
+    return () => {
+      const events = [...live.keys()].flatMap((id) => gesture.cancel(id));
+      live.clear();
+      last.current = null;
+      handle.current(events);
+    };
+  }, [gesture]);
+
+  const pointOf = (e: ReactPointerEvent<HTMLDivElement>): Point => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  const sample = (e: ReactPointerEvent<HTMLDivElement>, at: Point): Sample => ({ pointer: e.pointerId, x: at.x, y: at.y, t: e.timeStamp });
+  const overOf = (at: Point): ItemId | null => rowAt(p.mounted, at.y)?.row.id ?? null;
+  const ended = (pointer: number): void => {
+    downs.current.delete(pointer);
+    if (downs.current.size === 0) last.current = null;
+  };
+
+  return {
+    root,
+    handlers: {
+      onPointerDown: (e) => {
+        if (e.pointerType !== "touch") return;
+        const at = pointOf(e);
+        downs.current.set(e.pointerId, at);
+        handle.current(gesture.down(sample(e, at), touchHit(p.mounted, p.geo, e.target, at)));
+      },
+      onPointerMove: (e) => {
+        const from = downs.current.get(e.pointerId);
+        if (e.pointerType !== "touch" || from === undefined) return;
+        const at = pointOf(e);
+        last.current = { from, at };
+        handle.current(gesture.move(sample(e, at), overOf(at)));
+      },
+      onPointerUp: (e) => {
+        if (e.pointerType !== "touch") return;
+        const at = pointOf(e);
+        const events = gesture.up(sample(e, at), overOf(at));
+        ended(e.pointerId);
+        handle.current(events);
+      },
+      onPointerCancel: (e) => {
+        if (e.pointerType !== "touch") return;
+        const events = gesture.cancel(e.pointerId);
+        ended(e.pointerId);
+        handle.current(events);
+      },
+    },
+  };
 }
 
 const Shading = memo(function Shading(p: { geo: Geometry; zoom: Zoom }) {
@@ -241,8 +403,9 @@ export function Chart(p: ChartProps) {
   const slip = baseline === undefined ? null : view.derived.slip(baseline.id);
   const today = toDay(view.today);
   const live = p.mounted.filter((m) => m.row.kind === "task" || m.row.kind === "milestone");
+  const { root, handlers } = useTouch(p);
   return (
-    <div className="tl-chart" style={{ width: geo.width, height }}>
+    <div className="tl-chart" ref={root} style={{ width: geo.width, height }} {...handlers}>
       <Shading geo={geo} zoom={p.zoom} />
       {p.mounted.map((m) => (
         <div key={m.row.id} className={p.ui.selected === m.row.id ? "tl-rowline selected" : "tl-rowline"} style={{ top: m.index * ROW }} />

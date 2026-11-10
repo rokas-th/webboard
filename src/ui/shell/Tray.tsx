@@ -11,6 +11,7 @@ import { isClick } from "../timeline/gesture";
 interface ChipDrag {
   id: ItemId;
   down: { x: number; y: number };
+  touch: boolean;
 }
 
 export function Tray(p: { session: PlanSession; readOnly: boolean }) {
@@ -29,15 +30,17 @@ export function Tray(p: { session: PlanSession; readOnly: boolean }) {
   };
 
   const onDown = (e: ReactPointerEvent<HTMLSpanElement>, id: ItemId): void => {
-    if (e.button !== 0 || e.pointerType === "touch") return;
+    if (e.button !== 0) return;
+    const touch = e.pointerType === "touch";
+    drag.current = { id, down: { x: e.clientX, y: e.clientY }, touch };
+    if (touch) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = { id, down: { x: e.clientX, y: e.clientY } };
   };
 
   const onMove = (e: ReactPointerEvent<HTMLSpanElement>, name: string): void => {
     const d = drag.current;
-    if (d === null || p.readOnly || isClick(d.down, { x: e.clientX, y: e.clientY })) return;
+    if (d === null || d.touch || p.readOnly || isClick(d.down, { x: e.clientX, y: e.clientY })) return;
     setFloating({ name, x: e.clientX + 12, y: e.clientY + 10 });
   };
 
@@ -54,7 +57,7 @@ export function Tray(p: { session: PlanSession; readOnly: boolean }) {
       setUi({ selected: d.id });
       return;
     }
-    if (p.readOnly) return;
+    if (d.touch || p.readOnly) return;
     const hit = document.elementFromPoint(e.clientX, e.clientY);
     const chart = hit === null ? null : hit.closest(".tl-chart");
     if (chart === null) return;

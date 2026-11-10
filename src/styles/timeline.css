@@ -225,6 +225,7 @@
 .tl-chart {
   position: relative;
   flex-shrink: 0;
+  touch-action: pan-x pan-y;
 }
 
 .tl-rowline {
@@ -320,7 +321,10 @@
   background: rgba(36, 224, 255, 0.1);
   cursor: grab;
   z-index: 3;
-  touch-action: none;
+  touch-action: pan-x pan-y;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   transition: box-shadow 0.12s ease-out, border-color 0.12s ease-out;
 }
 
@@ -392,6 +396,10 @@
   bottom: -1px;
   width: 7px;
   cursor: ew-resize;
+  touch-action: pan-x pan-y;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .bar .h.l {
@@ -414,6 +422,10 @@
   cursor: crosshair;
   opacity: 0;
   z-index: 4;
+  touch-action: pan-x pan-y;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   transition: opacity 0.12s ease-out;
 }
 
@@ -491,7 +503,10 @@
   margin-left: -7px;
   z-index: 3;
   cursor: grab;
-  touch-action: none;
+  touch-action: pan-x pan-y;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .ms::before {
@@ -535,6 +550,31 @@
 
 .ms .nub {
   right: -14px;
+}
+
+@media (pointer: coarse) {
+  .nub {
+    pointer-events: none;
+  }
+
+  .nub::after {
+    content: "";
+    position: absolute;
+    inset: -19px;
+  }
+
+  .bar.selected .nub,
+  .ms.selected .nub {
+    pointer-events: auto;
+  }
+
+  .bar .nub {
+    right: -70px;
+  }
+
+  .ms .nub {
+    right: -42px;
+  }
 }
 
 .ghost {

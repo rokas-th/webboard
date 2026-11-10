@@ -3,11 +3,13 @@ import { beforeEach, vi } from "vitest";
 class TestPointerEvent extends MouseEvent {
   readonly pointerId: number;
   readonly pointerType: string;
+  readonly isPrimary: boolean;
 
   constructor(type: string, init: PointerEventInit = {}) {
     super(type, init);
     this.pointerId = init.pointerId ?? 1;
     this.pointerType = init.pointerType ?? "mouse";
+    this.isPrimary = init.isPrimary ?? true;
   }
 }
 
@@ -19,11 +21,21 @@ class TestResizeObserver {
 
 if (window.PointerEvent === undefined) Object.defineProperty(window, "PointerEvent", { configurable: true, writable: true, value: TestPointerEvent });
 if (window.ResizeObserver === undefined) Object.defineProperty(window, "ResizeObserver", { configurable: true, writable: true, value: TestResizeObserver });
+const captured = new WeakMap<Element, Set<number>>();
+const capturedBy = (el: Element): Set<number> => {
+  const ids = captured.get(el) ?? new Set<number>();
+  captured.set(el, ids);
+  return ids;
+};
 if (Element.prototype.setPointerCapture === undefined) {
-  Element.prototype.setPointerCapture = function setPointerCapture(): void {};
-  Element.prototype.releasePointerCapture = function releasePointerCapture(): void {};
-  Element.prototype.hasPointerCapture = function hasPointerCapture(): boolean {
-    return false;
+  Element.prototype.setPointerCapture = function setPointerCapture(this: Element, id: number): void {
+    capturedBy(this).add(id);
+  };
+  Element.prototype.releasePointerCapture = function releasePointerCapture(this: Element, id: number): void {
+    capturedBy(this).delete(id);
+  };
+  Element.prototype.hasPointerCapture = function hasPointerCapture(this: Element, id: number): boolean {
+    return capturedBy(this).has(id);
   };
 }
 const scrollIntoView = vi.fn<(this: Element, arg?: boolean | ScrollIntoViewOptions) => void>();

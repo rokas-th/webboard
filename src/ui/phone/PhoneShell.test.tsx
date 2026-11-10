@@ -49,6 +49,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   cleanup();
   clearToasts();
   vi.restoreAllMocks();
@@ -159,6 +160,50 @@ describe('PhoneShell, data-form="phone"', () => {
     fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "Probe choice" }));
     expect(lastUi().dialog).toEqual({ t: "choice", id: "c1", side: "a2" });
+  });
+
+  it("the read-only Timeline zooms by pinch, and a hold opens the item's sheet", async () => {
+    const t = await made();
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    const setUi = (): ((patch: { zoom: "M" }) => void) => {
+      const results = vi.mocked(useUi).mock.results;
+      const r = results[results.length - 1];
+      if (r === undefined || r.type !== "return") throw new Error("useUi has not returned");
+      return r.value[1];
+    };
+    act(() => setUi()({ zoom: "M" }));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const chart = document.querySelector(".tl-chart");
+    if (chart === null) throw new Error("no chart");
+    const fire = (el: Element, kind: "down" | "move" | "up", x: number, y: number, pointerId: number): void => {
+      const init = { clientX: x, clientY: y, button: 0, pointerId, pointerType: "touch", isPrimary: pointerId === 1 };
+      act(() => {
+        if (kind === "down") fireEvent.pointerDown(el, init);
+        else if (kind === "move") fireEvent.pointerMove(el, init);
+        else fireEvent.pointerUp(el, init);
+      });
+    };
+    fire(chart, "down", 0, 400, 1);
+    fire(chart, "down", 100, 400, 2);
+    fire(chart, "move", 160, 400, 2);
+    fire(chart, "up", 160, 400, 2);
+    fire(chart, "up", 0, 400, 1);
+    expect(lastUi().zoom).toBe("W");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const bar = document.querySelector('[data-bar="Review"]');
+    if (!(bar instanceof HTMLElement)) throw new Error("no Review bar");
+    const x = parseFloat(bar.style.left) + 20;
+    const y = parseFloat(bar.style.top) + 9;
+    fire(bar, "down", x, y, 1);
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    expect(document.querySelector(".drop-ghost")).toBeNull();
+    fire(bar, "up", x + 1, y, 1);
+    expect(screen.getByRole("dialog", { name: "Review" })).toBeTruthy();
+    expect(apply).toHaveBeenCalledTimes(0);
   });
 
   it("Shell renders the phone shell under phone, with no update line", async () => {
