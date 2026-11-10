@@ -152,12 +152,31 @@ fn listed(list: &[(String, String)], country: &str) -> bool {
     list.iter().any(|(code, _)| code == country)
 }
 
+enum Read {
+    Days(Vec<HolidayDay>),
+    Unlisted(String),
+}
+
+impl Read {
+    fn days(self) -> Result<Vec<HolidayDay>> {
+        match self {
+            Read::Days(days) => Ok(days),
+            Read::Unlisted(code) => Err(CommandError::new(
+                "holidays.parse",
+                format!(
+                    "OpenHolidays lists a holiday for {code}, which its subdivision list does not hold."
+                ),
+            )),
+        }
+    }
+}
+
 fn days_of(
     rows: Vec<Row>,
     subdivision: Option<&str>,
     scopes: &HashMap<String, String>,
     year: i32,
-) -> Result<Vec<HolidayDay>> {
+) -> Result<Read> {
     let nested = subdivision.map(|s| format!("{s}-"));
     let kept = rows
         .into_iter()
@@ -186,19 +205,14 @@ fn days_of(
             }
             (false, _, _) => continue,
         };
-        let labels = scope_codes
+        let labels = match scope_codes
             .iter()
-            .map(|code| {
-                scopes.get(*code).cloned().ok_or_else(|| {
-                    CommandError::new(
-                        "holidays.parse",
-                        format!(
-                            "OpenHolidays lists a holiday for {code}, which its subdivision list does not hold."
-                        ),
-                    )
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+            .map(|code| scopes.get(*code).ok_or(*code))
+            .collect::<std::result::Result<Vec<_>, &str>>()
+        {
+            Ok(labels) => labels,
+            Err(code) => return Ok(Read::Unlisted(code.to_string())),
+        };
         let scope = (!labels.is_empty()).then(|| {
             labels
                 .iter()
@@ -240,7 +254,7 @@ fn days_of(
         );
     }
     days.sort_by(|a, b| a.date.cmp(&b.date));
-    Ok(days)
+    Ok(Read::Days(days))
 }
 
 impl Holidays {
@@ -303,15 +317,15 @@ impl Holidays {
         Ok(self.oh_tree(country, false).await?.0.list)
     }
 
-    async fn require_subdivision(&self, country: &str, code: &str) -> Result<Tree> {
+    async fn require_subdivision(&self, country: &str, code: &str) -> Result<(Tree, bool)> {
         let (tree, from_cache) = self.oh_tree(country, false).await?;
         if find(&tree.list, code).is_some() {
-            return Ok(tree);
+            return Ok((tree, from_cache));
         }
         if from_cache {
             let again = self.oh_tree(country, true).await?.0;
             if find(&again.list, code).is_some() {
-                return Ok(again);
+                return Ok((again, false));
             }
         }
         Err(unsupported(format!("OpenHolidays does not list {code}.")))
@@ -365,9 +379,12 @@ impl Holidays {
         fresh: bool,
     ) -> Result<YearOut> {
         self.require_country(country).await?;
-        let scopes = match subdivision {
-            Some(code) => self.require_subdivision(country, code).await?.scopes,
-            None => HashMap::new(),
+        let (scopes, tree_cached) = match subdivision {
+            Some(code) => {
+                let (tree, from_cache) = self.require_subdivision(country, code).await?;
+                (tree.scopes, from_cache)
+            }
+            None => (HashMap::new(), false),
         };
         let coverage = self.oh_coverage(country, year).await?;
         let region = subdivision.unwrap_or(country);
@@ -387,20 +404,31 @@ impl Holidays {
             url: &url,
             query: &query,
         };
-        let (days, meta) = self
-            .load(&req, fresh, |text| {
-                let days = days_of(parse("holidays", text)?, subdivision, &scopes, year)?;
-                if days.is_empty() {
-                    return Err(CommandError::new(
-                        "holidays.parse",
-                        format!(
-                            "OpenHolidays returned no days for {region} {year} although it lists that region and year."
-                        ),
-                    ));
-                }
-                Ok(days)
-            })
-            .await?;
+        let read = |text: &str, scopes: &HashMap<String, String>| -> Result<Read> {
+            match days_of(parse("holidays", text)?, subdivision, scopes, year)? {
+                Read::Days(days) if days.is_empty() => Err(CommandError::new(
+                    "holidays.parse",
+                    format!(
+                        "OpenHolidays returned no days for {region} {year} although it lists that region and year."
+                    ),
+                )),
+                read => Ok(read),
+            }
+        };
+        let (days, meta) = match self.cached(&req, fresh, |text| read(text, &scopes)?.days())? {
+            Some(hit) => hit,
+            None => {
+                let body = self.get(&url, &query).await?;
+                let days = match read(&body, &scopes)? {
+                    Read::Unlisted(_) if tree_cached => {
+                        let tree = self.oh_tree(country, true).await?.0;
+                        read(&body, &tree.scopes)?.days()?
+                    }
+                    first => first.days()?,
+                };
+                self.store(&req, body, days)?
+            }
+        };
         Ok(YearOut {
             days,
             fetched_at: meta.fetched_at,

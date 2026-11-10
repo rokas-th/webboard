@@ -231,7 +231,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     ]);
     vi.mocked(exportFlow).mockResolvedValueOnce(undefined);
     fireEvent.click(items[0]);
-    expect(vi.mocked(exportFlow).mock.calls).toEqual([[t.session]]);
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[t.session, "macos"]]);
     expect(screen.queryByRole("menu")).toBeNull();
     fireEvent.click(more);
     vi.mocked(importFlow).mockResolvedValueOnce(undefined);

@@ -97,6 +97,8 @@ pub fn run() {
                     .map_err(|e| format!("{}: {}", e.code, e.message))?;
             }
             app.manage(commands::sync::SyncState::new(dir, client));
+            #[cfg(target_os = "ios")]
+            app.manage(commands::file::Staging(app.path().document_dir()?));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -112,6 +114,10 @@ pub fn run() {
             commands::device::device_info,
             commands::file::file_write,
             commands::file::file_read,
+            #[cfg(target_os = "ios")]
+            commands::file::file_stage,
+            #[cfg(target_os = "ios")]
+            commands::file::file_unstage,
             commands::settings::settings_read,
             commands::settings::settings_write,
             commands::settings::settings_reset,

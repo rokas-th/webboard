@@ -1100,6 +1100,173 @@ async fn subdivision_missing_from_the_cached_tree_refetches_once() {
     assert_eq!(stub.requests_to("/Subdivisions"), 3);
 }
 
+fn ch_tree_with(child: &str, name: &str) -> Vec<u8> {
+    let mut tree: Vec<Value> =
+        serde_json::from_slice(&fixture("oh-subdivisions-CH.json")).expect("the tree parses");
+    let zh = tree
+        .iter_mut()
+        .find(|s| s["code"] == "CH-ZH")
+        .expect("the recorded tree holds CH-ZH");
+    zh["children"]
+        .as_array_mut()
+        .expect("CH-ZH has children")
+        .push(json!({
+            "code": child,
+            "isoCode": "",
+            "shortName": child.trim_start_matches("CH-"),
+            "category": [{ "language": "EN", "text": "municipality" }],
+            "name": [{ "language": "DE", "text": name }],
+            "officialLanguages": ["DE"],
+        }));
+    serde_json::to_vec(&tree).expect("JSON")
+}
+
+fn ch_zh_rows_with(code: &str) -> Vec<u8> {
+    let mut rows: Vec<Value> =
+        serde_json::from_slice(&fixture("oh-CH-ZH-2026.json")).expect("recorded rows parse");
+    rows.push(oh_row(
+        "town-0000",
+        "2026-09-07",
+        "Public",
+        "FullDay",
+        &[code],
+        "Town day",
+    ));
+    serde_json::to_vec(&rows).expect("JSON")
+}
+
+#[tokio::test]
+async fn a_row_code_missing_from_the_cached_tree_refetches_the_tree_once() {
+    let stub = Stub::recorded();
+    let (_dir, h) = service(&stub);
+    h.subdivisions("CH").await.expect("the recorded tree");
+    assert_eq!(stub.requests_to("/Subdivisions"), 1);
+
+    stub.set(
+        "/Subdivisions",
+        Reply::json(ch_tree_with("CH-ZH-NEW", "Neustadt")),
+    );
+    stub.set("/PublicHolidays", Reply::json(ch_zh_rows_with("CH-ZH-NEW")));
+    let out = h
+        .year(&ch(Some("CH-ZH")), 2026, false)
+        .await
+        .expect("the year once the tree is fetched again");
+    assert_eq!(out.days.len(), 14);
+    assert_eq!(
+        day(&out.days, "2026-09-07").scope.as_deref(),
+        Some("Neustadt")
+    );
+    assert_eq!(
+        stub.requests_to("/Subdivisions"),
+        2,
+        "the cached tree lacked CH-ZH-NEW, so it was fetched once more"
+    );
+    assert_eq!(
+        stub.requests_to("/PublicHolidays"),
+        1,
+        "the same rows are read again, not fetched again"
+    );
+
+    stub.set(
+        "/PublicHolidays",
+        Reply::json(ch_zh_rows_with("CH-ZH-GONE")),
+    );
+    assert_eq!(
+        h.year(&ch(Some("CH-ZH")), 2026, true).await.unwrap_err(),
+        err(
+            "holidays.parse",
+            "OpenHolidays lists a holiday for CH-ZH-GONE, which its subdivision list does not hold."
+        )
+    );
+    assert_eq!(
+        stub.requests_to("/Subdivisions"),
+        3,
+        "the tree is fetched once more, and only once"
+    );
+    assert_eq!(stub.requests_to("/PublicHolidays"), 2);
+}
+
+#[tokio::test]
+async fn a_tree_fetched_for_this_year_is_not_fetched_again_for_a_row_code() {
+    let stub = Stub::recorded();
+    stub.set(
+        "/PublicHolidays",
+        Reply::json(ch_zh_rows_with("CH-ZH-GONE")),
+    );
+    let (_dir, h) = service(&stub);
+    assert_eq!(
+        h.year(&ch(Some("CH-ZH")), 2026, false).await.unwrap_err(),
+        err(
+            "holidays.parse",
+            "OpenHolidays lists a holiday for CH-ZH-GONE, which its subdivision list does not hold."
+        )
+    );
+    assert_eq!(stub.requests_to("/Subdivisions"), 1);
+}
+
+#[tokio::test]
+async fn a_cached_entry_that_no_longer_parses_is_fetched_again() {
+    let stub = Stub::recorded();
+    let (dir, h) = service(&stub);
+    let region = ch(Some("CH-ZH"));
+    let file = dir.path().join("holidays/openholidays/CH-ZH-2026.json");
+    let first = h.year(&region, 2026, false).await.expect("first");
+    assert_eq!(stub.requests_to("/PublicHolidays"), 1);
+
+    std::fs::write(&file, br#"{"fetchedAt":"2026-01-01T00:00:00Z","bo"#).expect("damage the cache");
+    let repaired = h
+        .year(&region, 2026, false)
+        .await
+        .expect("the damaged entry is fetched again");
+    assert!(!repaired.from_cache);
+    assert_eq!(repaired.days, first.days);
+    assert_eq!(stub.requests_to("/PublicHolidays"), 2);
+    let stored: Value = serde_json::from_slice(&std::fs::read(&file).expect("the year is cached"))
+        .expect("the cache is repaired");
+    assert_eq!(stored["fetchedAt"], json!(repaired.fetched_at));
+    assert!(
+        h.year(&region, 2026, false)
+            .await
+            .expect("the repaired entry")
+            .from_cache
+    );
+    assert_eq!(stub.requests_to("/PublicHolidays"), 2);
+
+    let refused = json!({ "fetchedAt": "2026-01-01T00:00:00Z", "body": "[]" });
+    std::fs::write(&file, serde_json::to_vec(&refused).expect("JSON"))
+        .expect("an entry this parser refuses");
+    let refetched = h
+        .year(&region, 2026, false)
+        .await
+        .expect("the refused entry is fetched again");
+    assert!(!refetched.from_cache);
+    assert_eq!(refetched.days, first.days);
+    assert_eq!(stub.requests_to("/PublicHolidays"), 3);
+
+    let tree = dir
+        .path()
+        .join("holidays/openholidays/subdivisions-CH.json");
+    std::fs::write(&tree, b"\xff").expect("damage the cached tree");
+    assert_eq!(
+        h.subdivisions("CH")
+            .await
+            .expect("the tree fetched again")
+            .len(),
+        26
+    );
+    assert_eq!(stub.requests_to("/Subdivisions"), 2);
+
+    std::fs::write(&file, b"\xff").expect("damage the year again");
+    stub.stop();
+    let e = h.year(&region, 2026, false).await.unwrap_err();
+    assert_eq!(e.code, "holidays.offline", "{}", e.message);
+    assert!(
+        e.message.starts_with("Could not reach 127.0.0.1"),
+        "{}",
+        e.message
+    );
+}
+
 #[tokio::test]
 async fn country_only_region_keeps_rows_without_subdivisions() {
     let stub = Stub::recorded();

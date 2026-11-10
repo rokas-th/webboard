@@ -669,7 +669,7 @@ describe("removal and the space", () => {
     };
     await click(within(entry("Launch")).getByRole("button", { name: "Launch" }));
     await click(within(banner()).getByRole("button", { name: "Export…" }));
-    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P")]]);
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P"), "macos"]]);
     await click(within(entry("Alpha")).getByRole("button", { name: "Alpha" }));
     expect(buttonNames(banner(), ["Export…", "Join with a code", "Set up sync"])).toEqual(["Join with a code", "Set up sync"]);
     await fresh();
@@ -690,7 +690,7 @@ describe("removal and the space", () => {
     const banner = screen.getByText(REMOVED).closest(".banner");
     if (!(banner instanceof HTMLElement)) throw new Error("no removed banner");
     await click(within(banner).getByRole("button", { name: "Export…" }));
-    expect(vi.mocked(exportPlan).mock.calls).toEqual([[await r.session("P")]]);
+    expect(vi.mocked(exportPlan).mock.calls).toEqual([[await r.session("P"), "macos"]]);
     expect(toasts()).toEqual(["Could not write the file: disk full."]);
     expect(badToasts()).toEqual(["Could not write the file: disk full."]);
   });
@@ -804,7 +804,7 @@ describe("plan errors in the dialog", () => {
     expect(messageText()).toEqual([TOO_LARGE_HELD]);
     expect(buttonNames(dialog(), ACTION_NAMES)).toEqual(["Export…", "Try again"]);
     await click(inDialog().getByRole("button", { name: "Export…" }));
-    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P")]]);
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P"), "macos"]]);
     const before = calls("sync_status");
     await click(inDialog().getByRole("button", { name: "Try again" }));
     expect(calls("sync_status")).toBe(before + 1);
@@ -834,7 +834,7 @@ describe("plan errors in the dialog", () => {
     await openChip();
     expect(messageText()).toEqual(["The server refused a change to “Launch” from this device. Update WebBoard, then try again."]);
     await click(inDialog().getByRole("button", { name: "Export…" }));
-    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P")]]);
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P"), "macos"]]);
     const before = calls("sync_status");
     const first = prov(f, "P");
     await click(inDialog().getByRole("button", { name: "Try again" }));

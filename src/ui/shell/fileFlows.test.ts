@@ -73,15 +73,15 @@ describe("exportFlow", () => {
   it("toasts the file name once the plan is written", async () => {
     const t = await made([{ name: "A", start: "2026-11-10" }]);
     vi.mocked(exportPlan).mockResolvedValueOnce({ path: PATH, unreadable: 0 });
-    await exportFlow(t.session);
-    expect(vi.mocked(exportPlan).mock.calls).toEqual([[t.session]]);
+    await exportFlow(t.session, "macos");
+    expect(vi.mocked(exportPlan).mock.calls).toEqual([[t.session, "macos"]]);
     expect(toasts()).toEqual([["Exported to MESA 1.0.webboard"]]);
   });
 
   it("does nothing when the save dialog is cancelled", async () => {
     const t = await made([{ name: "A", start: "2026-11-10" }]);
     vi.mocked(exportPlan).mockResolvedValueOnce(null);
-    await exportFlow(t.session);
+    await exportFlow(t.session, "macos");
     expect(toasts()).toEqual([]);
   });
 
@@ -91,7 +91,7 @@ describe("exportFlow", () => {
     const message = "Could not write /Users/x/Plans/MESA 1.0.webboard: Permission denied.";
     vi.mocked(exportPlan).mockRejectedValueOnce(new AppError("file.io", message));
     const from = tauri.calls.length;
-    await exportFlow(t.session);
+    await exportFlow(t.session, "macos");
     expect(toasts()).toEqual([[message, "bad"]]);
     expect(vi.mocked(exportPlan)).toHaveBeenCalledTimes(1);
     expect(apply).not.toHaveBeenCalled();
@@ -102,7 +102,7 @@ describe("exportFlow", () => {
     const t = await made([{ name: "A", start: "2026-11-10" }]);
     const bug = new Error("exportPlan broke");
     vi.mocked(exportPlan).mockRejectedValueOnce(bug);
-    await expect(exportFlow(t.session)).rejects.toBe(bug);
+    await expect(exportFlow(t.session, "macos")).rejects.toBe(bug);
     expect(toasts()).toEqual([]);
   });
 
@@ -110,8 +110,22 @@ describe("exportFlow", () => {
     const t = await made([{ name: "A", start: "2026-11-10" }], { answers: { file_write: () => null } });
     vi.mocked(save).mockResolvedValueOnce(PATH);
     const from = tauri.calls.length;
-    await exportFlow(t.session);
+    await exportFlow(t.session, "macos");
     expect(tauri.calls.slice(from).filter((c) => c.cmd === "file_write").map(xpath)).toEqual([encodeURIComponent(PATH)]);
+    expect(toasts()).toEqual([["Exported to MESA 1.0.webboard"]]);
+  });
+
+  it("on iOS stages the plan before the dialog, writes nothing after it, and toasts the destination's name", async () => {
+    const dest = "/private/var/mobile/Library/Mobile Documents/com~apple~CloudDocs/MESA 1.0.webboard";
+    const t = await made([{ name: "A", start: "2026-11-10" }], {
+      answers: { file_stage: () => "MESA 1.0.webboard", file_unstage: () => null, file_write: () => null },
+    });
+    vi.mocked(save).mockResolvedValueOnce(dest);
+    const from = tauri.calls.length;
+    await exportFlow(t.session, "ios");
+    expect(vi.mocked(exportPlan).mock.calls).toEqual([[t.session, "ios"]]);
+    expect(vi.mocked(save).mock.calls).toEqual([[{ defaultPath: "MESA 1.0.webboard", filters: [{ name: "WebBoard plan", extensions: ["webboard"] }] }]]);
+    expect(tauri.calls.slice(from).flatMap((c) => (c.cmd.startsWith("file_") ? [c.cmd] : []))).toEqual(["file_stage", "file_unstage"]);
     expect(toasts()).toEqual([["Exported to MESA 1.0.webboard"]]);
   });
 
@@ -120,7 +134,7 @@ describe("exportFlow", () => {
     expect([t.session.view().unreadable.length, t.session.view().pending]).toEqual([1, 0]);
     vi.mocked(save).mockResolvedValueOnce(PATH);
     const from = tauri.calls.length;
-    await exportFlow(t.session);
+    await exportFlow(t.session, "macos");
     expect(tauri.calls.slice(from).filter((c) => c.cmd === "file_write").map(xpath)).toEqual([encodeURIComponent(PATH)]);
     expect(toasts()).toEqual([
       ["Exported. This file holds 1 action this app cannot read yet, so Import will refuse it until they are resolved."],
@@ -131,7 +145,7 @@ describe("exportFlow", () => {
     const t = await made([{ id: "A", name: "A", start: "2026-11-10" }], { raw: { x1: RAW_X1, x2: child("x2", "Renamed") }, answers: { file_write: () => null } });
     expect([t.session.view().unreadable.length, t.session.view().pending]).toEqual([1, 1]);
     vi.mocked(save).mockResolvedValueOnce(PATH);
-    await exportFlow(t.session);
+    await exportFlow(t.session, "macos");
     expect(toasts()).toEqual([
       ["Exported. This file holds 2 actions this app cannot read yet, so Import will refuse it until they are resolved."],
     ]);
@@ -141,7 +155,7 @@ describe("exportFlow", () => {
     vi.mocked(save).mockResolvedValueOnce(PATH);
     const held = hold("file_write");
     const from = tauri.calls.length;
-    const flow = exportFlow(t.session);
+    const flow = exportFlow(t.session, "macos");
     await new Promise<void>((r) => setTimeout(r, 0));
     expect(tauri.calls.slice(from).filter((c) => c.cmd === "file_write")).toHaveLength(1);
     t.doc.ydoc.getMap("actions").set("x1", RAW_X1);
@@ -156,17 +170,17 @@ describe("exportFlow", () => {
     const u = await made([{ name: "B", start: "2026-11-10" }]);
     const picks = [deferred<string | null>(), deferred<string | null>()];
     vi.mocked(save).mockReturnValueOnce(picks[0].promise).mockReturnValueOnce(picks[1].promise);
-    const first = exportFlow(t.session);
-    const second = exportFlow(t.session);
-    const other = exportFlow(u.session);
+    const first = exportFlow(t.session, "macos");
+    const second = exportFlow(t.session, "macos");
+    const other = exportFlow(u.session, "macos");
     await new Promise<void>((r) => setTimeout(r, 0));
     expect(second).toBe(first);
     expect(vi.mocked(save)).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(exportPlan).mock.calls).toEqual([[t.session], [u.session]]);
+    expect(vi.mocked(exportPlan).mock.calls).toEqual([[t.session, "macos"], [u.session, "macos"]]);
     picks.forEach((p) => p.resolve(null));
     await Promise.all([first, second, other]);
     vi.mocked(save).mockResolvedValueOnce(null);
-    await exportFlow(t.session);
+    await exportFlow(t.session, "macos");
     expect(vi.mocked(save)).toHaveBeenCalledTimes(3);
     expect(toasts()).toEqual([]);
   });

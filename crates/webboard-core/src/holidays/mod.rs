@@ -350,26 +350,29 @@ impl Holidays {
         decode_text(url, &headers, bytes.to_vec())
     }
 
-    async fn load<T>(
+    fn cached<T>(
         &self,
         req: &Req<'_>,
         fresh: bool,
         parse: impl Fn(&str) -> Result<T>,
-    ) -> Result<(T, Meta)> {
-        if !fresh {
-            if let Some(entry) = self.cache.read(req.src, req.key)? {
-                let value = parse(&entry.body)?;
-                return Ok((
+    ) -> Result<Option<(T, Meta)>> {
+        if fresh {
+            return Ok(None);
+        }
+        Ok(self.cache.read(req.src, req.key)?.and_then(|entry| {
+            parse(&entry.body).ok().map(|value| {
+                (
                     value,
                     Meta {
                         fetched_at: entry.fetched_at,
                         from_cache: true,
                     },
-                ));
-            }
-        }
-        let body = self.get(req.url, req.query).await?;
-        let value = parse(&body)?;
+                )
+            })
+        }))
+    }
+
+    fn store<T>(&self, req: &Req<'_>, body: String, value: T) -> Result<(T, Meta)> {
         let entry = self.cache.write(req.src, req.key, body)?;
         Ok((
             value,
@@ -378,6 +381,20 @@ impl Holidays {
                 from_cache: false,
             },
         ))
+    }
+
+    async fn load<T>(
+        &self,
+        req: &Req<'_>,
+        fresh: bool,
+        parse: impl Fn(&str) -> Result<T>,
+    ) -> Result<(T, Meta)> {
+        if let Some(hit) = self.cached(req, fresh, &parse)? {
+            return Ok(hit);
+        }
+        let body = self.get(req.url, req.query).await?;
+        let value = parse(&body)?;
+        self.store(req, body, value)
     }
 
     pub async fn countries(&self) -> Result<Vec<Country>> {

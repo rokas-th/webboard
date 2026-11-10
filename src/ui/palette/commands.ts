@@ -251,7 +251,7 @@ export function commands(ctx: CommandCtx): Command[] {
       }),
     );
   const session = ctx.session;
-  const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session) }];
+  const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session, ctx.registry.device.platform) }];
   const always: Command[] = [
     { id: "new-plan", group: "File", label: "New plan", run: () => ctx.newPlan() },
     ...exportCommand,

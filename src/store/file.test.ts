@@ -119,8 +119,11 @@ const inverse = (m: ReadonlyMap<string, string>) => {
 const idsOf = (plan: PlanState): Set<string> =>
   new Set([...plan.items.keys(), ...plan.links.keys(), ...plan.calendar.closures.keys(), ...plan.baselines.keys(), plan.id]);
 
+const FILTERS = [{ name: "WebBoard plan", extensions: ["webboard"] }];
+
 const xpath = (c: Call): string | null => new Headers(c.options?.headers).get("x-path");
-const xdoc = (c: Call): string | null => new Headers(c.options?.headers).get("x-doc");
+const xname = (c: Call): string | null => new Headers(c.options?.headers).get("x-name");
+const xdoc =(c: Call): string | null => new Headers(c.options?.headers).get("x-doc");
 const callsOf = (from: number, cmd: string): Call[] => tauri.calls.slice(from).filter((c) => c.cmd === cmd);
 const appendsAfter = (from: number): Call[] => callsOf(from, "store_append");
 
@@ -191,11 +194,13 @@ describe("export", () => {
     session.apply({ t: "create", kind: "task", name: "Survey", parent: null, after: null, start: TODAY });
     vi.mocked(save).mockResolvedValue("/Users/a/Bridge.webboard");
     const from = tauri.calls.length;
-    expect(await exportPlan(session)).toEqual({ path: "/Users/a/Bridge.webboard", unreadable: 0 });
-    expect(vi.mocked(save).mock.calls).toEqual([[{ defaultPath: "Bridge.webboard", filters: [{ name: "WebBoard plan", extensions: ["webboard"] }] }]]);
+    expect(await exportPlan(session, "macos")).toEqual({ path: "/Users/a/Bridge.webboard", unreadable: 0 });
+    expect(vi.mocked(save).mock.calls).toEqual([[{ defaultPath: "Bridge.webboard", filters: FILTERS }]]);
     const writes = callsOf(from, "file_write");
     expect(writes).toHaveLength(1);
     expect(xpath(writes[0])).toBe(encodeURIComponent("/Users/a/Bridge.webboard"));
+    expect(callsOf(from, "file_stage")).toHaveLength(0);
+    expect(callsOf(from, "file_unstage")).toHaveLength(0);
     const body = writes[0].args;
     if (!(body instanceof Uint8Array)) throw new Error("file_write carried no bytes");
     expect([...body.subarray(0, 4)]).toEqual([0x57, 0x42, 0x58, 0x31]);
@@ -218,7 +223,7 @@ describe("export", () => {
     };
     vi.mocked(save).mockReturnValue(new Promise<string>((resolve) => (pick = resolve)));
     const from = tauri.calls.length;
-    const saved = exportPlan(session);
+    const saved = exportPlan(session, "macos");
     await flush();
     session.apply({ t: "planName", name: "Viaduct" });
     pick("/Users/a/Bridge.webboard");
@@ -237,8 +242,137 @@ describe("export", () => {
     const session = await reg.session(await reg.createPlan("Bridge"));
     vi.mocked(save).mockResolvedValue(null);
     const from = tauri.calls.length;
-    expect(await exportPlan(session)).toBeNull();
+    expect(await exportPlan(session, "macos")).toBeNull();
     expect(callsOf(from, "file_write")).toHaveLength(0);
+  });
+});
+
+describe("export on iOS", () => {
+  const DEST = "/private/var/mobile/Library/Mobile Documents/com~apple~CloudDocs/Bridge.webboard";
+
+  function staging(): { names(): string[]; bytes(name: string): Uint8Array } {
+    const staged = new Map<string, Uint8Array>();
+    tauri.answers.file_stage = (args, options) => {
+      const raw = new Headers(options?.headers).get("x-name");
+      if (raw === null || !(args instanceof Uint8Array)) throw new Error("file_stage without x-name or bytes");
+      const path = decodeURIComponent(raw);
+      const name = path.slice(path.lastIndexOf("/") + 1);
+      staged.set(name, args);
+      return name;
+    };
+    tauri.answers.file_unstage = (args) => {
+      if (args === undefined || args instanceof Uint8Array || args instanceof ArrayBuffer || Array.isArray(args) || typeof args.name !== "string") {
+        throw new Error("file_unstage without a name");
+      }
+      staged.delete(args.name);
+      return null;
+    };
+    return {
+      names: () => [...staged.keys()],
+      bytes: (name) => {
+        const b = staged.get(name);
+        if (b === undefined) throw new Error(`${name} is not staged`);
+        return b;
+      },
+    };
+  }
+
+  const fileCalls = (from: number): string[] => tauri.calls.slice(from).flatMap((c) => (c.cmd.startsWith("file_") ? [c.cmd] : []));
+
+  it("stages the bytes before the save dialog, writes nothing to the destination and removes the staged copy", async () => {
+    const reg = await registry();
+    const id = await reg.createPlan("Bridge");
+    const session = await reg.session(id);
+    session.apply({ t: "create", kind: "task", name: "Survey", parent: null, after: null, start: TODAY });
+    const s = staging();
+    const atDialog: { names: string[]; bytes: Uint8Array }[] = [];
+    vi.mocked(save).mockImplementation(async () => {
+      atDialog.push({ names: s.names(), bytes: s.bytes("Bridge.webboard") });
+      return DEST;
+    });
+    const from = tauri.calls.length;
+    expect(await exportPlan(session, "ios")).toEqual({ path: DEST, unreadable: 0 });
+    expect(vi.mocked(save).mock.calls).toEqual([[{ defaultPath: "Bridge.webboard", filters: FILTERS }]]);
+    expect(fileCalls(from)).toEqual(["file_stage", "file_unstage"]);
+    const stage = callsOf(from, "file_stage")[0];
+    expect(xname(stage)).toBe(encodeURIComponent("Bridge.webboard"));
+    const body = stage.args;
+    if (!(body instanceof Uint8Array)) throw new Error("file_stage carried no bytes");
+    expect(atDialog).toHaveLength(1);
+    expect(atDialog[0].names).toEqual(["Bridge.webboard"]);
+    expect(atDialog[0].bytes).toBe(body);
+    expect(body.length).toBeGreaterThan(0);
+    const { header, update } = decodeWbx(body);
+    expect(header.planId).toBe(id);
+    expect(header.name).toBe("Bridge");
+    const fresh = new Y.Doc();
+    Y.applyUpdate(fresh, update);
+    expect(projectPlan(id, logOf(new PlanDoc(fresh).actions()))).toEqual(session.view().plan);
+    expect(callsOf(from, "file_unstage").map((c) => c.args)).toEqual([{ name: "Bridge.webboard" }]);
+    expect(s.names()).toEqual([]);
+  });
+
+  it("gives the dialog the name the stage chose", async () => {
+    const reg = await registry();
+    const session = await reg.session(await reg.createPlan("Q3/Bridge"));
+    const s = staging();
+    vi.mocked(save).mockResolvedValue(DEST);
+    const from = tauri.calls.length;
+    expect(await exportPlan(session, "ios")).toEqual({ path: DEST, unreadable: 0 });
+    expect(xname(callsOf(from, "file_stage")[0])).toBe(encodeURIComponent("Q3/Bridge.webboard"));
+    expect(vi.mocked(save).mock.calls).toEqual([[{ defaultPath: "Bridge.webboard", filters: FILTERS }]]);
+    expect(callsOf(from, "file_unstage").map((c) => c.args)).toEqual([{ name: "Bridge.webboard" }]);
+    expect(s.names()).toEqual([]);
+  });
+
+  it("treats a closed dialog as cancel and removes the staged copy", async () => {
+    const reg = await registry();
+    const session = await reg.session(await reg.createPlan("Bridge"));
+    const s = staging();
+    vi.mocked(save).mockResolvedValue(null);
+    const from = tauri.calls.length;
+    expect(await exportPlan(session, "ios")).toBeNull();
+    expect(fileCalls(from)).toEqual(["file_stage", "file_unstage"]);
+    expect(s.names()).toEqual([]);
+  });
+
+  it("opens no dialog when the bytes cannot be staged", async () => {
+    const reg = await registry();
+    const session = await reg.session(await reg.createPlan("Bridge"));
+    tauri.answers.file_stage = () => {
+      throw { code: "file.io", message: "Could not write /var/Documents/Bridge.webboard: No space left on device." };
+    };
+    const from = tauri.calls.length;
+    const failed = exportPlan(session, "ios");
+    await expect(failed).rejects.toBeInstanceOf(AppError);
+    await expect(failed).rejects.toMatchObject({ code: "file.io", message: "Could not write /var/Documents/Bridge.webboard: No space left on device." });
+    expect(save).not.toHaveBeenCalled();
+    expect(fileCalls(from)).toEqual(["file_stage"]);
+  });
+
+  it("removes the staged copy when the dialog fails, and shows the dialog's failure", async () => {
+    const reg = await registry();
+    const session = await reg.session(await reg.createPlan("Bridge"));
+    const s = staging();
+    const broken = new Error("the dialog broke");
+    vi.mocked(save).mockRejectedValue(broken);
+    const from = tauri.calls.length;
+    await expect(exportPlan(session, "ios")).rejects.toBe(broken);
+    expect(fileCalls(from)).toEqual(["file_stage", "file_unstage"]);
+    expect(s.names()).toEqual([]);
+  });
+
+  it("shows a failure to remove the staged copy", async () => {
+    const reg = await registry();
+    const session = await reg.session(await reg.createPlan("Bridge"));
+    staging();
+    tauri.answers.file_unstage = () => {
+      throw { code: "file.io", message: "Could not remove /var/Documents/Bridge.webboard: Operation not permitted." };
+    };
+    vi.mocked(save).mockResolvedValue(DEST);
+    const failed = exportPlan(session, "ios");
+    await expect(failed).rejects.toBeInstanceOf(AppError);
+    await expect(failed).rejects.toMatchObject({ code: "file.io", message: "Could not remove /var/Documents/Bridge.webboard: Operation not permitted." });
   });
 });
 

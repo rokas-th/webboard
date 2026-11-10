@@ -70,17 +70,11 @@ impl Cache {
 
     pub fn read(&self, src: &str, key: &str) -> Result<Option<Entry>> {
         let path = self.path(src, key);
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(io_error("Could not read", &path, e)),
-        };
-        serde_json::from_slice(&bytes).map(Some).map_err(|e| {
-            CommandError::new(
-                "holidays.parse",
-                format!("The holiday cache {} is damaged: {e}", path.display()),
-            )
-        })
+        match fs::read(&path) {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes).ok()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_error("Could not read", &path, e)),
+        }
     }
 
     pub fn write(&self, src: &str, key: &str, body: String) -> Result<Entry> {

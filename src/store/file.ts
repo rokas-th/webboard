@@ -12,7 +12,7 @@ import { existence, key, parseKey, stateWrites, validateWrite } from "../plan/un
 import { AppError, call, callBytes } from "../services/ipc";
 import { decodeAction } from "./doc";
 import { newPlanId } from "./plan-id";
-import type { Registry } from "./registry";
+import type { DeviceInfo, Registry } from "./registry";
 import type { PlanSession } from "./session";
 
 export interface WbxHeader {
@@ -251,14 +251,35 @@ function missingId(item: ItemId, what: string): never {
   throw new Error(`Item ${item} has ${what} but no new id`);
 }
 
-export async function exportPlan(session: PlanSession): Promise<{ path: string; unreadable: number } | null> {
-  const path = await save({ defaultPath: session.view().plan.name + ".webboard", filters: FILTERS });
-  if (path === null) return null;
+type Exported = { path: string; unreadable: number } | null;
+
+function snapshot(session: PlanSession): { body: Uint8Array; unreadable: number } {
   const view = session.view();
   const { id, name } = view.plan;
   const u = session.encodeState();
-  const unreadable = view.unreadable.length + view.pending;
-  const body = encodeWbx({ planId: id, name, exportedAt: new Date(Date.now()).toISOString(), updateLength: u.length }, u);
+  return {
+    body: encodeWbx({ planId: id, name, exportedAt: new Date(Date.now()).toISOString(), updateLength: u.length }, u),
+    unreadable: view.unreadable.length + view.pending,
+  };
+}
+
+async function exportStaged(session: PlanSession, defaultPath: string): Promise<Exported> {
+  const { body, unreadable } = snapshot(session);
+  const name = await call<string>("file_stage", body, { headers: { "x-name": encodeURIComponent(defaultPath) } });
+  try {
+    const path = await save({ defaultPath: name, filters: FILTERS });
+    return path === null ? null : { path, unreadable };
+  } finally {
+    await call<null>("file_unstage", { name });
+  }
+}
+
+export async function exportPlan(session: PlanSession, platform: DeviceInfo["platform"]): Promise<Exported> {
+  const defaultPath = session.view().plan.name + ".webboard";
+  if (platform === "ios") return exportStaged(session, defaultPath);
+  const path = await save({ defaultPath, filters: FILTERS });
+  if (path === null) return null;
+  const { body, unreadable } = snapshot(session);
   await call<null>("file_write", body, { headers: { "x-path": encodeURIComponent(path) } });
   return { path, unreadable };
 }

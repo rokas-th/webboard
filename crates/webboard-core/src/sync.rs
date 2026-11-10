@@ -168,9 +168,10 @@ struct ErrorBody {
 enum Caller<'a> {
     Setup,
     Claim,
-    Member(&'a str),
+    Member(&'a Member),
 }
 
+#[derive(Clone)]
 struct Member {
     server: Url,
     space_id: String,
@@ -385,20 +386,22 @@ impl Local {
         fs::rename(current, aside).map_err(aside_failed)
     }
 
-    fn revoke(&self, only: Option<&str>) -> Result<bool, SyncError> {
-        let space_id = {
-            let _guard = self.guard()?;
-            let mut stored = match (self.read()?, only) {
-                (Some(stored), Some(space)) if stored.space.space_id != space => return Ok(false),
-                (None, Some(_)) => return Ok(false),
-                (None, None) => return Err(not_joined()),
-                (Some(stored), _) => stored,
-            };
-            stored.revoked = true;
-            self.write(&stored)?;
-            stored.space.space_id
+    fn revoke(&self, only: Option<&Member>) -> Result<bool, SyncError> {
+        let _guard = self.guard()?;
+        let mut stored = match (self.read()?, only) {
+            (Some(stored), Some(m)) if stored.space.space_id != m.space_id => return Ok(false),
+            (None, Some(_)) => return Ok(false),
+            (None, None) => return Err(not_joined()),
+            (Some(stored), _) => stored,
         };
-        self.tokens.delete(&space_id)?;
+        if let Some(m) = only {
+            if self.tokens.get(&m.space_id)?.as_deref() != Some(m.token.as_str()) {
+                return Ok(false);
+            }
+        }
+        stored.revoked = true;
+        self.write(&stored)?;
+        self.tokens.delete(&stored.space.space_id)?;
         Ok(true)
     }
 
@@ -556,9 +559,9 @@ impl SyncClient {
         };
         match (status.as_u16(), caller) {
             (401, _) => SyncError::new("sync.unauthorized", body.message),
-            (403, Caller::Member(space)) => {
-                let space = space.to_string();
-                match self.off(move |l| l.revoke(Some(&space))).await {
+            (403, Caller::Member(member)) => {
+                let member = member.clone();
+                match self.off(move |l| l.revoke(Some(&member))).await {
                     Ok(true) => SyncError::new("sync.revoked", body.message),
                     Ok(false) => answered(&body),
                     Err(e) => e,
@@ -657,8 +660,7 @@ impl SyncClient {
         let member = self.member().await?;
         let url = endpoint(&member.server, &["pair"])?;
         let request = self.authorised(&member, reqwest::Method::POST, &url);
-        self.exchange(&url, request, Caller::Member(&member.space_id))
-            .await
+        self.exchange(&url, request, Caller::Member(&member)).await
     }
 
     pub async fn ticket(&self, doc: &str) -> Result<Ticket, SyncError> {
@@ -667,8 +669,7 @@ impl SyncClient {
         let request = self
             .authorised(&member, reqwest::Method::POST, &url)
             .json(&serde_json::json!({ "doc": doc }));
-        self.exchange(&url, request, Caller::Member(&member.space_id))
-            .await
+        self.exchange(&url, request, Caller::Member(&member)).await
     }
 
     pub async fn devices(&self) -> Result<Vec<DeviceEntry>, SyncError> {
@@ -676,7 +677,7 @@ impl SyncClient {
         let url = endpoint(&member.server, &["devices"])?;
         let request = self.authorised(&member, reqwest::Method::GET, &url);
         let list: Devices = self
-            .exchange(&url, request, Caller::Member(&member.space_id))
+            .exchange(&url, request, Caller::Member(&member))
             .await?;
         Ok(list.devices)
     }
@@ -686,7 +687,7 @@ impl SyncClient {
         let url = endpoint(&member.server, &["devices", id])?;
         let request = self.authorised(&member, reqwest::Method::DELETE, &url);
         let _: IgnoredAny = self
-            .exchange(&url, request, Caller::Member(&member.space_id))
+            .exchange(&url, request, Caller::Member(&member))
             .await?;
         Ok(())
     }
@@ -2052,6 +2053,47 @@ mod tests {
             f.tokens.get(OTHER).expect("get").as_deref(),
             Some("tok_OTHER")
         );
+    }
+
+    #[tokio::test]
+    async fn a_late_403_with_the_old_token_leaves_a_rejoin_of_the_same_space_alone() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        let dir = f.dir.path().to_path_buf();
+        let server = f.url();
+        let tokens = f.tokens.clone();
+        let m = f
+            .server
+            .mock("POST", "/ticket")
+            .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+            .with_status(403)
+            .with_body_from_request(move |_| {
+                write_space(&dir, &server, SPACE);
+                tokens.put(SPACE, "tok_NEW_456").expect("put the new token");
+                json!({ "error": "revoked", "message": REVOKED })
+                    .to_string()
+                    .into_bytes()
+            })
+            .expect(1)
+            .create_async()
+            .await;
+        let client = f.client();
+        assert_eq!(
+            client.ticket("ix-sp000000000").await.map(|_| ()),
+            Err(err(
+                "sync.http",
+                "Server answered 403 revoked: This device was removed from the space."
+            ))
+        );
+        m.assert_async().await;
+        assert_eq!(
+            client.status().await,
+            Ok(SyncStatus {
+                space: Some(f.space()),
+                revoked: false
+            })
+        );
+        assert_eq!(f.token().as_deref(), Some("tok_NEW_456"));
     }
 
     #[tokio::test]

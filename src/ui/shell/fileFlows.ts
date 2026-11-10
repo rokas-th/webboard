@@ -1,7 +1,7 @@
 import type { PlanId } from "../../domain/model";
 import { AppError } from "../../services/ipc";
 import { exportPlan, fileNameOf, importPlan } from "../../store/file";
-import type { Registry } from "../../store/registry";
+import type { DeviceInfo, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { countedConflicts } from "../choices/HeadCounts";
 import { toast } from "../common/Toast";
@@ -23,8 +23,8 @@ const count = (n: number, one: string, many: string): string => `${n} ${n === 1 
 const exporting = new Map<PlanSession, Promise<void>>();
 let importing: Promise<void> | null = null;
 
-async function exportOnce(session: PlanSession): Promise<void> {
-  const written = await shown(exportPlan(session));
+async function exportOnce(session: PlanSession, platform: DeviceInfo["platform"]): Promise<void> {
+  const written = await shown(exportPlan(session, platform));
   if (!written.ok || written.value === null) return;
   const { path, unreadable } = written.value;
   toast(
@@ -47,10 +47,10 @@ async function importOnce(registry: Registry, open: (id: PlanId) => void): Promi
   toast(conflicts === 0 ? name : `${name} — ${count(conflicts, "conflict", "conflicts")} to fix`);
 }
 
-export function exportFlow(session: PlanSession): Promise<void> {
+export function exportFlow(session: PlanSession, platform: DeviceInfo["platform"]): Promise<void> {
   const running = exporting.get(session);
   if (running !== undefined) return running;
-  const run = exportOnce(session).finally(() => exporting.delete(session));
+  const run = exportOnce(session, platform).finally(() => exporting.delete(session));
   exporting.set(session, run);
   return run;
 }

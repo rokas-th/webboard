@@ -77,7 +77,7 @@ export function PlanMenu(p: {
 
   const exportPlan = (): void => {
     onOpenChange(false);
-    void exportFlow(p.session);
+    void exportFlow(p.session, p.registry.device.platform);
   };
 
   const importPlan = (): void => {

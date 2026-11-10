@@ -21,15 +21,26 @@ fn decoded(text: &str, what: &str) -> Result<String> {
         .map_err(|e| io(format!("{what} is not UTF-8 once decoded: {e}")))
 }
 
-fn path_of(request: &Request<'_>) -> Result<PathBuf> {
+fn header(request: &Request<'_>, name: &str) -> Result<String> {
     let raw = request
         .headers()
-        .get("x-path")
-        .ok_or_else(|| io("missing x-path header"))?;
+        .get(name)
+        .ok_or_else(|| io(format!("missing {name} header")))?;
     let raw = raw
         .to_str()
-        .map_err(|_| io("header x-path is not percent-encoded ASCII"))?;
-    let path = decoded(raw, "x-path")?;
+        .map_err(|_| io(format!("header {name} is not percent-encoded ASCII")))?;
+    decoded(raw, name)
+}
+
+fn raw_body(request: &Request<'_>, cmd: &str) -> Result<Vec<u8>> {
+    match request.body() {
+        InvokeBody::Raw(bytes) => Ok(bytes.clone()),
+        InvokeBody::Json(_) => Err(io(format!("{cmd} expects raw bytes"))),
+    }
+}
+
+fn path_of(request: &Request<'_>) -> Result<PathBuf> {
+    let path = header(request, "x-path")?;
     let path = match strip_ignoring_case(&path, FILE_URL) {
         None => path,
         Some(rest) => {
@@ -77,11 +88,51 @@ fn read_file(path: &Path) -> Result<Vec<u8>> {
 #[tauri::command]
 pub async fn file_write(request: Request<'_>) -> Result<()> {
     let path = path_of(&request)?;
-    let bytes = match request.body() {
-        InvokeBody::Raw(bytes) => bytes.clone(),
-        InvokeBody::Json(_) => return Err(io("file_write expects raw bytes")),
-    };
+    let bytes = raw_body(&request, "file_write")?;
     super::blocking("file_write", CODE, move || write_file(&path, &bytes)).await
+}
+
+#[cfg(any(target_os = "ios", test))]
+pub struct Staging(pub PathBuf);
+
+#[cfg(any(target_os = "ios", test))]
+fn file_name_of(path: &str) -> Option<&str> {
+    Path::new(path).file_name().and_then(|n| n.to_str())
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn remove_staged(path: &Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io(format!("Could not remove {}: {e}.", path.display()))),
+    }
+}
+
+#[cfg(any(target_os = "ios", test))]
+#[tauri::command]
+pub async fn file_stage(
+    staging: tauri::State<'_, Staging>,
+    request: Request<'_>,
+) -> Result<String> {
+    let default_path = header(&request, "x-name")?;
+    let name = file_name_of(&default_path)
+        .ok_or_else(|| io("x-name names no file"))?
+        .to_string();
+    let bytes = raw_body(&request, "file_stage")?;
+    let path = staging.0.join(&name);
+    super::blocking("file_stage", CODE, move || write_file(&path, &bytes)).await?;
+    Ok(name)
+}
+
+#[cfg(any(target_os = "ios", test))]
+#[tauri::command]
+pub async fn file_unstage(staging: tauri::State<'_, Staging>, name: String) -> Result<()> {
+    if file_name_of(&name) != Some(name.as_str()) {
+        return Err(io(format!("{name:?} is not a file name")));
+    }
+    let path = staging.0.join(&name);
+    super::blocking("file_unstage", CODE, move || remove_staged(&path)).await
 }
 
 #[tauri::command]
@@ -105,17 +156,131 @@ mod tests {
     struct Harness {
         _app: App<tauri::test::MockRuntime>,
         webview: WebviewWindow<tauri::test::MockRuntime>,
+        documents: TempDir,
     }
 
     fn harness() -> Harness {
+        let documents = TempDir::new().unwrap();
         let app = mock_builder()
-            .invoke_handler(tauri::generate_handler![file_write, file_read])
+            .manage(Staging(documents.path().to_path_buf()))
+            .invoke_handler(tauri::generate_handler![
+                file_write,
+                file_read,
+                file_stage,
+                file_unstage
+            ])
             .build(mock_context(noop_assets()))
             .unwrap();
         let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
-        Harness { _app: app, webview }
+        Harness {
+            _app: app,
+            webview,
+            documents,
+        }
+    }
+
+    fn stage(h: &Harness, x_name: &str, bytes: &[u8]) -> std::result::Result<Value, Value> {
+        match invoke_with(
+            h,
+            "file_stage",
+            InvokeBody::Raw(bytes.to_vec()),
+            Some(("x-name", &encode(x_name))),
+        )? {
+            InvokeResponseBody::Json(j) => Ok(serde_json::from_str(&j).unwrap()),
+            InvokeResponseBody::Raw(_) => panic!("file_stage answered raw bytes"),
+        }
+    }
+
+    fn unstage(h: &Harness, name: &str) -> std::result::Result<InvokeResponseBody, Value> {
+        invoke_with(
+            h,
+            "file_unstage",
+            InvokeBody::Json(json!({ "name": name })),
+            None,
+        )
+    }
+
+    fn staged(h: &Harness) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(h.documents.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn file_stage_writes_the_bytes_under_the_file_name_the_dialog_uses() {
+        let h = harness();
+        assert_eq!(
+            stage(&h, "Q3/Plan ü.webboard", b"WBX1 first"),
+            Ok(json!("Plan ü.webboard"))
+        );
+        assert_eq!(staged(&h), ["Plan ü.webboard"]);
+        assert_eq!(
+            fs::read(h.documents.path().join("Plan ü.webboard")).unwrap(),
+            b"WBX1 first"
+        );
+        assert_eq!(
+            stage(&h, "Plan ü.webboard", b"WBX1 second"),
+            Ok(json!("Plan ü.webboard"))
+        );
+        assert_eq!(staged(&h), ["Plan ü.webboard"]);
+        assert_eq!(
+            fs::read(h.documents.path().join("Plan ü.webboard")).unwrap(),
+            b"WBX1 second"
+        );
+    }
+
+    #[test]
+    fn file_unstage_removes_the_staged_copy() {
+        let h = harness();
+        stage(&h, "Plan.webboard", b"WBX1").unwrap();
+        unstage(&h, "Plan.webboard").unwrap();
+        assert_eq!(staged(&h), Vec::<String>::new());
+        unstage(&h, "Plan.webboard").unwrap();
+        assert_eq!(staged(&h), Vec::<String>::new());
+    }
+
+    #[test]
+    fn file_unstage_takes_only_a_file_name() {
+        let h = harness();
+        let outside = h.documents.path().parent().unwrap().join("Plan.webboard");
+        fs::write(&outside, b"not staged").unwrap();
+        for name in ["../Plan.webboard", "a/Plan.webboard", "", ".."] {
+            assert_eq!(
+                unstage(&h, name).unwrap_err(),
+                json!({ "code": "file.io", "message": format!("{name:?} is not a file name") })
+            );
+        }
+        assert_eq!(fs::read(&outside).unwrap(), b"not staged");
+        fs::remove_file(outside).unwrap();
+    }
+
+    #[test]
+    fn file_stage_refuses_a_missing_name_and_json() {
+        let h = harness();
+        assert_eq!(
+            invoke_with(&h, "file_stage", InvokeBody::Raw(b"x".to_vec()), None).unwrap_err(),
+            json!({ "code": "file.io", "message": "missing x-name header" })
+        );
+        assert_eq!(
+            stage(&h, "", b"x").unwrap_err(),
+            json!({ "code": "file.io", "message": "x-name names no file" })
+        );
+        assert_eq!(
+            invoke_with(
+                &h,
+                "file_stage",
+                InvokeBody::Json(json!({})),
+                Some(("x-name", &encode("Plan.webboard")))
+            )
+            .unwrap_err(),
+            json!({ "code": "file.io", "message": "file_stage expects raw bytes" })
+        );
+        assert_eq!(staged(&h), Vec::<String>::new());
     }
 
     fn encode(text: &str) -> String {
@@ -128,9 +293,18 @@ mod tests {
         body: InvokeBody,
         x_path: Option<&str>,
     ) -> std::result::Result<InvokeResponseBody, Value> {
+        invoke_with(h, cmd, body, x_path.map(|p| ("x-path", p)))
+    }
+
+    fn invoke_with(
+        h: &Harness,
+        cmd: &str,
+        body: InvokeBody,
+        header: Option<(&'static str, &str)>,
+    ) -> std::result::Result<InvokeResponseBody, Value> {
         let mut headers = tauri::http::HeaderMap::new();
-        if let Some(p) = x_path {
-            headers.insert("x-path", p.parse().unwrap());
+        if let Some((name, value)) = header {
+            headers.insert(name, value.parse().unwrap());
         }
         get_ipc_response(
             &h.webview,
