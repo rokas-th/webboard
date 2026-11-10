@@ -296,6 +296,16 @@ describe('auth', () => {
         retryAfter: 600,
       });
       expect(value(await claim(storage, T, code, DEV_B, 'iPad', '10.0.0.6')).enrolled.deviceId).toBe(DEV_B);
+      expect(await claim(storage, T + 599_999, otherCode(code), DEV_C, 'iPhone', '10.0.0.7')).toEqual({
+        ok: false,
+        status: 429,
+        error: 'rate_limited',
+        message: 'Too many wrong pairing codes.',
+        retryAfter: 1,
+      });
+      const fresh = await liveCode(storage, token, T + 600_000);
+      expect(await claim(storage, T + 600_000, otherCode(fresh), DEV_C, 'iPhone', '10.0.0.7')).toEqual(BAD_CODE);
+      expect(value(await claim(storage, T + 600_000, fresh, DEV_C, 'iPhone', '10.0.0.7')).enrolled.deviceId).toBe(DEV_C);
     });
   });
 
@@ -421,7 +431,7 @@ describe('auth', () => {
       const b = await enrolled(storage, DEV_B);
       value(await ticket(storage, T, a.token, 'docA0000000'));
       value(await ticket(storage, T, a.token, 'docB0000000'));
-      keepUntold(storage, DEV_A, ['docA0000000']);
+      keepUntold(storage, T, DEV_A, ['docA0000000']);
       expect(await purgePlan(storage, T + 1, b.token, 'docA0000000')).toEqual({ ok: true, value: { device: DEV_B } });
       expect(await purgePlan(storage, T + 2, a.token, 'docA0000000')).toEqual({ ok: true, value: { device: DEV_A } });
       expect(await purgePlan(storage, T + 3, a.token, 'docC0000000')).toEqual({ ok: true, value: { device: DEV_A } });

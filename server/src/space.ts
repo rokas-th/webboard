@@ -3,7 +3,7 @@ import * as auth from './auth';
 import type { Admission, DeviceEntry, Enrolled, Failure, Result } from './auth';
 
 const CLOSE_CHUNK = 50;
-const CLOSE_RETRY_MS = 60_000;
+const PURGE_RETRY_MS = 60_000;
 
 function roomCloseFailed(untold: number): Failure {
   const plans = untold === 1 ? '1 plan was' : `${untold} plans were`;
@@ -20,12 +20,15 @@ function chunked<T>(items: readonly T[], size: number): T[][] {
   return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
 }
 
-const ROOM_RESTORE_FAILED: Failure = {
-  ok: false,
-  status: 500,
-  error: 'internal',
-  message: 'This device joined, but the server could not reconnect it to every plan. Join again.',
-};
+function roomRestoreFailed(untold: number): Failure {
+  const plans = untold === 1 ? '1 plan was' : `${untold} plans were`;
+  return {
+    ok: false,
+    status: 500,
+    error: 'internal',
+    message: `This device joined, but ${plans} not told to let it connect again. Join again.`,
+  };
+}
 
 export interface RoomCalls {
   close(doc: string, deviceId: string): Promise<number>;
@@ -82,6 +85,7 @@ export class Space extends DurableObject<Env> {
         return removed;
       }
       const { untold, closed } = await this.tell(id, removed.value.joins);
+      await this.arm();
       return untold > 0 ? roomCloseFailed(untold) : { ok: true, value: { closed } };
     });
   }
@@ -93,31 +97,30 @@ export class Space extends DurableObject<Env> {
     }
     const erased = await this.erase(purged.value.device, doc);
     if (erased === null) {
-      await this.retryLater();
+      await this.arm();
       return auth.PURGE_PENDING;
     }
     return { ok: true, value: { closed: erased } };
   }
 
   async alarm(): Promise<void> {
-    await auth
-      .untoldDevices(this.ctx.storage)
-      .reduce<Promise<void>>(
-        async (done, device) => {
-          await done;
-          await this.serialised(device, async () => {
-            await this.tell(device, auth.untoldOf(this.ctx.storage, device));
-          });
-        },
-        Promise.resolve(),
-      );
+    const retry = auth.untoldRetry(this.ctx.storage);
+    if (retry !== null && retry.due <= Date.now()) {
+      await auth.untoldDevices(this.ctx.storage).reduce<Promise<void>>(async (done, device) => {
+        await done;
+        await this.serialised(device, async () => {
+          await this.tell(device, auth.untoldOf(this.ctx.storage, device));
+        });
+      }, Promise.resolve());
+      if (auth.untoldRetry(this.ctx.storage) !== null) {
+        auth.backOffUntold(this.ctx.storage, Date.now());
+      }
+    }
     await auth.unerased(this.ctx.storage).reduce<Promise<void>>(async (done, { doc, device }) => {
       await done;
       await this.erase(device, doc);
     }, Promise.resolve());
-    if (auth.unerased(this.ctx.storage).length > 0) {
-      await this.retryLater();
-    }
+    await this.arm();
   }
 
   private async erase(device: string, doc: string): Promise<number | null> {
@@ -131,23 +134,34 @@ export class Space extends DurableObject<Env> {
     return outcome.value;
   }
 
-  private async retryLater(): Promise<void> {
-    if ((await this.ctx.storage.getAlarm()) === null) {
-      await this.ctx.storage.setAlarm(Date.now() + CLOSE_RETRY_MS);
+  private async arm(): Promise<void> {
+    const retry = auth.untoldRetry(this.ctx.storage);
+    const wanted = [
+      ...(retry === null ? [] : [retry.due]),
+      ...(auth.unerased(this.ctx.storage).length > 0 ? [Date.now() + PURGE_RETRY_MS] : []),
+    ];
+    if (wanted.length === 0) {
+      return;
+    }
+    const current = await this.ctx.storage.getAlarm();
+    const at = Math.min(...wanted, ...(current === null ? [] : [current]));
+    if (at !== current) {
+      await this.ctx.storage.setAlarm(at);
     }
   }
 
-  private async tell(id: string, docs: readonly string[]): Promise<{ untold: number; closed: number }> {
-    const settled = await chunked(docs, CLOSE_CHUNK).reduce<Promise<PromiseSettledResult<number>[]>>(
-      async (done, chunk) => [...(await done), ...(await Promise.allSettled(chunk.map((doc) => this.rooms.close(doc, id))))],
+  private async inChunks<T>(docs: readonly string[], call: (doc: string) => Promise<T>): Promise<PromiseSettledResult<T>[]> {
+    return chunked(docs, CLOSE_CHUNK).reduce<Promise<PromiseSettledResult<T>[]>>(
+      async (done, chunk) => [...(await done), ...(await Promise.allSettled(chunk.map(call)))],
       Promise.resolve([]),
     );
+  }
+
+  private async tell(id: string, docs: readonly string[]): Promise<{ untold: number; closed: number }> {
+    const settled = await this.inChunks(docs, (doc) => this.rooms.close(doc, id));
     this.logFailures('closeDevice', id, docs, settled);
     const untold = docs.filter((_doc, index) => settled[index].status === 'rejected');
-    auth.keepUntold(this.ctx.storage, id, untold);
-    if (untold.length > 0) {
-      await this.retryLater();
-    }
+    auth.keepUntold(this.ctx.storage, Date.now(), id, untold);
     const closed = settled.reduce((sum, outcome) => (outcome.status === 'fulfilled' ? sum + outcome.value : sum), 0);
     return { untold: untold.length, closed };
   }
@@ -157,10 +171,9 @@ export class Space extends DurableObject<Env> {
       return admitted;
     }
     const { enrolled, joins } = admitted.value;
-    const settled = await Promise.allSettled(joins.map((doc) => this.rooms.restore(doc, enrolled.deviceId)));
-    return this.logFailures('restoreDevice', enrolled.deviceId, joins, settled) > 0
-      ? ROOM_RESTORE_FAILED
-      : { ok: true, value: enrolled };
+    const settled = await this.inChunks(joins, (doc) => this.rooms.restore(doc, enrolled.deviceId));
+    const untold = this.logFailures('restoreDevice', enrolled.deviceId, joins, settled);
+    return untold > 0 ? roomRestoreFailed(untold) : { ok: true, value: enrolled };
   }
 
   private logFailures(call: string, deviceId: string, docs: readonly string[], settled: readonly PromiseSettledResult<unknown>[]): number {
