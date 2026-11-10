@@ -791,10 +791,9 @@ impl Store {
         let Some(copies) = self.copies(id)? else {
             return Ok(());
         };
-        let whole = held.is_some();
         let targets: Vec<PathBuf> = copies
             .into_iter()
-            .chain(whole.then_some(dir.clone()))
+            .chain(held.is_some().then_some(dir))
             .collect();
         if targets.is_empty() {
             return Ok(());
@@ -807,12 +806,10 @@ impl Store {
                 Err(s) => CommandError::new("store.io", format!("{} {}", e.message, s.message)),
             }),
             Ok(()) => self.sync_root().map_err(|e| {
-                let done = if whole {
-                    format!("{} was removed", dir.display())
-                } else {
-                    format!("Removed {}", shown(&targets))
-                };
-                CommandError::new("store.io", format!("{done}, but {}", e.message))
+                CommandError::new(
+                    "store.unsynced",
+                    format!("Removed {}. {}", shown(&targets), e.message),
+                )
             }),
         }
     }
@@ -1789,11 +1786,14 @@ mod tests {
         );
         let store = Store::new(docs.clone());
         let dir = docs.join("P");
+        let root = {
+            use std::os::unix::fs::MetadataExt;
+            fs::metadata(tmp.path()).unwrap().uid() == 0
+        };
         fs::set_permissions(&docs, fs::Permissions::from_mode(0o600)).unwrap();
-        let refused = fs::symlink_metadata(&dir).is_err();
         let e = store.delete("P");
         fs::set_permissions(&docs, fs::Permissions::from_mode(0o755)).unwrap();
-        if refused {
+        if !root {
             let e = e.unwrap_err();
             assert_eq!(e.code, "store.io");
             assert!(
@@ -1842,6 +1842,65 @@ mod tests {
     }
 
     #[test]
+    fn a_sync_failure_after_removing_the_whole_plan_names_every_removed_target() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let store = Store::new(docs.clone());
+        append_range(&mut store.doc("P").unwrap().lock().unwrap(), 1..=2);
+        fs::create_dir(docs.join("P.bad-1")).unwrap();
+        store.fail_next_sync.store(true, Ordering::SeqCst);
+        assert_eq!(
+            store.delete("P").unwrap_err(),
+            CommandError::new(
+                "store.unsynced",
+                format!(
+                    "Removed {}, {}. Could not sync the directory {}: injected sync fault",
+                    docs.join("P.bad-1").display(),
+                    docs.join("P").display(),
+                    docs.display()
+                )
+            )
+        );
+        assert!(!docs.join("P").exists());
+        assert!(!docs.join("P.bad-1").exists());
+        assert!(!store.table().unwrap().contains_key("P"));
+    }
+
+    #[test]
+    fn delete_with_nothing_to_remove_does_not_sync_the_root() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        fs::create_dir_all(docs.join("Q.bad-1")).unwrap();
+        let store = Store::new(docs.clone());
+        store.fail_next_sync.store(true, Ordering::SeqCst);
+        assert_eq!(store.delete("P"), Ok(()));
+        assert!(store.fail_next_sync.load(Ordering::SeqCst));
+        assert!(docs.join("Q.bad-1").is_dir());
+    }
+
+    #[test]
+    fn delete_refuses_a_symlink_in_place_of_the_plan_folder() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let elsewhere = tmp.path().join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::write(elsewhere.join("seg-1.log"), b"keep").unwrap();
+        fs::create_dir_all(docs.join("P.bad-1")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, docs.join("P")).unwrap();
+        let store = Store::new(docs.clone());
+        assert_eq!(
+            store.delete("P").unwrap_err(),
+            CommandError::new(
+                "store.io",
+                format!("{} is not a plan folder", docs.join("P").display())
+            )
+        );
+        assert_eq!(fs::read_link(docs.join("P")).unwrap(), elsewhere);
+        assert_eq!(fs::read(elsewhere.join("seg-1.log")).unwrap(), b"keep");
+        assert!(docs.join("P.bad-1").is_dir());
+    }
+
+    #[test]
     fn a_sync_failure_after_removing_only_copies_says_they_were_removed() {
         let tmp = TempDir::new().unwrap();
         let docs = tmp.path().join("docs");
@@ -1852,9 +1911,9 @@ mod tests {
         assert_eq!(
             store.delete("P").unwrap_err(),
             CommandError::new(
-                "store.io",
+                "store.unsynced",
                 format!(
-                    "Removed {}, {}, but Could not sync the directory {}: injected sync fault",
+                    "Removed {}, {}. Could not sync the directory {}: injected sync fault",
                     docs.join("P.bad-1").display(),
                     docs.join("P.bad-2").display(),
                     docs.display()

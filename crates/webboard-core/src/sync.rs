@@ -191,6 +191,10 @@ fn http(message: impl Into<String>) -> SyncError {
     SyncError::new("sync.http", message)
 }
 
+fn refused(message: impl Into<String>) -> SyncError {
+    SyncError::new("sync.refused", message)
+}
+
 fn not_joined() -> SyncError {
     SyncError::new("sync.not_joined", NOT_JOINED)
 }
@@ -573,12 +577,12 @@ impl SyncClient {
             };
         };
         let answered = |b: &ErrorBody| {
-            http(format!(
+            format!(
                 "Server answered {} {}: {}",
                 status.as_u16(),
                 b.error,
                 b.message
-            ))
+            )
         };
         match (status.as_u16(), caller) {
             (401, _) => SyncError::new("sync.unauthorized", body.message),
@@ -586,7 +590,7 @@ impl SyncClient {
                 let member = member.clone();
                 match self.off(move |l| l.revoke(Some(&member))).await {
                     Ok(true) => SyncError::new("sync.revoked", body.message),
-                    Ok(false) => answered(&body),
+                    Ok(false) => http(answered(&body)),
                     Err(e) => e,
                 }
             }
@@ -608,7 +612,7 @@ impl SyncClient {
             (503, _) if body.error == "not_configured" => {
                 SyncError::new("sync.not_configured", NOT_CONFIGURED)
             }
-            _ => answered(&body),
+            _ => refused(answered(&body)),
         }
     }
 
@@ -1657,7 +1661,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn other_statuses_are_sync_http() {
+    async fn an_unreadable_refusal_is_sync_http_and_a_json_refusal_is_sync_refused() {
         let mut f = Fixture::new().await;
         f.join_with_token();
         let client = f.client();
@@ -1686,7 +1690,7 @@ mod tests {
         .await;
         assert_eq!(
             client.ticket("ix-sp000000000").await.map(|_| ()),
-            Err(err("sync.http", "Server answered 500 x: y"))
+            Err(err("sync.refused", "Server answered 500 x: y"))
         );
         f.answer(
             "DELETE",
@@ -1698,10 +1702,28 @@ mod tests {
         assert_eq!(
             client.remove_device("dev00000000").await,
             Err(err(
-                "sync.http",
+                "sync.refused",
                 "Server answered 404 not_found: This device is not in the space."
             ))
         );
+        for (status, error, message) in [
+            (400, "bad_request", "The document id is not valid. Update WebBoard on this device."),
+            (404, "not_found", "Not found."),
+            (405, "not_found", "Not found."),
+            (413, "too_large", "The request is too large."),
+        ] {
+            let m = f
+                .answer("POST", "/ticket", status, json!({ "error": error, "message": message }))
+                .await;
+            assert_eq!(
+                client.ticket("ix-sp000000000").await.map(|_| ()),
+                Err(err(
+                    "sync.refused",
+                    &format!("Server answered {status} {error}: {message}")
+                ))
+            );
+            m.remove_async().await;
+        }
     }
 
     #[tokio::test]
@@ -2464,7 +2486,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_410_or_500_with_another_error_stays_sync_http() {
+    async fn a_410_or_500_with_another_error_is_sync_refused() {
         let mut f = Fixture::new().await;
         f.join_with_token();
         f.answer(
@@ -2484,11 +2506,11 @@ mod tests {
         let client = f.client();
         assert_eq!(
             client.purge_plan("pl0000000001").await,
-            Err(err("sync.http", "Server answered 500 internal: boom"))
+            Err(err("sync.refused", "Server answered 500 internal: boom"))
         );
         assert_eq!(
             client.ticket("pl0000000001").await.map(|_| ()),
-            Err(err("sync.http", "Server answered 410 other: elsewhere"))
+            Err(err("sync.refused", "Server answered 410 other: elsewhere"))
         );
     }
 
@@ -2520,7 +2542,7 @@ mod tests {
         .await;
         assert_eq!(
             f.client().ticket("pl0000000501").await.map(|_| ()),
-            Err(err("sync.http", "Server answered 409 conflict: other"))
+            Err(err("sync.refused", "Server answered 409 conflict: other"))
         );
     }
 
@@ -2552,7 +2574,7 @@ mod tests {
         .await;
         assert_eq!(
             f.client().purge_plan("pl0000000001").await,
-            Err(err("sync.http", "Server answered 404 not_found: other"))
+            Err(err("sync.refused", "Server answered 404 not_found: other"))
         );
     }
 

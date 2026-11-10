@@ -465,35 +465,85 @@ mod tests {
         );
     }
 
+    fn dialog_or_fs_grants(dir: &std::path::Path) -> Vec<(String, Vec<String>)> {
+        let mut files: Vec<(String, Vec<String>)> = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("could not list {}: {e}", dir.display()))
+            .map(|entry| entry.unwrap_or_else(|e| panic!("could not list {}: {e}", dir.display())))
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .map(|path| {
+                let file = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| panic!("{} has no file name", path.display()));
+                let text = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("could not read capabilities/{file}: {e}"));
+                let caps: serde_json::Value = serde_json::from_str(&text)
+                    .unwrap_or_else(|e| panic!("capabilities/{file} is not JSON: {e}"));
+                let permissions = caps["permissions"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("capabilities/{file} has no permissions array"));
+                let granted: Vec<String> = permissions
+                    .iter()
+                    .map(|p| match p {
+                        serde_json::Value::String(id) => id.clone(),
+                        other => other["identifier"]
+                            .as_str()
+                            .unwrap_or_else(|| panic!("capabilities/{file} grants {other} without an identifier"))
+                            .to_string(),
+                    })
+                    .filter(|id| id.starts_with("dialog:") || id.starts_with("fs:"))
+                    .collect();
+                (file, granted)
+            })
+            .collect();
+        files.sort();
+        files
+    }
+
     #[test]
     fn no_capability_grants_a_dialog_or_fs_permission() {
-        [
-            ("default.json", include_str!("../capabilities/default.json")),
-            ("ios.json", include_str!("../capabilities/ios.json")),
-        ]
-        .into_iter()
-        .for_each(|(file, text)| {
-            let caps: serde_json::Value = serde_json::from_str(text)
-                .unwrap_or_else(|e| panic!("capabilities/{file} is not JSON: {e}"));
-            let permissions = caps["permissions"]
-                .as_array()
-                .unwrap_or_else(|| panic!("capabilities/{file} has no permissions array"));
-            let granted: Vec<String> = permissions
-                .iter()
-                .map(|p| match p {
-                    serde_json::Value::String(id) => id.clone(),
-                    other => other["identifier"]
-                        .as_str()
-                        .unwrap_or_else(|| panic!("capabilities/{file} grants {other} without an identifier"))
-                        .to_string(),
-                })
-                .filter(|id| id.starts_with("dialog:") || id.starts_with("fs:"))
-                .collect();
+        let files = dialog_or_fs_grants(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/capabilities"
+        )));
+        let names: Vec<&str> = files.iter().map(|(file, _)| file.as_str()).collect();
+        assert!(
+            ["default.json", "ios.json"].iter().all(|known| names.contains(known)),
+            "capabilities/ does not hold default.json and ios.json: {names:?}"
+        );
+        files.iter().for_each(|(file, granted)| {
             assert!(
                 granted.is_empty(),
                 "capabilities/{file} grants {granted:?}, so the window can open a dialog or name a path itself"
             );
         });
+    }
+
+    #[test]
+    fn the_capability_check_reads_every_json_file_in_the_folder() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("default.json"),
+            r#"{"permissions":["core:default"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("probe.json"),
+            r#"{"permissions":["dialog:allow-open",{"identifier":"fs:allow-read","allow":[]}]}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "dialog:allow-open").unwrap();
+        assert_eq!(
+            dialog_or_fs_grants(dir.path()),
+            [
+                ("default.json".to_string(), Vec::<String>::new()),
+                (
+                    "probe.json".to_string(),
+                    vec!["dialog:allow-open".to_string(), "fs:allow-read".to_string()]
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -503,7 +553,7 @@ mod tests {
             .into_iter()
             .for_each(|cmd| {
                 assert!(
-                    !body.contains(&format!("commands::file::{cmd}")),
+                    !body.contains(cmd),
                     "run() still registers {cmd}, which takes a path from the window"
                 )
             });
