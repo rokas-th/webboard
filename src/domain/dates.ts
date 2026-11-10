@@ -43,7 +43,6 @@ export const WEEKDAYS: readonly Weekday[] = [1, 2, 3, 4, 5, 6, 7];
 
 export function weekday(d: Day): Weekday {
   return WEEKDAYS[(((checkDay(d) + 3) % 7) + 7) % 7];
-
 }
 
 export function yearOf(d: Day): number {

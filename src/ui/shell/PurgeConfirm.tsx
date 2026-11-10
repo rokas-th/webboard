@@ -3,6 +3,7 @@ import { Refused } from "../../actions/intents";
 import type { PlanId } from "../../domain/model";
 import { AppError } from "../../services/ipc";
 import type { PlanListing, Registry } from "../../store/registry";
+import { useSyncState } from "../../sync/SyncProvider";
 import { Dialog } from "../common/Dialog";
 import { Sheet } from "../common/Sheet";
 import { toast } from "../common/Toast";
@@ -18,6 +19,7 @@ export function purgeText(l: PlanListing): string {
 }
 
 function PurgeConfirmBody(p: { registry: Registry; listing: PlanListing; refusal: string | null; onClose(): void }) {
+  const { manager } = useSyncState();
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const settle = (): void => {
@@ -28,15 +30,17 @@ function PurgeConfirmBody(p: { registry: Registry; listing: PlanListing; refusal
     if (pendingRef.current) return;
     pendingRef.current = true;
     setPending(true);
-    p.registry.purgePlan(p.listing.id).then(
+    p.registry.purgePlan(p.listing.id, manager.capRefused(p.listing.id)).then(
       () => {
         settle();
         p.onClose();
         toast(`Deleted ${quoted(p.listing)} forever.`);
+        if (p.listing.space !== null) manager.retryCapped();
       },
       (e: unknown) => {
         settle();
         if (!(e instanceof AppError || e instanceof Refused)) throw e;
+        if (e instanceof AppError && e.code === "sync.revoked") void manager.markRevoked();
         const left = !p.registry.plans().some((l) => l.id === p.listing.id);
         if (left || (e instanceof AppError && e.code === "sync.purge_pending")) p.onClose();
         toast(e.message, "bad");

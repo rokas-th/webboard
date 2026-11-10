@@ -27,12 +27,14 @@ export function moveAllLabel(n: number): string {
 }
 
 export function moveAllToSpace(registry: Registry, ids: readonly PlanId[]): void {
+  let moved: number;
   try {
-    registry.movePlansToSpace(ids);
+    moved = registry.movePlansToSpace(ids);
   } catch (e) {
-    if (!(e instanceof Refused) && !(e instanceof AppError && e.code === "move.partial")) throw e;
+    if (e instanceof AppError && e.code === "move.partial") console.error(e.cause);
+    else if (!(e instanceof Refused)) throw e;
     toast(e.message, "bad");
     return;
   }
-  toast(ids.length === 1 ? "Moved to the space" : `Moved ${ids.length} plans to the space`);
+  toast(moved === 1 ? "Moved to the space" : `Moved ${moved} plans to the space`);
 }

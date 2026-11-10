@@ -8,7 +8,7 @@ import type { Action, DeviceId, SessionId, Write } from "../log/types";
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { existence, key, parseKey, stateWrites, validateWrite } from "../plan/units";
-import { AppError, call, callBytes } from "../services/ipc";
+import { AppError, callBytes, callName } from "../services/ipc";
 import { decodeAction } from "./doc";
 import { newPlanId } from "./plan-id";
 import type { GanttReport } from "../import/gantt";
@@ -265,8 +265,9 @@ function snapshot(session: PlanSession): { body: Uint8Array; unreadable: number 
 
 export async function exportPlan(session: PlanSession): Promise<Exported> {
   const name = session.view().plan.name;
+  if (/\p{Cs}/u.test(name)) throw new AppError("file.io", "The plan name holds a character that cannot be written to a file name; rename the plan and export again.");
   const { body, unreadable } = snapshot(session);
-  const written = await call<string | null>("plan_export", body, { headers: { "x-name": encodeURIComponent(name) } });
+  const written = await callName("plan_export", body, { headers: { "x-name": encodeURIComponent(name) } });
   return written === null ? null : { name: written, unreadable };
 }
 
@@ -275,11 +276,13 @@ export function unframe(b: Uint8Array): { name: string; bytes: Uint8Array } {
   if (b.length < NAME_LENGTH) throw short();
   const end = NAME_LENGTH + new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true);
   if (end > b.length) throw short();
+  if (end === NAME_LENGTH) throw new AppError("ipc.shape", "plan_import sent an empty file name");
   let name: string;
   try {
     name = new TextDecoder("utf-8", { fatal: true }).decode(b.subarray(NAME_LENGTH, end));
-  } catch {
-    throw new AppError("ipc.shape", "plan_import sent a file name that is not UTF-8");
+  } catch (e) {
+    if (!(e instanceof TypeError)) throw e;
+    throw new AppError("ipc.shape", "plan_import sent a file name that is not UTF-8", e);
   }
   return { name, bytes: b.slice(end) };
 }

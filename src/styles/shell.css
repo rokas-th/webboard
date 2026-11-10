@@ -238,18 +238,6 @@
   margin: 0;
 }
 
-.converted-dropped {
-  list-style: none;
-  max-height: 200px;
-  overflow-y: auto;
-  margin: 0 0 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--void);
-  font-size: 12px;
-}
-
 .converted-dropped li {
   padding: 2px 0;
 }

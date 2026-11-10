@@ -150,7 +150,7 @@ export function derive(plan: PlanState, held: ReadonlySet<ItemId>, today: IsoDat
       }
       if (c.kind !== "task") return acc;
       const sc = scheduleOf(c);
-      const p = status.get(c.id) === "done" ? 100 : sc.progress;
+      const p = need(status, c.id, "status") === "done" ? 100 : sc.progress;
       return [acc[0] + sc.dur * p, acc[1] + sc.dur];
     }, [0, 0]);
     weights.set(g, w);
@@ -170,15 +170,15 @@ export function derive(plan: PlanState, held: ReadonlySet<ItemId>, today: IsoDat
 
   const horizon = new Map(
     [...live.values()]
-      .filter((i) => status.get(i.id) !== "done")
+      .filter((i) => need(status, i.id, "status") !== "done")
       .map((i) => {
         const s = view.items.get(i.id);
         if (s === undefined) return [i.id, scheduleOf(i).horizon] as const;
-        return [i.id, status.get(i.id) === "doing" ? "now" : horizonOf(need(start, i.id, "start") - now)] as const;
+        return [i.id, need(status, i.id, "status") === "doing" ? "now" : horizonOf(need(start, i.id, "start") - now)] as const;
       }),
   );
 
-  const late = new Set(scheds.filter((s) => status.get(s.id) !== "done" && need(end, s.id, "end") < now).map((s) => s.id));
+  const late = new Set(scheds.filter((s) => need(status, s.id, "status") !== "done" && need(end, s.id, "end") < now).map((s) => s.id));
 
   const stored = new Map(scheds.map((s) => [s.id, s.start] as const));
   const lo = Math.min(now, ...scheds.map((s) => need(start, s.id, "start")));
@@ -195,7 +195,6 @@ export function derive(plan: PlanState, held: ReadonlySet<ItemId>, today: IsoDat
         const current = view.items.get(item);
         if (current === undefined) return [];
         return [[item, signedWork(endOf({ ...current, start: toDay(d.start), dur: d.dur }, cal), need(end, item, "end"))] as const];
-
       }),
     );
   };

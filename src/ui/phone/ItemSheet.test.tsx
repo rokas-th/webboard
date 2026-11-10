@@ -192,6 +192,13 @@ describe("ItemSheet", () => {
     expect(apply).toHaveBeenCalledTimes(3);
   });
 
+  it("disables Duration +1 at the longest task", async () => {
+    const t = await made([{ name: "Long", start: "2026-11-16", dur: 3650 }]);
+    shown(t, "Long");
+    expect(button("Duration +1").hasAttribute("disabled")).toBe(true);
+    expect(button("Duration −1").hasAttribute("disabled")).toBe(false);
+  });
+
   it("disables Duration −1 at one day and has no duration stepper on a milestone", async () => {
     const t = await made([{ name: "One", start: "2026-11-13", dur: 1 }, { name: "M", kind: "milestone", start: "2026-11-20", deps: [fs("One")] }]);
     shown(t, "One");

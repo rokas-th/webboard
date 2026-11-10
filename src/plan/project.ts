@@ -1,6 +1,7 @@
 import type { Calendar, Closure, HolidayYear, Tuning } from "../domain/calendar";
 import type { IsoDate } from "../domain/dates";
 import { linkKey, type Baseline, type BaselineId, type Item, type ItemId, type ItemKind, type Link, type LinkKey, type PlanId, type PlanState, type Schedule } from "../domain/model";
+import { need } from "../domain/need";
 import type { LogState } from "../log/state";
 import type { UnitKey, Write } from "../log/types";
 import { decodeAs, decodeHolidayYear, linkEnds, parseKey, validateWrite, type UnitKind } from "./units";
@@ -121,7 +122,7 @@ const projectItems = (ids: readonly ItemId[], t: Table): Map<ItemId, Item> => {
   const isTrashed = (id: ItemId): boolean => {
     const known = trashed.get(id);
     if (known !== undefined) return known;
-    const parent = parentOf.get(id) ?? null;
+    const parent = need(parentOf, id, "parent");
     const raw = raws.get(id);
     if (raw === undefined) throw new Error(`Item ${id} is not in the plan`);
     const value = raw.own || (parent !== null && isTrashed(parent));
@@ -131,7 +132,7 @@ const projectItems = (ids: readonly ItemId[], t: Table): Map<ItemId, Item> => {
   return new Map(
     [...raws].map(([id, r]): [ItemId, Item] => [
       id,
-      { ...r.item, trashed: isTrashed(id), place: { parent: parentOf.get(id) ?? null, order: r.item.place.order } },
+      { ...r.item, trashed: isTrashed(id), place: { parent: need(parentOf, id, "parent"), order: r.item.place.order } },
     ]),
   );
 };

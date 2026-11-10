@@ -79,6 +79,14 @@ describe("PrintSheet (product-8)", () => {
     expect([indent("g1"), indent("a")]).toEqual(["0mm", "4mm"]);
   });
 
+  it("draws a done task's bar lighter even when its incoming link does not hold", async () => {
+    const t = await made();
+    t.session.apply({ t: "schedule", item: "b", set: { start: "2026-11-11", status: "done" } });
+    render(<PrintSheet view={t.session.view()} onDone={() => undefined} />);
+    expect(cells("b")[4]).toBe("conflict");
+    expect(row("b").querySelector(".print-bar")?.classList.contains("done")).toBe(true);
+  });
+
   it("places bars by percent of the fit span, the group thin, the done bar lighter", async () => {
     const t = await made();
     const view = t.session.view();

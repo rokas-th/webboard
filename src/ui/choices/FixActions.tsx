@@ -1,7 +1,7 @@
 import { useContext, useMemo } from "react";
 import { q } from "../../actions/copy";
 import { schedView } from "../../domain/derive";
-import type { ItemId } from "../../domain/model";
+import { MAX_LAG, type ItemId } from "../../domain/model";
 import { lagThatHolds, type Conflict, type SchedView } from "../../domain/schedule";
 import { choiceHolding } from "../../plan/choices";
 import type { PlanView } from "../../store/doc";
@@ -78,10 +78,8 @@ function Fix(p: { view: PlanView; conflict: Conflict; sv: SchedView | null; read
   const pred = q(nameOf(p.view, c.pred));
   if (isLocked(c)) {
     if (lag === null) throw new Error(`Conflict on ${c.link} has no schedule view`);
-    return line(EARLY[linkOf(p.view, c.link).type](pred), "conflict-text", [
-      [`Shorten the lag to ${signed(lag)}`, () => fix("shorten")],
-      ["Remove the link", () => fix("remove")],
-    ]);
+    const shorten: readonly Button[] = Math.abs(lag) > MAX_LAG ? [] : [[`Shorten the lag to ${signed(lag)}`, () => fix("shorten")]];
+    return line(EARLY[linkOf(p.view, c.link).type](pred), "conflict-text", [...shorten, ["Remove the link", () => fix("remove")]]);
   }
   const text = `Starts earlier than the link from ${pred} allows.`;
   if (c.succLock === "held") return line(text, "conflict-text", [], [["Open the choice", () => open(choiceHolding(p.view.choices, p.view.plan, c.succ))]]);

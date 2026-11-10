@@ -163,9 +163,10 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
     if (step === null) return [];
     return [{ id: `move-${id}`, group: "Edit", label, keys: `${ctx.mac ? "⌥" : "Alt "}${arrow}`, run: () => void run(step) }];
   });
-  if (it.kind === "group") return [...nudges, ...order, duplicate, trash];
-  if (!dated(it)) return [...order, duplicate, trash];
-  return [...nudges, ...resizes, ...order, duplicate, trash];
+  const copy = ctx.readOnly ? [] : [duplicate];
+  if (it.kind === "group") return [...nudges, ...order, ...copy, trash];
+  if (!dated(it)) return [...order, ...copy, trash];
+  return [...nudges, ...resizes, ...order, ...copy, trash];
 }
 
 function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {

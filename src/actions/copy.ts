@@ -109,7 +109,6 @@ export const refusal = {
   dateRange: "Dates run from 1 Jan 1900 to 31 Dec 2199.",
   lagRange: "A lag is at most 1000 working days either way.",
   movedPast: (name: string): string => `${q(name)} would move past 31 Dec 2199.`,
-  movedBefore: (name: string): string => `${q(name)} would move before 1 Jan 1900.`,
   stretched: (name: string): string => `${q(name)} would last more than 3650 working days on this calendar.`,
   milestoneDur: "Milestones have no duration.",
   progress: "Progress is a whole number from 0 to 100.",

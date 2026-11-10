@@ -29,7 +29,7 @@ const SEED: readonly SeedItem[] = [
 const d = (iso: string): number => toDay(iso);
 
 describe("printRows (product-8)", () => {
-  it("lists every live item in tree order with its depth, ignoring collapsed groups and leaving the Trash out", async () => {
+  it("lists every live item in tree order with its depth, leaving the Trash out", async () => {
     const t = await testSession(SEED);
     sessions.push(t.session);
     t.session.apply({ t: "trash", items: ["x", "g3"] });

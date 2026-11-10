@@ -2,10 +2,12 @@ import { invoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/cor
 
 export class AppError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  readonly cause: unknown;
+  constructor(code: string, message: string, cause?: unknown) {
     super(message);
     this.name = "AppError";
     this.code = code;
+    this.cause = cause;
   }
 }
 
@@ -31,10 +33,16 @@ export async function call<T>(cmd: string, args?: InvokeArgs, options?: InvokeOp
 
 const shapeOf = (x: unknown): string => (x === null ? "null" : Array.isArray(x) ? "an array" : x instanceof Uint8Array ? "a Uint8Array" : typeof x);
 
-export async function callBytes(cmd: string, args?: InvokeArgs, options?: InvokeOptions): Promise<Uint8Array> {
-  const out = await call<unknown>(cmd, args, options);
+export async function callBytes(cmd: string, args?: InvokeArgs): Promise<Uint8Array> {
+  const out = await call<unknown>(cmd, args);
   if (out instanceof ArrayBuffer) return new Uint8Array(out);
   throw new AppError("ipc.shape", `${cmd} answered ${shapeOf(out)} instead of raw bytes`);
+}
+
+export async function callName(cmd: string, args?: InvokeArgs, options?: InvokeOptions): Promise<string | null> {
+  const out = await call<unknown>(cmd, args, options);
+  if (out === null || (typeof out === "string" && out !== "")) return out;
+  throw new AppError("ipc.shape", `${cmd} answered ${out === "" ? "an empty string" : shapeOf(out)} instead of a file name or null`);
 }
 
 export interface SpaceInfo {

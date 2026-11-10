@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixedClock } from "../../services/clock";
 import { Registry } from "../../store/registry";
+import { SyncManager } from "../../sync/manager";
 import { fakeFactory } from "../../test/fakeProvider";
 import { setScreen } from "../../test/setup";
 import { seededStore } from "../../test/shell";
@@ -20,6 +21,8 @@ vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
 const UNKNOWN = "The server does not know this plan yet. Let it sync, then delete it again.";
 const PENDING = "The plan is deleted, but the server has not erased its history yet. It tries again every minute.";
+const REVOKED = "This device was removed from the space.";
+const CAP = "This device has joined 500 plans, the most one device may join.";
 
 const registries: Registry[] = [];
 
@@ -125,6 +128,27 @@ describe("Delete forever on another device while the plan is open", () => {
   });
 });
 
+describe("Delete forever on another device while the plan is open on the phone", () => {
+  it("lets go of the open plan", async () => {
+    const { r } = await spaceMounted("phone");
+    const plans = plansRoot("phone");
+    act(() => {
+      fireEvent.click(within(plans).getByRole("button", { name: /Launch/ }));
+    });
+    await deep();
+    expect(r.openSessions().map((s) => s.view().plan.id)).toContain("P");
+    expect(document.querySelector(".phone-plan-name")?.textContent).toBe("Launch");
+    const ix = (await r.doc(IX)).ydoc;
+    act(() => {
+      Y.applyUpdate(ix, remoteUpdate(ix, "r-g", encodeAction(stamp("r-g", headsOf(ix), [own("ip:P", { gone: true })], { dev: "dev-B", lbl: "Delete plan forever" }))));
+    });
+    await deep();
+    expect(r.openSessions().map((s) => s.view().plan.id)).not.toContain("P");
+    expect(document.querySelector(".phone-plan-name")?.textContent).not.toBe("Launch");
+    expect(badToasts()).toEqual(["“Launch” was deleted forever on another device. It is erased from this device too, including changes that had not synced."]);
+  });
+});
+
 describe("Delete forever of a moved plan whose space is not attached", () => {
   it("says to connect to the space and offers no delete", async () => {
     const w = syncWorld({ names: { P: "Launch" } });
@@ -139,7 +163,7 @@ describe("Delete forever of a moved plan whose space is not attached", () => {
     registries.push(r);
     await deep();
     const purgePlan = vi.spyOn(r, "purgePlan");
-    render(<PurgeConfirm registry={r} id="P" onClose={() => undefined} />);
+    render(withSync(<PurgeConfirm registry={r} id="P" onClose={() => undefined} />));
     const d = screen.getByRole("dialog", { name: "Delete “Launch” forever?" });
     expect(d.textContent).toContain("Connect to the space to delete this plan forever.");
     expect(d.textContent).not.toContain("is erased from this device");
@@ -186,7 +210,7 @@ describe.each<Form>(["wide", "phone"])("Delete forever (%s)", (form) => {
       fireEvent.click(confirmIn(d));
     });
     await deep();
-    expect(purgePlan.mock.calls).toEqual([[ids[0]]]);
+    expect(purgePlan.mock.calls).toEqual([[ids[0], false]]);
     expect(purges()).toEqual([["store_delete", ids[0]]]);
     expect(screen.queryByRole("dialog", { name: "Delete “Alpha” forever?" })).toBeNull();
     expect(toastTexts()).toEqual(["Deleted “Alpha” forever."]);
@@ -208,6 +232,52 @@ describe.each<Form>(["wide", "phone"])("Delete forever (%s)", (form) => {
     ]);
     expect(toastTexts()).toEqual(["Deleted “Pod” forever."]);
     expect(r.plans().map((p) => p.id)).not.toContain("P2");
+  });
+
+  it("a space purge connects again the plans the server's plan cap stopped", async () => {
+    const retry = vi.spyOn(SyncManager.prototype, "retryCapped");
+    await spaceMounted(form);
+    const d = await deleteForever(form, "Pod");
+    act(() => {
+      fireEvent.click(confirmIn(d));
+    });
+    await deep();
+    expect(toastTexts()).toEqual(["Deleted “Pod” forever."]);
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it("a plan the plan cap kept off the server is deleted forever here when the server does not know it", async () => {
+    const { r, w } = await spaceMounted(form, {
+      sync_purge_plan: fail({ code: "sync.unknown_plan", message: UNKNOWN }),
+      sync_ticket: (args) => {
+        if (argsOf({ args }).doc === "P2") throw { code: "sync.too_many_plans", message: CAP };
+        return w.ticket("x");
+      },
+    });
+    const purgePlan = vi.spyOn(r, "purgePlan");
+    const d = await deleteForever(form, "Pod");
+    act(() => {
+      fireEvent.click(confirmIn(d));
+    });
+    await deep();
+    expect(purgePlan.mock.calls).toEqual([["P2", true]]);
+    expect(purges()).toEqual([
+      ["sync_purge_plan", "P2"],
+      ["store_delete", "P2"],
+    ]);
+    expect(toastTexts()).toEqual(["Deleted “Pod” forever."]);
+    expect(r.plans().map((p) => p.id)).not.toContain("P2");
+  });
+
+  it("a purge refused because this device was removed tells sync, which turns the space read-only", async () => {
+    await spaceMounted(form, { sync_purge_plan: fail({ code: "sync.revoked", message: REVOKED }) });
+    const d = await deleteForever(form, "Pod");
+    act(() => {
+      fireEvent.click(confirmIn(d));
+    });
+    await deep();
+    expect(badToasts()).toEqual([REVOKED]);
+    expect(tauri.calls.filter((c) => c.cmd === "sync_mark_revoked")).toHaveLength(1);
   });
 
   it("a purge the server does not know yet shows its message, keeps the dialog and leaves the plan in the Trash", async () => {

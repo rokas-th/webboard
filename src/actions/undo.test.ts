@@ -203,7 +203,9 @@ describe("buildUndo", () => {
     ctx = applied(ctx, b);
     expect(valueOf(ctx, "s:A")).toEqual(["2026-11-18", 3, "doing", 0, "later"]);
     expect(ctx.view.derived.progress.get("G")).toBe(0);
-    ctx = applied(ctx, buildUndo(ctx, b.action.id));
+    const u = buildUndo(ctx, b.action.id);
+    expect(u.action.w.map((x) => x.u)).toEqual([`a:${b.action.id}`]);
+    ctx = applied(ctx, u);
     expect(valueOf(ctx, "s:A")).toEqual(["2026-11-18", 3, "done", 100, "later"]);
     expect(ctx.view.derived.progress.get("G")).toBe(60);
   });

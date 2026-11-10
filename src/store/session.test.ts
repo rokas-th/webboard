@@ -733,6 +733,23 @@ describe("PlanSession", () => {
     expect(nameOf(s, aId)).toBe("A");
   });
 
+  it("opens a plan saved before the date bounds whose start is out of the window, naming the unit", async () => {
+    const e = env();
+    const seed = seedDoc();
+    const pd = new PlanDoc(seed);
+    const l = logOf(seed);
+    const aUnit = [...l.units().keys()].find((u) => u.startsWith("n:") && l.unit(u)?.value === "A");
+    if (aUnit === undefined) throw new Error("no item named A");
+    const aId = aUnit.slice(2);
+    const old = { u: key.s(aId), v: ["0026-11-16", 2, "todo", 0, "later"], c: "own" as const };
+    const id = newId();
+    pd.append(act(id, [...l.heads], [old]), []);
+    const s = await open(e, seed);
+    expect(s.view().unreadable.map((u) => u.id)).toEqual([id]);
+    expect(s.view().unreadable[0]?.message).toContain(`s:${aId}: start is not a date from 1900-01-01 to 2199-12-31`);
+    expect(nameOf(s, aId)).toBe("A");
+  });
+
   it("undecodable remote action", async () => {
     const e = env();
     const s = await open(e);

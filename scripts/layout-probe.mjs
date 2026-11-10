@@ -76,6 +76,7 @@ const valued = (selector, text) => ({ valued: [selector, text] });
 const ellipsed = (selector) => ({ ellipsed: selector });
 const within_ = (selector, box, n) => ({ within: [selector, box, n] });
 const fitLabels = () => ({ fitLabels: true });
+const monthCut = () => ({ monthCut: true });
 const raise = (message) => ({ raise: message });
 const media = (kind) => ({ media: kind });
 
@@ -134,7 +135,7 @@ function states() {
       actions: [viewExpect(place.view), tap(names, PICKED), expect(".slot-panel .panel .kind", "TASK")],
     });
   });
-  add("fit/labels", "mesa", { place: { view: "timeline", zoom: "F" }, actions: [viewExpect("timeline"), fitLabels()] });
+  add("fit/labels", "mesa", { place: { view: "timeline", zoom: "F" }, actions: [viewExpect("timeline"), fitLabels(), monthCut()] });
   add("scale", "scale", { actions: [expect(".tl-row .name", "WS01 task 01"), valued(".plan-head h1 input", "Scale: 1,000 items")] });
   add("print/scale", "scale-print", {
     sizes: "standard",
@@ -532,7 +533,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -1404,6 +1405,13 @@ window.__probeAct = function (a) {
       return r.width === 0 || r.left < b.left - 0.5 || r.right > b.right + 0.5 || r.top < b.top - 0.5 || r.bottom > b.bottom + 0.5;
     });
     if (outside.length > 0) return { fail: outside.length + " " + a.within[0] + " are empty or not inside their " + a.within[1] + ": " + outside.map(function (el) { return JSON.stringify(el.textContent); }).join(", ") };
+    return { ok: true };
+  }
+  if (a.monthCut !== undefined) {
+    var cutMonths = Array.prototype.slice.call(document.querySelectorAll(".tl-month-text")).filter(function (m) { return m.scrollWidth > m.clientWidth; });
+    if (cutMonths.length === 0) return { fail: "no .tl-month-text is narrower than its text, so the month ellipsis is not tested" };
+    var plainCut = cutMonths.filter(function (m) { return getComputedStyle(m).textOverflow !== "ellipsis"; });
+    if (plainCut.length > 0) return { fail: plainCut.length + " cut month labels end without an ellipsis, first " + JSON.stringify(plainCut[0].textContent) };
     return { ok: true };
   }
   if (a.ellipsed !== undefined) {

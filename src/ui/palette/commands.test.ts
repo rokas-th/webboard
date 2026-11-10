@@ -611,6 +611,13 @@ describe("duplicate (product-7)", () => {
     expect(ids(harness(t, { selected: "one" }).ctx)).not.toContain("duplicate");
   });
 
+  it("is not offered on a read-only plan", async () => {
+    const t = await made(SMALL);
+    const all = ids({ ...harness(t, { selected: "a" }).ctx, readOnly: true });
+    expect(all).not.toContain("duplicate");
+    expect(all).toContain("trash");
+  });
+
   it("runs the duplicate intent and selects and follows the copy on the timeline", async () => {
     const t = await made(SMALL);
     const apply = vi.spyOn(t.session, "apply");

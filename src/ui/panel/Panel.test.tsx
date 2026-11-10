@@ -8,10 +8,10 @@ import { fs, MESA_SEED, testSession, type SeedItem, type TestSession, type TestS
 import { shellFor } from "../../test/shell";
 import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
-import { READ_ONLY } from "../run";
-import { useUi, type UiState } from "../state";
+import { OpenChoice, READ_ONLY } from "../run";
+import { UiContext, useUi, type UiState } from "../state";
 import { historyTime, revertText } from "./historyText";
-import { groupOptions } from "./ItemPanel";
+import { groupOptions, ItemPanel } from "./ItemPanel";
 import { withSync } from "../../test/withSync";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -189,7 +189,7 @@ describe("ItemPanel fields", () => {
     const t = await made(ITEM_SEED);
     await shown(t);
     select("X");
-    expect([input("End").min, input("End").max]).toEqual(["1900-01-01", "2199-12-31"]);
+    expect([input("End").min, input("End").max]).toEqual(["2026-11-16", "2040-11-09"]);
     const apply = vi.spyOn(t.session, "apply");
     edit(input("End"), "2026-11-20", "Enter");
     expect(apply.mock.calls).toEqual([[{ t: "resize", item: "X", dur: 5 }]]);
@@ -206,6 +206,25 @@ describe("ItemPanel fields", () => {
     edit(input("End"), "", "blur");
     expect(input("End").value).toBe("2026-11-20");
     expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the End field hold an end past 2199 that the longest task allows", async () => {
+    const t = await made([{ id: "Late", name: "Late", start: "2199-06-03", dur: 400 }]);
+    render(
+      <OpenChoice.Provider value={vi.fn()}>
+        <UiContext.Provider
+          value={{
+            ui: { plan: null, view: "timeline", zoom: "W", selected: "Late", collapsed: new Set(), baseline: null, dialog: null, reveal: null, follow: null, naming: null },
+            setUi: vi.fn(),
+          }}
+        >
+          <ItemPanel session={t.session} item="Late" local="Mac" mac={true} naming={false} onNamed={() => undefined} />
+        </UiContext.Provider>
+      </OpenChoice.Provider>,
+    );
+    const end = document.querySelector('input[aria-label="End"]');
+    if (!(end instanceof HTMLInputElement)) throw new Error("no End field");
+    expect([end.value, end.min, end.max]).toEqual(["2200-12-12", "2199-06-03", "2213-05-28"]);
   });
 
   it("shows no End field on an unscheduled task or a milestone", async () => {
@@ -374,6 +393,14 @@ describe("ItemPanel fields", () => {
     expect([input("Duration").value, input("Duration").nextElementSibling?.textContent]).toEqual(["1", "working day"]);
     expect(button("Shorter by one working day").disabled).toBe(true);
     expect(button("Longer by one working day").disabled).toBe(false);
+  });
+
+  it("stops + at the longest task", async () => {
+    const t = await made([{ id: "Long", name: "Long", start: "2026-11-16", dur: 3650 }]);
+    await shown(t);
+    select("Long");
+    expect(button("Longer by one working day").disabled).toBe(true);
+    expect(button("Shorter by one working day").disabled).toBe(false);
   });
 
   it("sets status from three options and progress in steps of 5", async () => {

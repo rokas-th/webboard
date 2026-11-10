@@ -848,7 +848,7 @@ describe("removal and the space", () => {
     const line = (): HTMLElement | null => sidebar().querySelector(".local-line");
 
     it("tags each one, says how many, and moves them all with one button", async () => {
-      const w = await spaceWorld({ local: true });
+      const w = await spaceWorld({ local: true, trashedP2: true });
       const { r, f } = await mounted(w);
       syncAll(f);
       await settle();
@@ -858,8 +858,8 @@ describe("removal and the space", () => {
       const shown = line();
       if (shown === null) throw new Error("no local line");
       expect([shown.querySelector("p")?.textContent, within(shown).getByRole("button").textContent]).toEqual([LINE_TWO, "Move both"]);
-      const trash = within(sidebar()).queryByRole("region", { name: "Trash" });
-      expect(trash === null || (shown.compareDocumentPosition(trash) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+      const trash = within(sidebar()).getByRole("region", { name: "Trash" });
+      expect(shown.compareDocumentPosition(trash) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
       const move = vi.spyOn(r, "movePlansToSpace");
       await click(within(shown).getByRole("button", { name: "Move both" }));
       expect(move.mock.calls).toEqual([[["L", "M"]]]);
@@ -891,14 +891,33 @@ describe("removal and the space", () => {
       const { r, f } = await mounted(w);
       syncAll(f);
       await settle();
+      const cause = new Error("Disk full");
+      const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
       vi.spyOn(r, "movePlansToSpace").mockImplementation(() => {
-        throw new AppError("move.partial", "Moved 1 of 2 plans to the space. Mango: Disk full");
+        throw new AppError("move.partial", "Moved 1 of 2 plans to the space. Mango: Disk full", cause);
       });
       const shown = line();
       if (shown === null) throw new Error("no local line");
       await click(within(shown).getByRole("button", { name: "Move both" }));
       expect(badToasts()).toEqual(["Moved 1 of 2 plans to the space. Mango: Disk full"]);
+      expect(logged.mock.calls).toEqual([[cause]]);
       expect(line()).not.toBeNull();
+    });
+
+    it("leaves a local plan that failed to load untagged and out of the count", async () => {
+      const w = await spaceWorld({ local: true });
+      w.mem.fail("store_load", "M", { code: "store.corrupt", message: "The plan file is damaged at record 12." });
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await settle();
+      expect(r.failures().has("M")).toBe(true);
+      expect(tagged("tag-local")).toEqual(["Alpha"]);
+      const shown = line();
+      if (shown === null) throw new Error("no local line");
+      expect([shown.querySelector("p")?.textContent, within(shown).getByRole("button").textContent]).toEqual([
+        "1 plan is on this device only. Move it to the space to see it on other devices.",
+        "Move it",
+      ]);
     });
 
     it("shows no tags and no line while sync is off", async () => {

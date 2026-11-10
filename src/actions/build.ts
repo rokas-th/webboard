@@ -647,7 +647,7 @@ export function withDerived(ctx: Ctx, ownWrites: readonly Write[], roots: readon
       throw new Error(ownUnits.has(u) ? `Derived write to ${u}, which this action unschedules` : `Derived write to unscheduled ${id}`);
     }
     if (start !== undefined && start > toDay(LAST_PLAN_DATE)) throw new Refused(refusal.movedPast(nameOf(ctx, id)));
-    if (start !== undefined && start < toDay(FIRST_PLAN_DATE)) throw new Refused(refusal.movedBefore(nameOf(ctx, id)));
+    if (start !== undefined && start < toDay(FIRST_PLAN_DATE)) throw new Error(`Derived write moves ${id} before ${FIRST_PLAN_DATE}`);
     if (dur !== undefined && dur > MAX_TASK_DUR) throw new Refused(refusal.stretched(nameOf(ctx, id)));
     return { u, v: codec.sched.enc(bounded({ ...sc, start: start === undefined ? sc.start : toIso(start), dur: dur ?? sc.dur })), c };
   };

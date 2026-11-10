@@ -186,7 +186,6 @@ export function workCalendar(cal: Calendar): WorkCalendar {
       .filter(([date]) => date >= lo && date <= hi)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .flatMap(([, entries]) => entries.map(listedOf));
-
   };
 
   const missingYears = (from: Day, to: Day): number[] => {

@@ -22,6 +22,8 @@ const PURGE_LABEL = "Delete plan forever";
 const GONE_LABEL = "Follow a deletion on another device";
 const CONNECT = "Connect to the space to delete this plan forever.";
 const UNREAD_SPACE = "The plan list of a space on this device could not be read, so WebBoard cannot tell whether this plan belongs to it.";
+const ALREADY = "This plan was already deleted forever.";
+const OFFLINE = "Could not reach webboard.rokass.org.";
 
 const gone = (plan: string): Write => own("ip:" + plan, { gone: true });
 
@@ -86,7 +88,9 @@ async function rejection(p: Promise<unknown>): Promise<unknown> {
   throw new Error("expected a rejection");
 }
 
-function purgeWorld(o: { trashed?: boolean; moved?: boolean; localGone?: boolean; synced?: boolean; followed?: boolean; answers?: Record<string, Answer> } = {}): SyncWorld {
+function purgeWorld(
+  o: { trashed?: boolean; moved?: boolean; localGone?: boolean; synced?: boolean; followed?: boolean; purged?: boolean; answers?: Record<string, Answer> } = {},
+): SyncWorld {
   const w = syncWorld({ names: { P: "Launch", L: "Alpha" }, answers: o.answers });
   seedIndex(w.mem, "local", [
     ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"),
@@ -101,6 +105,7 @@ function purgeWorld(o: { trashed?: boolean; moved?: boolean; localGone?: boolean
     ixAct("s-P", ["s-b"], [ip("P", false)]),
     ...(o.trashed === true ? [ixAct("s-Pt", ["s-P"], [ip("P", true)], "dev-A", "Move plan to Trash")] : []),
     ...(o.followed === true ? [ixAct("s-Pg", ["s-P"], [gone("P")], "dev-A", GONE_LABEL)] : []),
+    ...(o.purged === true ? [ixAct("s-Pp", ["s-P"], [gone("P")], "dev-B", PURGE_LABEL)] : []),
   ]);
   const p = seedPlan(w.mem, "P", "Launch", { items: ["A"] });
   seedPlan(w.mem, "L", "Alpha");
@@ -486,6 +491,103 @@ describe("Registry: delete forever", () => {
     expect(r.takeGoneNotices()).toEqual([
       { text: "“Launch” was deleted forever on another device. It is erased from this device too, including changes that had not synced.", bad: true },
     ]);
+  });
+
+  it("at start names the deleting device from the plan list of a space that is not attached", async () => {
+    purgeWorld({ trashed: true, synced: true, purged: true });
+    const r = await open();
+    await flush();
+    expect(docsOf(0, "store_delete")).toEqual(["P"]);
+    expect(r.takeGoneNotices()).toEqual([{ text: "“Launch” was deleted forever on iPhone. It is erased from this device too.", bad: false }]);
+  });
+
+  it("a plan that cannot be closed before it is erased says so, and its files are not removed", async () => {
+    const w = purgeWorld({ trashed: true, synced: true });
+    const r = await spaceOpen(w);
+    const s = await r.session("P");
+    vi.spyOn(s, "close").mockRejectedValueOnce(new AppError("store.io", "Disk full."));
+    const from = tauri.calls.length;
+    await remoteGone(r, "P");
+    expect(docsOf(from, "store_delete")).toEqual([]);
+    expect(w.mem.docs.has("P")).toBe(true);
+    expect(r.takeGoneNotices()).toEqual([
+      {
+        text: "“Launch” was deleted forever on iPhone, but it could not be closed on this device, so its files were not removed: Disk full. Restart WebBoard to try again.",
+        bad: true,
+      },
+    ]);
+  });
+
+  it("asks the server once more when its answer to a purge was lost, and erases the plan as its own purge", async () => {
+    let asked = 0;
+    const w = purgeWorld({
+      trashed: true,
+      answers: {
+        sync_purge_plan: () => {
+          asked += 1;
+          if (asked === 1) throw { code: "sync.http", message: "webboard.rokass.org did not answer within 10 s." };
+          return null;
+        },
+      },
+    });
+    const r = await spaceOpen(w);
+    const from = tauri.calls.length;
+    await r.purgePlan("P");
+    await flush();
+    expect(docsOf(from, "sync_purge_plan")).toEqual(["P", "P"]);
+    expect(docsOf(from, "store_delete")).toEqual(["P"]);
+    expect(labelsTo(from, IX)).toEqual([PURGE_LABEL]);
+    expect(r.takeGoneNotices()).toEqual([]);
+  });
+
+  it("an offline purge of a space plan changes nothing here and rethrows the transport error", async () => {
+    const w = purgeWorld({ trashed: true, answers: { sync_purge_plan: fail({ code: "sync.http", message: OFFLINE }) } });
+    const r = await spaceOpen(w);
+    const from = tauri.calls.length;
+    const e = await rejection(r.purgePlan("P"));
+    await flush();
+    expect(e).toBeInstanceOf(AppError);
+    expect(e).toMatchObject({ code: "sync.http", message: OFFLINE });
+    expect(docsOf(from, "sync_purge_plan")).toEqual(["P", "P"]);
+    expect(docsOf(from, "store_delete")).toEqual([]);
+    expect(writesTo(from, IX)).toEqual([]);
+    expect(r.plans().find((p) => p.id === "P")).toMatchObject({ trashed: true, space: SP });
+  });
+
+  it("refuses a plan that was already deleted forever as such", async () => {
+    const w = purgeWorld({ trashed: true, synced: true });
+    const r = await spaceOpen(w);
+    await remoteGone(r, "P");
+    expect(r.purgeRefusal("P")).toBe(ALREADY);
+    const e = await rejection(r.purgePlan("P"));
+    expect(e).toBeInstanceOf(Refused);
+    expect(e).toMatchObject({ message: ALREADY });
+  });
+
+  it("a plan the server never stored because of its plan cap is erased here and tombstoned without the server", async () => {
+    const w = purgeWorld({ trashed: true, synced: true, answers: { sync_purge_plan: fail({ code: "sync.unknown_plan", message: UNKNOWN }) } });
+    const r = await spaceOpen(w);
+    const from = tauri.calls.length;
+    await r.purgePlan("P", true);
+    await flush();
+    expect(docsOf(from, "sync_purge_plan")).toEqual(["P"]);
+    expect(labelsTo(from, IX)).toEqual([PURGE_LABEL]);
+    expect(docsOf(from, "store_delete")).toEqual(["P"]);
+    expect(r.isGone("P")).toBe(true);
+    expect(r.takeGoneNotices()).toEqual([]);
+  });
+
+  it("closing while a sweep loads the erased copy ends the sweep quietly", async () => {
+    const w = purgeWorld({ trashed: true });
+    const r = await spaceOpen(w);
+    const answer = tauri.answers.store_load;
+    const held = hold("store_load");
+    await remoteGone(r, "P");
+    const loads = tauri.calls.filter((c) => c.cmd === "store_load");
+    expect(argsOf(loads[loads.length - 1]).doc).toBe("P");
+    const closing = r.close();
+    held.resolve(answer({ doc: "P" }));
+    await expect(closing).resolves.toBeUndefined();
   });
 
   it("an own purge whose files cannot be removed rejects with that, and queues no second notice", async () => {

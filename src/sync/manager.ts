@@ -83,6 +83,7 @@ const MESSAGES = {
   storeNamed: (name: string) => `The server could not store a change to “${name}”. Try again; if it repeats, export it.`,
   store: "The server could not store a change from this device. Try again.",
   storeIndex: "The server could not store a change to the plan list. Try again.",
+  indexGone: "The server says this space’s plan list was deleted. Sync is stopped.",
 } as const;
 
 export function holdsPlan(registry: Registry, doc: string): boolean {
@@ -636,7 +637,8 @@ export class SyncManager {
         this.stopAll(this.fault("local-failed", null, e.message + RESET_HINT, e.code));
         return;
       case "sync.gone":
-        this.erase(link);
+        if (isIndex(link.doc)) this.stopAll(this.fault("failed", null, e.message, e.code));
+        else this.erase(link);
         return;
       case "sync.rate_limited": {
         const wait = this.rateWait(e.message);
@@ -729,7 +731,8 @@ export class SyncManager {
         void this.markRevoked();
         return;
       case 4410:
-        this.erase(link);
+        if (isIndex(link.doc)) this.stopAll(this.fault("failed", null, MESSAGES.indexGone, null));
+        else this.erase(link);
         return;
       case 4413:
         this.stopDoc(link, this.fault("too-large", link.doc, this.tooLargeText(link.doc), null));
@@ -792,7 +795,25 @@ export class SyncManager {
   private erase(link: Link): void {
     this.drop(link);
     this.emit();
+    if (this.registry.isClosed()) return;
     void this.registry.markGone(link.doc);
+  }
+
+  capRefused(doc: string): boolean {
+    return this.links.get(doc)?.fault?.cause === "sync.too_many_plans";
+  }
+
+  retryCapped(): void {
+    if (this.global !== null || this.revokedLatch) return;
+    [...this.links.values()]
+      .filter((l) => !l.dead && l.fault?.cause === "sync.too_many_plans")
+      .forEach((l) => {
+        l.fault = null;
+        l.stopped = false;
+        l.attempt = 0;
+        this.connect(l);
+      });
+    this.emit();
   }
 
   private drop(link: Link): void {

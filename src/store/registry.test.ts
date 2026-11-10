@@ -2234,6 +2234,7 @@ describe("Registry: spaces", () => {
         ["R", SP, false],
         ["S", null, false],
       ]);
+      expect(appErrorOf(thrown).cause).toEqual(new Error("Disk full"));
       spy.mockRestore();
       await flush();
       const from = tauri.calls.length;
@@ -2241,6 +2242,46 @@ describe("Registry: spaces", () => {
       await flush();
       expect(appendsTo(from, IX)).toEqual([]);
       expect(appendsTo(from, "local").map(writesOf)).toEqual([[ip("R", true)]]);
+    });
+
+    const halfMoved = async (): Promise<Registry> => {
+      const r = await twoLocal();
+      await r.doc("R");
+      await flush();
+      const real = IndexDoc.prototype.trashPlan;
+      let calls = 0;
+      const spy = vi.spyOn(IndexDoc.prototype, "trashPlan").mockImplementation(function (this: IndexDoc, id) {
+        calls += 1;
+        if (calls === 2) throw new Error("Disk full");
+        real.call(this, id);
+      });
+      expect(() => r.movePlansToSpace(["Q", "R"])).toThrow(AppError);
+      spy.mockRestore();
+      await flush();
+      return r;
+    };
+
+    it("names the half-moved plan when finishing it fails, as move.partial keeping the cause", async () => {
+      const r = await halfMoved();
+      const cause = new Error("Disk still full");
+      vi.spyOn(IndexDoc.prototype, "trashPlan").mockImplementation(() => {
+        throw cause;
+      });
+      let thrown: unknown = null;
+      try {
+        r.movePlansToSpace(["S"]);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(AppError);
+      expect([appErrorOf(thrown).code, appErrorOf(thrown).message]).toEqual(["move.partial", "Could not finish moving River to the space: Disk still full"]);
+      expect(appErrorOf(thrown).cause).toBe(cause);
+    });
+
+    it("counts the half-moved plans it finished with the ones it was given", async () => {
+      const r = await halfMoved();
+      expect(r.movePlansToSpace(["S"])).toBe(2);
+      expect(r.movePlansToSpace([])).toBe(0);
     });
   });
 

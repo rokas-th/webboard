@@ -56,4 +56,19 @@ describe("FixActions", () => {
     expect(screen.getByRole("button", { name: "Shorten the lag to 1" })).toBeTruthy();
     expect(vi.mocked(lagThatHolds)).toHaveBeenCalledTimes(1);
   });
+
+  it("offers only Remove the link when the lag that holds is past the lag bound", async () => {
+    const t = await testSession([
+      { name: "Build", start: "2026-11-16", dur: 2 },
+      { name: "Review", start: "2026-11-19", dur: 2, status: "doing", progress: 10, deps: [fs("Build", 3)] },
+    ]);
+    sessions.push(t.session);
+    vi.mocked(lagThatHolds).mockReturnValueOnce(-1240);
+    render(
+      <OpenChoice.Provider value={() => undefined}>
+        <FixActions view={t.session.view()} item="Review" readOnly={false} run={run} />
+      </OpenChoice.Provider>,
+    );
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Remove the link"]);
+  });
 });

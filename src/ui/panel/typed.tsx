@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { workCalendar } from "../../domain/calendar";
 import { fmtNear, isCalendarDate, toDay, toIso } from "../../domain/dates";
-import type { Item } from "../../domain/model";
+import { MAX_TASK_DUR, type Item } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import { toast } from "../common/Toast";
 import { DATE_UNREADABLE, endBeforeStart, endOnDayOff } from "../copy";
@@ -46,5 +46,17 @@ export function EndField(p: { view: PlanView; item: Item; label: string; run: Ru
     }
     return p.run.run({ t: "resize", item: it.id, dur: cal.workBetween(start, day) }) !== null;
   };
-  return <TextField type="date" className="date-input" label={p.label} value={toIso(end)} readOnly={false} onCommit={commit} onUnreadable={dateUnreadable} />;
+  return (
+    <TextField
+      type="date"
+      className="date-input"
+      label={p.label}
+      min={toIso(start)}
+      max={toIso(cal.addWork(start, MAX_TASK_DUR - 1))}
+      value={toIso(end)}
+      readOnly={false}
+      onCommit={commit}
+      onUnreadable={dateUnreadable}
+    />
+  );
 }

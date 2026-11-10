@@ -15,7 +15,6 @@ const deepEqual = (a: unknown, b: unknown): boolean => {
   return ka.length === kb.length && ka.every((k) => k in b && deepEqual(a[k], b[k]));
 };
 
-
 const sameYear = (u: UnitKey, a: unknown, b: unknown): boolean => {
   const ya = decodeAs("holidayYear", u, a);
   const yb = decodeAs("holidayYear", u, b);

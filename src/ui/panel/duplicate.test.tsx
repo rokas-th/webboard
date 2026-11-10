@@ -87,6 +87,19 @@ describe("Duplicate in the item panel (product-7)", () => {
     expect(screen.queryByRole("button", { name: "Duplicate" })).toBeNull();
   });
 
+  it("offers no Duplicate for an item inside a trashed group", async () => {
+    const t = await testSession([
+      { id: "g", name: "G", kind: "group" },
+      { id: "a", name: "A", parent: "g", start: "2026-11-10", dur: 3 },
+    ]);
+    sessions.push(t.session);
+    t.session.apply({ t: "trash", items: ["g"] });
+    expect(t.session.view().plan.items.get("a")?.trashed).toBe(true);
+    panel(t);
+    expect(document.querySelector(".panel .kind")?.textContent).toBe("TASK");
+    expect(screen.queryByRole("button", { name: "Duplicate" })).toBeNull();
+  });
+
   it("is not on the phone's item sheet", async () => {
     const t = await made();
     render(

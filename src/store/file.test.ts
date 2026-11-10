@@ -146,7 +146,7 @@ const flush = async (): Promise<void> => {
   await new Promise<void>((r) => setTimeout(r, 0));
 };
 
-const fileState: { picked: { name: string; bytes: Uint8Array } | null; saved: string | null } = { picked: null, saved: null };
+const fileState: { picked: { name: string; bytes: Uint8Array } | null | undefined; saved: unknown } = { picked: undefined, saved: undefined };
 
 const pickFile = (name: string, bytes: Uint8Array): void => {
   fileState.picked = { name, bytes };
@@ -169,8 +169,14 @@ function env(answers: Record<string, Answer> = {}): void {
     holidays_year: () => {
       throw { code: "holidays.offline", message: "No connection to the holiday source." };
     },
-    plan_import: () => (fileState.picked === null ? new ArrayBuffer(0) : framed(fileState.picked.name, fileState.picked.bytes)),
-    plan_export: () => fileState.saved,
+    plan_import: () => {
+      if (fileState.picked === undefined) throw new Error("this test set no plan_import answer");
+      return fileState.picked === null ? new ArrayBuffer(0) : framed(fileState.picked.name, fileState.picked.bytes);
+    },
+    plan_export: () => {
+      if (fileState.saved === undefined) throw new Error("this test set no plan_export answer");
+      return fileState.saved;
+    },
     ...answers,
   });
 }
@@ -184,8 +190,8 @@ async function registry(): Promise<Registry> {
 }
 
 beforeEach(() => {
-  fileState.picked = null;
-  fileState.saved = null;
+  fileState.picked = undefined;
+  fileState.saved = undefined;
   env();
 });
 
@@ -233,6 +239,7 @@ describe("export", () => {
     const exports = callsOf(from, "plan_export");
     expect(exports).toHaveLength(1);
     expect(xname(exports[0])).toBe("Bridge");
+    expect(outsideRust(from)).toEqual([]);
     const body = exports[0].args;
     if (!(body instanceof Uint8Array)) throw new Error("plan_export carried no bytes");
     const { header, update } = decodeWbx(body);
@@ -249,6 +256,36 @@ describe("export", () => {
     const from = tauri.calls.length;
     expect(await exportPlan(session)).toEqual({ name: "Q3-Bridge ü.webboard", unreadable: 0 });
     expect(xname(callsOf(from, "plan_export")[0])).toBe(encodeURIComponent("Q3/Bridge ü"));
+    expect(outsideRust(from)).toEqual([]);
+  });
+
+  it.each([
+    [{}, "object"],
+    [3, "number"],
+    ["", "an empty string"],
+  ])("refuses a plan_export answer of %j as ipc.shape", async (answer, shape) => {
+    const reg = await registry();
+    const session = await reg.session(await reg.createPlan("Bridge"));
+    fileState.saved = answer;
+    const failed = exportPlan(session);
+    await expect(failed).rejects.toBeInstanceOf(AppError);
+    await expect(failed).rejects.toMatchObject({ code: "ipc.shape", message: `plan_export answered ${shape} instead of a file name or null` });
+  });
+
+  it("refuses a plan name holding a lone surrogate before asking Rust", async () => {
+    const reg = await registry();
+    const session = await reg.session(await reg.createPlan("Bridge"));
+    session.apply({ t: "planName", name: "A\uD800" });
+    expect(session.view().plan.name).toBe("A\uD800");
+    fileState.saved = "A.webboard";
+    const from = tauri.calls.length;
+    const failed = exportPlan(session);
+    await expect(failed).rejects.toBeInstanceOf(AppError);
+    await expect(failed).rejects.toMatchObject({
+      code: "file.io",
+      message: "The plan name holds a character that cannot be written to a file name; rename the plan and export again.",
+    });
+    expect(callsOf(from, "plan_export")).toHaveLength(0);
   });
 
   it("answers null when the save dialog is cancelled", async () => {
@@ -267,8 +304,10 @@ describe("export", () => {
     tauri.answers.plan_export = () => {
       throw { code: "file.io", message: "Could not write /Users/a/Bridge.webboard: No space left on device." };
     };
+    const from = tauri.calls.length;
     const failed = exportPlan(session);
     await expect(failed).rejects.toBeInstanceOf(AppError);
+    expect(outsideRust(from)).toEqual([]);
     await expect(failed).rejects.toMatchObject({ code: "file.io", message: "Could not write /Users/a/Bridge.webboard: No space left on device." });
   });
 });
@@ -530,6 +569,7 @@ describe("import through plan_import", () => {
     const reg = await registry();
     const from = tauri.calls.length;
     const before = reg.plans();
+    fileState.picked = null;
     expect(await importPlan(reg, unreviewed)).toBeNull();
     expect(callsOf(from, "plan_import")).toHaveLength(1);
     expect(appendsAfter(from)).toHaveLength(0);
@@ -577,6 +617,23 @@ describe("unframe", () => {
     const b = new Uint8Array(framed("Bridge.webboard", Uint8Array.from([1, 2])));
     new DataView(b.buffer).setUint32(0, b.length, true);
     expect(caught(b)).toMatchObject({ code: "ipc.shape", message: `plan_import answered ${b.length} bytes, which do not hold a file name and its file` });
+  });
+
+  it("reads a frame whose name fills it as an empty file", () => {
+    const { name, bytes } = unframe(new Uint8Array(framed("a.webboard", new Uint8Array(0))));
+    expect(name).toBe("a.webboard");
+    expect([...bytes]).toEqual([]);
+  });
+
+  it("refuses a name length one byte past the end", () => {
+    const b = new Uint8Array(framed("a.webboard", new Uint8Array(0)));
+    new DataView(b.buffer).setUint32(0, b.length - 3, true);
+    expect(caught(b)).toMatchObject({ code: "ipc.shape", message: `plan_import answered ${b.length} bytes, which do not hold a file name and its file` });
+  });
+
+  it("refuses an empty file name", () => {
+    const b = new Uint8Array(framed("", Uint8Array.from([1])));
+    expect(caught(b)).toMatchObject({ code: "ipc.shape", message: "plan_import sent an empty file name" });
   });
 
   it("refuses a name that is not UTF-8", () => {

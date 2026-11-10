@@ -3,7 +3,6 @@ import { goneSet } from "../../domain/derive";
 import type { ItemId, ItemKind } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
-import { ghostIds } from "../ghosts";
 
 export interface PrintRow {
   id: ItemId;
@@ -32,10 +31,9 @@ const spanOf = (view: PlanView, id: ItemId): PrintRow["span"] => {
 
 export function printRows(view: PlanView): PrintRow[] {
   const gone = goneSet(view.plan);
-  const ghosts = ghostIds(view);
   const walk = (parent: ItemId | null, depth: number): PrintRow[] =>
     childrenOf(view.plan, parent)
-      .filter((it) => !gone.has(it.id) && !ghosts.has(it.id))
+      .filter((it) => !gone.has(it.id))
       .flatMap((it) => [{ id: it.id, depth, kind: it.kind, span: spanOf(view, it.id) }, ...(it.kind === "group" ? walk(it.id, depth + 1) : [])]);
   return walk(null, 0);
 }

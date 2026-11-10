@@ -331,7 +331,7 @@ const baselineSpec: Spec<BaselineValue> = {
         return [item, { start: planDate(unit, `${field}.start`, e.start), dur: int(unit, `${field}.dur`, e.dur, 0, MAX_TASK_DUR) }];
       }),
     );
-    return { name: nameRule(unit, "name", r.name), at: date(unit, "at", r.at), dates };
+    return { name: nameRule(unit, "name", r.name), at: planDate(unit, "at", r.at), dates };
   },
 };
 
@@ -505,7 +505,6 @@ export function validateWrite(w: Write): void {
   if (!isOneOf(CAUSES, w.c)) throw fail(w.u, `cause is not one of ${CAUSES.join(", ")}: ${show(w.c)}`);
   decodeUnit(w.u, w.v);
   if ((w.c === "push" || w.c === "recalendar") && (parseKey(w.u).kind !== "s" || decodeAs("sched", w.u, w.v).start === null)) {
-
     throw fail(w.u, `${w.c} cannot write this unit`);
   }
 }

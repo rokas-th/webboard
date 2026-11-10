@@ -166,7 +166,13 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
               </>
             )}
             {!p.readOnly && (
-              <button type="button" className="step" aria-label="Longer by one working day" onClick={() => p.run.run({ t: "resize", item: it.id, dur: sc.dur + 1 })}>
+              <button
+                type="button"
+                className="step"
+                aria-label="Longer by one working day"
+                disabled={sc.dur >= MAX_TASK_DUR}
+                onClick={() => p.run.run({ t: "resize", item: it.id, dur: sc.dur + 1 })}
+              >
                 +
               </button>
             )}

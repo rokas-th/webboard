@@ -201,6 +201,7 @@ describe("codecs", () => {
     expect(() => closure.dec(["2199-12-31", "2200-01-02", "X"])).toThrow(`cc: to ${WINDOW}`);
     expect(() => closure.dec(["1899-12-30", "1900-01-02", "X"])).toThrow(`cc: from ${WINDOW}`);
     expect(() => baseline.dec({ name: "B", at: "2026-11-08", dates: { A: { start: "3026-11-16", dur: 2 } } })).toThrow(`b: dates.A.start ${WINDOW}`);
+    expect(() => baseline.dec({ name: "B", at: "0026-11-08", dates: {} })).toThrow(`b: at ${WINDOW}`);
     expect(() => baseline.dec({ name: "B", at: "2026-11-08", dates: { A: { start: "2026-11-16", dur: 3651 } } })).toThrow("b: dates.A.dur is not a whole number from 0 to 3650");
   });
 

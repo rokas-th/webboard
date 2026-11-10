@@ -77,7 +77,7 @@ const endOf = (view: PlanView, id: ItemId): Day => {
   return d;
 };
 
-function Stepper(p: { label: string; value: string; valueClass: string; readOnly: boolean; less: (() => void) | null; more: () => void; children?: ReactNode }) {
+function Stepper(p: { label: string; value: string; valueClass: string; readOnly: boolean; less: (() => void) | null; more: (() => void) | null; children?: ReactNode }) {
   return (
     <span className="inline">
       {!p.readOnly && (
@@ -88,7 +88,7 @@ function Stepper(p: { label: string; value: string; valueClass: string; readOnly
       {!p.readOnly && p.children}
       <span className={p.valueClass}>{p.value}</span>
       {!p.readOnly && (
-        <button type="button" className="step" aria-label={`${p.label} +1${p.label === "Start" ? " working day" : ""}`} onClick={p.more}>
+        <button type="button" className="step" aria-label={`${p.label} +1${p.label === "Start" ? " working day" : ""}`} disabled={p.more === null} onClick={p.more ?? undefined}>
           +
         </button>
       )}
@@ -166,7 +166,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
             valueClass="val"
             readOnly={p.readOnly}
             less={sc.dur <= 1 ? null : () => p.run.run({ t: "resize", item: it.id, dur: sc.dur - 1 })}
-            more={() => p.run.run({ t: "resize", item: it.id, dur: sc.dur + 1 })}
+            more={sc.dur >= MAX_TASK_DUR ? null : () => p.run.run({ t: "resize", item: it.id, dur: sc.dur + 1 })}
           >
             <WholeField
               label="Duration"

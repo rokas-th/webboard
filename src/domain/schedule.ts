@@ -263,7 +263,6 @@ export function recalendar(view: SchedView, next: WorkCalendar): RecalResult {
   const preds = groupBy(live, (l) => l.to);
   const endMoved = (s: Sched, moves: ReadonlyMap<ItemId, Day>): boolean => {
     const r = need(recal.items, s.id, "schedule");
-
     const m = moves.get(s.id);
     return endOf(m === undefined ? r : { ...r, start: m }, next) !== endOf(s, view.cal);
   };
@@ -273,8 +272,7 @@ export function recalendar(view: SchedView, next: WorkCalendar): RecalResult {
     .sort(byId);
   const pushedFromRoots = push(recal, roots);
   const at = (id: ItemId): Sched => {
-    const r = recal.items.get(id);
-    if (r === undefined) throw new Error(`recalendar: no item ${id}`);
+    const r = need(recal.items, id, "schedule");
     const m = pushedFromRoots.moves.get(id);
     return m === undefined ? r : { ...r, start: m };
   };
@@ -284,7 +282,7 @@ export function recalendar(view: SchedView, next: WorkCalendar): RecalResult {
     .flatMap((s): Stop[] => {
       if (s.lock === null) return [];
       const now = at(s.id);
-      const early = (preds.get(s.id) ?? []).some((l) => startOf(now, next) < earliest(now, l, at(l.from), next));
+      const early = need(preds, s.id, "predecessors").some((l) => startOf(now, next) < earliest(now, l, at(l.from), next));
       return early ? [{ id: s.id, reason: s.lock }] : [];
     });
   const pushed: PushResult = { moves: pushedFromRoots.moves, stopped: [...pushedFromRoots.stopped, ...lockStops] };

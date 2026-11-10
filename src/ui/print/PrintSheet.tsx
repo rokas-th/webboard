@@ -6,6 +6,7 @@ import { liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { countedConflicts } from "../choices/HeadCounts";
 import { statusLabel } from "../list/groups";
+import { derivedStatus } from "../status";
 import { depsOf } from "../list/List";
 import { fitSpan } from "../timeline/geometry";
 import { pct, printRows, printScale, type PrintRow } from "./sheet";
@@ -84,7 +85,7 @@ function SheetBody(p: { view: PlanView }) {
         <td className="print-chart">
           <div className="print-track">
             {todayLine}
-            <Bar row={r} done={status === "done"} first={first} days={days} />
+            <Bar row={r} done={!group && derivedStatus(view, r.id, "PrintSheet") === "done"} first={first} days={days} />
           </div>
         </td>
       </tr>

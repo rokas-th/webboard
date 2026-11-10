@@ -1567,6 +1567,26 @@ describe("SyncManager: plan cap", () => {
     await stopped(f, "P2");
     expect(prov(f, "P").calls).not.toContain("disconnect");
   });
+
+  it("names a plan stopped by the cap, and connects it again when asked after a slot was freed", async () => {
+    let capped = true;
+    const { f, m } = await started({
+      before: (w) => {
+        const ok = w.ticket;
+        w.ticket = (doc) => (doc === "P2" && capped ? fail({ code: "sync.too_many_plans", message: CAP })() : ok(doc));
+      },
+    });
+    expect([m.capRefused("P2"), m.capRefused("P")]).toEqual([true, false]);
+    capped = false;
+    const from = tauri.calls.length;
+    m.retryCapped();
+    await settle();
+    expect(tickets(from, "P2")).toBe(1);
+    expect(tickets(from, "P")).toBe(0);
+    syncAll(f);
+    expect(m.state()).toEqual({ kind: "synced" });
+    expect(m.capRefused("P2")).toBe(false);
+  });
 });
 
 describe("SyncManager: delete forever", () => {
@@ -1650,6 +1670,41 @@ describe("SyncManager: delete forever", () => {
     expect(m.state()).toEqual({ kind: "synced" });
     await advance(60_000);
     expect(tickets(from, "P")).toBe(0);
+  });
+
+  it("a ticket refused as gone for the plan list stops sync with that message and erases nothing", async () => {
+    const { r, m } = await started({
+      before: (w) => {
+        const ok = w.ticket;
+        w.ticket = (doc) => (doc === IX ? fail({ code: "sync.gone", message: GONE })() : ok(doc));
+      },
+    });
+    expect(errorOf(m.state())).toMatchObject({ code: "failed", doc: null, message: GONE, cause: "sync.gone" });
+    expect(deletes(0)).toEqual([]);
+    expect(r.plans().map((p) => p.id)).toContain("P");
+  });
+
+  it("a 4410 close of the plan list stops sync and erases nothing", async () => {
+    const { r, f, m } = await started();
+    syncAll(f);
+    const from = tauri.calls.length;
+    prov(f, IX).closeWith(4410, "Plan deleted");
+    await settle();
+    expect(errorOf(m.state())).toMatchObject({ code: "failed", doc: null, message: "The server says this space’s plan list was deleted. Sync is stopped." });
+    expect(deletes(from)).toEqual([]);
+    expect(appendsTo(from, IX)).toEqual([]);
+    expect(r.plans().map((p) => p.id)).toContain("P");
+  });
+
+  it("a 4410 close after the registry closed drops the link and asks the registry nothing", async () => {
+    const { r, f } = await started();
+    syncAll(f);
+    await r.close();
+    const from = tauri.calls.length;
+    prov(f, "P").closeWith(4410, "Plan deleted");
+    await settle();
+    expect(prov(f, "P").calls).toContain("destroy");
+    expect(tauri.calls.slice(from)).toEqual([]);
   });
 
   it("a tombstone from another device drops the plan's link", async () => {

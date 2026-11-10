@@ -53,6 +53,7 @@ export interface GoneNotice {
 
 const READ_ONLY = "This device was removed from the space; its plans are read-only.";
 const NOT_TRASHED = "Move the plan to the Trash first.";
+const ALREADY_GONE = "This plan was already deleted forever.";
 const CONNECT = "Connect to the space to delete this plan forever.";
 const MOVE_READ_ONLY = "This device was removed from the space. Join again to move plans there.";
 const INCOMPLETE = "This plan has not arrived yet; it opens once it syncs.";
@@ -306,6 +307,10 @@ export class Registry {
     const d = this.loaded.get(id);
     if (d === undefined) throw new Error(`Document ${id} is not loaded`);
     return d;
+  }
+
+  isClosed(): boolean {
+    return this.closed;
   }
 
   private usable(): void {
@@ -629,6 +634,10 @@ export class Registry {
     return ix === null ? this.local.devices() : new Map([...this.local.devices(), ...ix.devices()]);
   }
 
+  private knownDevices(): ReadonlyMap<DeviceId, string> {
+    return new Map([this.local, ...this.spaces.values()].flatMap((ix) => [...ix.devices()]));
+  }
+
   indexUnreadable(): readonly string[] {
     const ix = this.spaceIndex();
     return [...this.local.unreadable(), ...(ix?.unreadable() ?? [])].map((u) => u.message);
@@ -719,6 +728,7 @@ export class Registry {
   }
 
   purgeRefusal(id: PlanId): string | null {
+    if (this.goneHere(id)) return ALREADY_GONE;
     const listing = this.plans().find((p) => p.id === id);
     if (listing === undefined || !listing.trashed) return NOT_TRASHED;
     if (listing.space !== null) return this.readOnlySpace ? READ_ONLY : null;
@@ -726,7 +736,7 @@ export class Registry {
     return this.spaceIds.some((s) => !this.spaces.has(s)) ? UNREAD_SPACE : null;
   }
 
-  async purgePlan(id: PlanId): Promise<void> {
+  async purgePlan(id: PlanId, capRefused = false): Promise<void> {
     this.usable();
     const refusal = this.purgeRefusal(id);
     if (refusal !== null) throw new Refused(refusal);
@@ -737,10 +747,14 @@ export class Registry {
       let pending: AppError | null = null;
       if (listing.space !== null) {
         try {
-          await syncPurgePlan(id);
+          await syncPurgePlan(id).catch((e: unknown) => {
+            if (!(e instanceof AppError) || e.code !== "sync.http") throw e;
+            return syncPurgePlan(id);
+          });
         } catch (e) {
-          if (!(e instanceof AppError) || e.code !== "sync.purge_pending") throw e;
-          pending = e;
+          if (!(e instanceof AppError)) throw e;
+          if (e.code === "sync.purge_pending") pending = e;
+          else if (!(capRefused && e.code === "sync.unknown_plan")) throw e;
         }
       }
       [this.local, this.spaceIndex()].filter((ix): ix is IndexDoc => ix !== null && ix.lists(id)).forEach((ix) => ix.purgePlan(id));
@@ -781,6 +795,8 @@ export class Registry {
         this.sweepAgain = false;
         await this.sweepOnce();
       } while (this.sweepAgain && !this.closed);
+    } catch (e) {
+      if (!(e instanceof RegistryClosed && this.closed)) throw e;
     } finally {
       this.sweeping = null;
     }
@@ -814,17 +830,26 @@ export class Registry {
     const lost = check === true ? ", including changes that had not synced" : "";
     const unread = check instanceof AppError ? ` WebBoard could not read it to check for changes that had not synced: ${sentence(check.message)}.` : "";
     this.emit();
-    try {
-      await this.release(id);
-      this.detach(id);
-      await storeDelete(id);
-    } catch (e) {
-      if (!(e instanceof AppError)) throw e;
+    const failed = (e: AppError, what: string): void => {
       const failure = (by: string | undefined): AppError =>
-        new AppError(e.code, `${label} was deleted forever${where(by)}${lost}, but its files on this device could not be removed: ${sentence(e.message)}. Restart WebBoard to try again.${unread}`);
+        new AppError(e.code, `${label} was deleted forever${where(by)}${lost}, but ${what}: ${sentence(e.message)}. Restart WebBoard to try again.${unread}`);
       if (own) this.ownFailures.set(id, failure(undefined));
       else this.tell(id, purger, (by) => ({ text: failure(by).message, bad: true }));
       this.emit();
+    };
+    try {
+      await this.release(id);
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e;
+      failed(e, "it could not be closed on this device, so its files were not removed");
+      return;
+    }
+    this.detach(id);
+    try {
+      await storeDelete(id);
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e;
+      failed(e, "its files on this device could not be removed");
       return;
     }
     this.stored = this.stored.filter((x) => x !== id);
@@ -847,7 +872,7 @@ export class Registry {
 
   private tell(id: PlanId, purger: DeviceId | null, make: (by: string | undefined) => GoneNotice): void {
     if (purger !== null) {
-      this.goneNotices.push(make(this.devices().get(purger)));
+      this.goneNotices.push(make(this.knownDevices().get(purger)));
       return;
     }
     this.heldNotices.set(id, { make, timer: setTimeout(() => this.settleNotice(id), this.followWaitMs) });
@@ -859,7 +884,7 @@ export class Registry {
     clearTimeout(held.timer);
     this.heldNotices.delete(id);
     const purger = this.goneWriters().get(id) ?? null;
-    this.goneNotices.push(held.make(purger === null ? undefined : this.devices().get(purger)));
+    this.goneNotices.push(held.make(purger === null ? undefined : this.knownDevices().get(purger)));
     this.emit();
   }
 
@@ -892,7 +917,7 @@ export class Registry {
     movePlan(id, this.local, ix);
   }
 
-  movePlansToSpace(ids: readonly PlanId[]): void {
+  movePlansToSpace(ids: readonly PlanId[]): number {
     this.usable();
     if (this.readOnlySpace) throw new Refused(MOVE_READ_ONLY);
     const ix = this.spaceIndex();
@@ -903,14 +928,18 @@ export class Registry {
     const listed = new Set(local.map((p) => p.id));
     const stray = ids.find((id) => !listed.has(id) || !(live.has(id) || inSpace.has(id)));
     if (stray !== undefined) throw new Error(`Cannot move ${stray}: not a plan on this device.`);
-    [...inSpace].filter((id) => live.has(id)).forEach((id) => movePlan(id, this.local, ix));
-    ids.forEach((id, at) => {
-      try {
-        movePlan(id, this.local, ix);
-      } catch (e) {
-        throw new AppError("move.partial", `Moved ${at} of ${ids.length} plans to the space. ${this.settings.names[id] ?? id}: ${messageOf(e)}`);
-      }
-    });
+    const half = [...inSpace].filter((id) => live.has(id));
+    half.forEach((id) => this.moveOne(id, ix, (e) => `Could not finish moving ${this.settings.names[id] ?? id} to the space: ${messageOf(e)}`));
+    ids.forEach((id, at) => this.moveOne(id, ix, (e) => `Moved ${at} of ${ids.length} plans to the space. ${this.settings.names[id] ?? id}: ${messageOf(e)}`));
+    return new Set([...half, ...ids]).size;
+  }
+
+  private moveOne(id: PlanId, ix: IndexDoc, say: (e: unknown) => string): void {
+    try {
+      movePlan(id, this.local, ix);
+    } catch (e) {
+      throw new AppError("move.partial", say(e), e);
+    }
   }
 
   async setLastRegion(r: RegionRef): Promise<void> {

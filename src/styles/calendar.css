@@ -129,7 +129,8 @@ html[data-form="compact"] .cal-grid > label {
   margin-bottom: 6px;
 }
 
-.day-list {
+.day-list,
+.converted-dropped {
   list-style: none;
   max-height: 200px;
   overflow-y: auto;

@@ -313,10 +313,9 @@ describe("the Cyberdeck look", () => {
 
   it("styles the converted report's list like the calendar dialog's list", () => {
     const plain = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
-    const keys = ["list-style", "margin", "padding", "border", "border-radius", "background"];
     const day = plain(".day-list");
-    expect(keys.map((k) => [k, plain(".converted-dropped")[k]])).toEqual(keys.map((k) => [k, day[k]]));
-    expect(day["list-style"]).toBe("none");
+    expect(plain(".converted-dropped")).toEqual(day);
+    expect([day["list-style"], day["font-variant-numeric"]]).toEqual(["none", "tabular-nums"]);
   });
 
   it("tints timeline greys with --dim's channels", () => {

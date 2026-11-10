@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { framed } from "../test/fixtures/framed";
 import { resetTauri, tauri } from "../test/tauriMock";
-import { PROBE_BYTES, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine } from "./probes";
+import { failure, PROBE_BYTES, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine } from "./probes";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 
@@ -98,6 +98,11 @@ describe("files", () => {
     expect(tauri.calls.map((c) => c.cmd)).toEqual(["plan_export"]);
   });
 
+  it("reports a save answer that is not a file name", async () => {
+    tauri.answers.plan_export = () => ({});
+    expect(await probeSave()).toEqual(["files", { error: "ipc.shape", message: "plan_export answered object instead of a file name or null" }]);
+  });
+
   it("imports through plan_import and reports the picked name and its length", async () => {
     tauri.answers.plan_import = () => framed("probe ü.webboard", PROBE_BYTES);
     expect(await probeOpen()).toEqual(["files", { opened: "probe ü.webboard", read: 16 }]);
@@ -120,5 +125,12 @@ describe("files", () => {
       throw { code: "file.io", message: "Could not read /x/probe.webboard: denied." };
     };
     expect(await probeOpen()).toEqual(["files", { error: "file.io", message: "Could not read /x/probe.webboard: denied." }]);
+  });
+});
+
+describe("failure", () => {
+  it("reports a rejection that is not an AppError as thrown", () => {
+    expect(failure(new TypeError("x"))).toEqual({ thrown: "TypeError: x" });
+    expect(failure("s")).toEqual({ thrown: "s" });
   });
 });
