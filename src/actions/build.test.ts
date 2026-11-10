@@ -228,6 +228,28 @@ describe("buildAction: own starts (refinement 29)", () => {
   });
 });
 
+describe("buildAction: reopening a done item (schedule-3)", () => {
+  const done = (): Ctx => ctxFrom(replaced(CHAIN, [w("s:Admin", sched("2026-11-23", 2, "done", 100))]));
+
+  it("resets progress to 0 when a done item goes back to do or in progress", () => {
+    const todo = buildAction(done(), { t: "schedule", item: "Admin", set: { status: "todo" } });
+    expect(units(todo)).toEqual(["s:Admin"]);
+    expect(writeOf(todo, "s:Admin").v).toEqual(sched("2026-11-23", 2, "todo", 0));
+    expect(todo.action.lbl).toBe("Marked “Admin” to do");
+    const doing = buildAction(done(), { t: "schedule", item: "Admin", set: { status: "doing" } });
+    expect(writeOf(doing, "s:Admin").v).toEqual(sched("2026-11-23", 2, "doing", 0));
+    expect(doing.action.lbl).toBe("Marked “Admin” in progress");
+  });
+
+  it("keeps a progress set in the same action and never resets an item that was not done", () => {
+    const set = buildAction(done(), { t: "schedule", item: "Admin", set: { status: "doing", progress: 30 } });
+    expect(writeOf(set, "s:Admin").v).toEqual(sched("2026-11-23", 2, "doing", 30));
+    const doing = ctxFrom(replaced(CHAIN, [w("s:Admin", sched("2026-11-23", 2, "doing", 100))]));
+    const b = buildAction(doing, { t: "schedule", item: "Admin", set: { status: "todo" } });
+    expect(writeOf(b, "s:Admin").v).toEqual(sched("2026-11-23", 2, "todo", 100));
+  });
+});
+
 describe("buildAction: merging writes on one unit", () => {
   it("moves two linked items together with one write per unit", () => {
     const b = buildAction(chain(), { t: "move", items: ["PFF", "Spec"], days: 6 });

@@ -293,11 +293,12 @@ const scheduleDraft = (ctx: Ctx, id: ItemId, set: Partial<Schedule>): Draft => {
   }
   const cal = workCalendar(plan.calendar);
   const start = set.start === undefined ? sc.start : set.start === null ? null : toIso(cal.snapF(toDay(set.start)));
+  const reopened = sc.status === "done" && status !== "done" && sc.progress === 100;
   const next: Schedule = {
     start,
     dur: set.dur ?? sc.dur,
     status,
-    progress: set.progress ?? (status === "done" ? 100 : sc.progress),
+    progress: set.progress ?? (status === "done" ? 100 : reopened ? 0 : sc.progress),
     horizon: set.horizon ?? sc.horizon,
   };
   const fields = (Object.keys(set) as (keyof Schedule)[]).filter((k) => set[k] !== undefined);

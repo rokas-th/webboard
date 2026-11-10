@@ -193,6 +193,21 @@ describe("buildUndo", () => {
     expect(buildUndo(ctx, m1.action.id).preview.kept).toEqual(["“Plan review” was changed since on the Device ab12 — kept"]);
   });
 
+  it("undoing a reopen brings back done, 100 and the group's progress with one write", () => {
+    let ctx = ctxFrom(
+      act("g", ["a0"], [w("e:G", { k: "group", t: false }), w("n:G", "Group"), w("p:G", [null, "a3"]), w("p:A", ["G", "a0"]), w("p:Q", ["G", "a1"]), w("s:A", ["2026-11-18", 3, "done", 100, "later"])], mac),
+    );
+    expect(ctx.view.derived.progress.get("G")).toBe(60);
+    const b = buildAction(ctx, { t: "schedule", item: "A", set: { status: "doing" } });
+    expect(b.action.w.filter((x) => !x.u.startsWith("a:")).map((x) => x.u)).toEqual(["s:A"]);
+    ctx = applied(ctx, b);
+    expect(valueOf(ctx, "s:A")).toEqual(["2026-11-18", 3, "doing", 0, "later"]);
+    expect(ctx.view.derived.progress.get("G")).toBe(0);
+    ctx = applied(ctx, buildUndo(ctx, b.action.id));
+    expect(valueOf(ctx, "s:A")).toEqual(["2026-11-18", 3, "done", 100, "later"]);
+    expect(ctx.view.derived.progress.get("G")).toBe(60);
+  });
+
   it("writes only activity, so restoring a predecessor's later date leaves an early conflict", () => {
     let ctx = ctxFrom();
     const m1 = buildAction(ctx, { t: "move", items: ["A"], days: -2 });
