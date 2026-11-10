@@ -39,7 +39,7 @@ export function ReloadConfirm(p: { registry: Registry; docId: string; frame?: "d
         <button type="button" onClick={p.onClose}>
           Cancel
         </button>
-        <button type="button" className="button-primary" disabled={pending} onClick={load}>
+        <button type="button" className="button-primary" disabled={pending || p.registry.reloading(p.docId)} onClick={load}>
           Load again
         </button>
       </div>

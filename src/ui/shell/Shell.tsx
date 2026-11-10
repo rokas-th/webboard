@@ -35,7 +35,7 @@ import { FILES_STAY, PlanFailed, ReloadButton } from "./PlanFailed";
 import { PlanHead } from "./PlanHead";
 import { PlanMenu } from "./PlanMenu";
 import { ReloadConfirm } from "./ReloadConfirm";
-import { messageOf, quoted, surfaced, usePlanFiles, usePlanSelection } from "./selection";
+import { messageOf, restorePlan, usePlanFiles, usePlanSelection } from "./selection";
 import { NewPlanButton, Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 import { Tray } from "./Tray";
@@ -89,7 +89,9 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   useUpdateState(updates);
   const { ui, setUi } = useUiValue();
   const { main, open: openPlan, trashOwn } = usePlanSelection(registry);
-  const { creating, importing, newPlan, importPlan } = usePlanFiles(registry, openPlan);
+  const files = usePlanFiles(registry, openPlan);
+  const { creating, importing, importPlan } = files;
+  const newPlan = (): void => files.newPlan("New plan", (message) => toast(message, "bad"));
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
   const [sheet, setSheet] = useState<CompactSheet>(null);
   const selectedItem = useRef<ItemId | null>(ui.selected);
@@ -151,17 +153,6 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       return;
     }
     toast("Moved to the space");
-  };
-
-  const restore = (id: PlanId): void => {
-    const listing = listingOf(id);
-    try {
-      registry.restorePlan(id);
-    } catch (e) {
-      toast(surfaced(e), "bad");
-      return;
-    }
-    toast(`Restored ${quoted(listing)} from the Trash.`);
   };
 
   const sel = ui.plan;
@@ -317,7 +308,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       onNew={newPlan}
       onSelect={(id) => openPlan(id)}
       onTrash={(id) => void trashOwn(id)}
-      onRestore={restore}
+      onRestore={(id) => restorePlan(registry, id)}
       onMove={moveToSpace}
     />
   );

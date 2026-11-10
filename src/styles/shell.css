@@ -341,6 +341,10 @@
   color: var(--dim);
 }
 
+.reload-confirm {
+  display: contents;
+}
+
 .plan-head {
   display: flex;
   align-items: flex-start;

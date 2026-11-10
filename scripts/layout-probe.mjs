@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
-import { buildFixtures, LONG_NAMES, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "./layout-fixtures.mjs";
+import { buildFixtures, LONG_NAMES, PLAN_IDS, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "./layout-fixtures.mjs";
 
 const DIST = fileURLToPath(new URL("../dist", import.meta.url));
 
@@ -78,6 +78,7 @@ function states() {
       sizes: o.sizes ?? "desktop",
       dialog: o.dialog === true,
       clip: o.clip === true ? LONG_NAMES : o.clip ?? [],
+      clipIn: o.clipIn ?? [],
       logs: o.logs ?? [],
       net: { ws: o.net?.ws ?? "none", online: o.net?.online ?? true },
     });
@@ -200,9 +201,11 @@ function states() {
     actions: [count(".sidebar", 0), expect('.phone-views [role="tab"][aria-selected="true"]', "List"), expect(".phone-list .prow .prow-name")],
   });
   add("phone-plans", "phone-plans", {
+    place: { plan: PLAN_IDS.long, view: "timeline", zoom: "W" },
     sizes: "phone",
     dialog: true,
     clip: true,
+    clipIn: [".plans-sheet .entry-name", ".phone-plan-name"],
     actions: [
       click(".phone-head button", "Plans"),
       expect('.sheet[role="dialog"] .sheet-title', "Plans"),
@@ -840,7 +843,7 @@ const MEASURE = String.raw`
   }
   function names() {
     var long = P.clip;
-    if (long.length === 0) return { checked: 0, faults: [] };
+    if (long.length === 0) return { checked: 0, faults: [], missing: [] };
     var shows = function (t) {
       return long.some(function (n) { return t === n || t === "◆ " + n; });
     };
@@ -860,7 +863,10 @@ const MEASURE = String.raw`
       var cut = (s.overflowX === "hidden" || s.overflowX === "clip") && s.textOverflow === "ellipsis";
       if (!cut) faults.push(path(box) + " overflows by " + (box.scrollWidth - box.clientWidth) + "px without an ellipsis");
     });
-    return { checked: hits.length, faults: faults.slice(0, 12) };
+    var missing = P.clipIn.filter(function (s) {
+      return !hits.some(function (el) { return el.matches(s); });
+    });
+    return { checked: hits.length, faults: faults.slice(0, 12), missing: missing };
   }
 
   function inside(r, box) {
@@ -1329,6 +1335,7 @@ function judge(state, viewport, r, errors, notFound) {
   if (state.clip.length > 0) {
     if (r.names.checked === 0) problems.push("no element shows one of the long names");
     r.names.faults.forEach((f) => problems.push(f));
+    r.names.missing.forEach((s) => problems.push(`no ${s} shows one of the long names`));
   }
   if (state.dialog) {
     if (r.dialogs.count !== 1) problems.push(`${r.dialogs.count} elements have role="dialog", not one`);
@@ -1528,6 +1535,7 @@ async function main() {
       place: state.place,
       fixture: fixtures.get(state.fixture),
       clip: state.clip,
+      clipIn: state.clipIn,
       dialog: state.dialog,
       net: state.net,
       fonts: FONTS,

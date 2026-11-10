@@ -21,8 +21,15 @@ export function ReloadButton(p: { enabled: boolean; small?: boolean; onOpen(): v
   );
 }
 
-export function PlanFailed(p: { registry: Registry; id: PlanId; error: AppError; onTrash(id: PlanId): void }) {
-  const reloadable = canReload(useSyncState().state);
+export function FailedPlanView(p: {
+  registry: Registry;
+  id: PlanId;
+  error: AppError;
+  reloadEnabled: boolean;
+  frame: "dialog" | "sheet";
+  onRetry(): void;
+  onTrash(id: PlanId): void;
+}) {
   const [confirm, setConfirm] = useState(false);
   const listing = p.registry.plans().find((l) => l.id === p.id);
   if (listing === undefined) throw new Error(`Plan ${p.id} is not listed`);
@@ -32,7 +39,7 @@ export function PlanFailed(p: { registry: Registry; id: PlanId; error: AppError;
       <p className="failed-message bad">{p.error.message}</p>
       <div className="failed-actions">
         {action === "retry" && (
-          <button type="button" onClick={() => void p.registry.retryPlan(p.id)}>
+          <button type="button" onClick={p.onRetry}>
             Try again
           </button>
         )}
@@ -41,10 +48,34 @@ export function PlanFailed(p: { registry: Registry; id: PlanId; error: AppError;
             Move to Trash
           </button>
         )}
-        {action === "reload" && <ReloadButton enabled={reloadable} onOpen={() => setConfirm(true)} />}
+        {action === "reload" && <ReloadButton enabled={p.reloadEnabled} onOpen={() => setConfirm(true)} />}
       </div>
       {filesStay && <p className="failed-note">{FILES_STAY}</p>}
-      {confirm && <ReloadConfirm registry={p.registry} docId={p.id} onClose={() => setConfirm(false)} />}
+      {confirm && (
+        <div
+          className="reload-confirm"
+          onKeyDown={(e) => {
+            if (e.key === "Escape" || e.key === "Tab") e.stopPropagation();
+          }}
+        >
+          <ReloadConfirm registry={p.registry} docId={p.id} frame={p.frame} onClose={() => setConfirm(false)} />
+        </div>
+      )}
     </div>
+  );
+}
+
+export function PlanFailed(p: { registry: Registry; id: PlanId; error: AppError; onTrash(id: PlanId): void }) {
+  const reloadEnabled = canReload(useSyncState().state);
+  return (
+    <FailedPlanView
+      registry={p.registry}
+      id={p.id}
+      error={p.error}
+      reloadEnabled={reloadEnabled}
+      frame="dialog"
+      onRetry={() => void p.registry.retryPlan(p.id)}
+      onTrash={p.onTrash}
+    />
   );
 }

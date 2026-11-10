@@ -428,7 +428,7 @@ describe("ItemSheet editing (Step 4)", () => {
     fireEvent.change(field, { target: { value: "   " } });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(apply).toHaveBeenCalledTimes(0);
-    expect(toasts()).toEqual([EMPTY_NAME]);
+    expect(screen.queryAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([[EMPTY_NAME, "toast bad"]]);
     expect(nameField().value).toBe("Review");
     clearToasts();
     fireEvent.change(nameField(), { target: { value: "Review 2" } });

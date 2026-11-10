@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useContext } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { Built } from "../../actions/intents";
 import type { ItemId, PlanId } from "../../domain/model";
 import { newId } from "../../log/ids";
@@ -403,10 +403,19 @@ const withSpace = (registry: Registry, ids: ReadonlySet<PlanId>): void => {
   vi.spyOn(registry, "plans").mockImplementation(() => real().map((l): PlanListing => (ids.has(l.id) ? { ...l, space: "S1" } : l)));
 };
 
-const builtOf = (spy: { mock: { results: { type: string; value: unknown }[] } }, i = 0): Built => {
+type BuildSpy = MockInstance<PlanSession["apply"]> | MockInstance<PlanSession["undo"]> | MockInstance<PlanSession["redo"]> | MockInstance<PlanSession["resolve"]>;
+
+const builtOf = (spy: BuildSpy, i = 0): Built => {
   const r = spy.mock.results[i];
   if (r === undefined || r.type !== "return") throw new Error("the spy did not return");
-  return r.value as Built;
+  if (r.value === null) throw new Error("the spy returned no action");
+  return r.value;
+};
+
+const mainFailed = (): HTMLElement => {
+  const el = document.querySelector(".app.phone > .plan-failed");
+  if (!(el instanceof HTMLElement)) throw new Error("no failed plan in the main area");
+  return el;
 };
 
 describe("PhoneShell plans (Step 1)", () => {
@@ -558,6 +567,43 @@ describe("PhoneShell plans (Step 1)", () => {
     expect(vi.mocked(importFlow).mock.calls.map((c) => c[0])).toEqual([r.registry]);
     listShows("MESA 2027");
   });
+
+  it("two Import plan… taps before a re-render start one import", async () => {
+    await seededStore(["Alpha"]);
+    const r = await indexOpen();
+    vi.mocked(importPlan).mockResolvedValueOnce(null);
+    await showIndex(r);
+    const button = within(openPlans()).getByRole("button", { name: "Import plan…" });
+    act(() => {
+      button.click();
+      button.click();
+    });
+    await settle();
+    expect(importFlow).toHaveBeenCalledTimes(1);
+  });
+
+  it("the sheet's create error clears when the sheet closes", async () => {
+    await seededStore(["Alpha"]);
+    const r = await indexOpen();
+    await showIndex(r);
+    const sheet = openPlans();
+    fireEvent.change(within(sheet).getByRole("textbox", { name: "Plan name" }), { target: { value: "   " } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "New plan" }));
+    await settle();
+    expect(within(plansSheet()).getByText(EMPTY_NAME).classList.contains("bad")).toBe(true);
+    closePlans();
+    expect(within(openPlans()).queryByText(EMPTY_NAME)).toBeNull();
+  });
+
+  it("the top bar reads Loading… for a plan whose name has not arrived", async () => {
+    await seededStore(["Alpha"]);
+    const r = await indexOpen();
+    const real = r.registry.plans.bind(r.registry);
+    vi.spyOn(r.registry, "plans").mockImplementation(() => real().map((l): PlanListing => ({ ...l, name: null })));
+    vi.spyOn(r.registry, "session").mockReturnValue(new Promise<PlanSession>(() => undefined));
+    await showIndex(r);
+    expect(topBar().querySelector(".phone-plan-name")?.textContent).toBe("Loading…");
+  });
 });
 
 describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
@@ -668,6 +714,17 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     expect(reload).toHaveBeenCalledTimes(2);
   });
 
+  it("Escape in a row's reload sheet closes only that sheet", async () => {
+    const { s, registry } = await failing();
+    withSpace(registry, new Set([s.ids[2]]));
+    openPlans();
+    fireEvent.click(within(planRow("Gamma")).getByRole("button", { name: RELOAD }));
+    const confirm = screen.getByRole("dialog", { name: RELOAD });
+    fireEvent.keyDown(within(confirm).getByRole("button", { name: "Cancel" }), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: RELOAD })).toBeNull();
+    expect(plansSheet()).toBeTruthy();
+  });
+
   it("a plan trashed on another device", async () => {
     const s = await seededStore(["Alpha", "Beta"]);
     const r = await indexOpen();
@@ -755,6 +812,79 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     expect(document.querySelector(".phone-list")).toBeNull();
   });
 
+  it("a corrupt local plan in the main area offers Move to Trash", async () => {
+    const { s, registry } = await failing();
+    const gamma = s.ids[2];
+    const trashPlan = vi.spyOn(registry, "trashPlan");
+    fireEvent.click(within(openPlans()).getByRole("button", { name: "Gamma" }));
+    await settle();
+    const main = mainFailed();
+    expect(within(main).getByText("Bad record in seg-0.log.").classList.contains("bad")).toBe(true);
+    expect(within(main).getByText(FILES_STAY)).toBeTruthy();
+    expect(within(main).queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(within(main).queryByRole("button", { name: RELOAD })).toBeNull();
+    fireEvent.click(within(main).getByRole("button", { name: "Move to Trash" }));
+    await settle();
+    expect(trashPlan.mock.calls).toEqual([[gamma]]);
+    expect(toastTexts()).toEqual(["Moved “Gamma” to the Trash. Restore it from the Trash."]);
+    listShows("Alpha");
+  });
+
+  it("a corrupt space plan in the main area opens the reload sheet", async () => {
+    const { s, registry } = await failing();
+    const gamma = s.ids[2];
+    withSpace(registry, new Set([gamma]));
+    const reload = vi.spyOn(registry, "reloadFromServer");
+    fireEvent.click(within(openPlans()).getByRole("button", { name: "Gamma" }));
+    await settle();
+    const main = mainFailed();
+    expect(within(main).getByText("Bad record in seg-0.log.")).toBeTruthy();
+    expect(within(main).queryByText(FILES_STAY)).toBeNull();
+    expect(within(main).queryByRole("button", { name: "Move to Trash" })).toBeNull();
+    fireEvent.click(within(main).getByRole("button", { name: RELOAD }));
+    const confirm = screen.getByRole("dialog", { name: RELOAD });
+    expect(confirm.classList.contains("sheet")).toBe(true);
+    expect(within(confirm).getByText(RELOAD_TEXT)).toBeTruthy();
+    expect(reload).not.toHaveBeenCalled();
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: RELOAD })).toBeNull();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("Load again stays disabled while the registry reloads the plan", async () => {
+    const { s, registry } = await failing();
+    const gamma = s.ids[2];
+    withSpace(registry, new Set([gamma]));
+    vi.spyOn(registry, "reloading").mockImplementation((doc) => doc === gamma);
+    const reload = vi.spyOn(registry, "reloadFromServer");
+    fireEvent.click(within(openPlans()).getByRole("button", { name: "Gamma" }));
+    await settle();
+    fireEvent.click(within(mainFailed()).getByRole("button", { name: RELOAD }));
+    const load = within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" });
+    expect(load.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(load);
+    await settle();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("a failed plan open at start shows its error in the main area", async () => {
+    const s = await seededStore(["Alpha", "Beta"]);
+    s.mem.fail("store_load", s.ids[1], { code: "store.locked", message: "Locked by another process." });
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: s.ids[1] }));
+    const r = await indexOpen();
+    const retryPlan = vi.spyOn(r.registry, "retryPlan");
+    await showIndex(r);
+    const main = mainFailed();
+    expect(within(main).getByText("Locked by another process.").classList.contains("bad")).toBe(true);
+    expect(document.querySelector(".phone-list")).toBeNull();
+    expect(topBar().querySelector(".phone-plan-name")?.textContent).toBe("Beta");
+    s.mem.recover("store_load", s.ids[1]);
+    fireEvent.click(within(main).getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(retryPlan.mock.calls).toEqual([[s.ids[1]]]);
+    listShows("Beta");
+  });
+
   it("the empty state offers New plan", async () => {
     const r = await emptyIndex();
     const createPlan = vi.spyOn(r.registry, "createPlan");
@@ -780,6 +910,7 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     if (state === null) throw new Error("no empty state");
     expect(within(state).getByText("Disk full.").classList.contains("bad")).toBe(true);
     expect(document.querySelector(".phone-list")).toBeNull();
+    expect(within(openPlans()).queryByText("Disk full.")).toBeNull();
   });
 
   it("the empty state's New plan shows it is busy", async () => {
@@ -935,7 +1066,7 @@ describe("PhoneShell undo and redo (Step 2)", () => {
     expect(t.session.history()).toHaveLength(actions);
     fireEvent.click(within(sheet).getByRole("button", { name: "Apply" }));
     expect(resolve.mock.calls).toEqual([[offer.choice, { side: offer.side }, { pushFromPredecessors: true, returnPushed: true }]]);
-    expect(toastTexts()).toContain(builtOf(resolve).toast);
+    expect(toastTexts()).toEqual([builtOf(resolve).toast]);
   });
 });
 
@@ -998,6 +1129,19 @@ describe("PhoneShell item sheet (Step 4)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(toastTexts()).toEqual([TRASHED_ON_IPHONE]);
     expect(t.session.authorOf("e:Notes")).toEqual({ dev: "iphone", device: "iPhone" });
+  });
+
+  it("a peer trash of the group closes its item's sheet and names the group", async () => {
+    const { peer } = await withPeer();
+    setUiNow({ selected: "Review" });
+    expect(screen.getByRole("dialog", { name: "Review" })).toBeTruthy();
+    act(() => {
+      peer.session.apply({ t: "trash", items: ["S4"] });
+      peer.sync();
+    });
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toastTexts()).toEqual(["“Sprint 4” was moved to the Trash on iPhone. Restore it from the Trash."]);
   });
 
   it("a peer trash among local edits", async () => {

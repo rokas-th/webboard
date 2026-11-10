@@ -16,7 +16,9 @@ function NewItemMenu(p: { disabled: boolean; onPick(kind: ItemKind): void }) {
   const first = useRef<HTMLButtonElement>(null);
   const shown = open && !p.disabled;
   useEffect(() => {
-    if (shown) first.current?.focus();
+    if (!shown) return;
+    if (first.current === null) throw new Error("NewItemMenu: open without its first item");
+    first.current.focus();
   }, [shown]);
   const close = (): void => {
     setOpen(false);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { normalizeName } from "../../actions/build";
 import { Refused } from "../../actions/intents";
 import type { PlanId } from "../../domain/model";
 import { AppError } from "../../services/ipc";
@@ -176,10 +177,21 @@ export function usePlanSelection(registry: Registry): PlanSelection {
   return { main, open, trashOwn };
 }
 
+export function restorePlan(registry: Registry, id: PlanId): void {
+  const listing = registry.plans().find((l) => l.id === id);
+  try {
+    registry.restorePlan(id);
+  } catch (e) {
+    toast(surfaced(e), "bad");
+    return;
+  }
+  toast(`Restored ${quoted(listing)} from the Trash.`);
+}
+
 export interface PlanFiles {
   creating: boolean;
   importing: boolean;
-  newPlan(): void;
+  newPlan(raw: string, fail: (message: string) => void): void;
   importPlan(): void;
 }
 
@@ -187,15 +199,23 @@ export function usePlanFiles(registry: Registry, open: (id: PlanId) => void): Pl
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const creatingRef = useRef(false);
-  const newPlan = (): void => {
+  const importingRef = useRef(false);
+  const newPlan = (raw: string, fail: (message: string) => void): void => {
     if (creatingRef.current) return;
+    let name: string;
+    try {
+      name = normalizeName(raw);
+    } catch (e) {
+      fail(surfaced(e));
+      return;
+    }
     creatingRef.current = true;
     setCreating(true);
     registry
-      .createPlan("New plan")
+      .createPlan(name)
       .then(
         (id) => open(id),
-        (e: unknown) => toast(surfaced(e), "bad"),
+        (e: unknown) => fail(surfaced(e)),
       )
       .finally(() => {
         creatingRef.current = false;
@@ -203,8 +223,13 @@ export function usePlanFiles(registry: Registry, open: (id: PlanId) => void): Pl
       });
   };
   const importPlan = (): void => {
+    if (importingRef.current) return;
+    importingRef.current = true;
     setImporting(true);
-    void importFlow(registry, (id) => open(id)).finally(() => setImporting(false));
+    void importFlow(registry, (id) => open(id)).finally(() => {
+      importingRef.current = false;
+      setImporting(false);
+    });
   };
   return { creating, importing, newPlan, importPlan };
 }

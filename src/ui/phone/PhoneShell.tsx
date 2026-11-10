@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
 import type { ItemId, PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
-import type { AppError } from "../../services/ipc";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { toast, Toasts } from "../common/Toast";
 import { ghostIds } from "../ghosts";
 import { OpenChoice } from "../run";
-import { failureActions } from "../shell/failure";
-import { FILES_STAY } from "../shell/PlanFailed";
-import { RELOAD_LABEL, ReloadConfirm } from "../shell/ReloadConfirm";
-import { usePlanSelection, type PlanMain } from "../shell/selection";
+import { FailedPlanView } from "../shell/PlanFailed";
+import { usePlanFiles, usePlanSelection, type PlanFiles, type PlanMain } from "../shell/selection";
 import { NewPlanButton } from "../shell/Sidebar";
 import { UiContext, useUi, useUiValue, type DialogState } from "../state";
 import { Timeline } from "../timeline/Timeline";
@@ -19,7 +16,7 @@ import { ChoiceSheet } from "./ChoiceSheet";
 import { ItemSheet } from "./ItemSheet";
 import { PhoneList } from "./PhoneList";
 import { PhoneTopBar } from "./PhoneTopBar";
-import { CreateError, ImportButton, NEW_PLAN, PlansSheet, usePhoneFiles, type PhoneFiles } from "./PlansSheet";
+import { CreateError, ImportButton, NEW_PLAN, PlansSheet } from "./PlansSheet";
 
 type PhoneView = "list" | "timeline";
 
@@ -127,53 +124,42 @@ function OpenPlan(p: { session: PlanSession; registry: Registry }) {
   );
 }
 
-function Failed(p: { registry: Registry; id: PlanId; error: AppError; recorded: boolean; open(id: PlanId): void; trash(id: PlanId): void }) {
-  const [confirm, setConfirm] = useState(false);
-  const listing = p.registry.plans().find((l) => l.id === p.id);
-  if (listing === undefined) throw new Error(`Plan ${p.id} is not listed`);
-  const { action, filesStay } = failureActions(p.error, listing.space, p.registry.spaceReadOnly());
-  return (
-    <div className="plan-failed">
-      <p className="failed-message bad">{p.error.message}</p>
-      <div className="failed-actions">
-        {action === "retry" && (
-          <button type="button" onClick={() => (p.recorded ? void p.registry.retryPlan(p.id) : p.open(p.id))}>
-            Try again
-          </button>
-        )}
-        {action === "trash" && (
-          <button type="button" className="button-danger" onClick={() => p.trash(p.id)}>
-            Move to Trash
-          </button>
-        )}
-        {action === "reload" && (
-          <button type="button" onClick={() => setConfirm(true)}>
-            {RELOAD_LABEL}
-          </button>
-        )}
-      </div>
-      {filesStay && <p className="failed-note">{FILES_STAY}</p>}
-      {confirm && <ReloadConfirm registry={p.registry} docId={p.id} frame="sheet" onClose={() => setConfirm(false)} />}
-    </div>
-  );
-}
-
-function Main(p: { registry: Registry; main: PlanMain; files: PhoneFiles; open(id: PlanId): void; trash(id: PlanId): void }) {
+function Main(p: {
+  registry: Registry;
+  main: PlanMain;
+  files: PlanFiles;
+  error: string | null;
+  onNew(name: string): void;
+  open(id: PlanId): void;
+  trash(id: PlanId): void;
+}) {
   const m = p.main;
   if (m.k === "empty") {
     return (
       <div className="empty-state">
         <div className="empty-actions">
-          <NewPlanButton creating={p.files.creating} onNew={() => p.files.newPlan(NEW_PLAN)} />
+          <NewPlanButton creating={p.files.creating} onNew={() => p.onNew(NEW_PLAN)} />
           <ImportButton files={p.files} />
         </div>
-        <CreateError files={p.files} />
+        <CreateError error={p.error} />
       </div>
     );
   }
   if (m.k === "opening") return null;
   if (m.k === "incomplete") return <p className="main-note">{m.message}</p>;
-  if (m.k === "failed") return <Failed registry={p.registry} id={m.id} error={m.error} recorded={m.recorded} open={p.open} trash={p.trash} />;
+  if (m.k === "failed") {
+    return (
+      <FailedPlanView
+        registry={p.registry}
+        id={m.id}
+        error={m.error}
+        reloadEnabled
+        frame="sheet"
+        onRetry={() => (m.recorded ? void p.registry.retryPlan(m.id) : p.open(m.id))}
+        onTrash={p.trash}
+      />
+    );
+  }
   if (m.k === "error") {
     return (
       <div className="banner bad">
@@ -187,38 +173,68 @@ function Main(p: { registry: Registry; main: PlanMain; files: PhoneFiles; open(i
   return <OpenPlan key={m.id} session={m.session} registry={p.registry} />;
 }
 
+function listedName(registry: Registry, id: PlanId | null): string | null {
+  if (id === null) return null;
+  const listing = registry.plans().find((l) => l.id === id);
+  if (listing === undefined) throw new Error(`Plan ${id} is not listed`);
+  return listing.name ?? "Loading…";
+}
+
 function PhoneBody(p: { registry: Registry; clock: Clock }) {
   const { ui, setUi } = useUiValue();
   const { main, open, trashOwn } = usePlanSelection(p.registry);
   const [plans, setPlans] = useState(false);
-  const openFromPlans = useCallback(
+  const [emptyError, setEmptyError] = useState<string | null>(null);
+  const [sheetError, setSheetError] = useState<string | null>(null);
+  const closePlans = useCallback(() => {
+    setPlans(false);
+    setSheetError(null);
+  }, []);
+  const openPlan = useCallback(
     (id: PlanId) => {
-      setPlans(false);
+      closePlans();
+      setEmptyError(null);
       open(id);
     },
-    [open],
+    [closePlans, open],
   );
-  const files = usePhoneFiles(p.registry, openFromPlans);
+  const files = usePlanFiles(p.registry, openPlan);
+  const createFrom =
+    (set: (message: string | null) => void) =>
+    (name: string): void => {
+      set(null);
+      files.newPlan(name, set);
+    };
   const openChoice = useCallback(
     (choice: string, side?: string) => setUi({ dialog: side === undefined ? { t: "choice", id: choice } : { t: "choice", id: choice, side } }),
     [setUi],
   );
   const trash = (id: PlanId): void => void trashOwn(id);
   const session = main.k === "open" ? main.session : null;
-  const name = ui.plan === null ? null : (p.registry.plans().find((l) => l.id === ui.plan)?.name ?? null);
   return (
     <OpenChoice.Provider value={openChoice}>
       <div className="app phone">
         <PhoneTopBar
-          name={name}
+          name={listedName(p.registry, main.k === "empty" ? null : main.id)}
           session={session}
           today={() => p.clock.today()}
           onPlans={() => setPlans(true)}
           onChoose={(choice) => openChoice(choice)}
           onCreated={(id) => setUi({ selected: id, naming: id })}
         />
-        <Main registry={p.registry} main={main} files={files} open={open} trash={trash} />
-        {plans && <PlansSheet registry={p.registry} selected={ui.plan} files={files} onOpen={openFromPlans} onTrash={trash} onClose={() => setPlans(false)} />}
+        <Main registry={p.registry} main={main} files={files} error={emptyError} onNew={createFrom(setEmptyError)} open={open} trash={trash} />
+        {plans && (
+          <PlansSheet
+            registry={p.registry}
+            selected={ui.plan}
+            files={files}
+            error={sheetError}
+            onNew={createFrom(setSheetError)}
+            onOpen={openPlan}
+            onTrash={trash}
+            onClose={closePlans}
+          />
+        )}
         <Toasts />
       </div>
     </OpenChoice.Provider>
