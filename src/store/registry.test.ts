@@ -9,7 +9,7 @@ import { LogState } from "../log/state";
 import type { Action, ActionId, DeviceId, Write } from "../log/types";
 import { planRules } from "../plan/rules";
 import { fixedClock } from "../services/clock";
-import { noticeText } from "../services/holidays";
+import { HolidayService, noticeText } from "../services/holidays";
 import { AppError } from "../services/ipc";
 import { act } from "../test/act";
 import { CH_ZH_2026, CH_ZH_2027, FETCHED_AT } from "../test/fixtures/calendars";
@@ -459,6 +459,17 @@ describe("Registry: creating plans", () => {
 });
 
 describe("Registry: sessions and devices", () => {
+  it("open uses the holiday service it is given", async () => {
+    env();
+    const clock = fixedClock(TODAY);
+    const holidays = new HolidayService(() => clock.now());
+    const r = await open({ clock, holidays });
+    expect(r.holidays).toBe(holidays);
+    const own = await open({ clock });
+    expect(own.holidays).toBeInstanceOf(HolidayService);
+    expect(own.holidays).not.toBe(holidays);
+  });
+
   it("openSessions", async () => {
     const e = env();
     seedIndex(e.mem, "local", listing("A", "B"));

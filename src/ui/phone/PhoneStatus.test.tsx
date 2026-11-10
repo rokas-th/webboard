@@ -4,9 +4,8 @@ import type { Preview } from "../../actions/intents";
 import type { PlanId } from "../../domain/model";
 import type { Calendar, RegionRef } from "../../domain/calendar";
 import type { Action } from "../../log/types";
-import { sideText } from "../../plan/choices";
 import { fixedClock, type Clock } from "../../services/clock";
-import { noticeText, type HolidayNotice } from "../../services/holidays";
+import { noticeText, type HolidayNotice, type HolidayService } from "../../services/holidays";
 import { AppError } from "../../services/ipc";
 import { encodeAction } from "../../store/doc";
 import { Registry } from "../../store/registry";
@@ -18,7 +17,6 @@ import { setScreen } from "../../test/setup";
 import { seededStore, type SeededStore } from "../../test/shell";
 import { tauri, type Answer } from "../../test/tauriMock";
 import { CALENDAR_BANNER } from "../choices/CalendarBanner";
-import { orderedSides } from "../choices/order";
 import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
 import { RELOAD_LABEL, RELOAD_TEXT } from "../shell/ReloadConfirm";
@@ -77,9 +75,9 @@ const made = async (seed: readonly SeedItem[], opts?: TestSessionOpts): Promise<
   return t;
 };
 
-const shown = async (t: TestSession): Promise<Registry> => {
-  tauri.answers.device_info = () => ({ deviceId: "mac", platform: "macos" });
-  const registry = await phoneRegistry(t);
+const shown = async (t: TestSession, opts?: { holidays?: HolidayService; device?: "mac" | "iphone" }): Promise<Registry> => {
+  tauri.answers.device_info = () => (opts?.device === "iphone" ? { deviceId: "iphone", platform: "ios" } : { deviceId: "mac", platform: "macos" });
+  const registry = await phoneRegistry(t, { holidays: opts?.holidays });
   registries.push(registry);
   render(<PhoneShell registry={registry} clock={t.clock} />);
   await settle();
@@ -145,7 +143,9 @@ const notifier = (r: Registry): (() => void) => {
   return () => [...subscribers].forEach((cb) => cb());
 };
 
-const failOnce = (cmd: string, e: { code: string; message: string }, when: (args: unknown, options: unknown) => boolean = () => true): (() => void) => {
+type When = (...call: Parameters<Answer>) => boolean;
+
+const failOnce = (cmd: string, e: { code: string; message: string }, when: When = () => true): (() => void) => {
   const real = tauri.answers[cmd];
   if (real === undefined) throw new Error("no answer for " + cmd);
   let failing = true;
@@ -159,9 +159,9 @@ const failOnce = (cmd: string, e: { code: string; message: string }, when: (args
 };
 
 const xdocIs =
-  (doc: string) =>
-  (_args: unknown, options: unknown): boolean =>
-    typeof options === "object" && options !== null && "headers" in options && new Headers((options as { headers: HeadersInit }).headers).get("x-doc") === doc;
+  (doc: string): When =>
+  (_args, options) =>
+    new Headers(options?.headers).get("x-doc") === doc;
 
 const unreadableRaw = (): Record<string, unknown> => {
   const x2: Action = { id: "x2", dev: "iphone", ses: "s1", at: 0, par: ["x1"], lbl: "Renamed “Review” to “Review 2”", w: [{ u: "n:Review", v: "Review 2", c: "own" }] };
@@ -364,7 +364,7 @@ describe("PhoneStatus lines (Step 1)", () => {
     const t = await made(SEED);
     vi.spyOn(t.holidays, "notices").mockReturnValue(notices);
     const load = vi.spyOn(t.holidays, "load").mockResolvedValue(undefined);
-    await shown(t);
+    await shown(t, { holidays: t.holidays });
     return { t, load };
   };
 
@@ -414,7 +414,7 @@ describe("PhoneStatus lines (Step 1)", () => {
     const n: HolidayNotice = { k: "ready", year: 2027, count: 1, intent: { t: "calendar", next: now, base }, preview: NO_CHANGE };
     vi.spyOn(t.holidays, "notices").mockReturnValue([n]);
     const dismiss = vi.spyOn(t.holidays, "dismiss");
-    await shown(t);
+    await shown(t, { holidays: t.holidays });
     openStatus();
     fireEvent.click(within(lineOf("Holidays for 2027 ready — review")).getByRole("button", { name: "Review" }));
     const sheet = screen.getByRole("dialog", { name: "Calendar" });
@@ -430,7 +430,7 @@ describe("PhoneStatus lines (Step 1)", () => {
     const t = await made([...SEED, { name: "Late", start: "2028-03-06", dur: 2 }], { calendar: { region: ZH }, answers: { holidays_year: pending } });
     const peer = await t.peer("iphone");
     sessions.push(peer.session);
-    await shown(t);
+    await shown(t, { holidays: t.holidays });
     openStatus();
     expect(lineTexts()).toContain("Holidays for 2028 not loaded — load");
     const from = tauri.calls.length;
@@ -458,10 +458,13 @@ describe("PhoneStatus lines (Step 1)", () => {
     const sheet = screen.getByRole("dialog", { name: "B" });
     fireEvent.click(within(sheet).getByRole("button", { name: "Push “B” to Thu 19 Nov" }));
     expect(apply.mock.calls).toHaveLength(1);
+    expect(apply.mock.calls.filter((c) => c[0].t === "fix")).toHaveLength(1);
     const intent = apply.mock.calls[0][0];
     if (intent.t !== "fix") throw new Error("not a fix");
     expect(intent.how).toBe("push");
-    expect(intent.conflict.kind).toBe("early");
+    const conflict = intent.conflict;
+    if (conflict.kind !== "early") throw new Error("not an early conflict");
+    expect(conflict.succ).toBe("B");
   });
 
   it("a calendar choice shows the open-choices line and its banner, whose Choose… opens it", async () => {
@@ -550,6 +553,64 @@ describe("every open choice is reachable (Step 2)", () => {
     fireEvent.click(within(statusSheet()).getByRole("button", { name: "2 open choices · Choose…" }));
     const list = screen.getByRole("dialog", { name: "Open choices" });
     const rows = within(list).getAllByRole("button").filter((b) => b.classList.contains("choice-row"));
-    expect(rows.map((b) => b.textContent)).toEqual(view.choices.map((c) => orderedSides(c, "Mac").map((s) => sideText(c, s.key, view.plan)).join(" or ")));
+    expect(view.choices.map((c) => c.kind).sort()).toEqual(["calendar", "items"]);
+    expect(rows.map((b) => b.textContent)).toEqual(["Mac or iPhone", "Mac or iPhone"]);
+    fireEvent.click(rows[1]);
+    expect(lastUi().dialog).toEqual({ t: "choice", id: view.choices[1].id });
+  });
+
+  it("on the iPhone a choice row names the iPhone first", async () => {
+    const t = await made(SEED, { clashes: [{ unit: "n:Review", mac: "Review A", iphone: "Review B" }] });
+    const registry = await shown(t, { device: "iphone" });
+    expect(registry.device.name).toBe("iPhone");
+    openStatus();
+    fireEvent.click(within(statusSheet()).getByRole("button", { name: "1 open choice · Choose…" }));
+    const list = screen.getByRole("dialog", { name: "Open choices" });
+    const rows = within(list).getAllByRole("button").filter((b) => b.classList.contains("choice-row"));
+    expect(rows.map((b) => b.textContent)).toEqual(["iPhone or Mac"]);
+  });
+
+  const settledElsewhere = async (seedOpts: TestSessionOpts) => {
+    const t = await made(SEED, { ...seedOpts, clashes: [{ unit: "n:Review", mac: "Review A", iphone: "Review B" }] });
+    const peer = await t.peer("iphone");
+    sessions.push(peer.session);
+    await shown(t);
+    openStatus();
+    fireEvent.click(within(statusSheet()).getByRole("button", { name: "1 open choice · Choose…" }));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Open choices"]);
+    const choice = peer.session.view().choices[0];
+    const iphone = choice.sides.find((s) => s.label === "iPhone");
+    if (iphone === undefined) throw new Error("no iPhone side");
+    act(() => {
+      peer.session.resolve(choice.id, { side: iphone.key }, DEFAULTS);
+    });
+    act(() => peer.sync());
+    await settle();
+    expect(t.session.view().choices).toEqual([]);
+    expect(screen.queryByRole("dialog", { name: "Open choices" })).toBeNull();
+    return t;
+  };
+
+  it("a choice settled elsewhere while Open choices is open shows the Status sheet again", async () => {
+    await settledElsewhere({});
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Status"]);
+    expect(lineTexts()).toEqual([NO_REGION]);
+    fireEvent.click(within(statusSheet()).getByRole("button", { name: "Close" }));
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    fireEvent.click(strip());
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Status"]);
+  });
+
+  it("a choice settled elsewhere that leaves no lines closes the Status sheet, and a later line opens it", async () => {
+    const t = await settledElsewhere({ calendar: { ...CH_ZH }, answers: { holidays_year: pending } });
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    expect(document.querySelector(".phone-status")).toBeNull();
+    act(() => {
+      t.session.apply({ t: "calendar", next: { ...t.session.view().plan.calendar, region: null } });
+    });
+    expect(strip().textContent).toBe(NO_REGION);
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    fireEvent.click(strip());
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Status"]);
   });
 });

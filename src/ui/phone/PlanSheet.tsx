@@ -22,7 +22,7 @@ export function CalendarSheet(p: { session: PlanSession; registry: Registry; clo
   return (
     <Sheet open title="Calendar" onClose={p.onClose}>
       <div className="calendar-sheet">
-        <CalendarBody session={p.session} registry={p.registry} clock={p.clock} review={p.review} readOnlyApply="absent" onClose={p.onClose} />
+        <CalendarBody session={p.session} registry={p.registry} clock={p.clock} review={p.review} frame="sheet" onClose={p.onClose} />
       </div>
     </Sheet>
   );

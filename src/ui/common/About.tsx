@@ -6,28 +6,33 @@ export const HOLIDAY_ATTRIBUTION = "Holiday data: OpenHolidays API (openholidays
 
 export const ABOUT_TITLE = "About WebBoard";
 
-export function About(p: { frame?: "dialog" | "sheet"; onClose(): void }) {
-  const body = (
+function AboutText() {
+  return (
     <>
       <p>{`WebBoard ${version}`}</p>
       <p className="dimp">{HOLIDAY_ATTRIBUTION}</p>
-      <div className="modal-actions">
-        <button type="button" className="button-primary" onClick={p.onClose}>
-          Close
-        </button>
-      </div>
     </>
   );
+}
+
+export function About(p: { frame?: "dialog" | "sheet"; onClose(): void }) {
   if (p.frame === "sheet") {
     return (
       <Sheet open title={ABOUT_TITLE} onClose={p.onClose}>
-        <div className="about-sheet">{body}</div>
+        <div className="about-sheet">
+          <AboutText />
+        </div>
       </Sheet>
     );
   }
   return (
     <Dialog label={ABOUT_TITLE} onClose={p.onClose}>
-      {body}
+      <AboutText />
+      <div className="modal-actions">
+        <button type="button" className="button-primary" onClick={p.onClose}>
+          Close
+        </button>
+      </div>
     </Dialog>
   );
 }

@@ -167,19 +167,19 @@ export class Registry {
   private closed = false;
   private closing: Promise<void> | null = null;
 
-  private constructor(clock: Clock, settings: Settings, device: { deviceId: DeviceId; platform: DeviceInfo["platform"] }) {
+  private constructor(clock: Clock, holidays: HolidayService, settings: Settings, device: { deviceId: DeviceId; platform: DeviceInfo["platform"] }) {
     this.clock = clock;
-    this.holidays = new HolidayService(() => clock.now());
+    this.holidays = holidays;
     this.settings = settings;
     this.deviceId = device.deviceId;
     this.platform = device.platform;
   }
 
-  static async open(opts?: { clock?: Clock }): Promise<Registry> {
+  static async open(opts?: { clock?: Clock; holidays?: HolidayService }): Promise<Registry> {
     const clock = opts?.clock ?? systemClock;
     const settings = parseSettings(await call<unknown>("settings_read"));
     const device = parseDevice(await call<unknown>("device_info"));
-    const r = new Registry(clock, settings, device);
+    const r = new Registry(clock, opts?.holidays ?? new HolidayService(() => clock.now()), settings, device);
     try {
       await r.start();
     } catch (e) {

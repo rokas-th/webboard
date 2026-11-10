@@ -1431,6 +1431,14 @@ const historyRow = (id: string): HTMLElement => {
 
 const sheetLines = (title: string): (string | null)[] => [...screen.getByRole("dialog", { name: title }).querySelectorAll(".revert-text p")].map((p) => p.textContent);
 
+const onlyClose = (title: string): HTMLElement => {
+  const sheet = screen.getByRole("dialog", { name: title });
+  expect(within(sheet).queryByRole("button", { name: "Cancel" })).toBeNull();
+  const close = within(sheet).getAllByRole("button", { name: "Close" });
+  expect(close).toHaveLength(1);
+  return close[0];
+};
+
 const newestLabel = (t: TestSession): string => {
   const e = t.session.history()[0];
   if (e === undefined) throw new Error("no history");
@@ -1515,7 +1523,7 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     expect(saved.label).toBe("Saved baseline “Baseline 9 Nov 2026”");
     fireEvent.click(within(historyRow(saved.id)).getByRole("button", { name: "Revert this action" }));
     expect(sheetLines("Revert this action")).toEqual([saved.label, "No item dates change."]);
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Revert this action" })).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(onlyClose("Revert this action"));
     fireEvent.click(within(topBar()).getByRole("button", { name: "Undo" }));
     expect(historyRow(saved.id).classList.contains("inactive")).toBe(true);
     const revert = vi.spyOn(t.session, "revert");
@@ -1586,25 +1594,36 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Change calendar…" }));
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Calendar"]);
     expect(screen.getByRole("dialog", { name: "Calendar" }).querySelector(".cal-body")).not.toBeNull();
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Calendar" })).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(onlyClose("Calendar"));
     expect(planSheet()).toBeTruthy();
   });
 
   it("exports and imports from File", async () => {
-    const t = await planSheetMade();
+    await seededStore(["Alpha"]);
+    const r = await indexOpen();
     vi.mocked(exportFlow).mockResolvedValueOnce(undefined);
     vi.mocked(importFlow).mockResolvedValueOnce(undefined);
-    const registry = await phoneRegistry(t);
-    registries.push(registry);
-    render(<PhoneShell registry={registry} clock={t.clock} />);
-    await settle();
+    await showIndex(r);
+    listShows("Alpha");
+    const alpha = r.registry.plans().find((l) => l.name === "Alpha");
+    if (alpha === undefined) throw new Error("Alpha is not listed");
     openPlanSheet();
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Export plan…" }));
-    expect(vi.mocked(exportFlow).mock.calls).toEqual([[t.session]]);
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.registry.session(alpha.id)]]);
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Import plan…" }));
-    expect(vi.mocked(importFlow).mock.calls).toHaveLength(1);
-    expect(vi.mocked(importFlow).mock.calls[0][0]).toBe(registry);
     await settle();
+    expect(importFlow).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(importFlow).mock.calls[0];
+    expect(call).toHaveLength(2);
+    const [registry, opener] = call;
+    expect(registry).toBe(r.registry);
+    expect(typeof opener).toBe("function");
+    const imported = await act(async () => r.registry.createPlan("MESA 2027"));
+    await settle();
+    listShows("Alpha");
+    act(() => opener(imported));
+    await settle();
+    listShows("MESA 2027");
   });
 
   it("about", async () => {
@@ -1618,7 +1637,7 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     expect(about.textContent).toContain(`WebBoard ${version}`);
     expect(about.textContent).toContain(HOLIDAY_ATTRIBUTION);
     expect(HOLIDAY_ATTRIBUTION).toBe("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.");
-    fireEvent.click(within(about).getAllByRole("button", { name: "Close" })[0]);
+    fireEvent.click(onlyClose("About WebBoard"));
     expect(lastUi().dialog).toBeNull();
     expect(planSheet()).toBeTruthy();
     expect(apply).not.toHaveBeenCalled();
@@ -1730,7 +1749,7 @@ describe("PhoneShell read-only plan sheet (Task 5.8 Step 3b)", () => {
     fireEvent.click(within(sheet).getByRole("button", { name: "Change calendar…" }));
     const calendar = screen.getByRole("dialog", { name: "Calendar" });
     expect(within(calendar).queryByRole("button", { name: "Apply" })).toBeNull();
-    fireEvent.click(within(calendar).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(onlyClose("Calendar"));
     expect(apply).not.toHaveBeenCalled();
     expect(revert).not.toHaveBeenCalled();
     expect(restorePlan).not.toHaveBeenCalled();

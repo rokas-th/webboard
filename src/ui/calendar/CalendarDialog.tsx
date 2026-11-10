@@ -31,7 +31,7 @@ export interface CalendarProps {
   registry: Registry;
   clock: Clock;
   review?: CalendarReview;
-  readOnlyApply?: "disabled" | "absent";
+  frame?: "dialog" | "sheet";
   onClose(): void;
 }
 
@@ -109,6 +109,7 @@ function previewText(session: PlanSession, view: PlanView, intent: Extract<Inten
 export function CalendarBody(p: CalendarProps) {
   const session = p.session;
   const holidays = p.registry.holidays;
+  const sheet = p.frame === "sheet";
   const view = usePlanView(session);
   const run = useRun(session);
   const exec = useExec(session);
@@ -338,16 +339,24 @@ export function CalendarBody(p: CalendarProps) {
           </button>
         </div>
       )}
-      <div className="modal-actions">
-        <button type="button" onClick={p.onClose}>
-          Cancel
-        </button>
-        {!(readOnly && p.readOnlyApply === "absent") && (
+      {sheet ? (
+        !readOnly && (
+          <div className="modal-actions">
+            <button type="button" className="button-primary" disabled={applied || unchanged} onClick={apply}>
+              Apply
+            </button>
+          </div>
+        )
+      ) : (
+        <div className="modal-actions">
+          <button type="button" onClick={p.onClose}>
+            Cancel
+          </button>
           <button type="button" className="button-primary" disabled={readOnly || applied || unchanged} onClick={apply}>
             Apply
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

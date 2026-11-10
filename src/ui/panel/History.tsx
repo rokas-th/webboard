@@ -85,6 +85,7 @@ export function RevertDialog(p: { session: PlanSession; id: ActionId; frame?: "d
     if (exec(() => p.session.revert(p.id)) !== null) p.onClose();
   };
   const title = entry.active ? REVERT : BRING_BACK;
+  const sheet = p.frame === "sheet";
   const body = (
     <>
       <div className="revert-text">
@@ -93,16 +94,18 @@ export function RevertDialog(p: { session: PlanSession; id: ActionId; frame?: "d
         ))}
       </div>
       <div className="modal-actions">
-        <button type="button" onClick={p.onClose}>
-          Cancel
-        </button>
+        {!sheet && (
+          <button type="button" onClick={p.onClose}>
+            Cancel
+          </button>
+        )}
         <button type="button" className="button-primary" disabled={p.session.readOnly} onClick={apply}>
           Apply
         </button>
       </div>
     </>
   );
-  if (p.frame === "sheet") {
+  if (sheet) {
     return (
       <Sheet open title={title} onClose={p.onClose}>
         <div className="revert-sheet">{body}</div>

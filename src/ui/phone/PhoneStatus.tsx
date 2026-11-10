@@ -163,13 +163,18 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
     if (none) setOpen(false);
   }, [none]);
   const closeConfirm = useCallback(() => setConfirm(null), []);
+  const view = session?.view() ?? null;
+  const noChoices = view === null || view.choices.length === 0;
+  useEffect(() => {
+    if (noChoices) setChoicesOpen(false);
+  }, [noChoices]);
+  const showChoices = choicesOpen && !noChoices;
 
   const first = lines[0];
-  const view = session?.view() ?? null;
   const local = registry.device.name;
   const sheets = (
     <>
-      {open && confirm === null && !choicesOpen && (
+      {open && confirm === null && !showChoices && (
         <Sheet open title="Status" onClose={() => setOpen(false)}>
           <ul className="status-lines">
             {lines.map((l) => (
@@ -188,7 +193,7 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
           </ul>
         </Sheet>
       )}
-      {choicesOpen && view !== null && view.choices.length > 0 && (
+      {showChoices && view !== null && (
         <Sheet open title="Open choices" onClose={() => setChoicesOpen(false)}>
           <ul className="status-choices" aria-label="Open choices">
             {view.choices.map((c) => (

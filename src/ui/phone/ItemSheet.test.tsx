@@ -579,6 +579,11 @@ describe("ItemSheet choices (Task 5.8 Step 2)", () => {
     if (!(list instanceof HTMLElement)) throw new Error("no phone list");
     const row = within(list).getByText("Review").closest("button");
     if (row === null) throw new Error("no Review row");
+    const section = row.closest("section.psec");
+    if (section === null) throw new Error("the Review row is in no section");
+    expect(section.querySelector(":scope > h2.psec-title")).not.toBeNull();
+    expect(section.querySelector(":scope > button.psec-title")).toBeNull();
+    expect([...list.querySelectorAll(".psec-title")].map((e) => e.textContent)).not.toContain("Sprint 4");
     fireEvent.click(row);
     const body = screen.getByRole("dialog", { name: "Review" }).querySelector(".isheet");
     if (body === null) throw new Error("no item sheet body");
