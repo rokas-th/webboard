@@ -12,7 +12,7 @@ function roomCloseFailed(untold: number): Failure {
     ok: false,
     status: 500,
     error: 'internal',
-    message: `The device was removed, but ${plans} not told to close its connections. The server tries again every minute; until then the device keeps syncing ${those} while it stays connected.`,
+    message: `The device was removed, but ${plans} not told to close its connections. The server tries again in a minute, then less often, at least once an hour; until then the device keeps syncing ${those} while it stays connected.`,
   };
 }
 
@@ -84,7 +84,7 @@ export class Space extends DurableObject<Env> {
       if (!removed.ok) {
         return removed;
       }
-      const { untold, closed } = await this.tell(id, removed.value.joins);
+      const { untold, closed } = await this.tell(id, removed.value.joins, true);
       await this.arm();
       return untold > 0 ? roomCloseFailed(untold) : { ok: true, value: { closed } };
     });
@@ -104,18 +104,15 @@ export class Space extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
-    const retry = auth.untoldRetry(this.ctx.storage);
-    if (retry !== null && retry.due <= Date.now()) {
-      await auth.untoldDevices(this.ctx.storage).reduce<Promise<void>>(async (done, device) => {
-        await done;
-        await this.serialised(device, async () => {
-          await this.tell(device, auth.untoldOf(this.ctx.storage, device));
-        });
-      }, Promise.resolve());
-      if (auth.untoldRetry(this.ctx.storage) !== null) {
-        auth.backOffUntold(this.ctx.storage, Date.now());
-      }
-    }
+    await auth.dueUntoldDevices(this.ctx.storage, Date.now()).reduce<Promise<void>>(async (done, device) => {
+      await done;
+      await this.serialised(device, async () => {
+        await this.tell(device, auth.untoldOf(this.ctx.storage, device), false);
+        if (auth.hasUntoldRetry(this.ctx.storage, device)) {
+          auth.backOffUntold(this.ctx.storage, Date.now(), device);
+        }
+      });
+    }, Promise.resolve());
     await auth.unerased(this.ctx.storage).reduce<Promise<void>>(async (done, { doc, device }) => {
       await done;
       await this.erase(device, doc);
@@ -135,9 +132,9 @@ export class Space extends DurableObject<Env> {
   }
 
   private async arm(): Promise<void> {
-    const retry = auth.untoldRetry(this.ctx.storage);
+    const retry = auth.nextUntoldRetry(this.ctx.storage);
     const wanted = [
-      ...(retry === null ? [] : [retry.due]),
+      ...(retry === null ? [] : [retry]),
       ...(auth.unerased(this.ctx.storage).length > 0 ? [Date.now() + PURGE_RETRY_MS] : []),
     ];
     if (wanted.length === 0) {
@@ -157,11 +154,11 @@ export class Space extends DurableObject<Env> {
     );
   }
 
-  private async tell(id: string, docs: readonly string[]): Promise<{ untold: number; closed: number }> {
+  private async tell(id: string, docs: readonly string[], fresh: boolean): Promise<{ untold: number; closed: number }> {
     const settled = await this.inChunks(docs, (doc) => this.rooms.close(doc, id));
     this.logFailures('closeDevice', id, docs, settled);
     const untold = docs.filter((_doc, index) => settled[index].status === 'rejected');
-    auth.keepUntold(this.ctx.storage, Date.now(), id, untold);
+    auth.keepUntold(this.ctx.storage, Date.now(), id, untold, fresh);
     const closed = settled.reduce((sum, outcome) => (outcome.status === 'fulfilled' ? sum + outcome.value : sum), 0);
     return { untold: untold.length, closed };
   }

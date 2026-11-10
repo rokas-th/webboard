@@ -28,7 +28,7 @@ const BAD_CODE = {
 };
 const CLOSE_FAILED = {
   error: 'internal',
-  message: 'The device was removed, but 1 plan was not told to close its connections. The server tries again every minute; until then the device keeps syncing that plan while it stays connected.',
+  message: 'The device was removed, but 1 plan was not told to close its connections. The server tries again in a minute, then less often, at least once an hour; until then the device keeps syncing that plan while it stays connected.',
 };
 
 let addresses = 0;

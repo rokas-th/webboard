@@ -431,7 +431,7 @@ describe('auth', () => {
       const b = await enrolled(storage, DEV_B);
       value(await ticket(storage, T, a.token, 'docA0000000'));
       value(await ticket(storage, T, a.token, 'docB0000000'));
-      keepUntold(storage, T, DEV_A, ['docA0000000']);
+      keepUntold(storage, T, DEV_A, ['docA0000000'], true);
       expect(await purgePlan(storage, T + 1, b.token, 'docA0000000')).toEqual({ ok: true, value: { device: DEV_B } });
       expect(await purgePlan(storage, T + 2, a.token, 'docA0000000')).toEqual({ ok: true, value: { device: DEV_A } });
       expect(await purgePlan(storage, T + 3, a.token, 'docC0000000')).toEqual({ ok: true, value: { device: DEV_A } });

@@ -162,7 +162,7 @@ export function schema(sql: SqlStorage): void {
   );
   sql.exec('CREATE TABLE IF NOT EXISTS joins (device TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY (device, doc))');
   sql.exec('CREATE TABLE IF NOT EXISTS untold (device TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY (device, doc))');
-  sql.exec('CREATE TABLE IF NOT EXISTS retry (id INTEGER PRIMARY KEY CHECK (id = 1), delay INTEGER NOT NULL, due INTEGER NOT NULL)');
+  sql.exec('CREATE TABLE IF NOT EXISTS retry (device TEXT PRIMARY KEY, delay INTEGER NOT NULL, due INTEGER NOT NULL)');
   sql.exec(
     'CREATE TABLE IF NOT EXISTS purged (doc TEXT PRIMARY KEY, device TEXT NOT NULL, at INTEGER NOT NULL, erased_at INTEGER)',
   );
@@ -229,16 +229,8 @@ function plansFull(sql: SqlStorage, device: string, doc: string, index: string):
   return joined >= MAX_PLANS_PER_DEVICE;
 }
 
-function settleRetry(sql: SqlStorage, now: number): void {
-  if (int(sql.exec('SELECT COUNT(*) AS n FROM untold').one(), 'n') === 0) {
-    sql.exec('DELETE FROM retry');
-    return;
-  }
-  sql.exec(
-    'INSERT INTO retry (id, delay, due) VALUES (1, ?, ?) ON CONFLICT (id) DO NOTHING',
-    UNTOLD_FIRST_RETRY_MS,
-    now + UNTOLD_FIRST_RETRY_MS,
-  );
+function dropSettledRetries(sql: SqlStorage): void {
+  sql.exec('DELETE FROM retry WHERE device NOT IN (SELECT device FROM untold)');
 }
 
 function admit(
@@ -259,7 +251,7 @@ function admit(
     now,
   );
   sql.exec('DELETE FROM untold WHERE device = ?', deviceId);
-  settleRetry(sql, now);
+  dropSettledRetries(sql);
   return { enrolled: { spaceId, deviceId, token }, joins: joinsOf(sql, deviceId) };
 }
 
@@ -488,31 +480,45 @@ export async function removeDevice(
   });
 }
 
-export function keepUntold(storage: DurableObjectStorage, now: number, device: string, docs: readonly string[]): void {
+export function keepUntold(storage: DurableObjectStorage, now: number, device: string, docs: readonly string[], fresh: boolean): void {
   inTransaction(storage, (sql) => {
     sql.exec('DELETE FROM untold WHERE device = ?', device);
     docs.forEach((doc) => sql.exec('INSERT INTO untold (device, doc) VALUES (?, ?)', device, doc));
-    settleRetry(sql, now);
+    if (docs.length > 0) {
+      sql.exec(
+        fresh
+          ? 'INSERT INTO retry (device, delay, due) VALUES (?, ?, ?) ON CONFLICT (device) DO UPDATE SET delay = excluded.delay, due = excluded.due'
+          : 'INSERT INTO retry (device, delay, due) VALUES (?, ?, ?) ON CONFLICT (device) DO NOTHING',
+        device,
+        UNTOLD_FIRST_RETRY_MS,
+        now + UNTOLD_FIRST_RETRY_MS,
+      );
+    }
+    dropSettledRetries(sql);
   });
 }
 
-export function untoldRetry(storage: DurableObjectStorage): { delay: number; due: number } | null {
-  const rows = storage.sql.exec('SELECT delay, due FROM retry').toArray();
-  return rows.length === 0 ? null : { delay: int(rows[0], 'delay'), due: int(rows[0], 'due') };
+export function nextUntoldRetry(storage: DurableObjectStorage): number | null {
+  const rows = storage.sql.exec('SELECT due FROM retry ORDER BY due LIMIT 1').toArray();
+  return rows.length === 0 ? null : int(rows[0], 'due');
 }
 
-export function backOffUntold(storage: DurableObjectStorage, now: number): void {
-  const retry = untoldRetry(storage);
-  if (retry === null) {
-    throw new Error('Space: no untold retry to back off');
+export function backOffUntold(storage: DurableObjectStorage, now: number, device: string): void {
+  const rows = storage.sql.exec('SELECT delay FROM retry WHERE device = ?', device).toArray();
+  if (rows.length === 0) {
+    throw new Error(`Space: no untold retry to back off for ${device}`);
   }
-  const delay = Math.min(retry.delay * 2, UNTOLD_MAX_RETRY_MS);
-  storage.sql.exec('UPDATE retry SET delay = ?, due = ?', delay, now + delay);
+  const delay = Math.min(int(rows[0], 'delay') * 2, UNTOLD_MAX_RETRY_MS);
+  storage.sql.exec('UPDATE retry SET delay = ?, due = ? WHERE device = ?', delay, now + delay, device);
 }
 
-export function untoldDevices(storage: DurableObjectStorage): string[] {
+export function hasUntoldRetry(storage: DurableObjectStorage, device: string): boolean {
+  return storage.sql.exec('SELECT 1 FROM retry WHERE device = ?', device).toArray().length > 0;
+}
+
+export function dueUntoldDevices(storage: DurableObjectStorage, now: number): string[] {
   return storage.sql
-    .exec('SELECT DISTINCT device FROM untold ORDER BY device')
+    .exec('SELECT device FROM retry WHERE due <= ? ORDER BY device', now)
     .toArray()
     .map((row) => text(row, 'device'));
 }
@@ -541,7 +547,7 @@ export async function purgePlan(
     }
     sql.exec('INSERT INTO purged (doc, device, at, erased_at) VALUES (?, ?, ?, NULL) ON CONFLICT (doc) DO NOTHING', doc, who.id, now);
     ['joins', 'tickets', 'untold'].forEach((table) => sql.exec(`DELETE FROM ${table} WHERE doc = ?`, doc));
-    settleRetry(sql, now);
+    dropSettledRetries(sql);
     return ok({ device: who.id });
   });
 }

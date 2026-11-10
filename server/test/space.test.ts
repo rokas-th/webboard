@@ -10,6 +10,7 @@ import { newDoc, value } from './helpers';
 const SECRET = env.SETUP_SECRET;
 const DEV_A = 'devA0000000';
 const DEV_B = 'devB0000000';
+const DEV_C = 'devC0000000';
 function closeFailed(untold: number): unknown {
   const plans = untold === 1 ? '1 plan was' : `${untold} plans were`;
   const that = untold === 1 ? 'that plan' : 'those plans';
@@ -17,7 +18,7 @@ function closeFailed(untold: number): unknown {
     ok: false,
     status: 500,
     error: 'internal',
-    message: `The device was removed, but ${plans} not told to close its connections. The server tries again every minute; until then the device keeps syncing ${that} while it stays connected.`,
+    message: `The device was removed, but ${plans} not told to close its connections. The server tries again in a minute, then less often, at least once an hour; until then the device keeps syncing ${that} while it stays connected.`,
   };
 }
 function restoreFailed(untold: number): unknown {
@@ -74,9 +75,9 @@ async function untoldIn(space: DurableObjectStub<Space>): Promise<string[]> {
   );
 }
 
-async function retryOf(space: DurableObjectStub<Space>): Promise<{ delay: number; due: number } | null> {
+async function retryOf(space: DurableObjectStub<Space>, device: string): Promise<{ delay: number; due: number } | null> {
   return runInDurableObject(space, (_space, state) => {
-    const rows = state.storage.sql.exec('SELECT delay, due FROM retry').toArray();
+    const rows = state.storage.sql.exec('SELECT delay, due FROM retry WHERE device = ?', device).toArray();
     return rows.length === 0 ? null : { delay: Number(rows[0].delay), due: Number(rows[0].due) };
   });
 }
@@ -446,7 +447,7 @@ describe('Space', () => {
     expect(await untoldIn(space)).toEqual([`${DEV_A} docF0000000`]);
     const again = value(await space.enrol(SECRET, DEV_A, 'iPad', '1.1.1.1'));
     expect(await untoldIn(space)).toEqual([]);
-    expect(await retryOf(space)).toBeNull();
+    expect(await retryOf(space, DEV_A)).toBeNull();
     const closes = await runInDurableObject(space, (instance: Space) => vi.spyOn(instance.rooms, 'close'));
     closes.mockClear();
     expect(await runDurableObjectAlarm(space)).toBe(true);
@@ -472,7 +473,7 @@ describe('Space', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const before = Date.now();
     expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
-    const first = await retryOf(space);
+    const first = await retryOf(space, DEV_A);
     expect(first?.delay).toBe(60_000);
     expect(first?.due).toBeGreaterThanOrEqual(before + 60_000);
     expect(await alarmOf(space)).toBe(first?.due);
@@ -480,7 +481,7 @@ describe('Space', () => {
       await dueNow(space);
       const ran = Date.now();
       expect(await runDurableObjectAlarm(space)).toBe(true);
-      const retry = await retryOf(space);
+      const retry = await retryOf(space, DEV_A);
       expect(retry?.delay).toBe(delay);
       expect(retry?.due).toBeGreaterThanOrEqual(ran + delay);
       expect(retry?.due).toBeLessThanOrEqual(Date.now() + delay);
@@ -491,8 +492,67 @@ describe('Space', () => {
     await dueNow(space);
     expect(await runDurableObjectAlarm(space)).toBe(true);
     expect(await untoldIn(space)).toEqual([]);
-    expect(await retryOf(space)).toBeNull();
+    expect(await retryOf(space, DEV_A)).toBeNull();
     expect(await alarmOf(space)).toBeNull();
+  });
+
+  it('a removal that fails while another device is backed off waits a minute, and each device backs off alone', async () => {
+    const space = spaceOf('untold-overlap');
+    const { a, b } = await twoDevices(space);
+    const c = value(await space.enrol(SECRET, DEV_C, 'Phone', '1.1.1.1')).token;
+    value(await space.ticket(a, 'docX0000000'));
+    value(await space.ticket(c, 'docY0000000'));
+    const closes = await runInDurableObject(space, (instance: Space) =>
+      vi.spyOn(instance.rooms, 'close').mockImplementation(async () => {
+        throw new Error('room down');
+      }),
+    );
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
+    for (let run = 0; run < 6; run += 1) {
+      await dueNow(space);
+      expect(await runDurableObjectAlarm(space)).toBe(true);
+    }
+    expect((await retryOf(space, DEV_A))?.delay).toBe(3_600_000);
+    const before = Date.now();
+    expect(await space.removeDevice(b, DEV_C)).toEqual(closeFailed(1));
+    const fresh = await retryOf(space, DEV_C);
+    expect(fresh?.delay).toBe(60_000);
+    expect(fresh?.due).toBeGreaterThanOrEqual(before + 60_000);
+    expect(fresh?.due).toBeLessThanOrEqual(Date.now() + 60_000);
+    expect(await alarmOf(space)).toBe(fresh?.due);
+    const backedOff = await retryOf(space, DEV_A);
+    expect(backedOff?.delay).toBe(3_600_000);
+    await runInDurableObject(space, (_space, state) => {
+      state.storage.sql.exec('UPDATE retry SET due = ? WHERE device = ?', Date.now(), DEV_C);
+    });
+    closes.mockClear();
+    expect(await runDurableObjectAlarm(space)).toBe(true);
+    expect(closes.mock.calls).toEqual([['docY0000000', DEV_C]]);
+    expect(await retryOf(space, DEV_A)).toEqual(backedOff);
+    expect((await retryOf(space, DEV_C))?.delay).toBe(120_000);
+    expect(await alarmOf(space)).toBe((await retryOf(space, DEV_C))?.due);
+  });
+
+  it('removing a device again starts its retry over at a minute', async () => {
+    const space = spaceOf('untold-again');
+    const { a, b } = await twoDevices(space);
+    value(await space.ticket(a, 'docR0000000'));
+    await failCloseIn(space, 'docR0000000');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
+    for (let run = 0; run < 3; run += 1) {
+      await dueNow(space);
+      expect(await runDurableObjectAlarm(space)).toBe(true);
+    }
+    expect((await retryOf(space, DEV_A))?.delay).toBe(480_000);
+    const before = Date.now();
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
+    const again = await retryOf(space, DEV_A);
+    expect(again?.delay).toBe(60_000);
+    expect(again?.due).toBeGreaterThanOrEqual(before + 60_000);
+    expect(again?.due).toBeLessThanOrEqual(Date.now() + 60_000);
+    expect(await alarmOf(space)).toBe(again?.due);
   });
 
   it('an alarm before the untold retry is due tells no plan', async () => {
@@ -502,12 +562,12 @@ describe('Space', () => {
     await failCloseIn(space, 'docN0000000');
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
-    const retry = await retryOf(space);
+    const retry = await retryOf(space, DEV_A);
     const closes = await runInDurableObject(space, (instance: Space) => vi.spyOn(instance.rooms, 'close'));
     closes.mockClear();
     expect(await runDurableObjectAlarm(space)).toBe(true);
     expect(closes).not.toHaveBeenCalled();
-    expect(await retryOf(space)).toEqual(retry);
+    expect(await retryOf(space, DEV_A)).toEqual(retry);
     expect(await alarmOf(space)).toBe(retry?.due);
   });
 
@@ -655,10 +715,10 @@ describe('Space purge', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
     expect(await untoldIn(space)).toEqual([`${DEV_A} ${doc}`]);
-    expect(await retryOf(space)).not.toBeNull();
+    expect(await retryOf(space, DEV_A)).not.toBeNull();
     value(await space.purgePlan(b, doc));
     expect(await untoldIn(space)).toEqual([]);
-    expect(await retryOf(space)).toBeNull();
+    expect(await retryOf(space, DEV_A)).toBeNull();
   });
 
   it('a purge whose room fails answers purge_pending, and the alarm erases it later', async () => {
