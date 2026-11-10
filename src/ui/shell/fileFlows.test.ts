@@ -9,6 +9,7 @@ import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts 
 import { testRegistry } from "../../test/shell";
 import { hold, tauri, type Call } from "../../test/tauriMock";
 import { clearToasts, toast } from "../common/Toast";
+import { closeConverted, shownConverted } from "./ConvertedReport";
 import { exportFlow, importFlow } from "./fileFlows";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -213,9 +214,27 @@ describe("importFlow", () => {
     const id = t.session.view().plan.id;
     const registry = testRegistry(t);
     const open = vi.fn<(id: PlanId) => void>();
-    vi.mocked(importPlan).mockResolvedValueOnce(id);
+    vi.mocked(importPlan).mockResolvedValueOnce({ planId: id, converted: null });
     await importFlow(registry, open);
     expect(vi.mocked(importPlan).mock.calls).toEqual([[registry]]);
+    expect(open.mock.calls).toEqual([[id]]);
+    expect(toasts()).toEqual([["Imported “MESA 2027”"]]);
+  });
+
+  it("shows what a .gantt conversion made and dropped, and opens the plan only once that report is closed", async () => {
+    const t = await named([{ name: "A", start: "2026-11-10" }]);
+    const id = t.session.view().plan.id;
+    const open = vi.fn<(id: PlanId) => void>();
+    const report = { fileName: "Fixture Plan 20260901.gantt", name: "MESA 2027", counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1 }, dropped: ["TaskID on 4 items"] };
+    vi.mocked(importPlan).mockResolvedValueOnce({ planId: id, converted: report });
+    const flow = importFlow(testRegistry(t), open);
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(shownConverted()).toEqual(report);
+    expect(open).not.toHaveBeenCalled();
+    expect(toasts()).toEqual([]);
+    closeConverted();
+    await flow;
+    expect(shownConverted()).toBeNull();
     expect(open.mock.calls).toEqual([[id]]);
     expect(toasts()).toEqual([["Imported “MESA 2027”"]]);
   });
@@ -225,7 +244,7 @@ describe("importFlow", () => {
     const id = t.session.view().plan.id;
     expect(t.session.view().derived.conflicts.filter((c) => c.kind === "early" || c.kind === "loop")).toHaveLength(2);
     const open = vi.fn<(id: PlanId) => void>();
-    vi.mocked(importPlan).mockResolvedValueOnce(id);
+    vi.mocked(importPlan).mockResolvedValueOnce({ planId: id, converted: null });
     await importFlow(testRegistry(t), open);
     expect(open.mock.calls).toEqual([[id]]);
     expect(toasts()).toEqual([["Imported “MESA 2027” — 2 conflicts to fix"]]);
@@ -233,7 +252,7 @@ describe("importFlow", () => {
 
   it("counts one conflict in the singular", async () => {
     const t = await named(CLASH.slice(0, 2));
-    vi.mocked(importPlan).mockResolvedValueOnce(t.session.view().plan.id);
+    vi.mocked(importPlan).mockResolvedValueOnce({ planId: t.session.view().plan.id, converted: null });
     await importFlow(testRegistry(t), vi.fn<(id: PlanId) => void>());
     expect(toasts()).toEqual([["Imported “MESA 2027” — 1 conflict to fix"]]);
   });
@@ -243,7 +262,7 @@ describe("importFlow", () => {
     const id = t.session.view().plan.id;
     const later = deferred<PlanSession>();
     const open = vi.fn<(id: PlanId) => void>();
-    vi.mocked(importPlan).mockResolvedValueOnce(id);
+    vi.mocked(importPlan).mockResolvedValueOnce({ planId: id, converted: null });
     const flow = importFlow(testRegistry(t, { session: () => later.promise }), open);
     await new Promise<void>((r) => setTimeout(r, 0));
     expect(open.mock.calls).toEqual([[id]]);
@@ -282,7 +301,7 @@ describe("importFlow", () => {
     const t = await named([{ name: "A", start: "2026-11-10" }]);
     const id = t.session.view().plan.id;
     const open = vi.fn<(id: PlanId) => void>();
-    vi.mocked(importPlan).mockResolvedValueOnce(id);
+    vi.mocked(importPlan).mockResolvedValueOnce({ planId: id, converted: null });
     const registry = testRegistry(t, { session: () => Promise.reject(new AppError("store.io", "Could not read the plan: disk error.")) });
     await importFlow(registry, open);
     expect(open.mock.calls).toEqual([[id]]);

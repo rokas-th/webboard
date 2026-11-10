@@ -18,6 +18,7 @@ import { offeredSettings, resetTauri, tauri } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { OpenChoice } from "../run";
+import { closeConverted, CONVERTED_TITLE, OPEN_PLAN, shownConverted } from "../shell/ConvertedReport";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import { PLACE_KEY, useUi, type UiState } from "../state";
 import { PhoneShell } from "./PhoneShell";
@@ -87,6 +88,7 @@ afterEach(async () => {
   vi.useRealTimers();
   cleanup();
   clearToasts();
+  if (shownConverted() !== null) closeConverted();
   vi.restoreAllMocks();
   vi.mocked(useUi).mockClear();
   vi.mocked(newId).mockReset();
@@ -582,7 +584,7 @@ describe("PhoneShell plans (Step 1)", () => {
   it("Import plan… under New plan runs the import flow and opens the plan", async () => {
     await seededStore(["Alpha"]);
     const r = await indexOpen();
-    vi.mocked(importPlan).mockImplementationOnce(async (reg) => reg.createPlan("MESA 2027"));
+    vi.mocked(importPlan).mockImplementationOnce(async (reg) => ({ planId: await reg.createPlan("MESA 2027"), converted: null }));
     await showIndex(r);
     const sheet = openPlans();
     const names = within(sheet)
@@ -1041,7 +1043,7 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
 
   it("the empty state offers Import plan…", async () => {
     const r = await emptyIndex();
-    vi.mocked(importPlan).mockImplementationOnce(async (reg) => reg.createPlan("MESA 2027"));
+    vi.mocked(importPlan).mockImplementationOnce(async (reg) => ({ planId: await reg.createPlan("MESA 2027"), converted: null }));
     await showIndex(r);
     const state = emptyState();
     if (state === null) throw new Error("no empty state");
@@ -1052,6 +1054,26 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     expect(toastTexts()).toEqual(["Imported “MESA 2027”"]);
     listShows("MESA 2027");
     expect(emptyState()).toBeNull();
+  });
+
+  it("shows the .gantt conversion report in a sheet before it opens the imported plan", async () => {
+    const r = await emptyIndex();
+    const report = { fileName: "Fixture Plan 20260901.gantt", name: "MESA 2027", counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1 }, dropped: ["TaskID on 4 items"] };
+    vi.mocked(importPlan).mockImplementationOnce(async (reg) => ({ planId: await reg.createPlan("MESA 2027"), converted: report }));
+    await showIndex(r);
+    const state = emptyState();
+    if (state === null) throw new Error("no empty state");
+    fireEvent.click(within(state).getByRole("button", { name: "Import plan…" }));
+    await settle();
+    const sheet = screen.getByRole("dialog", { name: CONVERTED_TITLE });
+    expect(sheet.classList.contains("sheet")).toBe(true);
+    expect(within(sheet).getByText("TaskID on 4 items")).toBeTruthy();
+    expect(toastTexts()).toEqual([]);
+    fireEvent.click(within(sheet).getByRole("button", { name: OPEN_PLAN }));
+    await settle();
+    expect(screen.queryByRole("dialog", { name: CONVERTED_TITLE })).toBeNull();
+    expect(toastTexts()).toEqual(["Imported “MESA 2027”"]);
+    listShows("MESA 2027");
   });
 
   it("a cancelled import from the empty state changes nothing", async () => {

@@ -14,6 +14,7 @@ import { fixedClock } from "../services/clock";
 import { AppError } from "../services/ipc";
 import { act } from "../test/act";
 import { memoryStore } from "../test/fixtures/store";
+import { GANTT_FILE, ganttBytes, ganttSource, textBytes } from "../test/fixtures/gantt";
 import { VALID_WEBBOARD } from "../test/fixtures/webboard";
 import { offeredSettings, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
 import { decodeAction, encodeAction, PlanDoc } from "./doc";
@@ -120,6 +121,7 @@ const idsOf = (plan: PlanState): Set<string> =>
   new Set([...plan.items.keys(), ...plan.links.keys(), ...plan.calendar.closures.keys(), ...plan.baselines.keys(), plan.id]);
 
 const FILTERS = [{ name: "WebBoard plan", extensions: ["webboard"] }];
+const OPEN_FILTERS = [{ name: "WebBoard plan or .gantt file", extensions: ["webboard", "gantt"] }];
 
 const xpath = (c: Call): string | null => new Headers(c.options?.headers).get("x-path");
 const xname = (c: Call): string | null => new Headers(c.options?.headers).get("x-name");
@@ -633,8 +635,11 @@ describe("import reads by header", () => {
     const before = reg.plans().map((p) => p.id);
     vi.mocked(open).mockResolvedValue("/Users/a/My Plan.webboard");
     fileState.read = VALID_WEBBOARD.bytes;
-    const id = await importPlan(reg);
-    if (id === null) throw new Error("importPlan resolved null");
+    const imported = await importPlan(reg);
+    if (imported === null) throw new Error("importPlan resolved null");
+    const id = imported.planId;
+    expect(imported.converted).toBeNull();
+    expect(vi.mocked(open).mock.calls).toEqual([[{ multiple: false, directory: false, filters: OPEN_FILTERS }]]);
     const reads = callsOf(from, "file_read");
     expect(reads).toHaveLength(1);
     expect(reads[0].args).toEqual({});
@@ -652,8 +657,9 @@ describe("import reads by header", () => {
     const url = "file:///private/var/mobile/My%20Plan.webboard";
     vi.mocked(open).mockResolvedValue(url);
     fileState.read = VALID_WEBBOARD.bytes;
-    const id = await importPlan(reg);
-    if (id === null) throw new Error("importPlan resolved null");
+    const imported = await importPlan(reg);
+    if (imported === null) throw new Error("importPlan resolved null");
+    const id = imported.planId;
     expect(xpath(callsOf(from, "file_read")[0])).toBe(encodeURIComponent(url));
     expect((await reg.session(id)).history()[0].label).toBe("Imported from My Plan.webboard");
   });
@@ -670,5 +676,90 @@ describe("import reads by header", () => {
     vi.mocked(open).mockResolvedValue(null);
     expect(await importPlan(reg)).toBeNull();
     expect(callsOf(from, "file_read")).toHaveLength(0);
+  });
+});
+
+describe("import of a .gantt file", () => {
+  const pick = async (path: string, bytes: Uint8Array): Promise<{ reg: Registry; from: number; before: readonly string[] }> => {
+    const reg = await registry();
+    const from = tauri.calls.length;
+    const before = reg.plans().map((p) => p.id);
+    vi.mocked(open).mockResolvedValue(path);
+    fileState.read = bytes;
+    return { reg, from, before };
+  };
+
+  it("converts the file, creates one plan and reports what it converted and dropped", async () => {
+    const { reg, before } = await pick(`/Users/a/${GANTT_FILE}`, ganttBytes());
+    const imported = await importPlan(reg);
+    if (imported === null) throw new Error("importPlan resolved null");
+    expect(reg.plans().map((p) => p.id)).toEqual([...before, imported.planId]);
+    expect(imported.converted).toEqual({
+      fileName: GANTT_FILE,
+      name: "Fixture Plan",
+      counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1 },
+      dropped: expect.arrayContaining(["TaskID on 4 items", "color on 4 items", "advanced.workTime"]),
+    });
+    const session = await reg.session(imported.planId);
+    const plan = session.view().plan;
+    expect(plan.name).toBe("Fixture Plan");
+    expect([...plan.items.values()].filter((i) => !i.trashed).map((i) => `${i.kind} ${i.name}`).sort()).toEqual([
+      "group Phase",
+      "milestone Handover",
+      "task Build",
+      "task Survey",
+    ]);
+    expect(plan.links.size).toBe(2);
+    expect([...plan.baselines.values()].map((b) => b.name)).toEqual(["Imported plan"]);
+    expect(session.history()[0].label).toBe(`Imported from ${GANTT_FILE}`);
+  });
+
+  it("recognises the extension whatever its case", async () => {
+    const { reg } = await pick("/Users/a/Fixture Plan.GANTT", ganttBytes());
+    const imported = await importPlan(reg);
+    expect(imported?.converted?.name).toBe("Fixture Plan");
+  });
+
+  const withHolidays = (): Record<string, unknown> => {
+    const src = ganttSource();
+    const advanced = src.advanced;
+    if (typeof advanced !== "object" || advanced === null) throw new Error("the fixture has no advanced settings");
+    return { ...src, advanced: { ...advanced, holidays: ["2026-09-08"] } };
+  };
+
+  const refusals: [string, () => Uint8Array, RegExp][] = [
+    ["bytes that are not UTF-8", () => Uint8Array.from([0x7b, 0xff, 0x7d]), /^The \.gantt file is not UTF-8 text: /],
+    ["text that is not JSON", () => textBytes("not json"), /^The \.gantt file is not JSON: /],
+    ["a holiday list", () => ganttBytes(withHolidays()), /holidays/],
+  ];
+
+  it.each(refusals)("refuses %s as an AppError with the converter's message and creates nothing", async (_name, bytes, message) => {
+    const { reg, from, before } = await pick(`/Users/a/${GANTT_FILE}`, bytes());
+    const caught = await importPlan(reg).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    if (!(caught instanceof AppError)) throw new Error(`importPlan did not reject with an AppError: ${String(caught)}`);
+    expect(caught.code).toBe("import.gantt");
+    expect(caught.message).toMatch(message);
+    await flush();
+    expect(appendsAfter(from)).toHaveLength(0);
+    expect(reg.plans().map((p) => p.id)).toEqual(before);
+  });
+
+  it("keeps a multi-line fidelity refusal whole", async () => {
+    const text = JSON.stringify(ganttSource()).replace("2026-09-11T15:00:00.000Z", "2026-09-10T15:00:00.000Z");
+    const { reg } = await pick(`/Users/a/${GANTT_FILE}`, textBytes(text));
+    const caught = await importPlan(reg).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    if (!(caught instanceof AppError)) throw new Error(`importPlan did not reject with an AppError: ${String(caught)}`);
+    expect(caught.message).toMatch(/^WebBoard would show different dates than the \.gantt file:\n- Task 2 Survey: /);
+  });
+
+  it("reads a .webboard file as a plan file even when it holds .gantt text", async () => {
+    const { reg } = await pick("/Users/a/Fixture.webboard", ganttBytes());
+    await expect(importPlan(reg)).rejects.toMatchObject({ code: "import.foreign" });
   });
 });

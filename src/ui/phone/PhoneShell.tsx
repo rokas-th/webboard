@@ -10,6 +10,7 @@ import { About } from "../common/About";
 import { toast, Toasts } from "../common/Toast";
 import { ghostIds } from "../ghosts";
 import { OpenChoice } from "../run";
+import { ConvertedReport } from "../shell/ConvertedReport";
 import { FailedPlanView } from "../shell/PlanFailed";
 import { usePlanFiles, usePlanSelection, type PlanFiles, type PlanMain } from "../shell/selection";
 import { ExampleButton, NewPlanButton } from "../shell/Sidebar";
@@ -321,6 +322,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
         {ui.dialog !== null && ui.dialog.t === "sync" && (
           <SyncDialog pane={ui.dialog.pane} frame="sheet" onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />
         )}
+        <ConvertedReport frame="sheet" />
         <Toasts />
       </div>
     </OpenChoice.Provider>

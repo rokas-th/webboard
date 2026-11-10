@@ -5,6 +5,7 @@ import type { DeviceInfo, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { countedConflicts } from "../choices/HeadCounts";
 import { toast } from "../common/Toast";
+import { showConverted } from "./ConvertedReport";
 
 type Outcome<T> = { ok: true; value: T } | { ok: false };
 
@@ -37,7 +38,8 @@ async function exportOnce(session: PlanSession, platform: DeviceInfo["platform"]
 async function importOnce(registry: Registry, open: (id: PlanId) => void): Promise<void> {
   const imported = await shown(importPlan(registry));
   if (!imported.ok || imported.value === null) return;
-  const id = imported.value;
+  const { planId: id, converted } = imported.value;
+  if (converted !== null) await showConverted(converted);
   open(id);
   const session = await shown(registry.session(id));
   if (!session.ok) return;

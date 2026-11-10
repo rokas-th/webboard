@@ -12,6 +12,7 @@ import { existence, key, parseKey, stateWrites, validateWrite } from "../plan/un
 import { AppError, call, callBytes } from "../services/ipc";
 import { decodeAction } from "./doc";
 import { newPlanId } from "./plan-id";
+import type { GanttReport } from "../import/gantt";
 import type { DeviceInfo, Registry } from "./registry";
 import type { PlanSession } from "./session";
 
@@ -34,6 +35,8 @@ const MAGIC: readonly number[] = [0x57, 0x42, 0x58, 0x31];
 const FIXED = 12;
 const VERSION = 1;
 const FILTERS = [{ name: "WebBoard plan", extensions: ["webboard"] }];
+const OPEN_FILTERS = [{ name: "WebBoard plan or .gantt file", extensions: ["webboard", "gantt"] }];
+const GANTT_EXTENSION = ".gantt";
 const FILE_PREFIX = "file://";
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -292,10 +295,30 @@ export const fileNameOf = (path: string): string => {
   return path.slice(0, FILE_PREFIX.length).toLowerCase() === FILE_PREFIX ? decodeURIComponent(last) : last;
 };
 
-export async function importPlan(registry: Registry): Promise<PlanId | null> {
-  const path = await open({ multiple: false, directory: false, filters: FILTERS });
+export interface Imported {
+  planId: PlanId;
+  converted: GanttReport | null;
+}
+
+async function fromGantt(bytes: Uint8Array, fileName: string, dev: DeviceId): Promise<{ result: ImportResult; report: GanttReport }> {
+  const gantt = await import("../import/gantt");
+  try {
+    return gantt.importGantt({ bytes, fileName, dev, ses: newId(), now: Date.now() });
+  } catch (e) {
+    if (e instanceof gantt.GanttError) throw new AppError("import.gantt", e.message);
+    throw e;
+  }
+}
+
+export async function importPlan(registry: Registry): Promise<Imported | null> {
+  const path = await open({ multiple: false, directory: false, filters: OPEN_FILTERS });
   if (path === null) return null;
   const bytes = await callBytes("file_read", {}, { headers: { "x-path": encodeURIComponent(path) } });
-  const r = buildImport(bytes, fileNameOf(path), registry.device.deviceId, newId(), Date.now());
-  return registry.createPlanFrom(r);
+  const fileName = fileNameOf(path);
+  if (fileName.toLowerCase().endsWith(GANTT_EXTENSION)) {
+    const { result, report } = await fromGantt(bytes, fileName, registry.device.deviceId);
+    return { planId: await registry.createPlanFrom(result), converted: report };
+  }
+  const r = buildImport(bytes, fileName, registry.device.deviceId, newId(), Date.now());
+  return { planId: await registry.createPlanFrom(r), converted: null };
 }

@@ -35,6 +35,7 @@ import { useFormFactor } from "./formFactor";
 import { FILES_STAY, PlanFailed, ReloadButton } from "./PlanFailed";
 import { PlanHead } from "./PlanHead";
 import { PlanMenu } from "./PlanMenu";
+import { ConvertedReport } from "./ConvertedReport";
 import { ReloadConfirm } from "./ReloadConfirm";
 import { messageOf, restorePlan, usePlanFiles, usePlanSelection } from "./selection";
 import { ExampleButton, NewPlanButton, Sidebar } from "./Sidebar";
@@ -404,6 +405,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         {ui.dialog !== null && ui.dialog.t === "palette" && <Palette commands={commands(ctx)} onClose={closeDialog} />}
         {ui.dialog !== null && ui.dialog.t === "about" && <About onClose={closeDialog} />}
         {ui.dialog !== null && ui.dialog.t === "sync" && <SyncDialog pane={ui.dialog.pane} onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />}
+        <ConvertedReport />
         <Toasts />
       </div>
     </OpenChoice.Provider>

@@ -7,7 +7,7 @@ import { sideText } from "../../plan/choices";
 import { fixedClock } from "../../services/clock";
 import { AppError } from "../../services/ipc";
 import { decodeAction, encodeAction } from "../../store/doc";
-import { importPlan } from "../../store/file";
+import { importPlan, type Imported } from "../../store/file";
 import { IndexDoc } from "../../store/index-doc";
 import type { PersistedDoc } from "../../store/persist";
 import { Registry } from "../../store/registry";
@@ -21,6 +21,7 @@ import { orderedSides } from "../choices/order";
 import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
 import { forgetLastPlan, NO_PLAN_KEY, PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
+import { closeConverted, CONVERTED_TITLE, OPEN_PLAN, shownConverted } from "./ConvertedReport";
 import { exportFlow, importFlow } from "./fileFlows";
 import { PlanHead } from "./PlanHead";
 import { Shell } from "./Shell";
@@ -57,6 +58,7 @@ beforeEach(() => {
 afterEach(async () => {
   cleanup();
   clearToasts();
+  if (shownConverted() !== null) closeConverted();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.mocked(useUi).mockClear();
@@ -1261,7 +1263,7 @@ describe("Shell on Registry.open", () => {
   it.each(["the empty state's button", "the palette"])("imports a plan from %s and opens it", async (from) => {
     resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
     const registry = await opened();
-    vi.mocked(importPlan).mockImplementationOnce(async (r) => r.createPlan("MESA 2027"));
+    vi.mocked(importPlan).mockImplementationOnce(async (r) => ({ planId: await r.createPlan("MESA 2027"), converted: null }));
     render(withSync(shellOn(registry)));
     await settle();
     expectNoTimeline();
@@ -1293,10 +1295,33 @@ describe("Shell on Registry.open", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("shows the .gantt conversion report before it opens the imported plan", async () => {
+    resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
+    const registry = await opened();
+    const report = { fileName: "Fixture Plan 20260901.gantt", name: "MESA 2027", counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1 }, dropped: ["TaskID on 4 items"] };
+    vi.mocked(importPlan).mockImplementationOnce(async (r) => ({ planId: await r.createPlan("MESA 2027"), converted: report }));
+    render(withSync(shellOn(registry)));
+    await settle();
+    const main = document.querySelector("main.main");
+    if (!(main instanceof HTMLElement)) throw new Error("no main");
+    fireEvent.click(within(main).getByRole("button", { name: "Import plan…" }));
+    await settle();
+    const dialog = screen.getByRole("dialog", { name: CONVERTED_TITLE });
+    expect(within(dialog).getByText("Plan “MESA 2027” from Fixture Plan 20260901.gantt")).toBeTruthy();
+    expect(within(dialog).getByText("TaskID on 4 items")).toBeTruthy();
+    expect(toastTexts()).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: OPEN_PLAN }));
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(currentName()).toBe("MESA 2027");
+    expectTimeline();
+    expect(toastTexts()).toEqual(["Imported “MESA 2027”"]);
+  });
+
   it.each(["cancel", "AppError"])("shows Importing… on the empty state's Import plan… until an import ending in %s settles", async (end) => {
     resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
     const registry = await opened();
-    const pending = deferred<PlanId | null>();
+    const pending = deferred<Imported | null>();
     vi.mocked(importPlan).mockReturnValueOnce(pending.promise);
     render(withSync(shellOn(registry)));
     await settle();

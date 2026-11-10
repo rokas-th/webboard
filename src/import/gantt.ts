@@ -13,7 +13,7 @@ import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { linkEnds, name as nameCodec, stateWrites } from "../plan/units";
 import { PlanDoc } from "../store/doc";
-import { buildImport, encodeWbx } from "../store/file";
+import { buildImport, encodeWbx, type ImportResult } from "../store/file";
 import { newPlanId } from "../store/plan-id";
 
 export class GanttError extends Error {}
@@ -74,6 +74,13 @@ export interface GanttPlan {
   check: GanttCheck;
 }
 
+export interface GanttReport {
+  fileName: string;
+  name: string;
+  counts: GanttCounts;
+  dropped: readonly string[];
+}
+
 export const BASELINE_NAME = "Imported plan";
 
 type Raw = Record<string, unknown>;
@@ -124,7 +131,7 @@ const show = (v: unknown): string => (v === undefined ? "nothing" : JSON.stringi
 
 const isRecord = (v: unknown): v is Raw => typeof v === "object" && v !== null && !Array.isArray(v);
 
-const isLinkType = (v: string): v is LinkType => (LINK_TYPES as readonly string[]).includes(v);
+const isLinkType = (v: string): v is LinkType => LINK_TYPES.some((t) => t === v);
 
 const plural = (n: number, one: string, many: string = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -615,7 +622,25 @@ const canonText = (v: unknown): string => JSON.stringify(canonical(v));
 const differs = (what: string, got: unknown, want: unknown): string[] => (canonText(got) === canonText(want) ? [] : [`- ${what} reads back as ${canonText(got)}, not ${canonText(want)}`]);
 
 export function readBack(bytes: Uint8Array, fileName: string, g: GanttPlan): GanttCounts {
-  const r = buildImport(bytes, fileName, newId(), newId(), Date.now());
+  return checkImported(buildImport(bytes, fileName, newId(), newId(), Date.now()), g);
+}
+
+const textOfBytes = (bytes: Uint8Array): string => {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (e) {
+    throw new GanttError(`The .gantt file is not UTF-8 text: ${e instanceof Error ? e.message : String(e)}`);
+  }
+};
+
+export function importGantt(a: { bytes: Uint8Array; fileName: string; dev: DeviceId; ses: SessionId; now: number }): { result: ImportResult; report: GanttReport } {
+  const g = convertGantt({ text: textOfBytes(a.bytes), fileName: a.fileName, dev: a.dev, ses: a.ses, now: a.now });
+  const result = buildImport(g.bytes, a.fileName, a.dev, a.ses, a.now);
+  const counts = checkImported(result, g);
+  return { result, report: { fileName: a.fileName, name: g.plan.name, counts, dropped: g.dropped } };
+}
+
+function checkImported(r: ImportResult, g: GanttPlan): GanttCounts {
   const log = logOf(r.action, "The written plan does not read back");
   const back = projectPlan(r.planId, log);
   const to = (id: string): string => lookup(r.idMap, id, "read-back id");

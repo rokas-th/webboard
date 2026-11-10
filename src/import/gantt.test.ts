@@ -4,7 +4,7 @@ import { LogState } from "../log/state";
 import { childrenOf, projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { buildImport } from "../store/file";
-import { convertGantt, defaultPlanName, htmlToText, infoToText, localDate, readBack, standardOffset, type GanttPlan } from "./gantt";
+import { convertGantt, defaultPlanName, GanttError, htmlToText, importGantt, infoToText, localDate, readBack, standardOffset, type GanttPlan } from "./gantt";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
@@ -546,5 +546,38 @@ describe("readBack", () => {
     expect(() => readBack(g.bytes, OUT, { ...g, check: { ...g.check, sources } })).toThrow(
       "WebBoard would show different dates than the .gantt file:\n- Task 3 Build: source 2026-09-14 → 2026-09-17, WebBoard 2026-09-14 → 2026-09-18",
     );
+  });
+});
+
+describe("importGantt", () => {
+  const bytesOf = (src: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(src));
+  const run = (bytes: Uint8Array) => importGantt({ bytes, fileName: FILE, dev: "dev-G", ses: "ses-G", now: Date.UTC(2026, 10, 10) });
+
+  it("imports the converted plan and reports its name, counts and every dropped field", () => {
+    const { result, report } = run(bytesOf(source()));
+    const g = convert();
+    expect(report).toEqual({ fileName: FILE, name: "Fixture Plan", counts: g.counts, dropped: g.dropped });
+    expect(result.action.lbl).toBe(`Imported from ${FILE}`);
+    expect(result.action.dev).toBe("dev-G");
+    const log = new LogState(planRules);
+    expect(log.add([result.action]).refused).toEqual([]);
+    const plan = projectPlan(result.planId, log);
+    expect([...plan.items.values()].map((i) => i.name).sort()).toEqual([...g.plan.items.values()].map((i) => i.name).sort());
+    expect(plan.links.size).toBe(g.plan.links.size);
+    expect([...result.notes.values()].filter((t) => t !== "").sort()).toEqual([...g.notes.values()].sort());
+  });
+
+  it("refuses bytes that are not UTF-8 with a GanttError", () => {
+    const bad = Uint8Array.from([0x7b, 0xff, 0xfe, 0x7d]);
+    expect(() => run(bad)).toThrow(GanttError);
+    expect(() => run(bad)).toThrow(/^The \.gantt file is not UTF-8 text: /);
+  });
+
+  it("passes the converter's refusal through as a GanttError with its message", () => {
+    expect(() => run(bytesOf(source(mutate(3, { DurationUnit: "hour" }))))).toThrow(GanttError);
+  });
+
+  it("runs the fidelity check before anything is imported", () => {
+    expect(() => run(bytesOf(source(mutate(3, { EndDate: "2026-09-17T15:00:00.000Z" }))))).toThrow(/WebBoard would show different dates than the \.gantt file/);
   });
 });
