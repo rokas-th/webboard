@@ -1,4 +1,3 @@
-import { open, save } from "@tauri-apps/plugin-dialog";
 import * as Y from "yjs";
 import type { Baseline, BaselineId, Item, ItemId, Link, LinkKey, PlanId, PlanState } from "../domain/model";
 import { linkKey } from "../domain/model";
@@ -13,7 +12,7 @@ import { AppError, call, callBytes } from "../services/ipc";
 import { decodeAction } from "./doc";
 import { newPlanId } from "./plan-id";
 import type { GanttReport } from "../import/gantt";
-import type { DeviceInfo, Registry } from "./registry";
+import type { Registry } from "./registry";
 import type { PlanSession } from "./session";
 
 export interface WbxHeader {
@@ -34,10 +33,8 @@ export interface ImportResult {
 const MAGIC: readonly number[] = [0x57, 0x42, 0x58, 0x31];
 const FIXED = 12;
 const VERSION = 1;
-const FILTERS = [{ name: "WebBoard plan", extensions: ["webboard"] }];
-const OPEN_FILTERS = [{ name: "WebBoard plan or .gantt file", extensions: ["webboard", "gantt"] }];
 const GANTT_EXTENSION = ".gantt";
-const FILE_PREFIX = "file://";
+const NAME_LENGTH = 4;
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -254,7 +251,7 @@ function missingId(item: ItemId, what: string): never {
   throw new Error(`Item ${item} has ${what} but no new id`);
 }
 
-type Exported = { path: string; unreadable: number } | null;
+type Exported = { name: string; unreadable: number } | null;
 
 function snapshot(session: PlanSession): { body: Uint8Array; unreadable: number } {
   const view = session.view();
@@ -266,34 +263,26 @@ function snapshot(session: PlanSession): { body: Uint8Array; unreadable: number 
   };
 }
 
-async function exportStaged(session: PlanSession, defaultPath: string): Promise<Exported> {
+export async function exportPlan(session: PlanSession): Promise<Exported> {
+  const name = session.view().plan.name;
   const { body, unreadable } = snapshot(session);
-  const name = await call<string>("file_stage", body, { headers: { "x-name": encodeURIComponent(defaultPath) } });
-  const unstage = (): Promise<null> => call<null>("file_unstage", { name });
-  const path = await save({ defaultPath: name, filters: FILTERS }).catch(async (e: unknown): Promise<never> => {
-    await unstage().catch((u: unknown) => {
-      throw Object.assign(new Error(`${messageOf(e)} (removing the staged copy afterwards failed too: ${messageOf(u)})`), { cause: e, suppressed: u });
-    });
-    throw e;
-  });
-  await unstage();
-  return path === null ? null : { path, unreadable };
+  const written = await call<string | null>("plan_export", body, { headers: { "x-name": encodeURIComponent(name) } });
+  return written === null ? null : { name: written, unreadable };
 }
 
-export async function exportPlan(session: PlanSession, platform: DeviceInfo["platform"]): Promise<Exported> {
-  const defaultPath = session.view().plan.name + ".webboard";
-  if (platform === "ios") return exportStaged(session, defaultPath);
-  const path = await save({ defaultPath, filters: FILTERS });
-  if (path === null) return null;
-  const { body, unreadable } = snapshot(session);
-  await call<null>("file_write", body, { headers: { "x-path": encodeURIComponent(path) } });
-  return { path, unreadable };
+export function unframe(b: Uint8Array): { name: string; bytes: Uint8Array } {
+  const short = (): AppError => new AppError("ipc.shape", `plan_import answered ${b.length} bytes, which do not hold a file name and its file`);
+  if (b.length < NAME_LENGTH) throw short();
+  const end = NAME_LENGTH + new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true);
+  if (end > b.length) throw short();
+  let name: string;
+  try {
+    name = new TextDecoder("utf-8", { fatal: true }).decode(b.subarray(NAME_LENGTH, end));
+  } catch {
+    throw new AppError("ipc.shape", "plan_import sent a file name that is not UTF-8");
+  }
+  return { name, bytes: b.slice(end) };
 }
-
-export const fileNameOf = (path: string): string => {
-  const last = path.slice(path.lastIndexOf("/") + 1);
-  return path.slice(0, FILE_PREFIX.length).toLowerCase() === FILE_PREFIX ? decodeURIComponent(last) : last;
-};
 
 export interface Imported {
   planId: PlanId;
@@ -311,10 +300,9 @@ async function fromGantt(bytes: Uint8Array, fileName: string, dev: DeviceId): Pr
 }
 
 export async function importPlan(registry: Registry, review: (report: GanttReport) => Promise<void>): Promise<Imported | null> {
-  const path = await open({ multiple: false, directory: false, filters: OPEN_FILTERS });
-  if (path === null) return null;
-  const bytes = await callBytes("file_read", {}, { headers: { "x-path": encodeURIComponent(path) } });
-  const fileName = fileNameOf(path);
+  const answer = await callBytes("plan_import");
+  if (answer.length === 0) return null;
+  const { name: fileName, bytes } = unframe(answer);
   if (fileName.toLowerCase().endsWith(GANTT_EXTENSION)) {
     const { result, report } = await fromGantt(bytes, fileName, registry.device.deviceId);
     await review(report);

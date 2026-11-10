@@ -80,7 +80,7 @@ export function PlanMenu(p: {
 
   const exportPlan = (): void => {
     onOpenChange(false);
-    void exportFlow(p.session, p.registry.device.platform);
+    void exportFlow(p.session);
   };
 
   const importPlan = (): void => {

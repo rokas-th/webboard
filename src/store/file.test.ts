@@ -1,4 +1,3 @@
-import { open, save } from "@tauri-apps/plugin-dialog";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { Refused } from "../actions/intents";
@@ -16,14 +15,14 @@ import type { GanttReport } from "../import/gantt";
 import { act } from "../test/act";
 import { memoryStore } from "../test/fixtures/store";
 import { GANTT_FILE, ganttBytes, ganttSource, textBytes } from "../test/fixtures/gantt";
+import { framed } from "../test/fixtures/framed";
 import { VALID_WEBBOARD } from "../test/fixtures/webboard";
-import { offeredSettings, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
+import { hold, offeredSettings, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
 import { decodeAction, encodeAction, PlanDoc } from "./doc";
-import { buildImport, decodeWbx, encodeWbx, exportPlan, fileNameOf, importPlan, type ImportResult } from "./file";
+import { buildImport, decodeWbx, encodeWbx, exportPlan, importPlan, unframe, type ImportResult } from "./file";
 import { Registry } from "./registry";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
 const TODAY = "2026-11-09";
 const SOURCE_ID = "P0000000000";
@@ -121,12 +120,8 @@ const inverse = (m: ReadonlyMap<string, string>) => {
 const idsOf = (plan: PlanState): Set<string> =>
   new Set([...plan.items.keys(), ...plan.links.keys(), ...plan.calendar.closures.keys(), ...plan.baselines.keys(), plan.id]);
 
-const FILTERS = [{ name: "WebBoard plan", extensions: ["webboard"] }];
-const OPEN_FILTERS = [{ name: "WebBoard plan or .gantt file", extensions: ["webboard", "gantt"] }];
-
 const unreviewed = (report: GanttReport): Promise<void> => Promise.reject(new Error(`no report expected, got one for ${report.fileName}`));
 
-const xpath = (c: Call): string | null => new Headers(c.options?.headers).get("x-path");
 const xname = (c: Call): string | null => new Headers(c.options?.headers).get("x-name");
 const xdoc = (c: Call): string | null => new Headers(c.options?.headers).get("x-doc");
 const callsOf = (from: number, cmd: string): Call[] => tauri.calls.slice(from).filter((c) => c.cmd === cmd);
@@ -151,7 +146,14 @@ const flush = async (): Promise<void> => {
   await new Promise<void>((r) => setTimeout(r, 0));
 };
 
-const fileState: { read: Uint8Array; written: Call[] } = { read: new Uint8Array(), written: [] };
+const fileState: { picked: { name: string; bytes: Uint8Array } | null; saved: string | null } = { picked: null, saved: null };
+
+const pickFile = (name: string, bytes: Uint8Array): void => {
+  fileState.picked = { name, bytes };
+};
+
+const outsideRust = (from: number): string[] =>
+  tauri.calls.slice(from).flatMap((c) => (c.cmd.startsWith("file_") || c.cmd.startsWith("plugin:dialog") ? [c.cmd] : []));
 
 function env(answers: Record<string, Answer> = {}): void {
   const mem = memoryStore();
@@ -167,8 +169,8 @@ function env(answers: Record<string, Answer> = {}): void {
     holidays_year: () => {
       throw { code: "holidays.offline", message: "No connection to the holiday source." };
     },
-    file_read: () => fileState.read.slice().buffer,
-    file_write: () => null,
+    plan_import: () => (fileState.picked === null ? new ArrayBuffer(0) : framed(fileState.picked.name, fileState.picked.bytes)),
+    plan_export: () => fileState.saved,
     ...answers,
   });
 }
@@ -182,9 +184,9 @@ async function registry(): Promise<Registry> {
 }
 
 beforeEach(() => {
+  fileState.picked = null;
+  fileState.saved = null;
   env();
-  vi.mocked(open).mockReset();
-  vi.mocked(save).mockReset();
 });
 
 afterEach(async () => {
@@ -192,22 +194,20 @@ afterEach(async () => {
 });
 
 describe("export", () => {
-  it("writes the plan through the save dialog", async () => {
+  it("sends the snapshot and the plan's name to plan_export and answers the written file name", async () => {
     const reg = await registry();
     const id = await reg.createPlan("Bridge");
     const session = await reg.session(id);
     session.apply({ t: "create", kind: "task", name: "Survey", parent: null, after: null, start: TODAY });
-    vi.mocked(save).mockResolvedValue("/Users/a/Bridge.webboard");
+    fileState.saved = "Bridge.webboard";
     const from = tauri.calls.length;
-    expect(await exportPlan(session, "macos")).toEqual({ path: "/Users/a/Bridge.webboard", unreadable: 0 });
-    expect(vi.mocked(save).mock.calls).toEqual([[{ defaultPath: "Bridge.webboard", filters: FILTERS }]]);
-    const writes = callsOf(from, "file_write");
-    expect(writes).toHaveLength(1);
-    expect(xpath(writes[0])).toBe(encodeURIComponent("/Users/a/Bridge.webboard"));
-    expect(callsOf(from, "file_stage")).toHaveLength(0);
-    expect(callsOf(from, "file_unstage")).toHaveLength(0);
-    const body = writes[0].args;
-    if (!(body instanceof Uint8Array)) throw new Error("file_write carried no bytes");
+    expect(await exportPlan(session)).toEqual({ name: "Bridge.webboard", unreadable: 0 });
+    const exports = callsOf(from, "plan_export");
+    expect(exports).toHaveLength(1);
+    expect(xname(exports[0])).toBe(encodeURIComponent("Bridge"));
+    expect(outsideRust(from)).toEqual([]);
+    const body = exports[0].args;
+    if (!(body instanceof Uint8Array)) throw new Error("plan_export carried no bytes");
     expect([...body.subarray(0, 4)]).toEqual([0x57, 0x42, 0x58, 0x31]);
     expect(new DataView(body.buffer, body.byteOffset).getUint32(4, true)).toBe(1);
     const { header, update } = decodeWbx(body);
@@ -219,183 +219,57 @@ describe("export", () => {
     expect(projectPlan(id, logOf(new PlanDoc(fresh).actions()))).toEqual(session.view().plan);
   });
 
-  it("names the plan as it is once the save dialog closes", async () => {
+  it("names the plan as it is when Export is chosen", async () => {
     const reg = await registry();
     const id = await reg.createPlan("Bridge");
     const session = await reg.session(id);
-    let pick: (path: string) => void = () => {
-      throw new Error("save was not called");
-    };
-    vi.mocked(save).mockReturnValue(new Promise<string>((resolve) => (pick = resolve)));
+    const held = hold("plan_export");
     const from = tauri.calls.length;
-    const saved = exportPlan(session, "macos");
+    const saved = exportPlan(session);
     await flush();
     session.apply({ t: "planName", name: "Viaduct" });
-    pick("/Users/a/Bridge.webboard");
-    expect(await saved).toEqual({ path: "/Users/a/Bridge.webboard", unreadable: 0 });
-    const body = callsOf(from, "file_write")[0].args;
-    if (!(body instanceof Uint8Array)) throw new Error("file_write carried no bytes");
+    held.resolve("Bridge.webboard");
+    expect(await saved).toEqual({ name: "Bridge.webboard", unreadable: 0 });
+    const exports = callsOf(from, "plan_export");
+    expect(exports).toHaveLength(1);
+    expect(xname(exports[0])).toBe("Bridge");
+    const body = exports[0].args;
+    if (!(body instanceof Uint8Array)) throw new Error("plan_export carried no bytes");
     const { header, update } = decodeWbx(body);
-    expect(header.name).toBe("Viaduct");
-    const fresh = new Y.Doc();
-    Y.applyUpdate(fresh, update);
-    expect(projectPlan(id, logOf(new PlanDoc(fresh).actions())).name).toBe("Viaduct");
-  });
-
-  it("writes nothing on cancel", async () => {
-    const reg = await registry();
-    const session = await reg.session(await reg.createPlan("Bridge"));
-    vi.mocked(save).mockResolvedValue(null);
-    const from = tauri.calls.length;
-    expect(await exportPlan(session, "macos")).toBeNull();
-    expect(callsOf(from, "file_write")).toHaveLength(0);
-  });
-});
-
-describe("export on iOS", () => {
-  const DEST = "/private/var/mobile/Library/Mobile Documents/com~apple~CloudDocs/Bridge.webboard";
-
-  function staging(): { names(): string[]; bytes(name: string): Uint8Array } {
-    const staged = new Map<string, Uint8Array>();
-    tauri.answers.file_stage = (args, options) => {
-      const raw = new Headers(options?.headers).get("x-name");
-      if (raw === null || !(args instanceof Uint8Array)) throw new Error("file_stage without x-name or bytes");
-      const path = decodeURIComponent(raw);
-      const name = path.slice(path.lastIndexOf("/") + 1);
-      staged.set(name, args);
-      return name;
-    };
-    tauri.answers.file_unstage = (args) => {
-      if (args === undefined || args instanceof Uint8Array || args instanceof ArrayBuffer || Array.isArray(args) || typeof args.name !== "string") {
-        throw new Error("file_unstage without a name");
-      }
-      staged.delete(args.name);
-      return null;
-    };
-    return {
-      names: () => [...staged.keys()],
-      bytes: (name) => {
-        const b = staged.get(name);
-        if (b === undefined) throw new Error(`${name} is not staged`);
-        return b;
-      },
-    };
-  }
-
-  const fileCalls = (from: number): string[] => tauri.calls.slice(from).flatMap((c) => (c.cmd.startsWith("file_") ? [c.cmd] : []));
-
-  it("stages the bytes before the save dialog, writes nothing to the destination and removes the staged copy", async () => {
-    const reg = await registry();
-    const id = await reg.createPlan("Bridge");
-    const session = await reg.session(id);
-    session.apply({ t: "create", kind: "task", name: "Survey", parent: null, after: null, start: TODAY });
-    const s = staging();
-    const atDialog: { names: string[]; bytes: Uint8Array }[] = [];
-    vi.mocked(save).mockImplementation(async () => {
-      atDialog.push({ names: s.names(), bytes: s.bytes("Bridge.webboard") });
-      return DEST;
-    });
-    const from = tauri.calls.length;
-    expect(await exportPlan(session, "ios")).toEqual({ path: DEST, unreadable: 0 });
-    expect(vi.mocked(save).mock.calls).toEqual([[{ defaultPath: "Bridge.webboard", filters: FILTERS }]]);
-    expect(fileCalls(from)).toEqual(["file_stage", "file_unstage"]);
-    const stage = callsOf(from, "file_stage")[0];
-    expect(xname(stage)).toBe(encodeURIComponent("Bridge.webboard"));
-    const body = stage.args;
-    if (!(body instanceof Uint8Array)) throw new Error("file_stage carried no bytes");
-    expect(atDialog).toHaveLength(1);
-    expect(atDialog[0].names).toEqual(["Bridge.webboard"]);
-    expect(atDialog[0].bytes).toBe(body);
-    expect(body.length).toBeGreaterThan(0);
-    const { header, update } = decodeWbx(body);
-    expect(header.planId).toBe(id);
     expect(header.name).toBe("Bridge");
     const fresh = new Y.Doc();
     Y.applyUpdate(fresh, update);
-    expect(projectPlan(id, logOf(new PlanDoc(fresh).actions()))).toEqual(session.view().plan);
-    expect(callsOf(from, "file_unstage").map((c) => c.args)).toEqual([{ name: "Bridge.webboard" }]);
-    expect(s.names()).toEqual([]);
+    expect(projectPlan(id, logOf(new PlanDoc(fresh).actions())).name).toBe("Bridge");
   });
 
-  it("gives the dialog the name the stage chose", async () => {
+  it("leaves separators in the name to Rust", async () => {
     const reg = await registry();
-    const session = await reg.session(await reg.createPlan("Q3/Bridge"));
-    const s = staging();
-    vi.mocked(save).mockResolvedValue(DEST);
+    const session = await reg.session(await reg.createPlan("Q3/Bridge ü"));
+    fileState.saved = "Q3-Bridge ü.webboard";
     const from = tauri.calls.length;
-    expect(await exportPlan(session, "ios")).toEqual({ path: DEST, unreadable: 0 });
-    expect(xname(callsOf(from, "file_stage")[0])).toBe(encodeURIComponent("Q3/Bridge.webboard"));
-    expect(vi.mocked(save).mock.calls).toEqual([[{ defaultPath: "Bridge.webboard", filters: FILTERS }]]);
-    expect(callsOf(from, "file_unstage").map((c) => c.args)).toEqual([{ name: "Bridge.webboard" }]);
-    expect(s.names()).toEqual([]);
+    expect(await exportPlan(session)).toEqual({ name: "Q3-Bridge ü.webboard", unreadable: 0 });
+    expect(xname(callsOf(from, "plan_export")[0])).toBe(encodeURIComponent("Q3/Bridge ü"));
   });
 
-  it("treats a closed dialog as cancel and removes the staged copy", async () => {
+  it("answers null when the save dialog is cancelled", async () => {
     const reg = await registry();
     const session = await reg.session(await reg.createPlan("Bridge"));
-    const s = staging();
-    vi.mocked(save).mockResolvedValue(null);
+    fileState.saved = null;
     const from = tauri.calls.length;
-    expect(await exportPlan(session, "ios")).toBeNull();
-    expect(fileCalls(from)).toEqual(["file_stage", "file_unstage"]);
-    expect(s.names()).toEqual([]);
+    expect(await exportPlan(session)).toBeNull();
+    expect(callsOf(from, "plan_export")).toHaveLength(1);
+    expect(outsideRust(from)).toEqual([]);
   });
 
-  it("opens no dialog when the bytes cannot be staged", async () => {
+  it("rejects with Rust's error when the file cannot be written", async () => {
     const reg = await registry();
     const session = await reg.session(await reg.createPlan("Bridge"));
-    tauri.answers.file_stage = () => {
-      throw { code: "file.io", message: "Could not write /var/Documents/Bridge.webboard: No space left on device." };
+    tauri.answers.plan_export = () => {
+      throw { code: "file.io", message: "Could not write /Users/a/Bridge.webboard: No space left on device." };
     };
-    const from = tauri.calls.length;
-    const failed = exportPlan(session, "ios");
+    const failed = exportPlan(session);
     await expect(failed).rejects.toBeInstanceOf(AppError);
-    await expect(failed).rejects.toMatchObject({ code: "file.io", message: "Could not write /var/Documents/Bridge.webboard: No space left on device." });
-    expect(save).not.toHaveBeenCalled();
-    expect(fileCalls(from)).toEqual(["file_stage"]);
-  });
-
-  it("removes the staged copy when the dialog fails, and shows the dialog's failure", async () => {
-    const reg = await registry();
-    const session = await reg.session(await reg.createPlan("Bridge"));
-    const s = staging();
-    const broken = new Error("the dialog broke");
-    vi.mocked(save).mockRejectedValue(broken);
-    const from = tauri.calls.length;
-    await expect(exportPlan(session, "ios")).rejects.toBe(broken);
-    expect(fileCalls(from)).toEqual(["file_stage", "file_unstage"]);
-    expect(s.names()).toEqual([]);
-  });
-
-  it("names both failures, the dialog's first, when the dialog fails and the staged copy cannot be removed", async () => {
-    const reg = await registry();
-    const session = await reg.session(await reg.createPlan("Bridge"));
-    staging();
-    tauri.answers.file_unstage = () => {
-      throw { code: "file.io", message: "Could not remove /var/Documents/Bridge.webboard: Operation not permitted." };
-    };
-    const broken = new Error("the dialog broke");
-    vi.mocked(save).mockRejectedValue(broken);
-    const from = tauri.calls.length;
-    const failed = exportPlan(session, "ios");
-    await expect(failed).rejects.toThrow(
-      "the dialog broke (removing the staged copy afterwards failed too: Could not remove /var/Documents/Bridge.webboard: Operation not permitted.)",
-    );
-    await expect(failed).rejects.toMatchObject({ cause: broken, suppressed: { code: "file.io" } });
-    expect(fileCalls(from)).toEqual(["file_stage", "file_unstage"]);
-  });
-
-  it("shows a failure to remove the staged copy", async () => {
-    const reg = await registry();
-    const session = await reg.session(await reg.createPlan("Bridge"));
-    staging();
-    tauri.answers.file_unstage = () => {
-      throw { code: "file.io", message: "Could not remove /var/Documents/Bridge.webboard: Operation not permitted." };
-    };
-    vi.mocked(save).mockResolvedValue(DEST);
-    const failed = exportPlan(session, "ios");
-    await expect(failed).rejects.toBeInstanceOf(AppError);
-    await expect(failed).rejects.toMatchObject({ code: "file.io", message: "Could not remove /var/Documents/Bridge.webboard: Operation not permitted." });
+    await expect(failed).rejects.toMatchObject({ code: "file.io", message: "Could not write /Users/a/Bridge.webboard: No space left on device." });
   });
 });
 
@@ -614,8 +488,7 @@ describe("malformed refused", () => {
     const reg = await registry();
     const from = tauri.calls.length;
     const before = reg.plans();
-    vi.mocked(open).mockResolvedValue("/Users/a/Bad.webboard");
-    fileState.read = bytes;
+    pickFile("Bad.webboard", bytes);
     const caught = await importPlan(reg, unreviewed).then(
       () => null,
       (e: unknown) => e,
@@ -630,65 +503,94 @@ describe("malformed refused", () => {
   });
 });
 
-describe("import reads by header", () => {
-  it("reads the picked file through x-path and creates one plan", async () => {
+describe("import through plan_import", () => {
+  it("reads the framed answer and creates one plan", async () => {
     expect([...VALID_WEBBOARD.bytes.subarray(0, 4)]).toEqual([0x57, 0x42, 0x58, 0x31]);
     const reg = await registry();
     const from = tauri.calls.length;
     const before = reg.plans().map((p) => p.id);
-    vi.mocked(open).mockResolvedValue("/Users/a/My Plan.webboard");
-    fileState.read = VALID_WEBBOARD.bytes;
+    pickFile("My Plan ü.webboard", VALID_WEBBOARD.bytes);
     const imported = await importPlan(reg, unreviewed);
     if (imported === null) throw new Error("importPlan resolved null");
     const id = imported.planId;
     expect(imported.converted).toBeNull();
-    expect(vi.mocked(open).mock.calls).toEqual([[{ multiple: false, directory: false, filters: OPEN_FILTERS }]]);
-    const reads = callsOf(from, "file_read");
+    const reads = callsOf(from, "plan_import");
     expect(reads).toHaveLength(1);
-    expect(reads[0].args).toEqual({});
-    expect(xpath(reads[0])).toBe("%2FUsers%2Fa%2FMy%20Plan.webboard");
+    expect(reads[0].args).toBeUndefined();
+    expect(reads[0].options).toBeUndefined();
+    expect(outsideRust(from)).toEqual([]);
     expect(reg.plans().map((p) => p.id)).toEqual([...before, id]);
     const session = await reg.session(id);
     expect(session.view().plan.name).toBe(VALID_WEBBOARD.plan.name);
     expect([...session.view().plan.items.values()].filter((i) => !i.trashed)).toHaveLength(VALID_WEBBOARD.plan.items);
-    expect(session.history()[0].label).toBe("Imported from My Plan.webboard");
+    expect(session.history()[0].label).toBe("Imported from My Plan ü.webboard");
   });
 
-  it("decodes the file name of a file:// URL", async () => {
+  it("imports nothing when the open dialog is cancelled", async () => {
     const reg = await registry();
     const from = tauri.calls.length;
-    const url = "file:///private/var/mobile/My%20Plan.webboard";
-    vi.mocked(open).mockResolvedValue(url);
-    fileState.read = VALID_WEBBOARD.bytes;
-    const imported = await importPlan(reg, unreviewed);
-    if (imported === null) throw new Error("importPlan resolved null");
-    const id = imported.planId;
-    expect(xpath(callsOf(from, "file_read")[0])).toBe(encodeURIComponent(url));
-    expect((await reg.session(id)).history()[0].label).toBe("Imported from My Plan.webboard");
-  });
-
-  it("decodes the file name of a file:// URL whatever the case of its scheme", () => {
-    expect(fileNameOf("FILE:///private/var/mobile/My%20x.webboard")).toBe("My x.webboard");
-    expect(fileNameOf("File:///private/var/mobile/My%20x.webboard")).toBe("My x.webboard");
-    expect(fileNameOf("/Users/x/My%20x.webboard")).toBe("My%20x.webboard");
-  });
-
-  it("cancel reads nothing", async () => {
-    const reg = await registry();
-    const from = tauri.calls.length;
-    vi.mocked(open).mockResolvedValue(null);
+    const before = reg.plans();
     expect(await importPlan(reg, unreviewed)).toBeNull();
-    expect(callsOf(from, "file_read")).toHaveLength(0);
+    expect(callsOf(from, "plan_import")).toHaveLength(1);
+    expect(appendsAfter(from)).toHaveLength(0);
+    expect(reg.plans()).toEqual(before);
+  });
+
+  it("refuses an answer too short to hold a file name and creates nothing", async () => {
+    const reg = await registry();
+    const from = tauri.calls.length;
+    const before = reg.plans();
+    tauri.answers.plan_import = () => new Uint8Array([3, 0]).buffer;
+    await expect(importPlan(reg, unreviewed)).rejects.toMatchObject({
+      code: "ipc.shape",
+      message: "plan_import answered 2 bytes, which do not hold a file name and its file",
+    });
+    await flush();
+    expect(appendsAfter(from)).toHaveLength(0);
+    expect(reg.plans()).toEqual(before);
+  });
+});
+
+describe("unframe", () => {
+  const caught = (b: Uint8Array): unknown => {
+    try {
+      unframe(b);
+    } catch (e) {
+      return e;
+    }
+    throw new Error("unframe did not throw");
+  };
+
+  it("splits the name from the file", () => {
+    const { name, bytes } = unframe(new Uint8Array(framed("Bridge ü.webboard", Uint8Array.from([1, 2, 3]))));
+    expect(name).toBe("Bridge ü.webboard");
+    expect([...bytes]).toEqual([1, 2, 3]);
+  });
+
+  it.each([1, 2, 3])("refuses a frame of %i bytes", (n) => {
+    const e = caught(new Uint8Array(n));
+    expect(e).toBeInstanceOf(AppError);
+    expect(e).toMatchObject({ code: "ipc.shape", message: `plan_import answered ${n} bytes, which do not hold a file name and its file` });
+  });
+
+  it("refuses a name length past the end", () => {
+    const b = new Uint8Array(framed("Bridge.webboard", Uint8Array.from([1, 2])));
+    new DataView(b.buffer).setUint32(0, b.length, true);
+    expect(caught(b)).toMatchObject({ code: "ipc.shape", message: `plan_import answered ${b.length} bytes, which do not hold a file name and its file` });
+  });
+
+  it("refuses a name that is not UTF-8", () => {
+    const b = Uint8Array.from([2, 0, 0, 0, 0xc3, 0x28, 9]);
+    expect(caught(b)).toMatchObject({ code: "ipc.shape", message: "plan_import sent a file name that is not UTF-8" });
   });
 });
 
 describe("import of a .gantt file", () => {
-  const pick = async (path: string, bytes: Uint8Array): Promise<{ reg: Registry; from: number; before: readonly string[] }> => {
+  const pick = async (name: string, bytes: Uint8Array): Promise<{ reg: Registry; from: number; before: readonly string[] }> => {
     const reg = await registry();
     const from = tauri.calls.length;
     const before = reg.plans().map((p) => p.id);
-    vi.mocked(open).mockResolvedValue(path);
-    fileState.read = bytes;
+    pickFile(name, bytes);
     return { reg, from, before };
   };
 
@@ -704,7 +606,7 @@ describe("import of a .gantt file", () => {
   };
 
   it("converts the file, shows the report before any plan exists, then creates one plan", async () => {
-    const { reg, from, before } = await pick(`/Users/a/${GANTT_FILE}`, ganttBytes());
+    const { reg, from, before } = await pick(GANTT_FILE, ganttBytes());
     const { review, seen } = reviewed(reg, before);
     const imported = await importPlan(reg, review);
     expect(seen).toEqual([imported?.converted]);
@@ -732,7 +634,7 @@ describe("import of a .gantt file", () => {
   });
 
   it("creates nothing while the report is open", async () => {
-    const { reg, from, before } = await pick(`/Users/a/${GANTT_FILE}`, ganttBytes());
+    const { reg, from, before } = await pick(GANTT_FILE, ganttBytes());
     let close = (): void => {
       throw new Error("the report never opened");
     };
@@ -747,7 +649,7 @@ describe("import of a .gantt file", () => {
   });
 
   it("recognises the extension whatever its case", async () => {
-    const { reg, before } = await pick("/Users/a/Fixture Plan.GANTT", ganttBytes());
+    const { reg, before } = await pick("Fixture Plan.GANTT", ganttBytes());
     const imported = await importPlan(reg, reviewed(reg, before).review);
     expect(imported?.converted?.name).toBe("Fixture Plan");
   });
@@ -766,7 +668,7 @@ describe("import of a .gantt file", () => {
   ];
 
   it.each(refusals)("refuses %s as an AppError with the converter's message and creates nothing", async (_name, bytes, message) => {
-    const { reg, from, before } = await pick(`/Users/a/${GANTT_FILE}`, bytes());
+    const { reg, from, before } = await pick(GANTT_FILE, bytes());
     const caught = await importPlan(reg, unreviewed).then(
       () => null,
       (e: unknown) => e,
@@ -781,7 +683,7 @@ describe("import of a .gantt file", () => {
 
   it("keeps a multi-line fidelity refusal whole", async () => {
     const text = JSON.stringify(ganttSource()).replace("2026-09-11T15:00:00.000Z", "2026-09-10T15:00:00.000Z");
-    const { reg } = await pick(`/Users/a/${GANTT_FILE}`, textBytes(text));
+    const { reg } = await pick(GANTT_FILE, textBytes(text));
     const caught = await importPlan(reg, unreviewed).then(
       () => null,
       (e: unknown) => e,
@@ -791,7 +693,7 @@ describe("import of a .gantt file", () => {
   });
 
   it("reads a .webboard file as a plan file even when it holds .gantt text", async () => {
-    const { reg } = await pick("/Users/a/Fixture.webboard", ganttBytes());
+    const { reg } = await pick("Fixture.webboard", ganttBytes());
     await expect(importPlan(reg, unreviewed)).rejects.toMatchObject({ code: "import.foreign" });
   });
 });

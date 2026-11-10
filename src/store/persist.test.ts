@@ -412,15 +412,15 @@ describe("openPersisted", () => {
 
 describe("callBytes", () => {
   it("callBytes shape", async () => {
-    resetTauri({ file_read: () => [1, 2], store_load: () => new Uint8Array([1, 2]).buffer });
-    const e = await callBytes("file_read").catch((x: unknown) => x);
+    resetTauri({ plan_import: () => [1, 2], store_load: () => new Uint8Array([1, 2]).buffer });
+    const e = await callBytes("plan_import").catch((x: unknown) => x);
     expect(e).toBeInstanceOf(AppError);
     expect(e).toMatchObject({ code: "ipc.shape" });
     await expect(callBytes("store_load", { doc: "p1" })).resolves.toEqual(new Uint8Array([1, 2]));
-    resetTauri({ file_read: () => new ArrayBuffer(0) });
-    await callBytes("file_read", {}, { headers: { "x-path": "a%20b" } });
+    resetTauri({ plan_import: () => new ArrayBuffer(0) });
+    await expect(callBytes("plan_import")).resolves.toEqual(new Uint8Array(0));
     expect(tauri.calls).toHaveLength(1);
-    expect(tauri.calls[0].args).toEqual({});
-    expect(headerOf(tauri.calls[0], "x-path")).toBe("a%20b");
+    expect(tauri.calls[0].args).toBeUndefined();
+    expect(tauri.calls[0].options).toBeUndefined();
   });
 });

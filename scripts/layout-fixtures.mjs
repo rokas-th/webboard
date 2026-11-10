@@ -604,14 +604,20 @@ const GANTT_SOURCE = {
   },
 };
 
+function picked(name, file) {
+  const encoded = Buffer.from(name, "utf8");
+  const length = Buffer.alloc(4);
+  length.writeUInt32LE(encoded.length, 0);
+  return Buffer.concat([length, encoded, file]);
+}
+
 function converted() {
   const f = fixtureOf([]);
   return {
     ...f,
     ipc: {
       ...f.ipc,
-      "plugin:dialog|open": `/probe/${CONVERTED_FILE}`,
-      file_read: { __bytes: Buffer.from(JSON.stringify(GANTT_SOURCE)).toString("base64") },
+      plan_import: { __bytes: picked(CONVERTED_FILE, Buffer.from(JSON.stringify(GANTT_SOURCE))).toString("base64") },
     },
   };
 }

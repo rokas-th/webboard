@@ -7,7 +7,6 @@ import { buildImport } from "../store/file";
 import { convertGantt, defaultPlanName, GanttError, htmlToText, importGantt, infoToText, localDate, readBack, standardOffset, type GanttPlan } from "./gantt";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
 type Task = Record<string, unknown>;
 

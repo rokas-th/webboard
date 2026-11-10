@@ -72,7 +72,6 @@ export function PlanSheet(p: { session: PlanSession; files: PlanFiles; onClose()
   const view = usePlanView(p.session);
   const readOnly = useReadOnly(p.session);
   const run = useRun(p.session);
-  const registry = useSyncRegistry();
   const { setUi } = useUiValue();
   const plan = view.plan;
   const rename = (next: string): boolean => {
@@ -104,7 +103,7 @@ export function PlanSheet(p: { session: PlanSession; files: PlanFiles; onClose()
         <SyncSection session={p.session} />
         <h2>File</h2>
         <div className="actions">
-          <button type="button" className="button-small" onClick={() => void exportFlow(p.session, registry.device.platform)}>
+          <button type="button" className="button-small" onClick={() => void exportFlow(p.session)}>
             Export plan…
           </button>
           <ImportButton files={p.files} />

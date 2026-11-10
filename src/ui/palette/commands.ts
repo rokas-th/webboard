@@ -300,7 +300,7 @@ export function commands(ctx: CommandCtx): Command[] {
     );
   const session = ctx.session;
   const platform = ctx.registry.device.platform;
-  const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session, platform) }];
+  const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session) }];
   const printCommand: Command[] =
     session === null || platform === "ios" ? [] : [{ id: "print", group: "File", label: "Print…", keys: ctx.mac ? "⌘P" : "Ctrl P", run: () => ctx.print() }];
   const always: Command[] = [

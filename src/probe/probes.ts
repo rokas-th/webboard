@@ -1,5 +1,5 @@
-import { open, save } from "@tauri-apps/plugin-dialog";
 import { AppError, call, callBytes } from "../services/ipc";
+import { unframe } from "../store/file";
 
 export type ProbeData = Record<string, unknown>;
 export type ProbeEntry = readonly [name: string, data: ProbeData];
@@ -56,10 +56,8 @@ export async function probeHolidays(): Promise<ProbeEntry> {
 
 export async function probeSave(): Promise<ProbeEntry> {
   try {
-    const path = await save({ defaultPath: "probe.webboard" });
-    if (path === null) return ["files", { saved: null }];
-    await call<null>("file_write", PROBE_BYTES, { headers: { "x-path": encodeURIComponent(path) } });
-    return ["files", { saved: path }];
+    const name = await call<string | null>("plan_export", PROBE_BYTES, { headers: { "x-name": PROBE_DOC } });
+    return ["files", { saved: name }];
   } catch (e) {
     return ["files", failure(e)];
   }
@@ -67,10 +65,10 @@ export async function probeSave(): Promise<ProbeEntry> {
 
 export async function probeOpen(): Promise<ProbeEntry> {
   try {
-    const path = await open();
-    if (path === null) return ["files", { opened: null }];
-    const bytes = await callBytes("file_read", {}, { headers: { "x-path": encodeURIComponent(path) } });
-    return ["files", { opened: path, read: bytes.length }];
+    const answer = await callBytes("plan_import");
+    if (answer.length === 0) return ["files", { opened: null }];
+    const { name, bytes } = unframe(answer);
+    return ["files", { opened: name, read: bytes.length }];
   } catch (e) {
     return ["files", failure(e)];
   }

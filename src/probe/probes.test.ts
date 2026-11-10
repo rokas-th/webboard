@@ -1,10 +1,9 @@
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { framed } from "../test/fixtures/framed";
 import { resetTauri, tauri } from "../test/tauriMock";
 import { PROBE_BYTES, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine } from "./probes";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
 const loadAnswer = (lastSeq: number): ArrayBuffer => {
   const bytes = new Uint8Array(17);
@@ -16,11 +15,6 @@ const loadAnswer = (lastSeq: number): ArrayBuffer => {
 
 beforeEach(() => {
   resetTauri({});
-});
-
-afterEach(() => {
-  vi.mocked(save).mockReset();
-  vi.mocked(open).mockReset();
 });
 
 describe("probeLine", () => {
@@ -89,37 +83,40 @@ describe("probeHolidays", () => {
 });
 
 describe("files", () => {
-  it("writes 16 bytes to the saved path", async () => {
-    vi.mocked(save).mockResolvedValue("/var/mobile/Documents/probe file.webboard");
-    tauri.answers.file_write = () => null;
-    expect(await probeSave()).toEqual(["files", { saved: "/var/mobile/Documents/probe file.webboard" }]);
-    expect(vi.mocked(save)).toHaveBeenCalledWith({ defaultPath: "probe.webboard" });
+  it("exports 16 bytes through plan_export under the name probe and reports the written name", async () => {
+    tauri.answers.plan_export = () => "probe.webboard";
+    expect(await probeSave()).toEqual(["files", { saved: "probe.webboard" }]);
+    expect(tauri.calls.map((c) => c.cmd)).toEqual(["plan_export"]);
     expect(tauri.calls[0].args).toEqual(PROBE_BYTES);
     expect(PROBE_BYTES.length).toBe(16);
-    expect(tauri.calls[0].options).toEqual({ headers: { "x-path": "%2Fvar%2Fmobile%2FDocuments%2Fprobe%20file.webboard" } });
+    expect(tauri.calls[0].options).toEqual({ headers: { "x-name": "probe" } });
   });
 
-  it("reports a cancelled save without writing", async () => {
-    vi.mocked(save).mockResolvedValue(null);
+  it("reports a cancelled save", async () => {
+    tauri.answers.plan_export = () => null;
     expect(await probeSave()).toEqual(["files", { saved: null }]);
-    expect(tauri.calls).toEqual([]);
+    expect(tauri.calls.map((c) => c.cmd)).toEqual(["plan_export"]);
   });
 
-  it("reads the opened path and reports its length", async () => {
-    vi.mocked(open).mockResolvedValue("file:///private/var/mobile/probe.webboard");
-    tauri.answers.file_read = () => PROBE_BYTES.slice().buffer;
-    expect(await probeOpen()).toEqual(["files", { opened: "file:///private/var/mobile/probe.webboard", read: 16 }]);
-    expect(tauri.calls[0].options).toEqual({ headers: { "x-path": encodeURIComponent("file:///private/var/mobile/probe.webboard") } });
+  it("imports through plan_import and reports the picked name and its length", async () => {
+    tauri.answers.plan_import = () => framed("probe ü.webboard", PROBE_BYTES);
+    expect(await probeOpen()).toEqual(["files", { opened: "probe ü.webboard", read: 16 }]);
+    expect(tauri.calls.map((c) => c.cmd)).toEqual(["plan_import"]);
+    expect(tauri.calls[0].args).toBeUndefined();
   });
 
-  it("reports a dialog rejection that is not an AppError as thrown", async () => {
-    vi.mocked(open).mockRejectedValue("dialog.open not allowed");
-    expect(await probeOpen()).toEqual(["files", { thrown: "dialog.open not allowed" }]);
+  it("reports a cancelled open", async () => {
+    tauri.answers.plan_import = () => new ArrayBuffer(0);
+    expect(await probeOpen()).toEqual(["files", { opened: null }]);
   });
 
-  it("reports file_read's code", async () => {
-    vi.mocked(open).mockResolvedValue("/x/probe.webboard");
-    tauri.answers.file_read = () => {
+  it("reports a frame it cannot read", async () => {
+    tauri.answers.plan_import = () => new Uint8Array([9]).buffer;
+    expect(await probeOpen()).toEqual(["files", { error: "ipc.shape", message: "plan_import answered 1 bytes, which do not hold a file name and its file" }]);
+  });
+
+  it("reports plan_import's code", async () => {
+    tauri.answers.plan_import = () => {
       throw { code: "file.io", message: "Could not read /x/probe.webboard: denied." };
     };
     expect(await probeOpen()).toEqual(["files", { error: "file.io", message: "Could not read /x/probe.webboard: denied." }]);

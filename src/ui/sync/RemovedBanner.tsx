@@ -22,7 +22,7 @@ export function RemovedBanner(p: { session: PlanSession | null }) {
   const space = session === null ? null : listingOf(registry, session.view().plan.id).space;
   const exportOpen = (): void => {
     if (session === null) throw new Error("Export needs an open plan");
-    void exportFlow(session, registry.device.platform);
+    void exportFlow(session);
   };
   return (
     <div className="banner bad removed-banner">

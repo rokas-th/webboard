@@ -44,7 +44,7 @@ export function SyncActionButtons(p: { holds: boolean; small?: boolean; onReset?
     if (doc === null) throw new Error("Export needs a plan doc");
     registry
       .session(doc)
-      .then((session) => exportFlow(session, registry.device.platform))
+      .then((session) => exportFlow(session))
       .catch((e: unknown) => {
         if (!(e instanceof AppError)) throw e;
         toast(e.message, "bad");

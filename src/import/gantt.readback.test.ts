@@ -7,7 +7,6 @@ import { GANTT_FILE, ganttBytes } from "../test/fixtures/gantt";
 import { GanttError, importGantt } from "./gantt";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
 const tamper = vi.hoisted(() => ({
   result: (r: ImportResult): ImportResult => r,

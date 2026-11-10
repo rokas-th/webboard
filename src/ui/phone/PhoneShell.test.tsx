@@ -1769,7 +1769,7 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     if (alpha === undefined) throw new Error("Alpha is not listed");
     openPlanSheet();
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Export plan…" }));
-    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.registry.session(alpha.id), "macos"]]);
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.registry.session(alpha.id)]]);
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Import plan…" }));
     await settle();
     expect(importFlow).toHaveBeenCalledTimes(1);
@@ -2038,7 +2038,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     expect(names(removedBanner(), ["Export…", "Join with a code", "Set up sync"])).toEqual(["Export…", "Join with a code", "Set up sync"]);
     expect(removedBanner().compareDocumentPosition(topBar()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await tap(within(removedBanner()).getByRole("button", { name: "Export…" }));
-    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P"), "ios"]]);
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P")]]);
     await tap(within(topBar()).getByRole("button", { name: "Plans" }));
     await tap(within(screen.getByRole("dialog", { name: "Plans" })).getByRole("button", { name: "Alpha" }));
     listShows("Alpha");
@@ -2143,7 +2143,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
       expect(messages(row)).toEqual([TOO_LARGE_HELD]);
       expect(names(row)).toEqual(["Export…", "Try again", "Open sync"]);
       await tap(within(row).getByRole("button", { name: "Export…" }));
-      expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P"), "ios"]]);
+      expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P")]]);
     });
 
     it("a removed device whose state could not be saved", async () => {
@@ -2211,7 +2211,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
       expect(messages(row)).toEqual(["The server refused a change to “Launch” from this device. Update WebBoard, then try again."]);
       expect(names(row)).toEqual(["Export…", "Try again", "Open sync"]);
       await tap(within(row).getByRole("button", { name: "Export…" }));
-      expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P"), "ios"]]);
+      expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P")]]);
       await fresh();
       const v = world();
       const second = await mounted(v);

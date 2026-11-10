@@ -4,7 +4,6 @@ import { resetTauri, tauri } from "../test/tauriMock";
 import ProbeApp from "./ProbeApp";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
 const ORIGINAL_VIEWPORT = "width=device-width, initial-scale=2.0, user-scalable=no";
 

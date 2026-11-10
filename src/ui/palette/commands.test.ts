@@ -197,7 +197,7 @@ describe("commands()", () => {
     const t = await made(SMALL);
     const h = harness(t);
     find(h.ctx, "export").run();
-    expect(vi.mocked(exportFlow).mock.calls).toEqual([[t.session, "macos"]]);
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[t.session]]);
     expect(importFlow).not.toHaveBeenCalled();
   });
 
