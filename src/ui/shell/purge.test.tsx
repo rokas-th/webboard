@@ -8,11 +8,12 @@ import { seededStore } from "../../test/shell";
 import * as Y from "yjs";
 import { encodeAction } from "../../store/doc";
 import { act as stamp } from "../../test/act";
-import { argsOf, fail, headsOf, IX, NOW, own, remoteUpdate, seedSpace, syncWorld, TODAY, type SyncWorld } from "../../test/syncWorld";
+import { argsOf, fail, headsOf, ip, IX, ixAct, NOW, own, remoteUpdate, seedIndex, seedPlan, seedSpace, syncWorld, TODAY, type SyncWorld } from "../../test/syncWorld";
 import { tauri, type Answer } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { PhoneShell } from "../phone/PhoneShell";
+import { PurgeConfirm } from "./PurgeConfirm";
 import { Shell } from "./Shell";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -78,9 +79,10 @@ const confirmIn = (d: HTMLElement): HTMLElement => {
   return last;
 };
 
-async function localMounted(form: Form): Promise<{ r: Registry; ids: string[] }> {
+async function localMounted(form: Form, failDelete = false): Promise<{ r: Registry; ids: string[] }> {
   if (form === "phone") setScreen(390, 844);
   const s = await seededStore(["Alpha", "Beta"], { trash: [0] });
+  if (failDelete) s.mem.fail("store_delete", s.ids[0], { code: "store.io", message: "Could not remove /docs/A: Permission denied." });
   const clock = fixedClock("2026-11-09");
   const r = await Registry.open({ clock });
   registries.push(r);
@@ -123,7 +125,44 @@ describe("Delete forever on another device while the plan is open", () => {
   });
 });
 
+describe("Delete forever of a moved plan whose space is not attached", () => {
+  it("says to connect to the space and offers no delete", async () => {
+    const w = syncWorld({ names: { P: "Launch" } });
+    seedIndex(w.mem, "local", [
+      ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"),
+      ixAct("l-P", ["l-n"], [ip("P", false)]),
+      ixAct("l-Pt", ["l-P"], [ip("P", true)], "dev-A", "Move plan to Trash"),
+    ]);
+    seedIndex(w.mem, IX, [ixAct("s-P", [], [ip("P", true)])]);
+    seedPlan(w.mem, "P", "Launch");
+    const r = await Registry.open({ clock: fixedClock(TODAY, NOW) });
+    registries.push(r);
+    await deep();
+    const purgePlan = vi.spyOn(r, "purgePlan");
+    render(<PurgeConfirm registry={r} id="P" onClose={() => undefined} />);
+    const d = screen.getByRole("dialog", { name: "Delete “Launch” forever?" });
+    expect(d.textContent).toContain("Connect to the space to delete this plan forever.");
+    expect(d.textContent).not.toContain("is erased from this device");
+    expect(within(d).queryByRole("button", { name: "Delete forever" })).toBeNull();
+    expect(purgePlan).not.toHaveBeenCalled();
+  });
+});
+
 describe.each<Form>(["wide", "phone"])("Delete forever (%s)", (form) => {
+  it("files that cannot be removed close the dialog with that one error and no success toast", async () => {
+    await localMounted(form, true);
+    const d = await deleteForever(form, "Alpha");
+    act(() => {
+      fireEvent.click(confirmIn(d));
+    });
+    await deep();
+    expect(toastTexts()).toEqual([
+      "“Alpha” was deleted forever, but its files on this device could not be removed: Could not remove /docs/A: Permission denied. Restart WebBoard to try again.",
+    ]);
+    expect(badToasts()).toHaveLength(1);
+    expect(screen.queryByRole("dialog", { name: "Delete “Alpha” forever?" })).toBeNull();
+  });
+
   it("names the plan, says it cannot be undone, and Cancel deletes nothing", async () => {
     const { r } = await localMounted(form);
     const purgePlan = vi.spyOn(r, "purgePlan");

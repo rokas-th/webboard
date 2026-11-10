@@ -40,6 +40,7 @@ const LABEL = {
   restore: "Restore plan",
   name: "Name device",
   purge: "Delete plan forever",
+  follow: "Follow a deletion on another device",
 } as const;
 
 const isTrash = (v: unknown): v is { t: boolean } =>
@@ -58,6 +59,14 @@ function checkIndexWrite(w: Write): void {
   if (w.c !== "own") throw new Error(`${w.u}: ${w.c} cannot write this unit`);
 }
 
+interface Tombstone {
+  action: ActionId;
+  dev: DeviceId;
+  purge: boolean;
+}
+
+const better = (a: Tombstone, b: Tombstone | undefined): boolean => b === undefined || (a.purge && (!b.purge || a.action < b.action));
+
 interface Bad {
   dev: DeviceId | null;
   error: string;
@@ -73,7 +82,7 @@ export class IndexDoc {
   private readonly log = new LogState(indexRules);
   private readonly bad = new Map<ActionId, Bad>();
   private readonly devOf = new Map<ActionId, DeviceId>();
-  private readonly goneBy = new Map<PlanId, DeviceId>();
+  private readonly goneBy = new Map<PlanId, Tombstone>();
   private readonly subscribers = new Set<() => void>();
   private closing: Promise<void> | null = null;
 
@@ -118,9 +127,13 @@ export class IndexDoc {
     });
     const refusedIds = new Set(delta.refused.map((r) => r.id));
     ok.filter((a) => !refusedIds.has(a.id))
-      .flatMap((a) => a.w.filter((w) => w.u.startsWith(PLAN) && isGoneValue(w.v)).map((w): [PlanId, DeviceId] => [w.u.slice(PLAN.length), a.dev]))
-      .forEach(([id, dev]) => {
-        if (!this.goneBy.has(id)) this.goneBy.set(id, dev);
+      .flatMap((a) =>
+        a.w
+          .filter((w) => w.u.startsWith(PLAN) && isGoneValue(w.v))
+          .map((w): [PlanId, Tombstone] => [w.u.slice(PLAN.length), { action: a.id, dev: a.dev, purge: a.lbl === LABEL.purge }]),
+      )
+      .forEach(([id, t]) => {
+        if (better(t, this.goneBy.get(id))) this.goneBy.set(id, t);
       });
     const bad = [...unreadable.map((u): [ActionId, Bad] => [u.id, { dev: u.dev, error: u.error }]), ...refused];
     bad.forEach(([id, b]) => this.bad.set(id, b));
@@ -151,8 +164,8 @@ export class IndexDoc {
       });
   }
 
-  gone(): ReadonlyMap<PlanId, DeviceId> {
-    return new Map(this.goneBy);
+  gone(): ReadonlyMap<PlanId, DeviceId | null> {
+    return new Map([...this.goneBy].map(([id, t]) => [id, t.purge ? t.dev : null]));
   }
 
   lists(id: PlanId): boolean {
@@ -203,8 +216,14 @@ export class IndexDoc {
 
   purgePlan(id: PlanId): void {
     this.listed(id);
-    if (this.goneBy.has(id)) return;
+    if (this.goneBy.get(id)?.purge === true) return;
     this.append(LABEL.purge, [{ u: PLAN + id, v: { gone: true }, c: "own" }]);
+  }
+
+  markGone(id: PlanId): void {
+    this.listed(id);
+    if (this.goneBy.has(id)) return;
+    this.append(LABEL.follow, [{ u: PLAN + id, v: { gone: true }, c: "own" }]);
   }
 
   nameDevice(id: DeviceId, name: string): void {

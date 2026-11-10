@@ -19,6 +19,8 @@ const NOT_TRASHED = "Move the plan to the Trash first.";
 const UNKNOWN = "The server does not know this plan yet. Let it sync, then delete it again.";
 const PENDING = "The plan is deleted, but the server has not erased its history yet. It tries again every minute.";
 const PURGE_LABEL = "Delete plan forever";
+const GONE_LABEL = "Follow a deletion on another device";
+const CONNECT = "Connect to the space to delete this plan forever.";
 
 const gone = (plan: string): Write => own("ip:" + plan, { gone: true });
 
@@ -57,6 +59,17 @@ const writesTo = (from: number, doc: string): Write[] =>
       );
     });
 
+const labelsTo = (from: number, doc: string): string[] =>
+  tauri.calls
+    .slice(from)
+    .filter((c) => c.cmd === "store_append" && xdoc(c) === doc)
+    .flatMap((c) => {
+      if (!(c.args instanceof Uint8Array)) throw new Error("store_append carried no bytes");
+      return Y.decodeUpdate(c.args).structs.flatMap((s) =>
+        s instanceof Y.Item && typeof s.parentSub === "string" ? [decodeAction(s.parentSub, s.content.getContent()[0]).lbl] : [],
+      );
+    });
+
 const namesOf = (w: SyncWorld): unknown => {
   const s = w.settings.value;
   if (typeof s !== "object" || s === null || !("names" in s)) throw new Error("settings hold no names");
@@ -72,7 +85,7 @@ async function rejection(p: Promise<unknown>): Promise<unknown> {
   throw new Error("expected a rejection");
 }
 
-function purgeWorld(o: { trashed?: boolean; moved?: boolean; localGone?: boolean; synced?: boolean; answers?: Record<string, Answer> } = {}): SyncWorld {
+function purgeWorld(o: { trashed?: boolean; moved?: boolean; localGone?: boolean; synced?: boolean; followed?: boolean; answers?: Record<string, Answer> } = {}): SyncWorld {
   const w = syncWorld({ names: { P: "Launch", L: "Alpha" }, answers: o.answers });
   seedIndex(w.mem, "local", [
     ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"),
@@ -86,6 +99,7 @@ function purgeWorld(o: { trashed?: boolean; moved?: boolean; localGone?: boolean
     ixAct("s-b", ["s-n"], [own("dn:dev-B", "iPhone")], "dev-B", "Name device"),
     ixAct("s-P", ["s-b"], [ip("P", false)]),
     ...(o.trashed === true ? [ixAct("s-Pt", ["s-P"], [ip("P", true)], "dev-A", "Move plan to Trash")] : []),
+    ...(o.followed === true ? [ixAct("s-Pg", ["s-P"], [gone("P")], "dev-A", GONE_LABEL)] : []),
   ]);
   const p = seedPlan(w.mem, "P", "Launch", { items: ["A"] });
   seedPlan(w.mem, "L", "Alpha");
@@ -102,9 +116,9 @@ async function spaceOpen(w: SyncWorld): Promise<Registry> {
   return r;
 }
 
-async function remoteGone(r: Registry, plan: string, dev: DeviceId = "dev-B", id: ActionId = "r-g"): Promise<void> {
+async function remoteGone(r: Registry, plan: string, dev: DeviceId = "dev-B", id: ActionId = "r-g", lbl = PURGE_LABEL): Promise<void> {
   const ix = (await r.doc(IX)).ydoc;
-  Y.applyUpdate(ix, remoteUpdate(ix, id, encodeAction(act(id, headsOf(ix), [gone(plan)], { dev, lbl: PURGE_LABEL }))));
+  Y.applyUpdate(ix, remoteUpdate(ix, id, encodeAction(act(id, headsOf(ix), [gone(plan)], { dev, lbl }))));
   await flush();
 }
 
@@ -165,6 +179,35 @@ describe("IndexDoc: delete forever", () => {
     );
     expect(labels).toEqual([PURGE_LABEL]);
     expect(() => ix.purgePlan("Q")).toThrow("Plan Q is not listed in local");
+    await ix.close();
+  });
+
+  it("names the device that deleted the plan, never one that only followed the deletion", async () => {
+    const w = syncWorld();
+    seedIndex(w.mem, "local", [
+      ixAct("c1", [], [ip("P", false)]),
+      ixAct("c2", ["c1"], [gone("P")], "dev-A", GONE_LABEL),
+      ixAct("c3", ["c1"], [ip("Q", false)]),
+      ixAct("c4", ["c3"], [gone("Q")], "dev-C", GONE_LABEL),
+      ixAct("c5", ["c3"], [gone("Q")], "dev-B", PURGE_LABEL),
+    ]);
+    const ix = await IndexDoc.open("local", "dev-A", openPersisted);
+    expect(ix.plans()).toEqual([]);
+    expect([...ix.gone()]).toEqual([
+      ["P", null],
+      ["Q", "dev-B"],
+    ]);
+    const from = tauri.calls.length;
+    ix.markGone("P");
+    ix.markGone("Q");
+    ix.purgePlan("Q");
+    await flush();
+    expect(writesTo(from, "local")).toEqual([]);
+    ix.purgePlan("P");
+    await flush();
+    expect(writesTo(from, "local")).toEqual([gone("P")]);
+    expect(labelsTo(from, "local")).toEqual([PURGE_LABEL]);
+    expect(ix.gone().get("P")).toBe("dev-A");
     await ix.close();
   });
 
@@ -360,12 +403,110 @@ describe("Registry: delete forever", () => {
     expect(namesOf(w)).toEqual({ P: "Launch", L: "Alpha" });
     expect(r.takeGoneNotices()).toEqual([
       {
-        text: "“Launch” was deleted forever, but its files on this device could not be removed: Could not remove /docs/P: Permission denied. Restart WebBoard to try again.",
+        text: "“Launch” was deleted forever on iPhone, including changes that had not synced, but its files on this device could not be removed: Could not remove /docs/P: Permission denied. Restart WebBoard to try again.",
         bad: true,
       },
     ]);
     await remoteName(r, "r-n");
     expect(docsOf(from, "store_delete")).toEqual(["P"]);
     expect(r.takeGoneNotices()).toEqual([]);
+  });
+
+  it("names the device that deleted the plan when a device that followed it wrote its tombstone first", async () => {
+    const w = purgeWorld({ trashed: true, synced: true });
+    const r = await spaceOpen(w);
+    await remoteName(r, "r-n");
+    const ix = (await r.doc(IX)).ydoc;
+    Y.applyUpdate(ix, remoteUpdate(ix, "r-c", encodeAction(act("r-c", headsOf(ix), [gone("P")], { dev: "dev-C", lbl: GONE_LABEL }))));
+    Y.applyUpdate(ix, remoteUpdate(ix, "r-b", encodeAction(act("r-b", headsOf(ix), [gone("P")], { dev: "dev-B", lbl: PURGE_LABEL }))));
+    await flush();
+    expect(r.takeGoneNotices()).toEqual([{ text: "“Launch” was deleted forever on iPhone. It is erased from this device too.", bad: false }]);
+  });
+
+  it("a tombstone from a device that only followed the deletion names no device", async () => {
+    const w = purgeWorld({ trashed: true, synced: true });
+    const r = await spaceOpen(w);
+    await remoteName(r, "r-n");
+    await remoteGone(r, "P", "dev-C", "r-c", GONE_LABEL);
+    expect(r.takeGoneNotices()).toEqual([{ text: "“Launch” was deleted forever on another device. It is erased from this device too.", bad: false }]);
+  });
+
+  it("a 4410 or 410 writes its tombstone under its own label", async () => {
+    const w = purgeWorld();
+    const r = await spaceOpen(w);
+    const from = tauri.calls.length;
+    await r.markGone("P");
+    await flush();
+    expect(labelsTo(from, IX)).toEqual([GONE_LABEL]);
+  });
+
+  it("says so when it cannot read the erased copy to check for changes that had not synced", async () => {
+    const w = purgeWorld({ trashed: true, synced: true });
+    w.mem.fail("store_load", "P", { code: "store.corrupt", message: "The log of P is damaged." });
+    const r = await spaceOpen(w);
+    const from = tauri.calls.length;
+    await remoteGone(r, "P");
+    expect(docsOf(from, "store_delete")).toEqual(["P"]);
+    expect(r.takeGoneNotices()).toEqual([
+      {
+        text: "“Launch” was deleted forever on iPhone. It is erased from this device too. WebBoard could not read it to check for changes that had not synced: The log of P is damaged.",
+        bad: true,
+      },
+    ]);
+  });
+
+  it("after a restart still tells a deletion it followed, with the changes that had not synced", async () => {
+    purgeWorld({ trashed: true, followed: true });
+    const r = await open();
+    await flush();
+    expect(docsOf(0, "store_delete")).toEqual(["P"]);
+    expect(r.takeGoneNotices()).toEqual([
+      { text: "“Launch” was deleted forever on another device. It is erased from this device too, including changes that had not synced.", bad: true },
+    ]);
+  });
+
+  it("an own purge whose files cannot be removed rejects with that, and queues no second notice", async () => {
+    const w = purgeWorld();
+    w.mem.fail("store_delete", "L", { code: "store.io", message: "Could not remove /docs/L: Permission denied." });
+    const r = await spaceOpen(w);
+    const e = await rejection(r.purgePlan("L"));
+    expect(e).toBeInstanceOf(AppError);
+    expect(e).toMatchObject({
+      code: "store.io",
+      message: "“Alpha” was deleted forever, but its files on this device could not be removed: Could not remove /docs/L: Permission denied. Restart WebBoard to try again.",
+    });
+    expect(r.plans().map((p) => p.id)).toEqual(["P"]);
+    expect(r.takeGoneNotices()).toEqual([]);
+  });
+
+  it("refuses a moved plan while its space is stored here but not attached", async () => {
+    const w = purgeWorld({ moved: true, trashed: true });
+    const r = await open();
+    await flush();
+    expect(r.plans().find((p) => p.id === "P")).toMatchObject({ trashed: true, space: null });
+    expect(r.purgeRefusal("P")).toBe(CONNECT);
+    expect(r.purgeRefusal("L")).toBeNull();
+    const from = tauri.calls.length;
+    const e = await rejection(r.purgePlan("P"));
+    await flush();
+    expect(e).toBeInstanceOf(Refused);
+    expect(e).toMatchObject({ message: CONNECT });
+    expect(docsOf(from, "sync_purge_plan")).toEqual([]);
+    expect(docsOf(from, "store_delete")).toEqual([]);
+    expect(writesTo(from, "local")).toEqual([]);
+    expect(r.isGone("P")).toBe(false);
+    expect(w.mem.docs.has("P")).toBe(true);
+  });
+
+  it("purges a moved plan through the server once its space is attached", async () => {
+    const w = purgeWorld({ moved: true, trashed: true });
+    const r = await spaceOpen(w);
+    expect(r.purgeRefusal("P")).toBeNull();
+    const from = tauri.calls.length;
+    await r.purgePlan("P");
+    await flush();
+    expect(docsOf(from, "sync_purge_plan")).toEqual(["P"]);
+    expect(docsOf(from, "store_delete")).toEqual(["P"]);
+    expect(w.mem.docs.has("P")).toBe(false);
   });
 });

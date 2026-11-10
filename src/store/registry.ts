@@ -53,6 +53,7 @@ export interface GoneNotice {
 
 const READ_ONLY = "This device was removed from the space; its plans are read-only.";
 const NOT_TRASHED = "Move the plan to the Trash first.";
+const CONNECT = "Connect to the space to delete this plan forever.";
 const MOVE_READ_ONLY = "This device was removed from the space. Join again to move plans there.";
 const INCOMPLETE = "This plan has not arrived yet; it opens once it syncs.";
 const INDEX_REPAIRED = "The last change to the plan list before WebBoard closed was not saved.";
@@ -62,6 +63,8 @@ const PROBE = "probe";
 const isIndexDoc = (id: string): boolean => id === LOCAL_INDEX || id.startsWith(SPACE_PREFIX);
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+const sentence = (text: string): string => text.replace(/\.$/, "");
 
 const createdAsExample = (log: LogState): boolean =>
   log.order().some((id) => {
@@ -184,7 +187,7 @@ export class Registry {
   private settingsQueue: Promise<void> = Promise.resolve();
   private indexRepairPending = false;
   private readonly ownPurge = new Set<PlanId>();
-  private readonly marked = new Set<PlanId>();
+  private readonly ownFailures = new Map<PlanId, AppError>();
   private readonly swept = new Set<PlanId>();
   private sweeping: Promise<void> | null = null;
   private sweepAgain = false;
@@ -512,8 +515,9 @@ export class Registry {
     return { id, name: this.settings.names[id] ?? null, trashed, loaded, space, example: loaded && tracker !== undefined && tracker.example };
   }
 
-  private goneWriters(): ReadonlyMap<PlanId, DeviceId> {
-    return new Map([this.local, ...this.spaces.values()].flatMap((ix) => [...ix.gone()]));
+  private goneWriters(): ReadonlyMap<PlanId, DeviceId | null> {
+    const all = [this.local, ...this.spaces.values()].flatMap((ix) => [...ix.gone()]);
+    return new Map([...all.filter(([, by]) => by === null), ...all.filter(([, by]) => by !== null)]);
   }
 
   isGone(id: PlanId): boolean {
@@ -686,11 +690,19 @@ export class Registry {
     this.planIndex(id).restorePlan(id);
   }
 
+  purgeRefusal(id: PlanId): string | null {
+    const listing = this.plans().find((p) => p.id === id);
+    if (listing === undefined || !listing.trashed) return NOT_TRASHED;
+    if (listing.space !== null) return this.readOnlySpace ? READ_ONLY : null;
+    return [...this.spaces.values()].some((ix) => ix.plans().some((p) => p.id === id)) ? CONNECT : null;
+  }
+
   async purgePlan(id: PlanId): Promise<void> {
     this.usable();
+    const refusal = this.purgeRefusal(id);
+    if (refusal !== null) throw new Refused(refusal);
     const listing = this.plans().find((p) => p.id === id);
-    if (listing === undefined || !listing.trashed) throw new Refused(NOT_TRASHED);
-    if (listing.space !== null && this.readOnlySpace) throw new Refused(READ_ONLY);
+    if (listing === undefined) throw new Error(`Plan ${id} left the list while it was checked`);
     this.ownPurge.add(id);
     try {
       let pending: AppError | null = null;
@@ -704,17 +716,19 @@ export class Registry {
       }
       [this.local, this.spaceIndex()].filter((ix): ix is IndexDoc => ix !== null && ix.lists(id)).forEach((ix) => ix.purgePlan(id));
       await this.sweep();
+      const failure = this.ownFailures.get(id);
+      if (failure !== undefined) throw pending === null ? failure : new AppError(failure.code, `${failure.message} ${pending.message}`);
       if (pending !== null) throw pending;
     } finally {
       this.ownPurge.delete(id);
+      this.ownFailures.delete(id);
     }
   }
 
   async markGone(doc: PlanId): Promise<void> {
     this.usable();
-    this.marked.add(doc);
     const space = this.readOnlySpace ? null : this.spaceIndex();
-    [this.local, space].filter((ix): ix is IndexDoc => ix !== null && ix.lists(doc)).forEach((ix) => ix.purgePlan(doc));
+    [this.local, space].filter((ix): ix is IndexDoc => ix !== null && ix.lists(doc)).forEach((ix) => ix.markGone(doc));
     await this.sweep();
   }
 
@@ -750,20 +764,25 @@ export class Registry {
   private async sweepOnce(): Promise<void> {
     if (this.closed) return;
     const due = [...this.goneWriters()].filter(([id]) => this.held(id) && !this.swept.has(id));
-    for (const [id, writer] of due) {
+    for (const [id, purger] of due) {
       if (this.closed) return;
-      await this.erase(id, writer);
+      await this.erase(id, purger);
     }
   }
 
-  private async erase(id: PlanId, writer: DeviceId): Promise<void> {
+  private async erase(id: PlanId, purger: DeviceId | null): Promise<void> {
     this.swept.add(id);
     const local = this.local;
-    if (local.lists(id) && !local.gone().has(id)) local.purgePlan(id);
-    const told = !this.ownPurge.has(id) && (writer !== this.deviceId || this.marked.has(id));
-    const unsynced = told && (await this.unsynced(id));
+    if (local.lists(id) && !local.gone().has(id)) local.markGone(id);
+    const own = this.ownPurge.has(id);
+    const told = !own && purger !== this.deviceId;
+    const check = told ? await this.unsynced(id) : false;
     const name = this.settings.names[id];
     const label = name === undefined ? "A plan" : `“${name}”`;
+    const by = purger === null ? undefined : this.devices().get(purger);
+    const where = told ? ` on ${by ?? "another device"}` : "";
+    const lost = check === true ? ", including changes that had not synced" : "";
+    const unread = check instanceof AppError ? ` WebBoard could not read it to check for changes that had not synced: ${sentence(check.message)}.` : "";
     this.emit();
     try {
       await this.release(id);
@@ -771,7 +790,9 @@ export class Registry {
       await storeDelete(id);
     } catch (e) {
       if (!(e instanceof AppError)) throw e;
-      this.goneNotices.push({ text: `${label} was deleted forever, but its files on this device could not be removed: ${e.message.replace(/\.$/, "")}. Restart WebBoard to try again.`, bad: true });
+      const failure = new AppError(e.code, `${label} was deleted forever${where}${lost}, but its files on this device could not be removed: ${sentence(e.message)}. Restart WebBoard to try again.${unread}`);
+      if (own) this.ownFailures.set(id, failure);
+      else this.goneNotices.push({ text: failure.message, bad: true });
       this.emit();
       return;
     }
@@ -783,11 +804,7 @@ export class Registry {
       names: Object.fromEntries(Object.entries(this.settings.names).filter(([x]) => x !== id)),
       ...(heads === undefined ? {} : { syncedHeads: Object.fromEntries(Object.entries(heads).filter(([x]) => x !== id)) }),
     };
-    if (told) {
-      const by = writer === this.deviceId ? undefined : this.devices().get(writer);
-      const tail = unsynced ? ", including changes that had not synced." : ".";
-      this.goneNotices.push({ text: `${label} was deleted forever on ${by ?? "another device"}. It is erased from this device too${tail}`, bad: unsynced });
-    }
+    if (told) this.goneNotices.push({ text: `${label} was deleted forever${where}. It is erased from this device too${lost}.${unread}`, bad: check !== false });
     try {
       await this.writeSettings();
     } catch (e) {
@@ -797,11 +814,14 @@ export class Registry {
     this.emit();
   }
 
-  private async unsynced(id: PlanId): Promise<boolean> {
+  private async unsynced(id: PlanId): Promise<boolean | AppError> {
     if (!this.trackers.has(id) && (this.stored.includes(id) || this.memo.has(id))) {
-      await this.load(id, false).then(afterEither, (e: unknown) => {
+      try {
+        await this.load(id, false);
+      } catch (e) {
         if (!(e instanceof AppError)) throw e;
-      });
+        return e;
+      }
     }
     const log = this.trackers.get(id)?.log;
     if (log === undefined) return false;

@@ -17,7 +17,7 @@ export function purgeText(l: PlanListing): string {
     : `${name} and its whole history are erased from the server and from every device in the space. This cannot be undone.`;
 }
 
-function PurgeConfirmBody(p: { registry: Registry; listing: PlanListing; onClose(): void }) {
+function PurgeConfirmBody(p: { registry: Registry; listing: PlanListing; refusal: string | null; onClose(): void }) {
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const settle = (): void => {
@@ -36,26 +36,25 @@ function PurgeConfirmBody(p: { registry: Registry; listing: PlanListing; onClose
       },
       (e: unknown) => {
         settle();
-        if (e instanceof AppError && e.code === "sync.purge_pending") {
-          p.onClose();
-          toast(e.message, "bad");
-          return;
-        }
         if (!(e instanceof AppError || e instanceof Refused)) throw e;
+        const left = !p.registry.plans().some((l) => l.id === p.listing.id);
+        if (left || (e instanceof AppError && e.code === "sync.purge_pending")) p.onClose();
         toast(e.message, "bad");
       },
     );
   };
   return (
     <>
-      <p>{purgeText(p.listing)}</p>
+      <p>{p.refusal ?? purgeText(p.listing)}</p>
       <div className="modal-actions">
         <button type="button" onClick={p.onClose}>
           Cancel
         </button>
-        <button type="button" className="button-danger" disabled={pending} onClick={purge}>
-          Delete forever
-        </button>
+        {p.refusal === null && (
+          <button type="button" className="button-danger" disabled={pending} onClick={purge}>
+            Delete forever
+          </button>
+        )}
       </div>
     </>
   );
@@ -64,7 +63,7 @@ function PurgeConfirmBody(p: { registry: Registry; listing: PlanListing; onClose
 export function PurgeConfirm(p: { registry: Registry; id: PlanId; frame?: "dialog" | "sheet"; onClose(): void }) {
   const listing = p.registry.plans().find((l) => l.id === p.id);
   if (listing === undefined) return null;
-  const body: ReactNode = <PurgeConfirmBody registry={p.registry} listing={listing} onClose={p.onClose} />;
+  const body: ReactNode = <PurgeConfirmBody registry={p.registry} listing={listing} refusal={p.registry.purgeRefusal(p.id)} onClose={p.onClose} />;
   if (p.frame === "sheet") {
     return (
       <Sheet open title={purgeLabel(listing)} onClose={p.onClose}>

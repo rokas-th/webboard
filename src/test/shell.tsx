@@ -18,6 +18,7 @@ const STUBBED = [
   "restorePlan",
   "purgePlan",
   "markGone",
+  "purgeRefusal",
   "setLastRegion",
   "warm",
   "reloadFromServer",
