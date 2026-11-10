@@ -1552,6 +1552,23 @@ describe("chipText", () => {
   });
 });
 
+describe("SyncManager: plan cap", () => {
+  const CAP = "This device has joined 500 plans, the most one device may join.";
+
+  it("a ticket refused for the plan cap stops that plan with the server's message and is not retried", async () => {
+    const { r, f, m } = await started({
+      before: (w) => {
+        const ok = w.ticket;
+        w.ticket = (doc) => (doc === "P2" ? fail({ code: "sync.too_many_plans", message: CAP })() : ok(doc));
+      },
+    });
+    expect(errorOf(m.state())).toMatchObject({ code: "failed", doc: "P2", message: CAP, cause: "sync.too_many_plans" });
+    expect(chipText(m.state(), NAME(r))).toBe(`Sync stopped: ${CAP}`);
+    await stopped(f, "P2");
+    expect(prov(f, "P").calls).not.toContain("disconnect");
+  });
+});
+
 describe("SyncManager: delete forever", () => {
   const GONE = "This plan was deleted forever on another device.";
   const deletes = (from: number): unknown[] => tauri.calls.slice(from).filter((c) => c.cmd === "store_delete").map((c) => argsOf(c).doc);
