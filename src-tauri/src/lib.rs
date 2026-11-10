@@ -89,7 +89,6 @@ pub fn run() {
                 std::sync::Arc::new(keychain::OsKeychain),
                 http,
             );
-            app.manage(commands::sync::SyncState::new(dir.clone(), client));
             #[cfg(feature = "probe")]
             {
                 commands::probe::record(&dir, "ready")
@@ -97,6 +96,7 @@ pub fn run() {
                 commands::probe::record(&dir, &format!("app_data_dir {}", dir.display()))
                     .map_err(|e| format!("{}: {}", e.code, e.message))?;
             }
+            app.manage(commands::sync::SyncState::new(dir, client));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

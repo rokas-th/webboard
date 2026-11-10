@@ -10,8 +10,9 @@ const BARS: readonly { bar: Bar; label: string }[] = [
 ];
 const HOLD_MS = 500;
 const SWIPE_PX = 8;
-const SCROLL_SETTLE_MS = 150;
-const VIEWPORT = "width=device-width, initial-scale=1.0";
+const SETTLE_MS = 150;
+
+type WindowSource = "resize" | "visualViewport" | "observer";
 
 interface Shown {
   n: number;
@@ -27,7 +28,19 @@ interface Gesture {
   moves: number;
 }
 
-function useProbeLog(): { lines: readonly Shown[]; log: (name: string, data: ProbeData) => void } {
+function isFailure(data: ProbeData): boolean {
+  return "error" in data || "thrown" in data;
+}
+
+function windowKey(data: ProbeData): string {
+  return JSON.stringify([data.inner, data.screen, data.visual, data.insets]);
+}
+
+function useProbeLog(): {
+  lines: readonly Shown[];
+  log: (name: string, data: ProbeData) => void;
+  show: (line: string, bad: boolean) => void;
+} {
   const [lines, setLines] = useState<readonly Shown[]>([]);
   const chain = useRef<Promise<void>>(Promise.resolve());
   const count = useRef(0);
@@ -39,12 +52,12 @@ function useProbeLog(): { lines: readonly Shown[]; log: (name: string, data: Pro
   const log = useCallback(
     (name: string, data: ProbeData) => {
       const line = probeLine(name, data);
-      show(line, false);
+      show(line, isFailure(data));
       chain.current = chain.current.then(() => sendLine(line).catch((e: unknown) => show(probeLine("probe_log", failure(e)), true)));
     },
     [show],
   );
-  return { lines, log };
+  return { lines, log, show };
 }
 
 function TouchBar({ bar, label, log }: { bar: Bar; label: string; log: (name: string, data: ProbeData) => void }) {
@@ -52,8 +65,9 @@ function TouchBar({ bar, label, log }: { bar: Bar; label: string; log: (name: st
   const gesture = useRef<Gesture | null>(null);
 
   useEffect(() => {
+    if (bar !== "B") return;
     const el = ref.current;
-    if (el === null || bar !== "B") return;
+    if (el === null) throw new Error("touch bar B is not mounted");
     let timer: ReturnType<typeof setTimeout> | null = null;
     let armed = false;
     let start: { x: number; y: number } | null = null;
@@ -79,7 +93,8 @@ function TouchBar({ bar, label, log }: { bar: Bar; label: string; log: (name: st
       const t = e.touches[0];
       if (start !== null && Math.hypot(t.clientX - start.x, t.clientY - start.y) > SWIPE_PX) clear();
     };
-    const onEnd = (): void => {
+    const onEnd = (e: TouchEvent): void => {
+      if (e.touches.length > 0) return;
       clear();
       armed = false;
       start = null;
@@ -131,16 +146,22 @@ function TouchBar({ bar, label, log }: { bar: Bar; label: string; log: (name: st
 }
 
 export default function ProbeApp() {
-  const { lines, log } = useProbeLog();
+  const { lines, log, show } = useProbeLog();
   const insetRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
+  const shippedViewport = useRef<string | null>(null);
   const [cover, setCover] = useState(false);
 
   const run = useCallback(
     (probe: () => Promise<ProbeEntry>) => {
-      void probe().then(([name, data]) => log(name, data));
+      void probe()
+        .then(([name, data]) => log(name, data))
+        .catch((e: unknown) => {
+          show(probeLine("probe", { thrown: e instanceof Error ? e.message : String(e) }), true);
+          console.error(e);
+        });
     },
-    [log],
+    [log, show],
   );
 
   useEffect(() => {
@@ -156,13 +177,33 @@ export default function ProbeApp() {
     const insetEl = insetRef.current;
     const root = document.getElementById("root");
     if (insetEl === null || root === null) throw new Error("the probe's window elements are not mounted");
-    const onResize = (): void => log("window", windowData("resize", insetEl));
-    const onVisual = (): void => log("window", windowData("visualViewport", insetEl));
-    const observer = new ResizeObserver(() => log("window", windowData("observer", insetEl)));
+    const timers = new Map<WindowSource, ReturnType<typeof setTimeout>>();
+    const lastLogged = new Map<WindowSource, string>();
+    const settled =
+      (on: WindowSource) =>
+      (): void => {
+        const pending = timers.get(on);
+        if (pending !== undefined) clearTimeout(pending);
+        timers.set(
+          on,
+          setTimeout(() => {
+            timers.delete(on);
+            const data = windowData(on, insetEl);
+            const key = windowKey(data);
+            if (lastLogged.get(on) === key) return;
+            lastLogged.set(on, key);
+            log("window", data);
+          }, SETTLE_MS),
+        );
+      };
+    const onResize = settled("resize");
+    const onVisual = settled("visualViewport");
+    const observer = new ResizeObserver(settled("observer"));
     window.addEventListener("resize", onResize);
     window.visualViewport?.addEventListener("resize", onVisual);
     observer.observe(root);
     return () => {
+      timers.forEach((t) => clearTimeout(t));
       window.removeEventListener("resize", onResize);
       window.visualViewport?.removeEventListener("resize", onVisual);
       observer.disconnect();
@@ -171,7 +212,10 @@ export default function ProbeApp() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => log("keys", keyData(e));
-    const onSelection = (): void => log("touch", { on: "selectionchange", selected: document.getSelection()?.toString().length ?? 0 });
+    const onSelection = (): void => {
+      const selection = document.getSelection();
+      log("touch", { on: "selectionchange", selected: selection === null ? null : selection.toString().length });
+    };
     window.addEventListener("keydown", onKey);
     document.addEventListener("selectionchange", onSelection);
     return () => {
@@ -186,7 +230,7 @@ export default function ProbeApp() {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const onScroll = (): void => {
       if (timer !== null) clearTimeout(timer);
-      timer = setTimeout(() => log("touch", { on: "scroll", scrollLeft: Math.round(pane.scrollLeft) }), SCROLL_SETTLE_MS);
+      timer = setTimeout(() => log("touch", { on: "scroll", scrollLeft: Math.round(pane.scrollLeft) }), SETTLE_MS);
     };
     pane.addEventListener("scroll", onScroll, { passive: true });
     return () => {
@@ -198,8 +242,14 @@ export default function ProbeApp() {
   const toggleCover = (): void => {
     const meta = document.querySelector('meta[name="viewport"]');
     if (meta === null) throw new Error("index.html has no viewport meta");
+    if (shippedViewport.current === null) {
+      const content = meta.getAttribute("content");
+      if (content === null) throw new Error("index.html's viewport meta has no content");
+      shippedViewport.current = content;
+    }
+    const shipped = shippedViewport.current;
     const next = !cover;
-    meta.setAttribute("content", next ? `${VIEWPORT}, viewport-fit=cover` : VIEWPORT);
+    meta.setAttribute("content", next ? `${shipped}, viewport-fit=cover` : shipped);
     setCover(next);
     log("window", { on: "viewport", content: meta.getAttribute("content") });
   };

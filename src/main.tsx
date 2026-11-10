@@ -21,13 +21,12 @@ const root = document.getElementById("root");
 if (root === null) throw new Error("index.html has no #root element");
 
 if (import.meta.env.VITE_WEBBOARD_PROBE === "1") {
-  import("./probe/ProbeApp").then(
-    ({ default: ProbeApp }) => ReactDOM.createRoot(root).render(<ProbeApp />),
-    (e: unknown) => {
+  import("./probe/ProbeApp")
+    .then(({ default: ProbeApp }) => ReactDOM.createRoot(root).render(<ProbeApp />))
+    .catch((e: unknown) => {
       root.textContent = `The probe did not load: ${e instanceof Error ? e.message : String(e)}`;
       throw e;
-    },
-  );
+    });
 } else {
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
