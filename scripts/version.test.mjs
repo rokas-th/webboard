@@ -25,6 +25,7 @@ const FILES = [
   "crates/webboard-core/Cargo.toml",
   "server/package.json",
   "server/package-lock.json",
+  "src-tauri/gen/apple/project.yml",
 ];
 
 async function fixture() {
@@ -49,13 +50,13 @@ async function edit(root, rel, from, to) {
   await writeFile(abs, text.replace(from, to));
 }
 
-test("--check passes when the eleven agree", async (t) => {
+test("--check passes when the thirteen agree", async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const r = version(root, ["--check"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`11 places agree on ${CURRENT_RE}`));
+  assert.match(r.stdout, new RegExp(`13 places agree on ${CURRENT_RE}`));
 });
 
 test("--check fails and names the file when one field drifts", async (t) => {
@@ -67,7 +68,7 @@ test("--check fails and names the file when one field drifts", async (t) => {
   const r = version(root, ["--check"]);
   assert.notEqual(r.status, 0, "a drifted field must not pass --check");
   assert.match(r.stdout, /! 0\.0\.9 {2}src-tauri\/tauri\.conf\.json \(version\)/);
-  assert.match(r.stderr, /1 of 11 places disagree/);
+  assert.match(r.stderr, /1 of 13 places disagree/);
 });
 
 test("--check <semver> rejects a tree that agrees on the wrong version", async (t) => {
@@ -75,17 +76,17 @@ test("--check <semver> rejects a tree that agrees on the wrong version", async (
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const r = version(root, ["--check", NEXT]);
-  assert.notEqual(r.status, 0, `11 agreeing on ${CURRENT} is not ${NEXT}`);
+  assert.notEqual(r.status, 0, `13 agreeing on ${CURRENT} is not ${NEXT}`);
   assert.match(r.stderr, new RegExp(`expected ${NEXT_RE}`));
 });
 
-test("writing sets the five sources and leaves the lockfiles for the regeneration", async (t) => {
+test("writing sets the seven sources and leaves the lockfiles for the regeneration", async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const w = version(root, [NEXT, "--no-lock"]);
   assert.equal(w.status, 0, w.stderr);
-  assert.equal((w.stdout.match(new RegExp(`${CURRENT_RE} -> ${NEXT_RE}`, "g")) ?? []).length, 5);
+  assert.equal((w.stdout.match(new RegExp(`${CURRENT_RE} -> ${NEXT_RE}`, "g")) ?? []).length, 7);
 
   for (const rel of ["package.json", "src-tauri/tauri.conf.json", "server/package.json"]) {
     assert.match(await readFile(join(root, rel), "utf8"), new RegExp(`"version": "${NEXT_RE}"`));
@@ -93,13 +94,16 @@ test("writing sets the five sources and leaves the lockfiles for the regeneratio
   for (const rel of ["src-tauri/Cargo.toml", "crates/webboard-core/Cargo.toml"]) {
     assert.match(await readFile(join(root, rel), "utf8"), new RegExp(`\nversion = "${NEXT_RE}"`));
   }
+  const yml = await readFile(join(root, "src-tauri/gen/apple/project.yml"), "utf8");
+  assert.match(yml, new RegExp(`\\n\\s*CFBundleShortVersionString: ${NEXT_RE}\\n`));
+  assert.match(yml, new RegExp(`\\n\\s*CFBundleVersion: "${NEXT_RE}"\\n`));
   for (const rel of ["Cargo.lock", "package-lock.json", "server/package-lock.json"]) {
     assert.equal(await readFile(join(root, rel), "utf8"), await readFile(join(REPO, rel), "utf8"));
   }
 
   const c = version(root, ["--check"]);
   assert.notEqual(c.status, 0, "a stale lockfile must fail --check");
-  assert.match(c.stderr, /6 of 11 places disagree/);
+  assert.match(c.stderr, /6 of 13 places disagree/);
 });
 
 test("--check names server/package.json when only it is bumped", async (t) => {
@@ -111,7 +115,20 @@ test("--check names server/package.json when only it is bumped", async (t) => {
   const r = version(root, ["--check"]);
   assert.notEqual(r.status, 0, "a bumped server/package.json must not pass --check");
   assert.match(r.stdout, new RegExp(`! ${PATCHED_RE} {2}server/package\\.json \\(version\\)`));
-  assert.match(r.stderr, /1 of 11 places disagree/);
+  assert.match(r.stderr, /1 of 13 places disagree/);
+});
+
+test("project.yml version keys must match package.json", async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await edit(root, "package.json", `"version": "${CURRENT}"`, `"version": "${PATCHED}"`);
+
+  const r = version(root, ["--check"]);
+  assert.notEqual(r.status, 0, "project.yml behind package.json must not pass --check");
+  for (const key of ["CFBundleShortVersionString", "CFBundleVersion"]) {
+    assert.match(r.stdout, new RegExp(`! ${CURRENT_RE} {2}src-tauri/gen/apple/project\\.yml \\(${key}\\)`));
+  }
 });
 
 for (const [failing, named, other] of [

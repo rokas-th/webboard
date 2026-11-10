@@ -1,0 +1,6 @@
+{
+  "identifier": "ios",
+  "platforms": ["iOS"],
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-save", "dialog:allow-open"]
+}

@@ -74,6 +74,12 @@ const SITES = [
     re: new RegExp(String.raw`("packages":\s*\{\s*"":\s*\{[^{}]*?"version":\s*")(${V})(")`),
     write: false,
   },
+  ...["ShortVersionString", "Version"].map((suffix) => ({
+    path: "src-tauri/gen/apple/project.yml",
+    key: `CFBundle${suffix}`,
+    re: new RegExp(String.raw`(^[ \t]*CFBundle${suffix}:[ \t]*"?)([0-9.]+)("?)(?=[ \t]*$)`, "m"),
+    write: true,
+  })),
 ];
 
 /** @param {string[]} argv */

@@ -1,0 +1,4 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": { "iOS": { "developmentTeam": "8UQXKX376Z", "minimumSystemVersion": "27.0" } }
+}

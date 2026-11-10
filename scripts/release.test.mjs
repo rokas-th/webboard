@@ -32,6 +32,7 @@ const VERSION_FILES = [
   "crates/webboard-core/Cargo.toml",
   "server/package.json",
   "server/package-lock.json",
+  "src-tauri/gen/apple/project.yml",
 ];
 
 function run(cmd, args, opts = {}) {
