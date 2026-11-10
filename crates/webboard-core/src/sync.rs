@@ -612,7 +612,8 @@ impl SyncClient {
             (503, _) if body.error == "not_configured" => {
                 SyncError::new("sync.not_configured", NOT_CONFIGURED)
             }
-            _ => refused(answered(&body)),
+            (400..=499, _) => refused(answered(&body)),
+            _ => http(answered(&body)),
         }
     }
 
@@ -1661,7 +1662,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unreadable_refusal_is_sync_http_and_a_json_refusal_is_sync_refused() {
+    async fn an_unreadable_refusal_or_a_json_5xx_is_sync_http_and_a_json_4xx_is_sync_refused() {
         let mut f = Fixture::new().await;
         f.join_with_token();
         let client = f.client();
@@ -1690,7 +1691,7 @@ mod tests {
         .await;
         assert_eq!(
             client.ticket("ix-sp000000000").await.map(|_| ()),
-            Err(err("sync.refused", "Server answered 500 x: y"))
+            Err(err("sync.http", "Server answered 500 x: y"))
         );
         f.answer(
             "DELETE",
@@ -1706,19 +1707,37 @@ mod tests {
                 "Server answered 404 not_found: This device is not in the space."
             ))
         );
-        for (status, error, message) in [
-            (400, "bad_request", "The document id is not valid. Update WebBoard on this device."),
-            (404, "not_found", "Not found."),
-            (405, "not_found", "Not found."),
-            (413, "too_large", "The request is too large."),
+        for (status, error, message, code) in [
+            (
+                400,
+                "bad_request",
+                "The document id is not valid. Update WebBoard on this device.",
+                "sync.refused",
+            ),
+            (404, "not_found", "Not found.", "sync.refused"),
+            (405, "not_found", "Not found.", "sync.refused"),
+            (
+                413,
+                "too_large",
+                "The request is too large.",
+                "sync.refused",
+            ),
+            (499, "closed", "Closed.", "sync.refused"),
+            (500, "internal", "boom", "sync.http"),
+            (503, "busy", "Try later.", "sync.http"),
         ] {
             let m = f
-                .answer("POST", "/ticket", status, json!({ "error": error, "message": message }))
+                .answer(
+                    "POST",
+                    "/ticket",
+                    status,
+                    json!({ "error": error, "message": message }),
+                )
                 .await;
             assert_eq!(
                 client.ticket("ix-sp000000000").await.map(|_| ()),
                 Err(err(
-                    "sync.refused",
+                    code,
                     &format!("Server answered {status} {error}: {message}")
                 ))
             );
@@ -2486,7 +2505,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_410_or_500_with_another_error_is_sync_refused() {
+    async fn a_410_with_another_error_is_sync_refused_and_a_500_is_sync_http() {
         let mut f = Fixture::new().await;
         f.join_with_token();
         f.answer(
@@ -2506,7 +2525,7 @@ mod tests {
         let client = f.client();
         assert_eq!(
             client.purge_plan("pl0000000001").await,
-            Err(err("sync.refused", "Server answered 500 internal: boom"))
+            Err(err("sync.http", "Server answered 500 internal: boom"))
         );
         assert_eq!(
             client.ticket("pl0000000001").await.map(|_| ()),
