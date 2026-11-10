@@ -2,12 +2,21 @@ import { DurableObject } from 'cloudflare:workers';
 import * as auth from './auth';
 import type { Admission, DeviceEntry, Enrolled, Failure, Result } from './auth';
 
-const ROOM_CLOSE_FAILED: Failure = {
-  ok: false,
-  status: 500,
-  error: 'internal',
-  message: 'The device was removed, but one of its open connections could not be closed; it stops syncing when that connection drops.',
-};
+const CLOSE_CHUNK = 50;
+
+function roomCloseFailed(untold: number): Failure {
+  const plans = untold === 1 ? '1 plan was' : `${untold} plans were`;
+  return {
+    ok: false,
+    status: 500,
+    error: 'internal',
+    message: `The device was removed, but ${plans} not told to close its connections. Remove it again to finish.`,
+  };
+}
+
+function chunked<T>(items: readonly T[], size: number): T[][] {
+  return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
+}
 
 const ROOM_RESTORE_FAILED: Failure = {
   ok: false,
@@ -69,10 +78,13 @@ export class Space extends DurableObject<Env> {
         return removed;
       }
       const joins = removed.value.joins;
-      const settled = await Promise.allSettled(joins.map((doc) => this.rooms.close(doc, id)));
-      const failed = this.logFailures('closeDevice', id, joins, settled);
+      const settled = await chunked(joins, CLOSE_CHUNK).reduce<Promise<PromiseSettledResult<number>[]>>(
+        async (done, chunk) => [...(await done), ...(await Promise.allSettled(chunk.map((doc) => this.rooms.close(doc, id))))],
+        Promise.resolve([]),
+      );
+      const untold = this.logFailures('closeDevice', id, joins, settled);
       const closed = settled.reduce((sum, outcome) => (outcome.status === 'fulfilled' ? sum + outcome.value : sum), 0);
-      return failed ? ROOM_CLOSE_FAILED : { ok: true, value: { closed } };
+      return untold > 0 ? roomCloseFailed(untold) : { ok: true, value: { closed } };
     });
   }
 
@@ -82,15 +94,15 @@ export class Space extends DurableObject<Env> {
     }
     const { enrolled, joins } = admitted.value;
     const settled = await Promise.allSettled(joins.map((doc) => this.rooms.restore(doc, enrolled.deviceId)));
-    return this.logFailures('restoreDevice', enrolled.deviceId, joins, settled)
+    return this.logFailures('restoreDevice', enrolled.deviceId, joins, settled) > 0
       ? ROOM_RESTORE_FAILED
       : { ok: true, value: enrolled };
   }
 
-  private logFailures(call: string, deviceId: string, docs: readonly string[], settled: readonly PromiseSettledResult<unknown>[]): boolean {
+  private logFailures(call: string, deviceId: string, docs: readonly string[], settled: readonly PromiseSettledResult<unknown>[]): number {
     const failures = settled.flatMap((outcome, index) => (outcome.status === 'rejected' ? [{ doc: docs[index], reason: outcome.reason }] : []));
     failures.forEach(({ doc, reason }) => console.error(`Space: ${call}(${deviceId}) failed in room ${doc}`, reason));
-    return failures.length > 0;
+    return failures.length;
   }
 
   private serialised<T>(deviceId: string, run: () => Promise<T>): Promise<T> {

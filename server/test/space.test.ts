@@ -9,12 +9,14 @@ import { newDoc, value } from './helpers';
 const SECRET = env.SETUP_SECRET;
 const DEV_A = 'devA0000000';
 const DEV_B = 'devB0000000';
-const CLOSE_FAILED = {
-  ok: false,
-  status: 500,
-  error: 'internal',
-  message: 'The device was removed, but one of its open connections could not be closed; it stops syncing when that connection drops.',
-};
+function closeFailed(plans: string): unknown {
+  return {
+    ok: false,
+    status: 500,
+    error: 'internal',
+    message: `The device was removed, but ${plans} not told to close its connections. Remove it again to finish.`,
+  };
+}
 const RESTORE_FAILED = {
   ok: false,
   status: 500,
@@ -188,7 +190,7 @@ describe('Space', () => {
     value(await space.ticket(a, 'docZ0000000'));
     await failCloseIn(space, 'docZ0000000');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(await space.removeDevice(b, DEV_A)).toEqual(CLOSE_FAILED);
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed('1 plan was'));
     expect(logged.mock.calls).toEqual([roomDown('closeDevice', 'docZ0000000')]);
     expect(await client.closed).toEqual(REMOVED);
     expect(value(await space.devices(b)).devices.map((d) => d.id)).toEqual([DEV_B]);
@@ -203,7 +205,7 @@ describe('Space', () => {
     const last = await synced(space, a, 'docY0000000', DEV_A);
     await failCloseIn(space, 'docM0000000');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(await space.removeDevice(b, DEV_A)).toEqual(CLOSE_FAILED);
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed('1 plan was'));
     expect(logged.mock.calls).toEqual([roomDown('closeDevice', 'docM0000000')]);
     expect(await Promise.all([first.closed, last.closed])).toEqual([REMOVED, REMOVED]);
     await closeAll(middle);
@@ -236,6 +238,64 @@ describe('Space', () => {
     expect(logged.mock.calls).toEqual([roomDown('restoreDevice', 'docW0000000')]);
     expect(await revokedIn('docD0000000', DEV_A)).toBe(false);
     expect(await revokedIn('docW0000000', DEV_A)).toBe(true);
+  });
+
+  it('removing a device tells its plans in sequential chunks of at most 50', async () => {
+    const space = spaceOf('remove-chunks');
+    const { a, b } = await twoDevices(space);
+    const docs = Array.from({ length: 120 }, (_, i) => 'c' + String(i).padStart(10, '0'));
+    for (const doc of docs) {
+      value(await space.ticket(a, doc));
+    }
+    const told: string[] = [];
+    const peaks: number[] = [];
+    let open = 0;
+    await runInDurableObject(space, (instance: Space) => {
+      vi.spyOn(instance.rooms, 'close').mockImplementation(async (doc) => {
+        open += 1;
+        peaks.push(open);
+        await scheduler.wait(5);
+        open -= 1;
+        told.push(doc);
+        return 1;
+      });
+    });
+    expect(await space.removeDevice(b, DEV_A)).toEqual({ ok: true, value: { closed: 120 } });
+    expect([...told].sort()).toEqual(docs);
+    expect(Math.max(...peaks)).toBe(50);
+    expect(peaks.slice(0, 50)).toEqual(Array.from({ length: 50 }, (_, i) => i + 1));
+    expect(peaks.slice(50, 51)).toEqual([1]);
+    expect(peaks.slice(100, 101)).toEqual([1]);
+  });
+
+  it('a removal that could not tell some plans names how many, and calling it again finishes', async () => {
+    const space = spaceOf('remove-again');
+    const { a, b } = await twoDevices(space);
+    const docs = Array.from({ length: 60 }, (_, i) => 'r' + String(i).padStart(10, '0'));
+    for (const doc of docs) {
+      value(await space.ticket(a, doc));
+    }
+    const failing = new Set([docs[3], docs[40], docs[59]]);
+    const told: string[] = [];
+    let broken = true;
+    await runInDurableObject(space, (instance: Space) => {
+      vi.spyOn(instance.rooms, 'close').mockImplementation(async (doc) => {
+        if (broken && failing.has(doc)) {
+          throw new Error('room down');
+        }
+        told.push(doc);
+        return 0;
+      });
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed('3 plans were'));
+    expect(logged.mock.calls).toEqual([...failing].map((doc) => roomDown('closeDevice', doc)));
+    expect(told.length).toBe(57);
+    expect(value(await space.devices(b)).devices.map((d) => d.id)).toEqual([DEV_B]);
+    broken = false;
+    told.length = 0;
+    expect(await space.removeDevice(b, DEV_A)).toEqual({ ok: true, value: { closed: 0 } });
+    expect([...told].sort()).toEqual(docs);
   });
 
   it('a removal and a re-admission of one device reach its rooms in order', async () => {

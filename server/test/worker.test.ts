@@ -27,7 +27,7 @@ const BAD_CODE = {
 };
 const CLOSE_FAILED = {
   error: 'internal',
-  message: 'The device was removed, but one of its open connections could not be closed; it stops syncing when that connection drops.',
+  message: 'The device was removed, but 1 plan was not told to close its connections. Remove it again to finish.',
 };
 
 let addresses = 0;

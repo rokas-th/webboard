@@ -245,42 +245,71 @@ describe('auth', () => {
     });
   });
 
-  it('refuses the 6th claim from one IP after 5 failures in 10 min', async () => {
+  it('a right code joins from an address over its limit, a wrong one is refused there', async () => {
     await inSpace('claim-ip-limit', async (storage) => {
       const { token } = await enrolled(storage, DEV_A);
       const code = await liveCode(storage, token);
       for (let i = 0; i < 5; i += 1) {
         expect(await claim(storage, T, otherCode(code), DEV_B, 'iPad', '1.1.1.1')).toEqual(BAD_CODE);
       }
-      expect(await claim(storage, T, code, DEV_B, 'iPad', '1.1.1.1')).toEqual({
+      expect(await claim(storage, T, otherCode(code), DEV_B, 'iPad', '1.1.1.1')).toEqual({
         ok: false,
         status: 429,
         error: 'rate_limited',
         message: 'Too many wrong pairing codes.',
         retryAfter: 600,
       });
-      expect(value(await claim(storage, T, code, DEV_B, 'iPad', '2.2.2.2')).enrolled.deviceId).toBe(DEV_B);
+      expect(value(await claim(storage, T, code, DEV_B, 'iPad', '1.1.1.1')).enrolled.deviceId).toBe(DEV_B);
+      expect(await claim(storage, T, otherCode(code), DEV_C, 'iPhone', '2.2.2.2')).toEqual(BAD_CODE);
     });
   });
 
-  it('refuses even a right code after 20 failed claims in a space in 10 min', async () => {
+  it('a right code joins after 4 addresses sent 5 wrong codes each, and a wrong code is then rate limited', async () => {
     await inSpace('claim-space-limit', async (storage) => {
       const { token } = await enrolled(storage, DEV_A);
       const code = await liveCode(storage, token);
-      for (const host of [1, 2, 3, 4, 5]) {
-        for (let i = 0; i < 4; i += 1) {
+      for (const host of [1, 2, 3, 4]) {
+        for (let i = 0; i < 5; i += 1) {
           expect(await claim(storage, T, otherCode(code), DEV_B, 'iPad', `10.0.0.${host}`)).toEqual(BAD_CODE);
         }
       }
-      expect(await claim(storage, T, code, DEV_B, 'iPad', '10.0.0.6')).toEqual({
+      expect(await claim(storage, T, otherCode(code), DEV_C, 'iPhone', '10.0.0.5')).toEqual({
         ok: false,
         status: 429,
         error: 'rate_limited',
         message: 'Too many wrong pairing codes.',
         retryAfter: 600,
       });
-      const fresh = await liveCode(storage, token, T + 600_000);
-      expect(value(await claim(storage, T + 600_000, fresh, DEV_B, 'iPad', '10.0.0.6')).enrolled.deviceId).toBe(DEV_B);
+      expect(value(await claim(storage, T, code, DEV_B, 'iPad', '10.0.0.6')).enrolled.deviceId).toBe(DEV_B);
+    });
+  });
+
+  it('a wrong code is refused and counted against the address and the space', async () => {
+    await inSpace('claim-counted', async (storage) => {
+      const { token } = await enrolled(storage, DEV_A);
+      const code = await liveCode(storage, token);
+      expect(await claim(storage, T, otherCode(code), DEV_B, 'iPad', '1.1.1.1')).toEqual(BAD_CODE);
+      expect(
+        storage.sql
+          .exec('SELECT scope FROM attempts ORDER BY scope')
+          .toArray()
+          .map((row) => text(row, 'scope')),
+      ).toEqual(['claim', 'claim:1.1.1.1']);
+      value(await claim(storage, T, code, DEV_B, 'iPad', '1.1.1.1'));
+      expect(count(storage, 'attempts')).toBe(2);
+    });
+  });
+
+  it('a code of a removed issuer is refused and counted, with clean counters', async () => {
+    await inSpace('claim-revoked-counted', async (storage) => {
+      const a = await enrolled(storage, DEV_A);
+      const b = await enrolled(storage, DEV_B);
+      const code = await liveCode(storage, a.token);
+      storage.sql.exec('UPDATE devices SET revoked_at = ? WHERE id = ?', T, DEV_A);
+      expect(count(storage, 'attempts')).toBe(0);
+      expect(await claim(storage, T + 1, code, DEV_C, 'iPhone', '1.1.1.1')).toEqual(BAD_CODE);
+      expect(count(storage, 'attempts')).toBe(2);
+      expect(value(await devices(storage, b.token)).devices.map((d) => d.id)).toEqual([DEV_B]);
     });
   });
 
@@ -344,6 +373,30 @@ describe('auth', () => {
       storage.sql.exec('UPDATE devices SET revoked_at = ? WHERE id = ?', T, DEV_A);
       expect(await claim(storage, T + 1, code, DEV_B, 'iPad', '1.1.1.1')).toEqual(BAD_CODE);
       expect(int(storage.sql.exec('SELECT used_at IS NULL AS unused FROM codes').one(), 'unused')).toBe(1);
+    });
+  });
+
+  it('refuses a ticket for a 501st plan, and keeps the joined plans and the index open', async () => {
+    await inSpace('join-cap', async (storage) => {
+      const { spaceId, token } = await enrolled(storage, DEV_A);
+      const plans = Array.from({ length: 500 }, (_, i) => 'p' + String(i).padStart(10, '0'));
+      for (const doc of plans) {
+        value(await ticket(storage, T, token, doc));
+      }
+      const tickets = count(storage, 'tickets');
+      expect(await ticket(storage, T, token, 'pX000000000')).toEqual({
+        ok: false,
+        status: 400,
+        error: 'bad_request',
+        message: 'This device has joined 500 plans, the most one device may join.',
+      });
+      expect(count(storage, 'tickets')).toBe(tickets);
+      expect(count(storage, 'joins')).toBe(500);
+      expect(await ticket(storage, T, token, plans[0])).toMatchObject({ ok: true });
+      expect(await ticket(storage, T, token, 'ix-' + spaceId)).toMatchObject({ ok: true });
+      expect(count(storage, 'joins')).toBe(501);
+      const other = await enrolled(storage, DEV_B);
+      expect(await ticket(storage, T, other.token, 'pX000000000')).toMatchObject({ ok: true });
     });
   });
 

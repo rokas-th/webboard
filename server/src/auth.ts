@@ -49,6 +49,7 @@ const MAX_ENROL_FAILURES_PER_IP = 5;
 const MAX_CLAIM_FAILURES_PER_IP = 5;
 const MAX_CLAIM_FAILURES_PER_SPACE = 20;
 const MIN_SECRET_BYTES = 32;
+const MAX_PLANS_PER_DEVICE = 500;
 
 const CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CODE_LENGTH = 8;
@@ -92,6 +93,12 @@ const BAD_DOC: Failure = {
   status: 400,
   error: 'bad_request',
   message: 'The document id is not valid. Update WebBoard on this device.',
+};
+const TOO_MANY_PLANS: Failure = {
+  ok: false,
+  status: 400,
+  error: 'bad_request',
+  message: `This device has joined ${MAX_PLANS_PER_DEVICE} plans, the most one device may join.`,
 };
 const REMOVE_SELF: Failure = { ok: false, status: 400, error: 'bad_request', message: 'Remove this device from another device.' };
 const NO_SUCH_DEVICE: Failure = { ok: false, status: 404, error: 'not_found', message: 'This device is not in the space.' };
@@ -191,6 +198,14 @@ function joinsOf(sql: SqlStorage, device: string): string[] {
     .exec('SELECT doc FROM joins WHERE device = ? ORDER BY doc', device)
     .toArray()
     .map((row) => text(row, 'doc'));
+}
+
+function plansFull(sql: SqlStorage, device: string, doc: string, index: string): boolean {
+  if (sql.exec('SELECT 1 FROM joins WHERE device = ? AND doc = ?', device, doc).toArray().length > 0) {
+    return false;
+  }
+  const joined = int(sql.exec('SELECT COUNT(*) AS n FROM joins WHERE device = ? AND doc != ?', device, index).one(), 'n');
+  return joined >= MAX_PLANS_PER_DEVICE;
 }
 
 function admit(
@@ -297,13 +312,6 @@ export async function claim(
   const ipScope = 'claim:' + ip;
   const spaceScope = 'claim';
   return inTransaction(storage, (sql): Result<Admission> => {
-    const waits = [
-      retryAfter(sql, ipScope, MAX_CLAIM_FAILURES_PER_IP, now),
-      retryAfter(sql, spaceScope, MAX_CLAIM_FAILURES_PER_SPACE, now),
-    ].filter((wait) => wait !== null);
-    if (waits.length > 0) {
-      return limited('Too many wrong pairing codes.', Math.max(...waits));
-    }
     const found = sql
       .exec(
         'SELECT codes.hash FROM codes JOIN devices ON devices.id = codes.issuer WHERE codes.hash = ? AND codes.used_at IS NULL AND codes.expires_at > ? AND devices.revoked_at IS NULL',
@@ -311,12 +319,19 @@ export async function claim(
         now,
       )
       .toArray();
-    if (found.length === 0) {
-      recordFailure(sql, [ipScope, spaceScope], now);
-      return BAD_CODE;
+    if (found.length > 0) {
+      sql.exec('UPDATE codes SET used_at = ? WHERE hash = ?', now, codeHash);
+      return ok(admit(sql, requireSpaceId(sql), deviceId, deviceName, token, tokenHash, now));
     }
-    sql.exec('UPDATE codes SET used_at = ? WHERE hash = ?', now, codeHash);
-    return ok(admit(sql, requireSpaceId(sql), deviceId, deviceName, token, tokenHash, now));
+    const waits = [
+      retryAfter(sql, ipScope, MAX_CLAIM_FAILURES_PER_IP, now),
+      retryAfter(sql, spaceScope, MAX_CLAIM_FAILURES_PER_SPACE, now),
+    ].filter((wait) => wait !== null);
+    if (waits.length > 0) {
+      return limited('Too many wrong pairing codes.', Math.max(...waits));
+    }
+    recordFailure(sql, [ipScope, spaceScope], now);
+    return BAD_CODE;
   });
 }
 
@@ -334,8 +349,12 @@ export async function ticket(
     if (!who.ok) {
       return who;
     }
-    if (!PLAN_DOC.test(doc) && doc !== 'ix-' + requireSpaceId(sql)) {
+    const index = 'ix-' + requireSpaceId(sql);
+    if (!PLAN_DOC.test(doc) && doc !== index) {
       return BAD_DOC;
+    }
+    if (doc !== index && plansFull(sql, who.id, doc, index)) {
+      return TOO_MANY_PLANS;
     }
     const expiresAt = now + TICKET_TTL_MS;
     sql.exec('DELETE FROM tickets WHERE expires_at - ? <= ?', TICKET_TTL_MS, now - TICKET_KEEP_MS);
