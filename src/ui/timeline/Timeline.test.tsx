@@ -615,6 +615,19 @@ describe("today and baselines", () => {
     expect(t.session.view().derived.slip(id).get("A")).toBe(3);
     expect(all(".bar-label .meta").map((e) => e.textContent)).toContain("+3d vs baseline");
   });
+
+  it("shows the slip of a task that only got longer", async () => {
+    const t = await made([{ name: "A", start: "2026-11-10", dur: 3 }]);
+    t.session.apply({ t: "baseline", op: "save", name: "B1" });
+    const [a] = [...t.session.view().plan.items.keys()];
+    t.session.apply({ t: "resize", item: a, dur: 5 });
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const [id] = [...t.session.view().plan.baselines.keys()];
+    act(() => uiNow()[1]({ baseline: id }));
+    expect(t.session.view().derived.slip(id).get(a)).toBe(2);
+    expect(all(".bar-label .meta").map((e) => e.textContent)).toContain("+2d vs baseline");
+  });
 });
 
 describe("gestures", () => {

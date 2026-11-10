@@ -199,7 +199,7 @@ describe.each(CASES)("the example plan, today on %s", (_, today, calendar, first
     expect(p.cal.workBetween(s, e)).toBe(5);
   });
 
-  it("keeps the Agreed plan baseline: the same dates with Visual design at 3 days, so Design sign-off and the work that waits on it slip", () => {
+  it("keeps the Agreed plan baseline: the same dates with Visual design at 3 days, so Visual design, Design sign-off and the work that waits on it slip", () => {
     const p = project(today, calendar);
     const baselines = [...p.plan.baselines.values()];
     expect(baselines.map((b) => b.name)).toEqual(["Agreed plan"]);
@@ -229,7 +229,7 @@ describe.each(CASES)("the example plan, today on %s", (_, today, calendar, first
       "Stakeholder interviews": 0,
       Requirements: 0,
       Wireframes: 0,
-      "Visual design": 0,
+      "Visual design": 2,
       "Design sign-off": 2,
       "CMS setup": 0,
       "Content migration": 2,

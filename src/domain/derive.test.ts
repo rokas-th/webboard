@@ -287,6 +287,47 @@ describe("derive", () => {
     expect(() => d.slip("nope")).toThrow(new Error("no baseline nope"));
   });
 
+  it("slip compares ends", () => {
+    const base: Baseline = {
+      id: "B",
+      name: "B",
+      at: "2026-11-01",
+      dates: {
+        A: { start: "2026-11-09", dur: 3 },
+        B: { start: "2026-11-12", dur: 2 },
+        C: { start: "2026-11-09", dur: 5 },
+        M: { start: "2026-11-13", dur: 0 },
+      },
+    };
+    const p = plan(
+      [
+        item("A", { start: "2026-11-09", dur: 8 }),
+        item("B", { start: "2026-11-19", dur: 2 }),
+        item("C", { start: "2026-11-09", dur: 3 }),
+        mile("M", { start: "2026-11-17" }),
+      ],
+      [ln("A", "B")],
+      { baselines: [base] },
+    );
+    expect(derive(p, NONE, TODAY).slip("B")).toEqual(
+      new Map([
+        ["A", 5],
+        ["B", 5],
+        ["C", -2],
+        ["M", 2],
+      ]),
+    );
+  });
+
+  it("slip of a done task after a closure", () => {
+    const base: Baseline = { id: "B", name: "B", at: "2026-11-01", dates: { T: { start: "2026-11-09", dur: 5 } } };
+    const calendar: Calendar = { ...CH_ZH, closures: new Map([["c1", { id: "c1", from: "2026-11-11", to: "2026-11-11", name: "Closed" }]]) };
+    const p = plan([item("T", { start: "2026-11-09", dur: 4, status: "done", progress: 100 })], [], { calendar, baselines: [base] });
+    const d = derive(p, NONE, TODAY);
+    expect(d.end.get("T")).toBe(toDay("2026-11-13"));
+    expect(d.slip("B")).toEqual(new Map([["T", -1]]));
+  });
+
   it("parent cycle", () => {
     const p = plan([group("G1", { parent: "G2" }), group("G2", { parent: "G1" }), item("T", { parent: "G1" })]);
     expect(() => derive(p, NONE, TODAY)).toThrow(new Error("parent cycle: G1, G2"));

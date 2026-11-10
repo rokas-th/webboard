@@ -186,9 +186,13 @@ export function derive(plan: PlanState, held: ReadonlySet<ItemId>, today: IsoDat
     const b = plan.baselines.get(id);
     if (b === undefined) throw new Error(`no baseline ${id}`);
     return new Map(
-      Object.entries(b.dates)
-        .filter(([item]) => view.items.has(item))
-        .map(([item, d]) => [item, signedWork(cal.snapF(toDay(d.start)), start.get(item) as Day)] as const),
+      Object.entries(b.dates).flatMap(([item, d]) => {
+        const current = view.items.get(item);
+        if (current === undefined) return [];
+        const e = end.get(item);
+        if (e === undefined) throw new Error(`no end for item ${item}`);
+        return [[item, signedWork(endOf({ ...current, start: toDay(d.start), dur: d.dur }, cal), e)] as const];
+      }),
     );
   };
 
