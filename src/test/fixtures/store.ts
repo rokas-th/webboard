@@ -23,7 +23,7 @@ export interface MemoryDoc {
   records: [number, Uint8Array][];
 }
 
-type FailingCmd = "store_load" | "store_append" | "store_compact" | "store_set_aside";
+type FailingCmd = "store_load" | "store_append" | "store_compact" | "store_set_aside" | "store_delete";
 
 export interface MemoryStore {
   answers: Record<string, Answer>;
@@ -111,6 +111,12 @@ export function memoryStore(): MemoryStore {
       const id = docArg(args);
       check("store_set_aside", id);
       if (!docs.delete(id)) throw { code: "store.io", message: `no document ${id}` };
+      return null;
+    },
+    store_delete: (args) => {
+      const id = docArg(args);
+      check("store_delete", id);
+      docs.delete(id);
       return null;
     },
   };

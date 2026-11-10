@@ -20,6 +20,7 @@ export const IX = "ix-" + SP;
 export const TODAY = "2026-11-08";
 export const NOW = new Date(2026, 10, 8, 14, 2).getTime();
 export const SPACE = { server: "https://webboard.rokass.org", spaceId: SP, deviceId: "dev-A", deviceName: "Mac" };
+export const GONE = "This plan was deleted forever on another device.";
 export const RESET_HINT = " Reset sync, then join with a code again.";
 
 const PLAIN: Calendar = { region: null, workdays: [1, 2, 3, 4, 5], closures: new Map(), tuning: new Map(), holidays: new Map() };
@@ -37,6 +38,7 @@ export interface SyncWorld {
   ticket: (doc: string) => unknown;
   answers: Record<string, Answer>;
   issued: number;
+  purged: Set<string>;
 }
 
 export const fail =
@@ -60,6 +62,7 @@ export function syncWorld(o: { names?: Record<string, string>; platform?: "macos
     },
     answers: {},
     issued: 0,
+    purged: new Set(),
   };
   w.answers = {
     ...mem.answers,
@@ -74,7 +77,14 @@ export function syncWorld(o: { names?: Record<string, string>; platform?: "macos
     sync_ticket: (args) => {
       const doc = argsOf({ args }).doc;
       if (typeof doc !== "string") throw new Error("sync_ticket without a doc");
+      if (w.purged.has(doc)) throw { code: "sync.gone", message: GONE };
       return w.ticket(doc);
+    },
+    sync_purge_plan: (args) => {
+      const doc = argsOf({ args }).doc;
+      if (typeof doc !== "string") throw new Error("sync_purge_plan without a doc");
+      w.purged.add(doc);
+      return null;
     },
     sync_mark_revoked: () => null,
     ...o.answers,

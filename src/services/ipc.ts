@@ -92,3 +92,11 @@ export async function syncMarkRevoked(): Promise<void> {
 export async function syncReset(): Promise<void> {
   await call<null>("sync_reset");
 }
+
+export async function syncPurgePlan(doc: string): Promise<void> {
+  await call<null>("sync_purge_plan", { doc });
+}
+
+export async function storeDelete(doc: string): Promise<void> {
+  await call<null>("store_delete", { doc });
+}

@@ -1551,3 +1551,58 @@ describe("chipText", () => {
     expect(() => chipText(err({ code: "failed" }), () => null)).toThrow("A failed sync state carries no message");
   });
 });
+
+describe("SyncManager: delete forever", () => {
+  const GONE = "This plan was deleted forever on another device.";
+  const deletes = (from: number): unknown[] => tauri.calls.slice(from).filter((c) => c.cmd === "store_delete").map((c) => argsOf(c).doc);
+
+  it("a ticket refused as gone drops the link and erases the plan, with no error", async () => {
+    const { r, f, m } = await started({
+      before: (w) => {
+        const ok = w.ticket;
+        w.ticket = (doc) => (doc === "P" ? fail({ code: "sync.gone", message: GONE })() : ok(doc));
+      },
+    });
+    await settle();
+    expect(prov(f, "P").calls).toContain("destroy");
+    expect(deletes(0)).toEqual(["P"]);
+    expect(r.plans().map((p) => p.id)).not.toContain("P");
+    expect(r.isGone("P")).toBe(true);
+    expect(m.state().kind).toBe("syncing");
+    syncAll(f);
+    expect(m.state()).toEqual({ kind: "synced" });
+    expect(r.takeGoneNotices().map((n) => n.text)).toEqual([
+      "“Launch” was deleted forever on another device. It is erased from this device too, including changes that had not synced.",
+    ]);
+    const from = tauri.calls.length;
+    await advance(60_000);
+    expect(tickets(from, "P")).toBe(0);
+  });
+
+  it("a 4410 close drops the link and erases the plan, with no error", async () => {
+    const { r, f, m } = await started();
+    syncAll(f);
+    const from = tauri.calls.length;
+    prov(f, "P").closeWith(4410, "Plan deleted");
+    await settle();
+    expect(prov(f, "P").calls).toContain("destroy");
+    expect(deletes(from)).toEqual(["P"]);
+    expect(appendsTo(from, IX).flatMap(xdocWrites)).toEqual([own("ip:P", { gone: true })]);
+    expect(r.isGone("P")).toBe(true);
+    expect(m.state()).toEqual({ kind: "synced" });
+    await advance(60_000);
+    expect(tickets(from, "P")).toBe(0);
+  });
+
+  it("a tombstone from another device drops the plan's link", async () => {
+    const { r, f, m } = await started();
+    syncAll(f);
+    const from = tauri.calls.length;
+    remoteIndex(prov(f, IX), "r-g", [own("ip:P2", { gone: true })]);
+    await settle();
+    expect(prov(f, "P2").calls).toContain("destroy");
+    expect(deletes(from)).toEqual(["P2"]);
+    expect(r.plans().map((p) => p.id)).not.toContain("P2");
+    expect(m.state()).toEqual({ kind: "synced" });
+  });
+});

@@ -39,10 +39,14 @@ const LABEL = {
   trash: "Move plan to Trash",
   restore: "Restore plan",
   name: "Name device",
+  purge: "Delete plan forever",
 } as const;
 
 const isTrash = (v: unknown): v is { t: boolean } =>
   typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length === 1 && "t" in v && typeof v.t === "boolean";
+
+const isGoneValue = (v: unknown): v is { gone: true } =>
+  typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length === 1 && "gone" in v && v.gone === true;
 
 const isDeviceName = (v: unknown): boolean => typeof v === "string" && v.trim().length > 0 && normalizeName(v) === v;
 
@@ -50,7 +54,7 @@ function checkIndexWrite(w: Write): void {
   const plan = w.u.startsWith(PLAN) && w.u.length > PLAN.length;
   const device = w.u.startsWith(DEVICE) && w.u.length > DEVICE.length;
   if (!plan && !device) throw new Error(`Unknown unit key “${w.u}”`);
-  if (plan ? !isTrash(w.v) : !isDeviceName(w.v)) throw new Error(`Malformed value for “${w.u}”`);
+  if (plan ? !isTrash(w.v) && !isGoneValue(w.v) : !isDeviceName(w.v)) throw new Error(`Malformed value for “${w.u}”`);
   if (w.c !== "own") throw new Error(`${w.u}: ${w.c} cannot write this unit`);
 }
 
@@ -69,6 +73,7 @@ export class IndexDoc {
   private readonly log = new LogState(indexRules);
   private readonly bad = new Map<ActionId, Bad>();
   private readonly devOf = new Map<ActionId, DeviceId>();
+  private readonly goneBy = new Map<PlanId, DeviceId>();
   private readonly subscribers = new Set<() => void>();
   private closing: Promise<void> | null = null;
 
@@ -111,6 +116,12 @@ export class IndexDoc {
       if (dev === undefined) throw new Error(`Refused index action ${r.id} was never read`);
       return [r.id, { dev, error: r.message }];
     });
+    const refusedIds = new Set(delta.refused.map((r) => r.id));
+    ok.filter((a) => !refusedIds.has(a.id))
+      .flatMap((a) => a.w.filter((w) => w.u.startsWith(PLAN) && isGoneValue(w.v)).map((w): [PlanId, DeviceId] => [w.u.slice(PLAN.length), a.dev]))
+      .forEach(([id, dev]) => {
+        if (!this.goneBy.has(id)) this.goneBy.set(id, dev);
+      });
     const bad = [...unreadable.map((u): [ActionId, Bad] => [u.id, { dev: u.dev, error: u.error }]), ...refused];
     bad.forEach(([id, b]) => this.bad.set(id, b));
     return bad.map(([, b]) => b);
@@ -132,10 +143,20 @@ export class IndexDoc {
   }
 
   plans(): readonly { id: PlanId; trashed: boolean }[] {
-    return this.units(PLAN).map(([id, v]) => {
-      if (!isTrash(v)) throw new Error(`Index unit ${PLAN}${id} holds a malformed value`);
-      return { id, trashed: v.t };
-    });
+    return this.units(PLAN)
+      .filter(([id]) => !this.goneBy.has(id))
+      .map(([id, v]) => {
+        if (!isTrash(v)) throw new Error(`Index unit ${PLAN}${id} holds a malformed value`);
+        return { id, trashed: v.t };
+      });
+  }
+
+  gone(): ReadonlyMap<PlanId, DeviceId> {
+    return new Map(this.goneBy);
+  }
+
+  lists(id: PlanId): boolean {
+    return this.log.unit(PLAN + id) !== undefined;
   }
 
   devices(): ReadonlyMap<DeviceId, string> {
@@ -148,7 +169,11 @@ export class IndexDoc {
   }
 
   private listed(id: PlanId): void {
-    if (this.log.unit(PLAN + id) === undefined) throw new Error(`Plan ${id} is not listed in ${this.id}`);
+    if (!this.lists(id)) throw new Error(`Plan ${id} is not listed in ${this.id}`);
+  }
+
+  private notGone(id: PlanId): void {
+    if (this.goneBy.has(id)) throw new Error(`Plan ${id} was deleted forever; ${this.id} cannot list it again`);
   }
 
   private append(lbl: string, w: readonly Write[]): void {
@@ -159,18 +184,27 @@ export class IndexDoc {
   }
 
   addPlan(id: PlanId): void {
-    if (this.log.unit(PLAN + id) !== undefined) throw new Error(`Plan ${id} is already listed in ${this.id}`);
+    this.notGone(id);
+    if (this.lists(id)) throw new Error(`Plan ${id} is already listed in ${this.id}`);
     this.append(LABEL.add, [{ u: PLAN + id, v: { t: false }, c: "own" }]);
   }
 
   trashPlan(id: PlanId): void {
+    this.notGone(id);
     this.listed(id);
     this.append(LABEL.trash, [{ u: PLAN + id, v: { t: true }, c: "own" }]);
   }
 
   restorePlan(id: PlanId): void {
+    this.notGone(id);
     this.listed(id);
     this.append(LABEL.restore, [{ u: PLAN + id, v: { t: false }, c: "own" }]);
+  }
+
+  purgePlan(id: PlanId): void {
+    this.listed(id);
+    if (this.goneBy.has(id)) return;
+    this.append(LABEL.purge, [{ u: PLAN + id, v: { gone: true }, c: "own" }]);
   }
 
   nameDevice(id: DeviceId, name: string): void {

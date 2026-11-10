@@ -13,6 +13,7 @@ import { OpenChoice } from "../run";
 import { ConvertedReport } from "../shell/ConvertedReport";
 import { moveAllToSpace } from "../shell/moving";
 import { FailedPlanView } from "../shell/PlanFailed";
+import { PurgeConfirm } from "../shell/PurgeConfirm";
 import { usePlanFiles, usePlanSelection, type PlanFiles, type PlanMain } from "../shell/selection";
 import { ExampleButton, NewPlanButton } from "../shell/Sidebar";
 import { RemovedBanner } from "../sync/RemovedBanner";
@@ -225,6 +226,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
   const [plans, setPlans] = useState(false);
   const [emptyError, setEmptyError] = useState<string | null>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
+  const [purging, setPurging] = useState<PlanId | null>(null);
   const sheetShown = useRef(0);
   const showPlans = useCallback(() => {
     sheetShown.current += 1;
@@ -315,6 +317,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
             onNew={newFromSheet}
             onOpen={openPlan}
             onTrash={trash}
+            onPurge={setPurging}
             onMoveAll={moveAll}
             onAbout={main.k === "empty" ? about : undefined}
             onSync={openSync}
@@ -325,6 +328,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
         {ui.dialog !== null && ui.dialog.t === "sync" && (
           <SyncDialog pane={ui.dialog.pane} frame="sheet" onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />
         )}
+        {purging !== null && <PurgeConfirm registry={p.registry} id={purging} frame="sheet" onClose={() => setPurging(null)} />}
         <ConvertedReport frame="sheet" />
         <Toasts />
       </div>

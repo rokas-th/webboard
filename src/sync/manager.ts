@@ -474,7 +474,7 @@ export class SyncManager {
     const reg = this.registry;
     const ix = this.indexId;
     const spaceId = this.space.spaceId;
-    [...this.links.values()].filter((l) => reg.reloading(l.doc)).forEach((l) => this.drop(l));
+    [...this.links.values()].filter((l) => reg.reloading(l.doc) || (!isIndex(l.doc) && reg.isGone(l.doc))).forEach((l) => this.drop(l));
     const open = reg.attachedSpace() === spaceId;
     if (this.attached && !open) this.attached = false;
     const e = reg.indexErrorOf(ix);
@@ -634,6 +634,9 @@ export class SyncManager {
       case "sync.io":
         this.stopAll(this.fault("local-failed", null, e.message + RESET_HINT, e.code));
         return;
+      case "sync.gone":
+        this.erase(link);
+        return;
       case "sync.rate_limited": {
         const wait = this.rateWait(e.message);
         if (wait === null) {
@@ -724,6 +727,9 @@ export class SyncManager {
       case 4403:
         void this.markRevoked();
         return;
+      case 4410:
+        this.erase(link);
+        return;
       case 4413:
         this.stopDoc(link, this.fault("too-large", link.doc, this.tooLargeText(link.doc), null));
         return;
@@ -780,6 +786,12 @@ export class SyncManager {
       if (!l.stopped) this.halt(l);
     });
     this.emit();
+  }
+
+  private erase(link: Link): void {
+    this.drop(link);
+    this.emit();
+    void this.registry.markGone(link.doc);
   }
 
   private drop(link: Link): void {

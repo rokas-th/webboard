@@ -38,6 +38,7 @@ import { FILES_STAY, PlanFailed, ReloadButton } from "./PlanFailed";
 import { PlanHead } from "./PlanHead";
 import { PlanMenu } from "./PlanMenu";
 import { ConvertedReport } from "./ConvertedReport";
+import { PurgeConfirm } from "./PurgeConfirm";
 import { ReloadConfirm } from "./ReloadConfirm";
 import { moveAllToSpace } from "./moving";
 import { messageOf, restorePlan, usePlanFiles, usePlanSelection } from "./selection";
@@ -102,6 +103,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
   const [sheet, setSheet] = useState<CompactSheet>(null);
   const [printing, setPrinting] = useState(false);
+  const [purging, setPurging] = useState<PlanId | null>(null);
   const selectedItem = useRef<ItemId | null>(ui.selected);
 
   const session = main.k === "open" && main.id === ui.plan ? main.session : null;
@@ -338,6 +340,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       }}
       onTrash={(id) => void trashOwn(id)}
       onRestore={(id) => restorePlan(registry, id)}
+      onPurge={setPurging}
       onMove={moveToSpace}
       onMoveAll={moveAll}
     />
@@ -434,6 +437,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         {ui.dialog !== null && ui.dialog.t === "about" && <About onClose={closeDialog} />}
         {ui.dialog !== null && ui.dialog.t === "sync" && <SyncDialog pane={ui.dialog.pane} onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />}
         <ConvertedReport />
+        {purging !== null && <PurgeConfirm registry={registry} id={purging} onClose={() => setPurging(null)} />}
         {printing && session !== null && <PrintSheet view={session.view()} onDone={() => setPrinting(false)} />}
         <Toasts />
       </div>

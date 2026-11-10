@@ -30,6 +30,7 @@ interface SidebarProps {
   onSelect(id: PlanId): void;
   onTrash(id: PlanId): void;
   onRestore(id: PlanId): void;
+  onPurge(id: PlanId): void;
   onMove(id: PlanId): void;
   onMoveAll(ids: readonly PlanId[]): void;
 }
@@ -93,6 +94,9 @@ export function Sidebar(p: SidebarProps) {
                 <div className="entry-actions">
                   <button type="button" className="button-small" disabled={locked(l)} onClick={() => p.onRestore(l.id)}>
                     Restore
+                  </button>
+                  <button type="button" className="button-small button-danger entry-more" disabled={locked(l)} onClick={() => p.onPurge(l.id)}>
+                    Delete forever
                   </button>
                 </div>
               </li>

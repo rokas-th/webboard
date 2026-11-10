@@ -25,7 +25,7 @@ export interface PlanSelection {
 
 export const quoted = (l: PlanListing | undefined): string => (l === undefined || l.name === null ? "the plan" : `“${l.name}”`);
 
-const capital = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+export const capital = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
 export const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -100,6 +100,7 @@ export function usePlanSelection(registry: Registry): PlanSelection {
     const takeIndexRepair = (): void => {
       const notice = registry.takeIndexRepairNotice();
       if (notice !== null) toast(notice);
+      registry.takeGoneNotices().forEach((n) => toast(n.text, n.bad ? "bad" : undefined));
     };
     const remember = (plans: readonly PlanListing[]): void => {
       lastTrashed.current = new Map(plans.map((l) => [l.id, l.trashed]));

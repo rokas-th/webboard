@@ -13,7 +13,7 @@ import { planRules } from "../plan/rules";
 import { region as regionCodec, validateWrite } from "../plan/units";
 import { collected, notifyEach, systemClock, type Clock } from "../services/clock";
 import { HolidayService } from "../services/holidays";
-import { AppError, call } from "../services/ipc";
+import { AppError, call, storeDelete, syncPurgePlan } from "../services/ipc";
 import { LOCAL, PlanDoc } from "./doc";
 import type { ImportResult } from "./file";
 import { IndexDoc } from "./index-doc";
@@ -46,7 +46,13 @@ export interface PlanListing {
   example: boolean;
 }
 
+export interface GoneNotice {
+  text: string;
+  bad: boolean;
+}
+
 const READ_ONLY = "This device was removed from the space; its plans are read-only.";
+const NOT_TRASHED = "Move the plan to the Trash first.";
 const MOVE_READ_ONLY = "This device was removed from the space. Join again to move plans there.";
 const INCOMPLETE = "This plan has not arrived yet; it opens once it syncs.";
 const INDEX_REPAIRED = "The last change to the plan list before WebBoard closed was not saved.";
@@ -177,6 +183,12 @@ export class Registry {
   private settingsFailure: AppError | null = null;
   private settingsQueue: Promise<void> = Promise.resolve();
   private indexRepairPending = false;
+  private readonly ownPurge = new Set<PlanId>();
+  private readonly marked = new Set<PlanId>();
+  private readonly swept = new Set<PlanId>();
+  private sweeping: Promise<void> | null = null;
+  private sweepAgain = false;
+  private goneNotices: GoneNotice[] = [];
   private closed = false;
   private closing: Promise<void> | null = null;
 
@@ -217,6 +229,7 @@ export class Registry {
     this.spaceIds = this.stored.filter((id) => id.startsWith(SPACE_PREFIX));
     await Promise.all(this.spaceIds.map((id) => this.openSpace(id)));
     this.adoptOrphans();
+    await this.sweep();
   }
 
   private async offerExample(): Promise<void> {
@@ -237,8 +250,8 @@ export class Registry {
   private adoptOrphans(): void {
     if (this.spaceIds.some((id) => !this.spaces.has(id))) return;
     const local = this.local;
-    const listed = new Set([local, ...this.spaces.values()].flatMap((ix) => ix.plans().map((p) => p.id)));
-    this.stored.filter((id) => !isIndexDoc(id) && id !== PROBE && !listed.has(id)).forEach((id) => local.addPlan(id));
+    const indexes = [local, ...this.spaces.values()];
+    this.stored.filter((id) => !isIndexDoc(id) && id !== PROBE && !indexes.some((ix) => ix.lists(id))).forEach((id) => local.addPlan(id));
   }
 
   private async openIndex(id: string): Promise<IndexDoc> {
@@ -282,6 +295,7 @@ export class Registry {
     const changed = !sameDevices(devices, this.lastDevices);
     this.lastDevices = devices;
     notifyEach([...(changed ? this.deviceCbs : []), ...this.subscribers]);
+    void this.sweep();
   }
 
   private record(id: string, e: AppError): void {
@@ -498,11 +512,20 @@ export class Registry {
     return { id, name: this.settings.names[id] ?? null, trashed, loaded, space, example: loaded && tracker !== undefined && tracker.example };
   }
 
+  private goneWriters(): ReadonlyMap<PlanId, DeviceId> {
+    return new Map([this.local, ...this.spaces.values()].flatMap((ix) => [...ix.gone()]));
+  }
+
+  isGone(id: PlanId): boolean {
+    return this.goneWriters().has(id);
+  }
+
   plans(): readonly PlanListing[] {
     const ix = this.spaceIndex();
     const spaceId = this.attachedSpace();
-    const inSpace = new Map((ix?.plans() ?? []).map((p) => [p.id, p.trashed]));
-    const local = this.local.plans();
+    const gone = this.goneWriters();
+    const inSpace = new Map((ix?.plans() ?? []).filter((p) => !gone.has(p.id)).map((p) => [p.id, p.trashed]));
+    const local = this.local.plans().filter((p) => !gone.has(p.id));
     const localIds = new Set(local.map((p) => p.id));
     return [
       ...local.map((p) => {
@@ -661,6 +684,135 @@ export class Registry {
   restorePlan(id: PlanId): void {
     this.usable();
     this.planIndex(id).restorePlan(id);
+  }
+
+  async purgePlan(id: PlanId): Promise<void> {
+    this.usable();
+    const listing = this.plans().find((p) => p.id === id);
+    if (listing === undefined || !listing.trashed) throw new Refused(NOT_TRASHED);
+    if (listing.space !== null && this.readOnlySpace) throw new Refused(READ_ONLY);
+    this.ownPurge.add(id);
+    try {
+      let pending: AppError | null = null;
+      if (listing.space !== null) {
+        try {
+          await syncPurgePlan(id);
+        } catch (e) {
+          if (!(e instanceof AppError) || e.code !== "sync.purge_pending") throw e;
+          pending = e;
+        }
+      }
+      [this.local, this.spaceIndex()].filter((ix): ix is IndexDoc => ix !== null && ix.lists(id)).forEach((ix) => ix.purgePlan(id));
+      await this.sweep();
+      if (pending !== null) throw pending;
+    } finally {
+      this.ownPurge.delete(id);
+    }
+  }
+
+  async markGone(doc: PlanId): Promise<void> {
+    this.usable();
+    this.marked.add(doc);
+    const space = this.readOnlySpace ? null : this.spaceIndex();
+    [this.local, space].filter((ix): ix is IndexDoc => ix !== null && ix.lists(doc)).forEach((ix) => ix.purgePlan(doc));
+    await this.sweep();
+  }
+
+  takeGoneNotices(): readonly GoneNotice[] {
+    return this.goneNotices.splice(0);
+  }
+
+  private sweep(): Promise<void> {
+    if (this.sweeping !== null) {
+      this.sweepAgain = true;
+      return this.sweeping;
+    }
+    this.sweeping = this.runSweeps();
+    return this.sweeping;
+  }
+
+  private async runSweeps(): Promise<void> {
+    try {
+      await Promise.resolve();
+      do {
+        this.sweepAgain = false;
+        await this.sweepOnce();
+      } while (this.sweepAgain && !this.closed);
+    } finally {
+      this.sweeping = null;
+    }
+  }
+
+  private held(id: PlanId): boolean {
+    return this.stored.includes(id) || this.loaded.has(id) || this.memo.has(id) || this.settings.names[id] !== undefined || this.settings.syncedHeads?.[id] !== undefined;
+  }
+
+  private async sweepOnce(): Promise<void> {
+    if (this.closed) return;
+    const due = [...this.goneWriters()].filter(([id]) => this.held(id) && !this.swept.has(id));
+    for (const [id, writer] of due) {
+      if (this.closed) return;
+      await this.erase(id, writer);
+    }
+  }
+
+  private async erase(id: PlanId, writer: DeviceId): Promise<void> {
+    this.swept.add(id);
+    const local = this.local;
+    if (local.lists(id) && !local.gone().has(id)) local.purgePlan(id);
+    const told = !this.ownPurge.has(id) && (writer !== this.deviceId || this.marked.has(id));
+    const unsynced = told && (await this.unsynced(id));
+    const name = this.settings.names[id];
+    const label = name === undefined ? "A plan" : `“${name}”`;
+    this.emit();
+    try {
+      await this.release(id);
+      this.detach(id);
+      await storeDelete(id);
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e;
+      this.goneNotices.push({ text: `${label} was deleted forever, but its files on this device could not be removed: ${e.message.replace(/\.$/, "")}. Restart WebBoard to try again.`, bad: true });
+      this.emit();
+      return;
+    }
+    this.stored = this.stored.filter((x) => x !== id);
+    this.failed.delete(id);
+    const heads = this.settings.syncedHeads;
+    this.settings = {
+      ...this.settings,
+      names: Object.fromEntries(Object.entries(this.settings.names).filter(([x]) => x !== id)),
+      ...(heads === undefined ? {} : { syncedHeads: Object.fromEntries(Object.entries(heads).filter(([x]) => x !== id)) }),
+    };
+    if (told) {
+      const by = writer === this.deviceId ? undefined : this.devices().get(writer);
+      const tail = unsynced ? ", including changes that had not synced." : ".";
+      this.goneNotices.push({ text: `${label} was deleted forever on ${by ?? "another device"}. It is erased from this device too${tail}`, bad: unsynced });
+    }
+    try {
+      await this.writeSettings();
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e;
+      this.settingsFailure = e;
+    }
+    this.emit();
+  }
+
+  private async unsynced(id: PlanId): Promise<boolean> {
+    if (!this.trackers.has(id) && (this.stored.includes(id) || this.memo.has(id))) {
+      await this.load(id, false).then(afterEither, (e: unknown) => {
+        if (!(e instanceof AppError)) throw e;
+      });
+    }
+    const log = this.trackers.get(id)?.log;
+    if (log === undefined) return false;
+    const covered = new Set<ActionId>();
+    const stack = [...(this.settings.syncedHeads?.[id] ?? [])];
+    for (let a = stack.pop(); a !== undefined; a = stack.pop()) {
+      if (covered.has(a)) continue;
+      covered.add(a);
+      stack.push(...(log.get(a)?.par ?? []));
+    }
+    return log.order().some((a) => !covered.has(a) && log.get(a)?.dev === this.deviceId);
   }
 
   movePlanToSpace(id: PlanId): void {
@@ -932,6 +1084,7 @@ export class Registry {
     this.offLocal?.();
     this.offLocal = null;
     this.unhookSpace();
+    const sweeps = await Promise.allSettled([this.sweeping ?? Promise.resolve()]);
     const sessions = await Promise.allSettled([...this.sessions.values()].map(async (s) => s.close()));
     const indexes = [...(this.localIx === null ? [] : [this.localIx]), ...this.spaces.values()];
     const indexDocs = await Promise.allSettled(indexes.map(async (ix) => ix.close()));
@@ -940,7 +1093,7 @@ export class Registry {
     this.memo.clear();
     const planDocs = await Promise.allSettled(docs.map(async ([, d]) => d.close()));
     await this.settingsQueue;
-    const thrown = [...new Set([...sessions, ...indexDocs, ...planDocs].flatMap((r) => (r.status === "rejected" ? [r.reason] : [])))];
+    const thrown = [...new Set([...sweeps, ...sessions, ...indexDocs, ...planDocs].flatMap((r) => (r.status === "rejected" ? [r.reason] : [])))];
     if (thrown.length > 0) throw collected(thrown, "documents failed to close");
   }
 }
