@@ -112,7 +112,7 @@ fn remove_staged(path: &Path) -> Result<()> {
 #[cfg(any(target_os = "ios", test))]
 #[tauri::command]
 pub async fn file_stage(
-    staging: tauri::State<'_, Staging>,
+    staging: tauri::State<'_, super::Started<Staging>>,
     request: Request<'_>,
 ) -> Result<String> {
     let default_path = header(&request, "x-name")?;
@@ -120,18 +120,21 @@ pub async fn file_stage(
         .ok_or_else(|| io("x-name names no file"))?
         .to_string();
     let bytes = raw_body(&request, "file_stage")?;
-    let path = staging.0.join(&name);
+    let path = staging.get()?.0.join(&name);
     super::blocking("file_stage", CODE, move || write_file(&path, &bytes)).await?;
     Ok(name)
 }
 
 #[cfg(any(target_os = "ios", test))]
 #[tauri::command]
-pub async fn file_unstage(staging: tauri::State<'_, Staging>, name: String) -> Result<()> {
+pub async fn file_unstage(
+    staging: tauri::State<'_, super::Started<Staging>>,
+    name: String,
+) -> Result<()> {
     if file_name_of(&name) != Some(name.as_str()) {
         return Err(io(format!("{name:?} is not a file name")));
     }
-    let path = staging.0.join(&name);
+    let path = staging.get()?.0.join(&name);
     super::blocking("file_unstage", CODE, move || remove_staged(&path)).await
 }
 
@@ -162,7 +165,9 @@ mod tests {
     fn harness() -> Harness {
         let documents = TempDir::new().unwrap();
         let app = mock_builder()
-            .manage(Staging(documents.path().to_path_buf()))
+            .manage(crate::commands::Started::new(Ok(Staging(
+                documents.path().to_path_buf(),
+            ))))
             .invoke_handler(tauri::generate_handler![
                 file_write,
                 file_read,

@@ -27,11 +27,12 @@ impl SyncState {
 
 #[tauri::command]
 pub async fn sync_setup(
-    sync: State<'_, SyncState>,
+    sync: State<'_, super::Started<SyncState>>,
     server: String,
     secret: String,
     device_name: String,
 ) -> Result<SpaceInfo> {
+    let sync = sync.get()?;
     let device_id = sync.device_id("sync_setup").await?;
     sync.client
         .setup(&server, &secret, &device_id, &device_name)
@@ -41,11 +42,12 @@ pub async fn sync_setup(
 
 #[tauri::command]
 pub async fn sync_pair_join(
-    sync: State<'_, SyncState>,
+    sync: State<'_, super::Started<SyncState>>,
     server: String,
     code: String,
     device_name: String,
 ) -> Result<SpaceInfo> {
+    let sync = sync.get()?;
     let device_id = sync.device_id("sync_pair_join").await?;
     sync.client
         .pair_join(&server, &code, &device_id, &device_name)
@@ -54,41 +56,68 @@ pub async fn sync_pair_join(
 }
 
 #[tauri::command]
-pub async fn sync_pair_code(sync: State<'_, SyncState>) -> Result<PairCode> {
-    sync.client.pair_code().await.map_err(CommandError::from)
+pub async fn sync_pair_code(sync: State<'_, super::Started<SyncState>>) -> Result<PairCode> {
+    sync.get()?
+        .client
+        .pair_code()
+        .await
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn sync_ticket(sync: State<'_, SyncState>, doc: String) -> Result<Ticket> {
-    sync.client.ticket(&doc).await.map_err(CommandError::from)
+pub async fn sync_ticket(
+    sync: State<'_, super::Started<SyncState>>,
+    doc: String,
+) -> Result<Ticket> {
+    sync.get()?
+        .client
+        .ticket(&doc)
+        .await
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn sync_devices(sync: State<'_, SyncState>) -> Result<Vec<DeviceEntry>> {
-    sync.client.devices().await.map_err(CommandError::from)
+pub async fn sync_devices(sync: State<'_, super::Started<SyncState>>) -> Result<Vec<DeviceEntry>> {
+    sync.get()?
+        .client
+        .devices()
+        .await
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn sync_remove_device(sync: State<'_, SyncState>, id: String) -> Result<()> {
-    sync.client
+pub async fn sync_remove_device(
+    sync: State<'_, super::Started<SyncState>>,
+    id: String,
+) -> Result<()> {
+    sync.get()?
+        .client
         .remove_device(&id)
         .await
         .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn sync_status(sync: State<'_, SyncState>) -> Result<SyncStatus> {
-    sync.client.status().await.map_err(CommandError::from)
+pub async fn sync_status(sync: State<'_, super::Started<SyncState>>) -> Result<SyncStatus> {
+    sync.get()?
+        .client
+        .status()
+        .await
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn sync_mark_revoked(sync: State<'_, SyncState>) -> Result<()> {
-    sync.client.mark_revoked().await.map_err(CommandError::from)
+pub async fn sync_mark_revoked(sync: State<'_, super::Started<SyncState>>) -> Result<()> {
+    sync.get()?
+        .client
+        .mark_revoked()
+        .await
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn sync_reset(sync: State<'_, SyncState>) -> Result<()> {
-    sync.client.reset().await.map_err(CommandError::from)
+pub async fn sync_reset(sync: State<'_, super::Started<SyncState>>) -> Result<()> {
+    sync.get()?.client.reset().await.map_err(CommandError::from)
 }
 
 #[cfg(test)]
@@ -118,7 +147,10 @@ mod tests {
             webboard_core::sync::http_client().expect("http client"),
         );
         let app = mock_builder()
-            .manage(SyncState::new(tmp.path().to_path_buf(), client))
+            .manage(crate::commands::Started::new(Ok(SyncState::new(
+                tmp.path().to_path_buf(),
+                client,
+            ))))
             .invoke_handler(tauri::generate_handler![
                 sync_setup,
                 sync_pair_code,

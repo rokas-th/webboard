@@ -47,6 +47,74 @@ fn close_every_window<R: tauri::Runtime>(
     });
 }
 
+struct Services {
+    store: webboard_core::store::Store,
+    holidays: webboard_core::holidays::Holidays,
+    sync: commands::sync::SyncState,
+    #[cfg(target_os = "ios")]
+    staging: commands::file::Staging,
+}
+
+fn no_folder(e: tauri::Error) -> webboard_core::CommandError {
+    webboard_core::CommandError::new(
+        "app.setup",
+        format!("WebBoard could not find its data folder: {e}"),
+    )
+}
+
+fn services(
+    data: tauri::Result<std::path::PathBuf>,
+    #[cfg(target_os = "ios")] documents: tauri::Result<std::path::PathBuf>,
+) -> webboard_core::error::Result<Services> {
+    use webboard_core::holidays::{Holidays, Sources};
+    let dir = data.map_err(no_folder)?;
+    let holidays = Holidays::new(dir.join("holidays"), Sources::official())?;
+    let http = webboard_core::sync::http_client()?;
+    let client = webboard_core::sync::SyncClient::new(
+        dir.clone(),
+        std::sync::Arc::new(keychain::OsKeychain),
+        http,
+    );
+    #[cfg(feature = "probe")]
+    {
+        commands::probe::record(&dir, "ready")?;
+        commands::probe::record(&dir, &format!("app_data_dir {}", dir.display()))?;
+    }
+    Ok(Services {
+        store: webboard_core::store::Store::new(dir.join("docs")),
+        holidays,
+        sync: commands::sync::SyncState::new(dir, client),
+        #[cfg(target_os = "ios")]
+        staging: commands::file::Staging(documents.map_err(no_folder)?),
+    })
+}
+
+fn manage_services<R: tauri::Runtime, M: tauri::Manager<R>>(
+    app: &M,
+    built: webboard_core::error::Result<Services>,
+) {
+    use commands::Started;
+    match built {
+        Ok(s) => {
+            app.manage(Started::new(Ok(s.store)));
+            app.manage(Started::new(Ok(s.holidays)));
+            app.manage(Started::new(Ok(s.sync)));
+            #[cfg(target_os = "ios")]
+            app.manage(Started::new(Ok(s.staging)));
+        }
+        Err(e) => {
+            eprintln!("webboard: setup failed: {}: {}", e.code, e.message);
+            app.manage(Started::<webboard_core::store::Store>::new(Err(e.clone())));
+            app.manage(Started::<webboard_core::holidays::Holidays>::new(Err(
+                e.clone()
+            )));
+            #[cfg(target_os = "ios")]
+            app.manage(Started::<commands::file::Staging>::new(Err(e.clone())));
+            app.manage(Started::<commands::sync::SyncState>::new(Err(e)));
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(not(target_vendor = "apple"))]
@@ -72,33 +140,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             use tauri::Manager;
-            use webboard_core::holidays::{Holidays, Sources};
-            let docs = app.path().app_data_dir()?.join("docs");
-            app.manage(webboard_core::store::Store::new(docs));
-            let holidays = Holidays::new(
-                app.path().app_data_dir()?.join("holidays"),
-                Sources::official(),
-            )
-            .map_err(|e| format!("{}: {}", e.code, e.message))?;
-            app.manage(holidays);
-            let http = webboard_core::sync::http_client()
-                .map_err(|e| format!("{}: {}", e.code, e.message))?;
-            let dir = app.path().app_data_dir()?;
-            let client = webboard_core::sync::SyncClient::new(
-                dir.clone(),
-                std::sync::Arc::new(keychain::OsKeychain),
-                http,
+            let built = services(
+                app.path().app_data_dir(),
+                #[cfg(target_os = "ios")]
+                app.path().document_dir(),
             );
-            #[cfg(feature = "probe")]
-            {
-                commands::probe::record(&dir, "ready")
-                    .map_err(|e| format!("{}: {}", e.code, e.message))?;
-                commands::probe::record(&dir, &format!("app_data_dir {}", dir.display()))
-                    .map_err(|e| format!("{}: {}", e.code, e.message))?;
-            }
-            app.manage(commands::sync::SyncState::new(dir, client));
-            #[cfg(target_os = "ios")]
-            app.manage(commands::file::Staging(app.path().document_dir()?));
+            manage_services(app, built);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -212,6 +259,113 @@ mod tests {
             named, 1,
             "the plugin is named {named} times in lib.rs. It may be named once, inside \
              single_instance_guard, which is the single place carrying the release-only cfg."
+        );
+    }
+
+    fn invoke_on(
+        webview: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+        cmd: &str,
+    ) -> Result<serde_json::Value, serde_json::Value> {
+        let request = tauri::webview::InvokeRequest {
+            cmd: cmd.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().expect("url"),
+            body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+            headers: tauri::http::HeaderMap::new(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        };
+        tauri::test::get_ipc_response(webview, request).map(|body| {
+            body.deserialize::<serde_json::Value>()
+                .expect("a JSON answer")
+        })
+    }
+
+    fn app_with(
+        built: webboard_core::error::Result<super::Services>,
+    ) -> (
+        tauri::App<tauri::test::MockRuntime>,
+        tauri::WebviewWindow<tauri::test::MockRuntime>,
+    ) {
+        use tauri::test::{mock_builder, mock_context, noop_assets};
+        let app = mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                super::commands::store::store_list,
+                super::commands::holidays::holidays_countries,
+                super::commands::sync::sync_status
+            ])
+            .build(mock_context(noop_assets()))
+            .expect("mock app");
+        super::manage_services(&app, built);
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("mock webview");
+        (app, webview)
+    }
+
+    #[test]
+    fn a_failed_setup_step_answers_every_command_with_its_error() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        std::fs::write(tmp.path().join("holidays"), b"")
+            .expect("a file where the cache folder goes");
+        let built = super::services(Ok(tmp.path().to_path_buf()));
+        let failure = match &built {
+            Ok(_) => panic!("setup succeeded although the holiday cache folder is a file"),
+            Err(e) => e.clone(),
+        };
+        assert_eq!(failure.code, "holidays.io", "{}", failure.message);
+        let (_app, webview) = app_with(built);
+        let answer = serde_json::json!({ "code": failure.code, "message": failure.message });
+        ["store_list", "holidays_countries", "sync_status"]
+            .into_iter()
+            .for_each(|cmd| assert_eq!(invoke_on(&webview, cmd), Err(answer.clone()), "{cmd}"));
+    }
+
+    #[test]
+    fn a_missing_data_folder_is_named_and_kept() {
+        let built = super::services(Err(tauri::Error::UnknownPath));
+        let failure = match &built {
+            Ok(_) => panic!("setup succeeded without a data folder"),
+            Err(e) => e.clone(),
+        };
+        assert_eq!(
+            failure,
+            webboard_core::CommandError::new(
+                "app.setup",
+                "WebBoard could not find its data folder: unknown path"
+            )
+        );
+        let (_app, webview) = app_with(built);
+        assert_eq!(
+            invoke_on(&webview, "store_list"),
+            Err(serde_json::json!({ "code": failure.code, "message": failure.message }))
+        );
+    }
+
+    #[test]
+    fn a_working_setup_serves_the_commands() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let (_app, webview) = app_with(super::services(Ok(tmp.path().to_path_buf())));
+        assert_eq!(invoke_on(&webview, "store_list"), Ok(serde_json::json!([])));
+        assert_eq!(
+            invoke_on(&webview, "sync_status"),
+            Ok(serde_json::json!({ "space": null, "revoked": false }))
+        );
+    }
+
+    #[test]
+    fn setup_itself_never_fails() {
+        let body = run_body();
+        let setup = body
+            .split_once(".setup(|app| {")
+            .expect("run() has a setup hook")
+            .1
+            .split_once(".invoke_handler(")
+            .expect("the setup hook ends before the handlers")
+            .0;
+        assert!(
+            !setup.contains('?'),
+            "the setup hook still returns early with ?, so a failure panics in tauri before any window exists:\n{setup}"
         );
     }
 

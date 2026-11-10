@@ -1612,3 +1612,47 @@ async fn burst_openholidays() {
         .expect("open probes.md");
     writeln!(file, "{}", lines.join("\n")).expect("append to probes.md");
 }
+
+#[tokio::test]
+async fn a_webcal_link_is_fetched_over_https() {
+    let dir = TempDir::new().expect("temp dir");
+    let (addr, thread) = raw_server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nno", false);
+    let h = Holidays::new(
+        dir.path().join("holidays"),
+        sources_at("http://127.0.0.1:9"),
+    )
+    .expect("Holidays::new");
+    let today = NaiveDate::from_ymd_opt(2026, 11, 8).expect("date");
+    let e = h
+        .ics_preview(&format!("WebCal://{addr}/holidays.ics"), today)
+        .await
+        .unwrap_err();
+    assert_eq!(e.code, "holidays.http", "{}", e.message);
+    assert!(
+        e.message
+            .starts_with("Could not make a secure connection to 127.0.0.1: "),
+        "{}",
+        e.message
+    );
+    thread.join().expect("the raw server ends cleanly");
+}
+
+#[tokio::test]
+async fn a_link_with_another_scheme_names_it() {
+    let dir = TempDir::new().expect("temp dir");
+    let h = Holidays::new(
+        dir.path().join("holidays"),
+        sources_at("http://127.0.0.1:9"),
+    )
+    .expect("Holidays::new");
+    let today = NaiveDate::from_ymd_opt(2026, 11, 8).expect("date");
+    assert_eq!(
+        h.ics_preview("ftp://example.org/holidays.ics", today)
+            .await
+            .unwrap_err(),
+        err(
+            "holidays.http",
+            "ftp://example.org/holidays.ics uses the ftp scheme. Calendar links start with https://, http:// or webcal://."
+        )
+    );
+}

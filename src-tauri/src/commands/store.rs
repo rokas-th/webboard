@@ -7,6 +7,8 @@ use webboard_core::error::Result;
 use webboard_core::store::{DocStore, Store};
 use webboard_core::CommandError;
 
+use super::Started;
+
 async fn blocking<T: Send + 'static>(
     cmd: &str,
     work: impl FnOnce() -> Result<T> + Send + 'static,
@@ -57,8 +59,8 @@ fn lock_doc<'a>(doc: &'a Mutex<DocStore>, id: &str) -> Result<MutexGuard<'a, Doc
 }
 
 #[tauri::command]
-pub async fn store_load(store: State<'_, Store>, doc: String) -> Result<Response> {
-    let store = store.inner().clone();
+pub async fn store_load(store: State<'_, Started<Store>>, doc: String) -> Result<Response> {
+    let store = store.get()?.clone();
     blocking("store_load", move || {
         let handle = store.doc(&doc)?;
         let loaded = lock_doc(&handle, &doc)?.load()?;
@@ -68,9 +70,9 @@ pub async fn store_load(store: State<'_, Store>, doc: String) -> Result<Response
 }
 
 #[tauri::command]
-pub async fn store_append(store: State<'_, Store>, request: Request<'_>) -> Result<()> {
+pub async fn store_append(store: State<'_, Started<Store>>, request: Request<'_>) -> Result<()> {
     let w = write_of("store_append", &request)?;
-    let store = store.inner().clone();
+    let store = store.get()?.clone();
     blocking("store_append", move || {
         let handle = store.doc(&w.doc)?;
         let result = lock_doc(&handle, &w.doc)?.append(w.seq, &w.bytes);
@@ -80,9 +82,9 @@ pub async fn store_append(store: State<'_, Store>, request: Request<'_>) -> Resu
 }
 
 #[tauri::command]
-pub async fn store_compact(store: State<'_, Store>, request: Request<'_>) -> Result<()> {
+pub async fn store_compact(store: State<'_, Started<Store>>, request: Request<'_>) -> Result<()> {
     let w = write_of("store_compact", &request)?;
-    let store = store.inner().clone();
+    let store = store.get()?.clone();
     blocking("store_compact", move || {
         let handle = store.doc(&w.doc)?;
         let result = lock_doc(&handle, &w.doc)?.compact(w.seq, &w.bytes);
@@ -92,20 +94,20 @@ pub async fn store_compact(store: State<'_, Store>, request: Request<'_>) -> Res
 }
 
 #[tauri::command]
-pub async fn store_list(store: State<'_, Store>) -> Result<Vec<String>> {
-    let store = store.inner().clone();
+pub async fn store_list(store: State<'_, Started<Store>>) -> Result<Vec<String>> {
+    let store = store.get()?.clone();
     blocking("store_list", move || store.list()).await
 }
 
 #[tauri::command]
-pub async fn store_set_aside(store: State<'_, Store>, doc: String) -> Result<()> {
+pub async fn store_set_aside(store: State<'_, Started<Store>>, doc: String) -> Result<()> {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| {
             CommandError::new("store.io", format!("The system clock is before 1970: {e}"))
         })?
         .as_secs();
-    let store = store.inner().clone();
+    let store = store.get()?.clone();
     blocking("store_set_aside", move || store.set_aside(&doc, secs)).await
 }
 
@@ -132,7 +134,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let docs = tmp.path().join("docs");
         let app = mock_builder()
-            .manage(Store::new(docs.clone()))
+            .manage(crate::commands::Started::new(Ok(Store::new(docs.clone()))))
             .invoke_handler(tauri::generate_handler![
                 store_load,
                 store_append,

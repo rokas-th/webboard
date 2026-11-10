@@ -196,6 +196,29 @@ fn transport_error(url: &str, e: &reqwest::Error) -> CommandError {
     }
 }
 
+const WEBCAL: &str = "webcal://";
+
+fn fetch_url(url: &str) -> Result<Url> {
+    let https = match url.get(..WEBCAL.len()) {
+        Some(head) if head.eq_ignore_ascii_case(WEBCAL) => {
+            format!("https://{}", &url[WEBCAL.len()..])
+        }
+        _ => url.to_string(),
+    };
+    let parsed = Url::parse(&https).map_err(|e| {
+        CommandError::new("holidays.http", format!("{url} is not a web address: {e}."))
+    })?;
+    match parsed.scheme() {
+        "https" | "http" => Ok(parsed),
+        other => Err(CommandError::new(
+            "holidays.http",
+            format!(
+                "{url} uses the {other} scheme. Calendar links start with https://, http:// or webcal://."
+            ),
+        )),
+    }
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes
         .iter()
@@ -330,9 +353,7 @@ impl Holidays {
     }
 
     async fn get(&self, url: &str, query: &[(&str, &str)]) -> Result<String> {
-        let parsed = Url::parse(url).map_err(|e| {
-            CommandError::new("holidays.http", format!("{url} is not a web address: {e}."))
-        })?;
+        let parsed = fetch_url(url)?;
         let mut request = self.client.get(parsed).query(query);
         if url == self.sources.opm {
             request = request.header(USER_AGENT, BROWSER_UA);

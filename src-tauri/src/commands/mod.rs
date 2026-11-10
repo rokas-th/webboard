@@ -28,3 +28,15 @@ pub(crate) async fn blocking<T: Send + 'static>(
         .await
         .map_err(|e| webboard_core::CommandError::new(code, format!("{cmd} stopped: {e}")))?
 }
+
+pub struct Started<T>(webboard_core::error::Result<T>);
+
+impl<T> Started<T> {
+    pub fn new(built: webboard_core::error::Result<T>) -> Self {
+        Self(built)
+    }
+
+    pub(crate) fn get(&self) -> webboard_core::error::Result<&T> {
+        self.0.as_ref().map_err(Clone::clone)
+    }
+}

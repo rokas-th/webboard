@@ -140,9 +140,7 @@ enum Parsed<'a> {
         size: usize,
     },
     Short,
-    BadCrc {
-        reaches_end: bool,
-    },
+    BadCrc,
 }
 
 fn parse_record(rest: &[u8]) -> Parsed<'_> {
@@ -157,9 +155,7 @@ fn parse_record(rest: &[u8]) -> Parsed<'_> {
     }
     let stored = u32::from_le_bytes(rest[HEADER + len..size].try_into().expect("4-byte slice"));
     if crc32fast::hash(&rest[..HEADER + len]) != stored {
-        return Parsed::BadCrc {
-            reaches_end: rest.len() == size,
-        };
+        return Parsed::BadCrc;
     }
     Parsed::Record {
         seq,
@@ -301,7 +297,7 @@ impl Scan {
                     }
                     offset += size;
                 }
-                Parsed::Short | Parsed::BadCrc { reaches_end: true } if is_last => {
+                Parsed::Short | Parsed::BadCrc if is_last => {
                     let tail = &bytes[offset..];
                     if let Some((at, seq)) = later_record(tail, self.last) {
                         return Err(corrupt(
@@ -323,7 +319,7 @@ impl Scan {
                         &format!("record at offset {offset} is cut short"),
                     ))
                 }
-                Parsed::BadCrc { .. } => {
+                Parsed::BadCrc => {
                     return Err(corrupt(
                         &seg.path,
                         &format!("record at offset {offset} fails its checksum"),
@@ -776,9 +772,9 @@ impl Store {
         match name.to_str() {
             Some(id) if check_id(id).is_ok() => Ok(Some(id.to_string())),
             Some(name) if is_set_aside(name) => Ok(None),
-            _ => Err(corrupt(
-                &self.root.join(name),
-                "folder is neither a plan nor a set-aside plan",
+            _ => Err(CommandError::new(
+                "store.foreign",
+                self.root.join(name).display().to_string(),
             )),
         }
     }
@@ -1161,6 +1157,52 @@ mod tests {
     }
 
     #[test]
+    fn a_zero_tail_longer_than_a_header_in_the_last_segment_is_torn() {
+        let tmp = TempDir::new().unwrap();
+        {
+            let mut s = DocStore::open(tmp.path()).unwrap();
+            append_range(&mut s, 1..=3);
+        }
+        let seg = tmp.path().join("seg-1.log");
+        let mut bytes = fs::read(&seg).unwrap();
+        bytes.extend_from_slice(&[0u8; 40]);
+        fs::write(&seg, &bytes).unwrap();
+        let l = DocStore::open(tmp.path()).unwrap().load().unwrap();
+        assert!(l.torn);
+        assert_eq!(seqs(&l), vec![1, 2, 3]);
+        assert_eq!(fs::read(&seg).unwrap(), bytes[..54]);
+        assert_eq!(torn_names(tmp.path()), ["seg-1.log.torn-54"]);
+        assert_eq!(
+            fs::read(tmp.path().join("seg-1.log.torn-54")).unwrap(),
+            vec![0u8; 40]
+        );
+    }
+
+    #[test]
+    fn a_zero_tail_in_an_earlier_segment_is_corrupt() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+        {
+            let mut s = DocStore::open_with(dir, 54).unwrap();
+            append_range(&mut s, 1..=5);
+        }
+        assert_eq!(seg_names(dir), ["seg-1.log", "seg-4.log"]);
+        let seg = dir.join("seg-1.log");
+        let mut bytes = fs::read(&seg).unwrap();
+        bytes.extend_from_slice(&[0u8; 40]);
+        fs::write(&seg, &bytes).unwrap();
+        let e = corrupt_load(dir);
+        assert!(e.message.contains("seg-1.log"), "{}", e.message);
+        assert!(
+            e.message.contains("offset 54 fails its checksum"),
+            "{}",
+            e.message
+        );
+        assert_eq!(fs::read(&seg).unwrap(), bytes);
+        assert_eq!(torn_names(dir), Vec::<String>::new());
+    }
+
+    #[test]
     fn flipped_len_bit_in_last_segment_is_corrupt() {
         let tmp = TempDir::new().unwrap();
         {
@@ -1306,8 +1348,10 @@ mod tests {
             .for_each(|name| {
                 fs::create_dir(docs.join(name)).unwrap();
                 let e = store.list().unwrap_err();
-                assert_eq!(e.code, "store.corrupt");
-                assert!(e.message.contains(name), "{}", e.message);
+                assert_eq!(
+                    e,
+                    CommandError::new("store.foreign", docs.join(name).display().to_string())
+                );
                 fs::remove_dir(docs.join(name)).unwrap();
             });
         assert_eq!(store.list().unwrap(), ["ab12"]);

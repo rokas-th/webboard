@@ -15,14 +15,29 @@ fn io(e: &keyring::Error) -> SyncError {
     SyncError::new("keychain.io", format!("The keychain failed: {e}"))
 }
 
-fn classify(e: keyring::Error) -> SyncError {
+#[cfg(any(target_os = "linux", test))]
+fn secret_service_error(e: &keyring::Error) -> Option<SyncError> {
     match e {
-        #[cfg(target_os = "linux")]
-        keyring::Error::NoStorageAccess(_) | keyring::Error::PlatformFailure(_) => {
-            SyncError::new("keychain.unavailable", UNAVAILABLE)
-        }
-        other => io(&other),
+        keyring::Error::NoStorageAccess(_) => Some(SyncError::new(
+            "keychain.unavailable",
+            format!("The keyring is locked or refused access: {e}. Unlock it and try again."),
+        )),
+        keyring::Error::PlatformFailure(_) => Some(SyncError::new(
+            "keychain.unavailable",
+            format!("{UNAVAILABLE} The keyring said: {e}"),
+        )),
+        _ => None,
     }
+}
+
+#[cfg(target_os = "linux")]
+fn classify(e: keyring::Error) -> SyncError {
+    secret_service_error(&e).unwrap_or_else(|| io(&e))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn classify(e: keyring::Error) -> SyncError {
+    io(&e)
 }
 
 fn absent(r: keyring::Result<String>) -> Result<Option<String>, SyncError> {
@@ -119,13 +134,29 @@ mod tests {
     fn keychain_failures_are_named() {
         let failure = || keyring::Error::PlatformFailure("dbus said no".into());
         let no_access = || keyring::Error::NoStorageAccess("locked".into());
-        if cfg!(target_os = "linux") {
-            [failure(), no_access()].into_iter().for_each(|e| {
-                assert_eq!(
-                    classify(e),
-                    SyncError::new("keychain.unavailable", UNAVAILABLE)
+        assert_eq!(
+            secret_service_error(&failure()),
+            Some(SyncError::new(
+                "keychain.unavailable",
+                format!("{UNAVAILABLE} The keyring said: {}", failure())
+            ))
+        );
+        assert_eq!(
+            secret_service_error(&no_access()),
+            Some(SyncError::new(
+                "keychain.unavailable",
+                format!(
+                    "The keyring is locked or refused access: {}. Unlock it and try again.",
+                    no_access()
                 )
-            });
+            ))
+        );
+        assert_eq!(secret_service_error(&keyring::Error::NoEntry), None);
+        if cfg!(target_os = "linux") {
+            let makers: [fn() -> keyring::Error; 2] = [failure, no_access];
+            makers
+                .into_iter()
+                .for_each(|make| assert_eq!(Some(classify(make())), secret_service_error(&make())));
         } else {
             let e = classify(failure());
             assert_eq!(e.code, "keychain.io");

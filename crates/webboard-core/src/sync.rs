@@ -284,6 +284,21 @@ fn unexpected(status: StatusCode) -> SyncError {
     ))
 }
 
+const SHOWN_BODY_CHARS: usize = 300;
+
+fn forbidden_text(bytes: &[u8]) -> SyncError {
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim();
+    if text.is_empty() {
+        return unexpected(StatusCode::FORBIDDEN);
+    }
+    let shown = match text.char_indices().nth(SHOWN_BODY_CHARS) {
+        Some((cut, _)) => format!("{}…", &text[..cut]),
+        None => text.to_string(),
+    };
+    http(format!("Server answered 403: {shown}"))
+}
+
 fn retry_after(headers: &HeaderMap) -> Option<u64> {
     headers
         .get(RETRY_AFTER)?
@@ -548,7 +563,10 @@ impl SyncClient {
             return rate_limited(body.map(|b| b.message), retry);
         }
         let Some(body) = body else {
-            return unexpected(status);
+            return match status {
+                StatusCode::FORBIDDEN => forbidden_text(&bytes),
+                _ => unexpected(status),
+            };
         };
         let answered = |b: &ErrorBody| {
             http(format!(
@@ -560,7 +578,7 @@ impl SyncClient {
         };
         match (status.as_u16(), caller) {
             (401, _) => SyncError::new("sync.unauthorized", body.message),
-            (403, Caller::Member(member)) => {
+            (403, Caller::Member(member)) if body.error == "revoked" => {
                 let member = member.clone();
                 match self.off(move |l| l.revoke(Some(&member))).await {
                     Ok(true) => SyncError::new("sync.revoked", body.message),
@@ -1251,6 +1269,76 @@ mod tests {
             })
         );
         assert_eq!(f.token(), None);
+    }
+
+    #[tokio::test]
+    async fn only_a_revoked_403_unpairs_the_device() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        f.answer(
+            "POST",
+            "/ticket",
+            403,
+            json!({ "error": "forbidden", "message": "Not for you." }),
+        )
+        .await;
+        let client = f.client();
+        assert_eq!(
+            client.ticket("ix-sp000000000").await.map(|_| ()),
+            Err(err(
+                "sync.http",
+                "Server answered 403 forbidden: Not for you."
+            ))
+        );
+        assert_eq!(
+            client.status().await,
+            Ok(SyncStatus {
+                space: Some(f.space()),
+                revoked: false
+            })
+        );
+        assert_eq!(f.token().as_deref(), Some(TOKEN));
+    }
+
+    #[tokio::test]
+    async fn a_403_that_is_not_json_is_an_error_with_its_body() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        f.server
+            .mock("POST", "/ticket")
+            .with_status(403)
+            .with_body("  <h1>Blocked by the proxy</h1>\n")
+            .create_async()
+            .await;
+        let client = f.client();
+        assert_eq!(
+            client.ticket("ix-sp000000000").await.map(|_| ()),
+            Err(err(
+                "sync.http",
+                "Server answered 403: <h1>Blocked by the proxy</h1>"
+            ))
+        );
+        assert_eq!(client.status().await.map(|s| s.revoked), Ok(false));
+        assert_eq!(f.token().as_deref(), Some(TOKEN));
+    }
+
+    #[test]
+    fn a_long_or_empty_403_body_is_cut_or_called_unexpected() {
+        let long = "é".repeat(SHOWN_BODY_CHARS + 50);
+        assert_eq!(
+            forbidden_text(long.as_bytes()),
+            err(
+                "sync.http",
+                &format!("Server answered 403: {}…", "é".repeat(SHOWN_BODY_CHARS))
+            )
+        );
+        assert_eq!(
+            forbidden_text(b" \n"),
+            err(
+                "sync.http",
+                "Server answered 403 with an unexpected response."
+            )
+        );
     }
 
     #[tokio::test]

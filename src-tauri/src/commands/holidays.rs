@@ -3,35 +3,40 @@ use tauri::State;
 use webboard_core::error::Result;
 use webboard_core::holidays::{Country, Holidays, PreviewDay, RegionRef, Subdivision, YearOut};
 
+use super::Started;
+
 #[tauri::command]
-pub async fn holidays_countries(holidays: State<'_, Holidays>) -> Result<Vec<Country>> {
-    holidays.countries().await
+pub async fn holidays_countries(holidays: State<'_, Started<Holidays>>) -> Result<Vec<Country>> {
+    holidays.get()?.countries().await
 }
 
 #[tauri::command]
 pub async fn holidays_subdivisions(
-    holidays: State<'_, Holidays>,
+    holidays: State<'_, Started<Holidays>>,
     country: String,
 ) -> Result<Vec<Subdivision>> {
-    holidays.subdivisions(&country).await
+    holidays.get()?.subdivisions(&country).await
 }
 
 #[tauri::command]
 pub async fn holidays_year(
-    holidays: State<'_, Holidays>,
+    holidays: State<'_, Started<Holidays>>,
     region: RegionRef,
     year: i32,
     fresh: bool,
 ) -> Result<YearOut> {
-    holidays.year(&region, year, fresh).await
+    holidays.get()?.year(&region, year, fresh).await
 }
 
 #[tauri::command]
 pub async fn holidays_ics_preview(
-    holidays: State<'_, Holidays>,
+    holidays: State<'_, Started<Holidays>>,
     url: String,
 ) -> Result<Vec<PreviewDay>> {
-    holidays.ics_preview(&url, Local::now().date_naive()).await
+    holidays
+        .get()?
+        .ics_preview(&url, Local::now().date_naive())
+        .await
 }
 
 #[cfg(test)]
@@ -61,7 +66,7 @@ mod tests {
         };
         let holidays = Holidays::new(tmp.path().join("holidays"), sources).expect("Holidays::new");
         let app = mock_builder()
-            .manage(holidays)
+            .manage(crate::commands::Started::new(Ok(holidays)))
             .invoke_handler(tauri::generate_handler![
                 holidays_countries,
                 holidays_subdivisions,
