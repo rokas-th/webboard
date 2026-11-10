@@ -203,12 +203,26 @@ describe("layout fixtures", () => {
     Object.entries(FIXTURES).forEach(([name, f]) => {
       const space = name === "sync-space" || name === "sync-receiving" || name === "sync-removed";
       expect("ix-sp000000000" in f.docs, name).toBe(space);
-      expect(f.ipc.sync_ticket, name).toEqual(space ? { ticket: "tk_probe", expiresAt: 0 } : undefined);
+      expect(f.ipc.sync_ticket, name).toEqual(space ? { ticket: "tk_probe", expiresAt: new Date(2026, 10, 9, 10, 0, 0, 0).getTime() } : undefined);
     });
   });
 
+  it("issues a ticket that outlives the probe's pinned clock by an hour", () => {
+    const pin = new Date(2026, 10, 9, 9, 0, 0, 0).getTime();
+    const ticket: unknown = fixture("sync-space").ipc.sync_ticket;
+    if (typeof ticket !== "object" || ticket === null || !("expiresAt" in ticket) || typeof ticket.expiresAt !== "number") throw new Error("sync-space answers no sync_ticket expiry");
+    expect(ticket.expiresAt - pin).toBe(60 * 60 * 1000);
+  });
+
   it("sync-dialog is the mesa plan, local only", () => {
+    expect(fixture("sync-dialog")).not.toBe(fixture("mesa"));
+    expect(fixture("sync-dialog").ipc).not.toBe(fixture("mesa").ipc);
     expect(fixture("sync-dialog")).toEqual(fixture("mesa"));
+  });
+
+  it("shares no ipc answers object between states", () => {
+    const all = Object.values(FIXTURES);
+    expect(new Set(all.map((f) => f.ipc)).size).toBe(all.length);
   });
 
   it("the space states are their plain fixtures plus the space index", () => {

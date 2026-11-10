@@ -4,7 +4,7 @@ import { AppError, call } from "./services/ipc";
 import { guardWindowClose } from "./services/window";
 import { Registry } from "./store/registry";
 import { toast } from "./ui/common/Toast";
-import { stopSync, SyncProvider } from "./sync/SyncProvider";
+import { stopSync, syncPending, SyncProvider } from "./sync/SyncProvider";
 import { Shell } from "./ui/shell/Shell";
 
 export const RESET_SETTINGS_LINE = "Plan names and the last region are rebuilt; the old file is kept.";
@@ -37,6 +37,7 @@ export default function App() {
     setStart({ k: "opening" });
     Registry.open({ clock: systemClock }).then(
       (registry) => {
+        syncPending(registry);
         live.current = registry;
         closable.current = {
           close: () => {

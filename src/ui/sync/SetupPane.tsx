@@ -7,7 +7,7 @@ import { usePaneCommand } from "./command";
 
 export const DEFAULT_SERVER = "https://webboard.rokass.org";
 
-export function SetupPane(p: { onDone(): void }) {
+export function SetupPane() {
   const registry = useSyncRegistry();
   const { restart } = useSyncState();
   const [server, setServer] = useState(DEFAULT_SERVER);
@@ -19,7 +19,6 @@ export function SetupPane(p: { onDone(): void }) {
       const deviceName = normalizeName(name);
       await syncSetup(server, secret, deviceName);
       setSecret("");
-      p.onDone();
       await restart();
       toast("Sync set up");
     });

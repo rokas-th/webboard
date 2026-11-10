@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { AppError, syncReset } from "../../services/ipc";
 import { chipText, holdsPlan, type SyncState } from "../../sync/manager";
-import { syncActions } from "../../sync/reload";
+import { canReload, syncActions } from "../../sync/reload";
 import { useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
 import { Dialog } from "../common/Dialog";
 import { toast } from "../common/Toast";
@@ -14,12 +14,14 @@ import { JoinPane } from "./JoinPane";
 import { PairPane } from "./PairPane";
 import { SetupPane } from "./SetupPane";
 
-const PANES: readonly (readonly [SyncPane, string])[] = [
-  ["setup", "Set up sync"],
-  ["join", "Join with a code"],
-  ["pair", "Add a device"],
-  ["devices", "Devices"],
-];
+const PANE_LABELS: Record<SyncPane, string> = {
+  setup: "Set up sync",
+  join: "Join with a code",
+  pair: "Add a device",
+  devices: "Devices",
+};
+
+const PANE_ORDER: readonly SyncPane[] = ["setup", "join", "pair", "devices"];
 
 export function resolvePane(state: SyncState, pane: SyncPane | null): SyncPane {
   if (pane !== null) return pane;
@@ -91,6 +93,7 @@ export function SyncActionButtons(p: { holds: boolean; onReset?(): void; childre
 
 function IndexActions(p: { cause: string | null }) {
   const registry = useSyncRegistry();
+  const enabled = canReload(useSyncState().state);
   const [confirm, setConfirm] = useState<string | null>(null);
   const doc = registry.indexErrorDoc();
   const reloadable = p.cause === "store.corrupt" && doc !== null && !registry.spaceReadOnly();
@@ -101,7 +104,7 @@ function IndexActions(p: { cause: string | null }) {
           Try again
         </button>
       </div>
-      {reloadable && <ReloadButton onOpen={() => setConfirm(doc)} />}
+      {reloadable && <ReloadButton enabled={enabled} onOpen={() => setConfirm(doc)} />}
       {confirm !== null && <ReloadConfirm registry={registry} docId={confirm} onClose={() => setConfirm(null)} />}
     </>
   );
@@ -115,7 +118,6 @@ export function SyncDialog(p: { pane: SyncPane | null; onPane(pane: SyncPane): v
   const error = state.kind === "error" ? state : null;
   const indexDoc = error !== null && error.code === "local-failed" && error.doc !== null && error.doc.startsWith("ix-");
   const holds = error !== null && error.doc !== null && !error.doc.startsWith("ix-") && holdsPlan(registry, error.doc);
-  const label = PANES.find(([k]) => k === pane)?.[1] ?? pane;
   return (
     <Dialog label="Sync" wide onClose={p.onClose}>
       {error !== null && (
@@ -125,15 +127,15 @@ export function SyncDialog(p: { pane: SyncPane | null; onPane(pane: SyncPane): v
         </div>
       )}
       <div className="sync-tabs" role="tablist" aria-label="Sync">
-        {PANES.map(([k, name]) => (
+        {PANE_ORDER.map((k) => (
           <button key={k} type="button" role="tab" aria-selected={pane === k} className={pane === k ? "active" : undefined} onClick={() => p.onPane(k)}>
-            {name}
+            {PANE_LABELS[k]}
           </button>
         ))}
       </div>
-      <section className="sync-pane" role="tabpanel" aria-label={label}>
-        {pane === "setup" && <SetupPane onDone={() => p.onPane("setup")} />}
-        {pane === "join" && <JoinPane onDone={() => p.onPane("join")} />}
+      <section className="sync-pane" role="tabpanel" aria-label={PANE_LABELS[pane]}>
+        {pane === "setup" && <SetupPane />}
+        {pane === "join" && <JoinPane />}
         {pane === "pair" && <PairPane />}
         {pane === "devices" && <DevicesPane />}
       </section>

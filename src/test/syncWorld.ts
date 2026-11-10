@@ -1,11 +1,12 @@
 import * as Y from "yjs";
 import { buildAction, initialAction } from "../actions/build";
 import type { Calendar } from "../domain/calendar";
-import type { ItemId } from "../domain/model";
+import type { Item, ItemId } from "../domain/model";
 import { LogState } from "../log/state";
 import type { Action, ActionId, DeviceId, Write } from "../log/types";
 import { planRules } from "../plan/rules";
-import { encodeAction, PlanDoc } from "../store/doc";
+import { decodeAction, encodeAction, PlanDoc } from "../store/doc";
+import type { PlanSession } from "../store/session";
 import { readActions } from "../store/read-actions";
 import { act as action } from "./act";
 import type { FakeProvider } from "./fakeProvider";
@@ -111,9 +112,15 @@ export function seedPlan(mem: MemoryStore | null, id: string, name: string, o: {
     log.add([b.action]);
   });
   if (o.link === true) {
+    const names = o.items ?? [];
+    if (names.length < 2) throw new Error("seedPlan: a link needs two items");
     const items = [...ctxOf(log, dev, TODAY, DEVICES).view.plan.items.values()];
-    const [a, b] = (o.items ?? []).map((n) => items.find((i) => i.name === n)?.id ?? "");
-    const l = buildAction(ctxOf(log, dev, TODAY, DEVICES, { ses: "seed" }), { t: "link", from: a, to: b, type: "FS", lag: 0 });
+    const idOf = (n: string): ItemId => {
+      const found = items.find((i) => i.name === n);
+      if (found === undefined) throw new Error(`no item ${n}`);
+      return found.id;
+    };
+    const l = buildAction(ctxOf(log, dev, TODAY, DEVICES, { ses: "seed" }), { t: "link", from: idOf(names[0]), to: idOf(names[1]), type: "FS", lag: 0 });
     pd.append(l.action, l.newNotes);
     log.add([l.action]);
   }
@@ -142,13 +149,30 @@ export const remoteIndex = (p: FakeProvider, id: ActionId, w: readonly Write[], 
 export const remotePlan = (p: FakeProvider, id: ActionId, w: readonly Write[], dev: DeviceId = "dev-B", lbl = "Change"): void =>
   p.deliver(remoteUpdate(p.ydoc, id, encodeAction(action(id, headsOf(p.ydoc), w, { dev, lbl }))));
 
-export const itemNamed = (ydoc: Y.Doc, name: string): ItemId => {
-  const log = new LogState(planRules);
-  log.add(new PlanDoc(ydoc).actions());
-  const found = [...ctxOf(log, "dev-A", TODAY).view.plan.items.values()].find((i) => i.name === name);
+export const itemNamed = (source: Y.Doc | PlanSession, name: string): ItemId => {
+  const items = (): Iterable<Item> => {
+    if (!(source instanceof Y.Doc)) return source.view().plan.items.values();
+    const log = new LogState(planRules);
+    log.add(new PlanDoc(source).actions());
+    return ctxOf(log, "dev-A", TODAY).view.plan.items.values();
+  };
+  const found = [...items()].find((i) => i.name === name);
   if (found === undefined) throw new Error(`no item ${name}`);
   return found.id;
 };
+
+export function appendedWrites(calls: readonly Call[]): [string, Write][] {
+  return calls
+    .filter((c) => c.cmd === "store_append")
+    .flatMap((c) => {
+      const doc = new Headers(c.options?.headers).get("x-doc");
+      if (doc === null) throw new Error("store_append without an x-doc header");
+      if (!(c.args instanceof Uint8Array)) throw new Error("store_append carried no bytes");
+      return Y.decodeUpdate(c.args)
+        .structs.flatMap((s) => (s instanceof Y.Item && s.parentSub !== null ? [decodeAction(s.parentSub, s.content.getContent()[0])] : []))
+        .flatMap((a) => a.w.map((w): [string, Write] => [doc, w]));
+    });
+}
 
 export function seedSpace(w: SyncWorld, o: { trashedP2?: boolean; link?: boolean } = {}): void {
   seedIndex(w.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("l-L", ["l-n"], [ip("L", false)])]);

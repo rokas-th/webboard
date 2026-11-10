@@ -6,6 +6,7 @@ import { PlanDoc } from "../store/doc";
 import { Registry } from "../store/registry";
 import { fakeFactory, type FakeFactory, type FakeProvider } from "../test/fakeProvider";
 import {
+  appendedWrites,
   argsOf,
   fail,
   IX,
@@ -29,6 +30,8 @@ import { clearToasts } from "../ui/common/Toast";
 import { useUi, type UiState } from "../ui/state";
 import { SyncManager } from "./manager";
 import type { ProviderFactory } from "./provider";
+import { stopSync, syncPending, SyncProvider, useSyncState } from "./SyncProvider";
+import { fixedClock } from "../services/clock";
 
 const fake = vi.hoisted(() => ({ factory: null as ProviderFactory | null }));
 
@@ -227,7 +230,7 @@ describe("SyncProvider", () => {
     expect(chip().textContent).not.toBe("Device removed");
     expect(banner()).toBeNull();
     expect(p.readOnly).toBe(false);
-    const a = [...p.view().plan.items.values()].find((i) => i.name === "A")?.id ?? "";
+    const a = itemNamed(p, "A");
     const toastOf: string[] = [];
     act(() => {
       toastOf.push(p.apply({ t: "rename", item: a, name: "Kickoff" }).toast);
@@ -259,17 +262,23 @@ describe("SyncProvider", () => {
       fireEvent.change(field(pane("Join with a code"), "Device name"), { target: { value: "  iPad\t2 " } });
     });
     w.status = () => ({ space: { ...SPACE, deviceName: "iPad 2" }, revoked: false });
-    const appends = vi.spyOn(PlanDoc.prototype, "append");
+    const from = tauri.calls.length;
     await click(within(pane("Join with a code")).getByRole("button", { name: "Join space" }));
     expect(tauri.calls.filter((c) => c.cmd === "sync_pair_join").map((c) => argsOf(c).deviceName)).toEqual(["iPad 2"]);
     expect([r.devices().get("dev-A"), r.device.name]).toEqual(["iPad 2", "iPad 2"]);
     expect(p.history().map((h) => h.device)).toContain("iPad 2");
-    const dn = (): string[] => appends.mock.calls.flatMap(([a]) => a.w.filter((x) => x.u === "dn:dev-A").map((x) => String(x.v)));
-    expect(dn()).toEqual(["iPad 2", "iPad 2"]);
+    const dn = (): [string, unknown][] => appendedWrites(tauri.calls.slice(from)).filter(([, x]) => x.u === "dn:dev-A").map(([doc, x]) => [doc, x.v]);
+    expect(dn()).toEqual([
+      ["local", "iPad 2"],
+      [IX, "iPad 2"],
+    ]);
     const m = managers[managers.length - 1];
     await act(async () => m.restart());
     await settle();
-    expect(dn()).toEqual(["iPad 2", "iPad 2"]);
+    expect(dn()).toEqual([
+      ["local", "iPad 2"],
+      [IX, "iPad 2"],
+    ]);
   });
 
   it("a plan trashed on a peer leaves the open plan", async () => {
@@ -309,7 +318,8 @@ describe("SyncProvider", () => {
     const a = itemNamed(prov("P").ydoc, "A");
     act(() => uiNow()[1]({ selected: a }));
     await settle();
-    expect(document.querySelector('[data-slot="panel"] input')).not.toBeNull();
+    const itemPanel = (): (string | null)[] => [...document.querySelectorAll('[data-slot="panel"] .panel')].filter((e) => e.querySelector(".kind") !== null).map((e) => e.querySelector<HTMLInputElement>('input[aria-label="Name"]')?.value ?? null);
+    expect(itemPanel()).toEqual(["A"]);
     act(() => remoteIndex(prov(IX), "n-B", [own("dn:dev-B", "iPhone")]));
     await settle();
     const appends = vi.spyOn(PlanDoc.prototype, "append");
@@ -317,6 +327,7 @@ describe("SyncProvider", () => {
     await settle();
     expect(p.authorOf("e:" + a)).toEqual({ dev: "dev-B", device: "iPhone" });
     expect(uiNow()[0].selected).toBeNull();
+    expect(itemPanel()).toEqual([]);
     expect(toasts()).toEqual(["“A” was moved to the Trash on iPhone. Restore it from the Trash."]);
     expect(appends).not.toHaveBeenCalled();
   });
@@ -380,6 +391,71 @@ describe("SyncProvider", () => {
     const tickets = calls("sync_ticket");
     await settle();
     expect(calls("sync_ticket")).toBe(tickets);
+  });
+
+  it("stopSync stops a running manager and skips only a registry whose sync has not started", async () => {
+    syncWorld();
+    const r = await Registry.open({ clock: fixedClock("2026-11-08", NOW) });
+    opened.push(Promise.resolve(r));
+    expect(() => stopSync(r)).toThrow(new Error("stopSync: no SyncManager runs for this registry"));
+    syncPending(r);
+    expect(() => stopSync(r)).not.toThrow();
+    const stop = vi.spyOn(SyncManager.prototype, "stop");
+    const { unmount } = render(
+      <SyncProvider registry={r} factory={f}>
+        <p>inside</p>
+      </SyncProvider>,
+    );
+    await settle();
+    stopSync(r);
+    expect(stop).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(() => stopSync(r)).not.toThrow();
+    expect(stop).toHaveBeenCalledTimes(2);
+  });
+
+  it("closing the window before sync starts closes the registry", async () => {
+    const w = syncWorld({ names: { P: "Plan P" } });
+    spaceStore(w, [["P", "Plan P"]]);
+    const registry = spyOpen();
+    const stop = vi.spyOn(SyncManager.prototype, "stop");
+    const start = vi.spyOn(SyncManager.prototype, "start");
+    render(<App />);
+    const closes: string[] = [];
+    await act(async () => {
+      const r = await registry();
+      const close = r.close.bind(r);
+      vi.spyOn(r, "close").mockImplementation(() => {
+        closes.push(start.mock.calls.length === 0 ? "before start" : "after start");
+        return close();
+      });
+      await requestWindowClose();
+    });
+    expect([closes, stop.mock.calls.length, toasts()]).toEqual([["before start"], 0, []]);
+  });
+
+  it("subscribes to the manager once across renders", async () => {
+    const w = syncWorld();
+    w.status = () => ({ space: null, revoked: false });
+    const r = await Registry.open({ clock: fixedClock("2026-11-08", NOW) });
+    opened.push(Promise.resolve(r));
+    const subscribe = vi.spyOn(SyncManager.prototype, "subscribe");
+    const Probe = (p: { n: number }) => {
+      const { state } = useSyncState();
+      return <p>{`render ${p.n} ${state.kind}`}</p>;
+    };
+    const tree = (n: number) => (
+      <SyncProvider registry={r} factory={f}>
+        <Probe n={n} />
+      </SyncProvider>
+    );
+    const { rerender } = render(tree(0));
+    await settle();
+    rerender(tree(1));
+    rerender(tree(2));
+    await settle();
+    expect([screen.getByText(/^render /).textContent, subscribe.mock.calls.length]).toEqual(["render 2 off", 1]);
   });
 
   it("closing the window stops sync before the registry closes", async () => {

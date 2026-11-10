@@ -4,6 +4,7 @@ import * as Y from "yjs";
 import { Refused } from "../../actions/intents";
 import { fixedClock } from "../../services/clock";
 import { AppError } from "../../services/ipc";
+import { exportPlan } from "../../store/file";
 import { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { chipText, SyncManager, type SyncState } from "../../sync/manager";
@@ -11,19 +12,24 @@ import { docName, SyncProvider } from "../../sync/SyncProvider";
 import { fakeFactory, type FakeFactory, type FakeProvider } from "../../test/fakeProvider";
 import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { shellFor } from "../../test/shell";
-import { IX, ixAct, NOW, own, ip, RESET_HINT, seedIndex, seedPlan, seedSpace, SP, SPACE, syncWorld, TODAY, fail, argsOf, remoteIndex, type SyncWorld } from "../../test/syncWorld";
+import { IX, itemNamed, ixAct, NOW, own, ip, RESET_HINT, seedIndex, seedPlan, seedSpace, SP, SPACE, syncWorld, TODAY, fail, argsOf, remoteIndex, type SyncWorld } from "../../test/syncWorld";
 import { tauri, type Answer } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { exportFlow } from "../shell/fileFlows";
 import { Shell } from "../shell/Shell";
 import { SyncChip } from "../shell/SyncChip";
-import { PLACE_KEY, useUi, type UiState } from "../state";
+import { PLACE_KEY, UiContext, useUi, type UiState } from "../state";
+import { RemovedBanner } from "./RemovedBanner";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("../../store/file", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../../store/file")>();
+  return { ...m, exportPlan: vi.fn(async () => null) };
+});
 vi.mock("../shell/fileFlows", async (importOriginal) => {
   const m = await importOriginal<typeof import("../shell/fileFlows")>();
-  return { ...m, exportFlow: vi.fn(async () => undefined), importFlow: vi.fn(m.importFlow) };
+  return { ...m, exportFlow: vi.fn(m.exportFlow), importFlow: vi.fn(m.importFlow) };
 });
 vi.mock("../state", async (importOriginal) => {
   const m = await importOriginal<typeof import("../state")>();
@@ -57,6 +63,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.mocked(useUi).mockClear();
   vi.mocked(exportFlow).mockClear();
+  vi.mocked(exportPlan).mockClear();
   await Promise.all(sessions.splice(0).map((s) => s.close()));
   await Promise.all(registries.splice(0).map((r) => r.close()));
   vi.useRealTimers();
@@ -273,11 +280,6 @@ describe("the sync dialog's status", () => {
     const w = syncWorld({ names: NAMES });
     const message = "Could not read the sync state: invalid JSON";
     w.status = fail({ code: "sync.io", message });
-    const rejections: unknown[] = [];
-    const onRejection = (e: PromiseRejectionEvent): void => {
-      rejections.push(e.reason);
-    };
-    window.addEventListener("unhandledrejection", onRejection);
     await mounted(w);
     expect(within(toolbar()).getByRole("button", { name: "Sync state on this device could not be read" })).toBe(chip());
     await openChip();
@@ -286,8 +288,8 @@ describe("the sync dialog's status", () => {
     const before = calls("sync_status");
     await click(inDialog().getByRole("button", { name: "Try again" }));
     expect(calls("sync_status")).toBe(before + 1);
-    window.removeEventListener("unhandledrejection", onRejection);
-    expect([rejections, badToasts()]).toEqual([[], []]);
+    await settle();
+    expect(badToasts()).toEqual([]);
   });
 
   it("shows a keychain error with Try again, which restarts once", async () => {
@@ -624,7 +626,7 @@ describe("removal and the space", () => {
     await settle();
     await click(within(entry("Launch")).getByRole("button", { name: "Launch" }));
     const s = await r.session("P");
-    const a = [...s.view().plan.items.values()].find((i) => i.name === "A")?.id ?? "";
+    const a = itemNamed(s, "A");
     select(a);
     await settle();
     expect(document.querySelectorAll(".nub").length).toBeGreaterThan(0);
@@ -675,6 +677,38 @@ describe("removal and the space", () => {
     await mounted(v);
     expect(document.querySelector(".empty-state")).not.toBeNull();
     expect(buttonNames(banner(), ["Export…", "Join with a code", "Set up sync"])).toEqual(["Join with a code", "Set up sync"]);
+  });
+
+  it("a failed banner export toasts once", async () => {
+    const w = await spaceWorld();
+    w.status = () => ({ space: SPACE, revoked: true });
+    place("P");
+    const { r } = await mounted(w);
+    await click(within(entry("Launch")).getByRole("button", { name: "Launch" }));
+    vi.mocked(exportPlan).mockRejectedValueOnce(new AppError("file.io", "Could not write the file: disk full."));
+    const banner = screen.getByText(REMOVED).closest(".banner");
+    if (!(banner instanceof HTMLElement)) throw new Error("no removed banner");
+    await click(within(banner).getByRole("button", { name: "Export…" }));
+    expect(vi.mocked(exportPlan).mock.calls).toEqual([[await r.session("P")]]);
+    expect(toasts()).toEqual(["Could not write the file: disk full."]);
+    expect(badToasts()).toEqual(["Could not write the file: disk full."]);
+  });
+
+  it("the removed banner refuses an open plan with no listing", async () => {
+    const t = await testSession(MESA_SEED);
+    sessions.push(t.session);
+    stubState(errorState("revoked"));
+    const { registry } = shellFor(t, { plans: () => [] });
+    const Host = () => {
+      const [ui, setUi] = useUi();
+      return (
+        <UiContext.Provider value={{ ui, setUi }}>
+          <RemovedBanner session={t.session} />
+        </UiContext.Provider>
+      );
+    };
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() => render(withSync(<Host />, { registry }))).toThrow(new Error(`Plan ${t.session.view().plan.id} is not listed`));
   });
 
   it("no Move to space while removed", async () => {
@@ -871,9 +905,11 @@ describe("plan errors in the dialog", () => {
     await settle();
     act(() => prov(f, "P").closeWith(4413, "Too large to sync"));
     await settle();
-    vi.mocked(exportFlow).mockRejectedValueOnce(new AppError("file.io", "Could not write the file: disk full."));
+    vi.mocked(exportPlan).mockRejectedValueOnce(new AppError("file.io", "Could not write the file: disk full."));
     await openChip();
     await click(inDialog().getByRole("button", { name: "Export…" }));
+    expect(vi.mocked(exportPlan)).toHaveBeenCalledTimes(1);
+    expect(toasts()).toEqual(["Could not write the file: disk full."]);
     expect(badToasts()).toEqual(["Could not write the file: disk full."]);
     expect(messageText()).toEqual([TOO_LARGE_HELD]);
     expect(buttonNames(dialog(), ACTION_NAMES)).toEqual(["Export…", "Try again"]);
@@ -979,6 +1015,38 @@ describe("loading again from the server", () => {
     await act(async () => r.retryIndex());
   });
 
+  it("a successful index retry leaves local-failed", async () => {
+    const w = await spaceWorld();
+    w.mem.fail("store_load", IX, { code: "store.io", message: "Disk full." });
+    const { f } = await mounted(w);
+    expect(chip().textContent).toBe("The space’s plan list on this device could not be read");
+    await openChip();
+    expect(messageText()).toEqual(["Disk full."]);
+    w.mem.recover("store_load", IX);
+    await click(inDialog().getByRole("button", { name: "Try again" }));
+    syncAll(f);
+    await settle();
+    expect(chip().textContent).toBe("Synced");
+    expect([messageText(), buttonNames(dialog(), ACTION_NAMES)]).toEqual([[], []]);
+    await fresh();
+    const v = syncWorld({ names: NAMES });
+    seedIndex(v.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("l-L", ["l-n"], [ip("L", false)])]);
+    seedIndex(v.mem, IX, [ixAct("s-P", [], [ip("P", false)])]);
+    seedPlan(v.mem, "P", "Launch");
+    seedPlan(v.mem, "L", "Alpha");
+    v.mem.fail("store_append", IX, { code: "store.io", message: "Disk full." });
+    const second = await mounted(v);
+    expect(chip().textContent).toBe("The space’s plan list on this device could not be saved");
+    await openChip();
+    expect(messageText()).toEqual(["Disk full."]);
+    v.mem.recover("store_append", IX);
+    await click(inDialog().getByRole("button", { name: "Try again" }));
+    syncAll(second.f);
+    await settle();
+    expect(chip().textContent).toBe("Synced");
+    expect([messageText(), buttonNames(dialog(), ACTION_NAMES)]).toEqual([[], []]);
+  });
+
   it("an unreadable sync state offers Reset sync, then Try again", async () => {
     const w = await spaceWorld();
     w.status = fail({ code: "sync.io", message: "Could not read the sync state: invalid JSON" });
@@ -1064,6 +1132,15 @@ describe("a plan that will not arrive", () => {
     await selectedS(() => undefined);
     expect(chip().textContent?.startsWith("Offline")).toBe(true);
     expect(within(mainArea()).getByText(INCOMPLETE)).toBeTruthy();
+  });
+});
+
+describe("the sync test helpers", () => {
+  it("throw on a missing item", async () => {
+    expect(() => seedPlan(null, "X", "Solo", { items: ["A"], link: true })).toThrow(new Error("seedPlan: a link needs two items"));
+    const t = await testSession(MESA_SEED);
+    sessions.push(t.session);
+    expect(() => itemNamed(t.session, "Nowhere")).toThrow(new Error("no item Nowhere"));
   });
 });
 

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import type { Registry } from "../store/registry";
 import { SyncManager, type SyncState } from "./manager";
 import { yProviderFactory, type ProviderFactory } from "./provider";
@@ -10,7 +10,7 @@ interface SyncValue {
 
 const SyncContext = createContext<SyncValue | null>(null);
 
-const running = new WeakMap<Registry, SyncManager>();
+const running = new WeakMap<Registry, SyncManager | "not started">();
 
 const onlineChange = (cb: () => void): (() => void) => {
   window.addEventListener("online", cb);
@@ -25,8 +25,16 @@ export function docName(registry: Registry): (doc: string) => string | null {
   return (doc) => registry.plans().find((p) => p.id === doc)?.name ?? null;
 }
 
+export function syncPending(registry: Registry): void {
+  if (running.has(registry)) throw new Error("syncPending: sync is already recorded for this registry");
+  running.set(registry, "not started");
+}
+
 export function stopSync(registry: Registry): void {
-  running.get(registry)?.stop();
+  const manager = running.get(registry);
+  if (manager === undefined) throw new Error("stopSync: no SyncManager runs for this registry");
+  if (manager === "not started") return;
+  manager.stop();
 }
 
 export function SyncProvider(props: { registry: Registry; factory?: ProviderFactory; children: ReactNode }) {
@@ -49,7 +57,7 @@ export function SyncProvider(props: { registry: Registry; factory?: ProviderFact
     void manager.start();
     return () => {
       manager.stop();
-      if (running.get(registry) === manager) running.delete(registry);
+      if (running.get(registry) === manager) running.set(registry, "not started");
     };
   }, [registry, manager]);
   const value = useMemo(() => ({ manager, registry }), [manager, registry]);
@@ -64,10 +72,9 @@ function useSyncValue(): SyncValue {
 
 export function useSyncState(): { state: SyncState; manager: SyncManager; restart(): Promise<void> } {
   const { manager } = useSyncValue();
-  const state = useSyncExternalStore(
-    (cb) => manager.subscribe(cb),
-    () => manager.state(),
-  );
+  const subscribe = useCallback((cb: () => void) => manager.subscribe(cb), [manager]);
+  const snapshot = useCallback(() => manager.state(), [manager]);
+  const state = useSyncExternalStore(subscribe, snapshot);
   return useMemo(() => ({ state, manager, restart: () => manager.restart() }), [state, manager]);
 }
 

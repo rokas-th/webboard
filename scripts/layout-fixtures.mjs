@@ -449,6 +449,8 @@ function fixtureOf(plans) {
   };
 }
 
+const copyOf = (f) => ({ docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, b.slice()])), ipc: JSON.parse(JSON.stringify(f.ipc)) });
+
 const mesa = (log) => ({ id: PLAN_IDS.mesa, name: "MESA 1.0", log });
 
 const onLinux = (f) => ({ ...f, ipc: { ...f.ipc, device_info: { deviceId: "linux", platform: "linux" } } });
@@ -456,6 +458,7 @@ const onLinux = (f) => ({ ...f, ipc: { ...f.ipc, device_info: { deviceId: "linux
 const PROBE_SPACE = { server: "https://probe.invalid", spaceId: "sp000000000", deviceId: "mac", deviceName: "Mac" };
 const SPACE_INDEX = "ix-sp000000000";
 const SYNC_OFF = { space: null, revoked: false };
+const PROBE_TICKET = { ticket: "tk_probe", expiresAt: new Date(2026, 10, 9, 10, 0, 0, 0).getTime() };
 
 function spaceIndex() {
   const log = new Log("ixSpc", START);
@@ -467,7 +470,7 @@ function inSpace(f, revoked) {
   const docs = { ...f.docs, [SPACE_INDEX]: frame(spaceIndex()) };
   return {
     docs,
-    ipc: { ...f.ipc, store_list: Object.keys(docs), sync_status: { space: { ...PROBE_SPACE }, revoked }, sync_ticket: { ticket: "tk_probe", expiresAt: 0 } },
+    ipc: { ...f.ipc, store_list: Object.keys(docs), sync_status: { space: { ...PROBE_SPACE }, revoked }, sync_ticket: { ...PROBE_TICKET } },
   };
 }
 
@@ -487,13 +490,10 @@ export function buildFixtures() {
     ]),
     unreadable,
     "two-choices": fixtureOf([mesa(twoChoicesLog())]),
-    "sync-dialog": mesaOnMac,
+    "sync-dialog": copyOf(mesaOnMac),
     "sync-space": inSpace(mesaOnMac, false),
     "sync-receiving": inSpace(unreadable, false),
     "sync-removed": inSpace(mesaOnMac, true),
   };
-  Object.values(fixtures).forEach((f) => {
-    f.ipc.sync_status ??= { ...SYNC_OFF };
-  });
-  return fixtures;
+  return Object.fromEntries(Object.entries(fixtures).map(([name, f]) => [name, { ...f, ipc: { sync_status: { ...SYNC_OFF }, ...f.ipc } }]));
 }

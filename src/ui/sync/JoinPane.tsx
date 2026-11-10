@@ -6,7 +6,7 @@ import { toast } from "../common/Toast";
 import { usePaneCommand } from "./command";
 import { DEFAULT_SERVER } from "./SetupPane";
 
-export function JoinPane(p: { onDone(): void }) {
+export function JoinPane() {
   const registry = useSyncRegistry();
   const { restart } = useSyncState();
   const [server, setServer] = useState(DEFAULT_SERVER);
@@ -17,7 +17,6 @@ export function JoinPane(p: { onDone(): void }) {
     cmd.run(async () => {
       const deviceName = normalizeName(name);
       await syncPairJoin(server, code, deviceName);
-      p.onDone();
       await restart();
       toast("Joined the space");
     });

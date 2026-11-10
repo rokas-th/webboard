@@ -203,6 +203,7 @@ const SHIM = String.raw`
   localStorage.clear();
   if (P.place !== null) localStorage.setItem("webboard.place", JSON.stringify(P.place));
   window.__PROBE_MISSING__ = [];
+  window.__PROBE_TICKETS__ = {};
   var RealDate = Date;
   var pin = new RealDate(2026, 10, 9, 9, 0, 0, 0).getTime();
   var started = performance.now();
@@ -233,6 +234,12 @@ const SHIM = String.raw`
     return Promise.reject({ code: "probe.missing", message: "The layout probe has no answer for " + cmd + " (" + why + ")" });
   }
   function answer(cmd, args) {
+    if (cmd === "sync_ticket") {
+      var ticketDoc = String(args ? args.doc : undefined);
+      var asked = (window.__PROBE_TICKETS__[ticketDoc] || 0) + 1;
+      window.__PROBE_TICKETS__[ticketDoc] = asked;
+      if (asked > 1) window.__PROBE_MISSING__.push("sync_ticket: ticket " + asked + " for " + ticketDoc + ", where a state asks for one per doc");
+    }
     if (cmd === "store_load") {
       var doc = args && args.doc;
       if (!(doc in docs)) return missing(cmd, "doc " + doc);
@@ -838,6 +845,7 @@ const MEASURE = String.raw`
     dialogs: dialogs(),
     text: (app === null ? "" : app.textContent.trim()).length,
     missing: window.__PROBE_MISSING__.slice(),
+    tickets: Object.assign({}, window.__PROBE_TICKETS__),
   };
 })()
 `;
@@ -1310,6 +1318,8 @@ async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffi
         continue;
       }
       const r = run.reading;
+      const tickets = Object.entries(r.tickets);
+      if (tickets.length > 0) process.stdout.write(`tickets ${state.name} @ ${viewport}: ${tickets.map(([doc, n]) => `${doc} ${n}`).join(", ")}\n`);
       const why = !r.scope.found
         ? `measures 3-8 are scoped to ${r.scope.name}${r.narrow ? ` (dialog state below ${FULL_MIN_WIDTH} px)` : ""}, and the page has none`
         : r.missing.length > 0

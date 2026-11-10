@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import * as Y from "yjs";
 import type { SpaceInfo } from "../services/ipc";
-import type { IndexDoc } from "../store/index-doc";
+import { IndexDoc } from "../store/index-doc";
 import type { Registry } from "../store/registry";
 import type { ProviderFactory } from "../sync/provider";
 import { SyncProvider } from "../sync/SyncProvider";
@@ -43,9 +43,14 @@ export function connectedStubs(t: TestSession): Partial<Registry> {
   const plan = t.session.view().plan.id;
   const ix = memoryDoc("ix-" + SYNC_SPACE, new Y.Doc());
   let heads: readonly string[] | null = null;
+  let index: Promise<IndexDoc> | null = null;
   return {
     setSpaceReadOnly: () => undefined,
-    attachSpace: async () => ({}) as IndexDoc,
+    attachSpace: (spaceId: string) => {
+      if (spaceId !== SYNC_SPACE) throw new Error("connectedStubs: no space " + spaceId);
+      index ??= IndexDoc.open(ix.id, "mac", async () => ix);
+      return index;
+    },
     attachedSpace: () => SYNC_SPACE,
     indexErrorOf: () => null,
     reloading: () => false,

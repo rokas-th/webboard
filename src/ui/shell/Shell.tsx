@@ -23,7 +23,7 @@ import { ItemPanel } from "../panel/ItemPanel";
 import { PlanPanel } from "../panel/PlanPanel";
 import { Timeline } from "../timeline/Timeline";
 import { HolidayState } from "./HolidayState";
-import { stopsArrival } from "../../sync/reload";
+import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
 import { RemovedBanner } from "../sync/RemovedBanner";
 import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
@@ -83,6 +83,7 @@ function Banner(p: { message: string; children?: ReactNode }) {
 }
 
 function IndexBanner(p: { registry: Registry; error: AppError }) {
+  const reloadable = canReload(useSyncState().state);
   const [confirm, setConfirm] = useState<string | null>(null);
   const doc = p.registry.indexErrorDoc();
   const space = p.error.code === "store.corrupt" && doc !== null && doc.startsWith("ix-") ? doc : null;
@@ -92,7 +93,7 @@ function IndexBanner(p: { registry: Registry; error: AppError }) {
       <button type="button" className="button-small" onClick={() => void p.registry.retryIndex()}>
         Try again
       </button>
-      {space !== null && !readOnly && <ReloadButton small onOpen={() => setConfirm(space)} />}
+      {space !== null && !readOnly && <ReloadButton enabled={reloadable} small onOpen={() => setConfirm(space)} />}
       {space !== null && readOnly && <span className="banner-note">{FILES_STAY}</span>}
       {confirm !== null && <ReloadConfirm registry={p.registry} docId={confirm} onClose={() => setConfirm(null)} />}
     </Banner>

@@ -1,11 +1,17 @@
-import { AppError } from "../../services/ipc";
+import type { PlanId } from "../../domain/model";
+import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
-import { toast } from "../common/Toast";
 import { exportFlow } from "../shell/fileFlows";
 import { useUiValue } from "../state";
 
 export const REMOVED_TEXT = "This device was removed from the space. Its plans are read-only. Export saves changes the server never received.";
+
+function listingOf(registry: Registry, id: PlanId): PlanListing {
+  const listing = registry.plans().find((l) => l.id === id);
+  if (listing === undefined) throw new Error(`Plan ${id} is not listed`);
+  return listing;
+}
 
 export function RemovedBanner(p: { session: PlanSession | null }) {
   const { state } = useSyncState();
@@ -13,14 +19,10 @@ export function RemovedBanner(p: { session: PlanSession | null }) {
   const { setUi } = useUiValue();
   if (state.kind !== "error" || state.code !== "revoked") return null;
   const session = p.session;
-  const id = session === null ? null : session.view().plan.id;
-  const space = id === null ? null : (registry.plans().find((l) => l.id === id)?.space ?? null);
+  const space = session === null ? null : listingOf(registry, session.view().plan.id).space;
   const exportOpen = (): void => {
     if (session === null) throw new Error("Export needs an open plan");
-    exportFlow(session).catch((e: unknown) => {
-      if (!(e instanceof AppError)) throw e;
-      toast(e.message, "bad");
-    });
+    void exportFlow(session);
   };
   return (
     <div className="banner bad removed-banner">
