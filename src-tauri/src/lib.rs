@@ -160,16 +160,10 @@ pub fn run() {
             commands::holidays::holidays_year,
             commands::holidays::holidays_ics_preview,
             commands::device::device_info,
-            commands::file::file_write,
-            commands::file::file_read,
             commands::file::plan_export,
             commands::file::plan_import,
             #[cfg(target_os = "macos")]
             commands::print::print_window,
-            #[cfg(target_os = "ios")]
-            commands::file::file_stage,
-            #[cfg(target_os = "ios")]
-            commands::file::file_unstage,
             commands::settings::settings_read,
             commands::settings::settings_write,
             commands::settings::settings_reset,
@@ -468,6 +462,62 @@ mod tests {
                 .any(|p| p.as_str() == Some("core:window:allow-destroy")),
             "capabilities/default.json does not grant core:window:allow-destroy, so the close \
              guard's destroy() is refused and the window never closes: {permissions:?}"
+        );
+    }
+
+    #[test]
+    fn no_capability_grants_a_dialog_or_fs_permission() {
+        [
+            ("default.json", include_str!("../capabilities/default.json")),
+            ("ios.json", include_str!("../capabilities/ios.json")),
+        ]
+        .into_iter()
+        .for_each(|(file, text)| {
+            let caps: serde_json::Value = serde_json::from_str(text)
+                .unwrap_or_else(|e| panic!("capabilities/{file} is not JSON: {e}"));
+            let permissions = caps["permissions"]
+                .as_array()
+                .unwrap_or_else(|| panic!("capabilities/{file} has no permissions array"));
+            let granted: Vec<String> = permissions
+                .iter()
+                .map(|p| match p {
+                    serde_json::Value::String(id) => id.clone(),
+                    other => other["identifier"]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("capabilities/{file} grants {other} without an identifier"))
+                        .to_string(),
+                })
+                .filter(|id| id.starts_with("dialog:") || id.starts_with("fs:"))
+                .collect();
+            assert!(
+                granted.is_empty(),
+                "capabilities/{file} grants {granted:?}, so the window can open a dialog or name a path itself"
+            );
+        });
+    }
+
+    #[test]
+    fn the_window_has_no_command_that_takes_a_path() {
+        let body = run_body();
+        ["file_write", "file_read", "file_stage", "file_unstage"]
+            .into_iter()
+            .for_each(|cmd| {
+                assert!(
+                    !body.contains(&format!("commands::file::{cmd}")),
+                    "run() still registers {cmd}, which takes a path from the window"
+                )
+            });
+        ["plan_export", "plan_import"].into_iter().for_each(|cmd| {
+            assert_eq!(
+                body.matches(&format!("commands::file::{cmd}")).count(),
+                1,
+                "run() does not register {cmd} exactly once"
+            )
+        });
+        let file = include_str!("commands/file.rs");
+        assert!(
+            !file.contains("x-path"),
+            "commands/file.rs still reads a path header"
         );
     }
 
