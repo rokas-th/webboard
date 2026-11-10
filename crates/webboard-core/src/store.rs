@@ -5,6 +5,7 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::error::{CommandError, Result};
 
@@ -13,6 +14,8 @@ pub const SEGMENT_MAX_BYTES: u64 = 4 << 20;
 const SNAPSHOT: &str = "snapshot.bin";
 const SNAPSHOT_TMP: &str = "snapshot.bin.tmp";
 const LOCK: &str = "lock";
+const LOCK_WAIT: Duration = Duration::from_millis(500);
+const LOCK_RETRY: Duration = Duration::from_millis(10);
 const MAGIC: &[u8; 4] = b"WBS1";
 const HEADER: usize = 12;
 const TRAILER: usize = 4;
@@ -472,19 +475,16 @@ impl DocStore {
             .truncate(false)
             .open(&path)
             .map_err(|e| io_error("Could not open", &path, e))?;
-        match lock.try_lock() {
-            Ok(()) => Ok(Self {
-                dir: dir.to_path_buf(),
-                segment_max,
-                _lock: lock,
-                state: None,
-                torn_unreported: false,
-                #[cfg(test)]
-                fail_next_append: false,
-            }),
-            Err(TryLockError::WouldBlock) => Err(locked_error(&doc_id(dir))),
-            Err(TryLockError::Error(e)) => Err(io_error("Could not lock", &path, e)),
-        }
+        lock_waiting(&lock, &path, &doc_id(dir))?;
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            segment_max,
+            _lock: lock,
+            state: None,
+            torn_unreported: false,
+            #[cfg(test)]
+            fail_next_append: false,
+        })
     }
 
     pub fn load(&mut self) -> Result<Loaded> {
@@ -798,10 +798,21 @@ fn lock_dir(dir: &Path, id: &str) -> Result<File> {
         .truncate(false)
         .open(&path)
         .map_err(|e| io_error("Could not open", &path, e))?;
-    match lock.try_lock() {
-        Ok(()) => Ok(lock),
-        Err(TryLockError::WouldBlock) => Err(locked_error(id)),
-        Err(TryLockError::Error(e)) => Err(io_error("Could not lock", &path, e)),
+    lock_waiting(&lock, &path, id)?;
+    Ok(lock)
+}
+
+fn lock_waiting(lock: &File, path: &Path, id: &str) -> Result<()> {
+    let start = Instant::now();
+    loop {
+        match lock.try_lock() {
+            Ok(()) => return Ok(()),
+            Err(TryLockError::WouldBlock) if start.elapsed() < LOCK_WAIT => {
+                std::thread::sleep(LOCK_RETRY)
+            }
+            Err(TryLockError::WouldBlock) => return Err(locked_error(id)),
+            Err(TryLockError::Error(e)) => return Err(io_error("Could not lock", path, e)),
+        }
     }
 }
 
@@ -816,7 +827,6 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
     use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
     fn payload(seq: u64) -> Vec<u8> {
@@ -1656,6 +1666,56 @@ mod tests {
             l.records,
             (1..=11).map(|q| (q, payload(q))).collect::<Vec<_>>()
         );
+    }
+
+    fn hold_lock(dir: &Path, for_ms: u64) -> std::thread::JoinHandle<()> {
+        fs::create_dir_all(dir).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(LOCK))
+            .unwrap();
+        held.try_lock().unwrap();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(for_ms));
+            drop(held);
+        })
+    }
+
+    #[test]
+    fn a_lock_held_briefly_is_waited_out() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("P");
+        let holder = hold_lock(&doc, 100);
+        let start = Instant::now();
+        DocStore::open(&doc).unwrap();
+        assert!(start.elapsed() >= Duration::from_millis(100));
+        holder.join().unwrap();
+        let other = tmp.path().join("Q");
+        let holder = hold_lock(&other, 100);
+        lock_dir(&other, "Q").unwrap();
+        holder.join().unwrap();
+    }
+
+    #[test]
+    fn a_lock_held_longer_than_the_wait_is_locked() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("P");
+        let holder = hold_lock(&doc, 1500);
+        let start = Instant::now();
+        let Err(e) = DocStore::open(&doc) else {
+            panic!("opened a store whose lock is held");
+        };
+        let waited = start.elapsed();
+        assert_eq!(e, locked_error("P"));
+        assert!(waited >= LOCK_WAIT, "{waited:?}");
+        assert!(waited < Duration::from_millis(1500), "{waited:?}");
+        let start = Instant::now();
+        assert_eq!(lock_dir(&doc, "P").unwrap_err(), locked_error("P"));
+        assert!(start.elapsed() >= LOCK_WAIT);
+        holder.join().unwrap();
     }
 
     #[test]
