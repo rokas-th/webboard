@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readdir, readFile, rename, rm, truncate, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { gzipSync } from "node:zlib";
 
 import { tarEntries, tarNames } from "./release.mjs";
@@ -378,4 +379,139 @@ test("tarEntries lets a file system error through as itself; only a parse error 
   const junk = join(dir, "junk.tar.gz");
   await writeFile(junk, "not gzip");
   await assert.rejects(tarEntries(junk), { message: new RegExp(`^${junk.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")} is not a gzip tarball WebBoard can read: `) });
+});
+
+function releaseAsync(root, ...args) {
+  return new Promise((resolve, reject) => {
+    execFile(process.execPath, [TOOL, ...args, "--root", root], { encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error !== null && typeof error.code !== "number") reject(error);
+      else resolve({ status: error === null ? 0 : error.code, stdout, stderr });
+    });
+  });
+}
+
+async function live(status, body) {
+  const requests = [];
+  const server = createServer((req, res) => {
+    requests.push(req.url);
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(body);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${server.address().port}/releases/latest.json`,
+    requests,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+}
+
+async function published() {
+  const p = await project();
+  const r = release(p.root, "manifest", CURRENT, "--notes", "n");
+  assert.equal(r.status, 0, r.stderr);
+  return p;
+}
+
+const DEPLOYED = [
+  "/releases/latest.json",
+  `/releases/${CURRENT}/${TARBALL}`,
+  `/releases/${CURRENT}/${DEB_NAME}`,
+  "/releases/WebBoard_amd64.deb",
+];
+
+test("check passes when the checkout's latest.json offers the live version, and lists the release files a deploy carries", async () => {
+  const p = await published();
+  const server = await live(200, JSON.stringify({ version: CURRENT, notes: "n" }));
+  try {
+    const r = await releaseAsync(p.root, "check", "--live", server.url);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(server.requests, ["/releases/latest.json"]);
+    assert.equal(r.stdout, [`release: ${join(p.releases, "latest.json")} offers ${CURRENT}, the same as ${server.url}`, ...DEPLOYED.map((f) => `  ${f}`), ""].join("\n"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("check refuses a checkout that holds no release, before it reads the live one", async () => {
+  const p = await project();
+  const server = await live(200, JSON.stringify({ version: CURRENT }));
+  try {
+    failsWith(await releaseAsync(p.root, "check", "--live", server.url), `${join(p.releases, "latest.json")} is missing`, "Deploy from the checkout where node scripts/release.mjs manifest wrote the release that is live.");
+    assert.deepEqual(server.requests, []);
+  } finally {
+    await server.close();
+  }
+});
+
+test("check refuses a checkout whose release is not the live one, naming both versions", async () => {
+  const p = await published();
+  const server = await live(200, JSON.stringify({ version: NEXT }));
+  try {
+    failsWith(await releaseAsync(p.root, "check", "--live", server.url), `offers ${CURRENT}, but ${server.url} offers ${NEXT}`, `Deploy from the checkout that holds ${NEXT}`);
+  } finally {
+    await server.close();
+  }
+});
+
+test("check <v> passes for the version being published without reading the live one", async () => {
+  const p = await published();
+  const server = await live(200, JSON.stringify({ version: NEXT }));
+  try {
+    const r = await releaseAsync(p.root, "check", CURRENT, "--live", server.url);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(server.requests, []);
+    assert.equal(r.stdout, [`release: ${join(p.releases, "latest.json")} offers ${CURRENT}, the version being published`, ...DEPLOYED.map((f) => `  ${f}`), ""].join("\n"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("check <v> refuses a checkout whose latest.json offers another version", async () => {
+  const p = await published();
+  failsWith(release(p.root, "check", NEXT), `${join(p.releases, "latest.json")} offers ${CURRENT}, not ${NEXT}, the version being published`, `node scripts/release.mjs manifest ${NEXT}`);
+});
+
+test("check refuses a release that lacks a file the deploy must carry", async () => {
+  const p = await published();
+  await rm(join(p.releases, "WebBoard_amd64.deb"));
+  failsWith(release(p.root, "check", CURRENT), `${join(p.releases, "WebBoard_amd64.deb")} is missing`);
+  const q = await published();
+  await rm(join(q.releases, CURRENT, DEB_NAME));
+  failsWith(release(q.root, "check", CURRENT), `${join(q.releases, CURRENT, DEB_NAME)} is missing`);
+});
+
+test("check fails loudly when the live latest.json cannot be read or names no version", async () => {
+  const p = await published();
+  const missing = await live(404, JSON.stringify({ error: "not_found" }));
+  try {
+    failsWith(await releaseAsync(p.root, "check", "--live", missing.url), `${missing.url} answered 404, not 200`, "node scripts/release.mjs check <major.minor.patch>");
+  } finally {
+    await missing.close();
+  }
+  const odd = await live(200, JSON.stringify({ release: CURRENT }));
+  try {
+    failsWith(await releaseAsync(p.root, "check", "--live", odd.url), `${odd.url} carries no major.minor.patch version`);
+  } finally {
+    await odd.close();
+  }
+  const gone = await live(200, "{}");
+  await gone.close();
+  failsWith(await releaseAsync(p.root, "check", "--live", gone.url), `could not read ${gone.url}: `);
+});
+
+test("check takes one version at most, and no --notes", async () => {
+  const p = await published();
+  failsWith(release(p.root, "check", "1.2"), "usage: node scripts/release.mjs check [<major.minor.patch>]");
+  failsWith(release(p.root, "check", CURRENT, NEXT), `unexpected argument ${NEXT}`);
+  failsWith(release(p.root, "check", "--notes", "n"), "check takes no --notes");
+  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n", "--live", "http://127.0.0.1:1/"), "only check takes --live");
+});
+
+test("runs through a symlinked path", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "webboard-release-link-"));
+  ROOTS.push(dir);
+  const link = join(dir, "release-link.mjs");
+  await symlink(TOOL, link);
+  const r = run(process.execPath, [link, "check", "--root", dir]);
+  failsWith(r, `${join(dir, RELEASES, "latest.json")} is missing`);
 });

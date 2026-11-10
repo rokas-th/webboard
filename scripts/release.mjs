@@ -1,13 +1,15 @@
+import { realpathSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createHash, createPublicKey, verify } from "node:crypto";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { basename, join } from "node:path";
 
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const LIMIT = 25 * 1024 * 1024;
 const BASE_URL = "https://webboard.rokass.org/releases";
+const LIVE = `${BASE_URL}/latest.json`;
 const FIRST_INSTALL = "WebBoard_amd64.deb";
 const APP = "WebBoard.app";
 const MAC_DIR = join("target", "release", "bundle", "macos");
@@ -15,6 +17,9 @@ const DEB_DIR = join("target", "release", "bundle", "deb");
 const RELEASES = join("server", "public", "releases");
 const CONF = join("src-tauri", "tauri.conf.json");
 const VERSION_TOOL = fileURLToPath(new URL("./version.mjs", import.meta.url));
+const USAGE = 'usage: node scripts/release.mjs tarball | manifest <major.minor.patch> --notes "<text>" | check [<major.minor.patch>]';
+const CHECK_USAGE = "usage: node scripts/release.mjs check [<major.minor.patch>]: the version this deploy publishes, or none for a deploy that publishes no release";
+const PUBLISH_HINT = "a deploy that publishes a release passes its version instead: node scripts/release.mjs check <major.minor.patch>";
 const SIGN = (file) => `run owner step R2: npx tauri signer sign -f ~/.tauri/webboard.key ${file}`;
 
 class ReleaseError extends Error {}
@@ -34,27 +39,32 @@ function compareVersions(a, b) {
 
 /** @param {string[]} argv */
 function parse(argv) {
-  const opts = { command: null, version: null, notes: null, root: null };
+  const opts = { command: null, version: null, notes: null, root: null, live: null };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === "--notes" || a === "--root") {
+    if (a === "--notes" || a === "--root" || a === "--live") {
       i += 1;
       const value = argv[i];
       if (value === undefined) fail(`${a} needs a value`);
       if (a === "--notes") opts.notes = value;
-      else opts.root = value;
+      else if (a === "--root") opts.root = value;
+      else opts.live = value;
     } else if (a.startsWith("-")) fail(`unknown option ${a}`);
     else if (opts.command === null) opts.command = a;
-    else if (opts.command === "manifest" && opts.version === null) opts.version = a;
+    else if ((opts.command === "manifest" || opts.command === "check") && opts.version === null) opts.version = a;
     else fail(`unexpected argument ${a}`);
   }
+  if (opts.live !== null && opts.command !== "check") fail("only check takes --live");
   if (opts.command === "manifest") {
     if (opts.version === null || !SEMVER.test(opts.version)) fail('usage: node scripts/release.mjs manifest <major.minor.patch> --notes "<text>"');
     if (opts.notes === null || opts.notes.trim() === "") fail('manifest needs --notes "<text>": the release notes the update line and latest.json carry');
   } else if (opts.command === "tarball") {
     if (opts.notes !== null) fail("tarball takes no --notes");
+  } else if (opts.command === "check") {
+    if (opts.version !== null && !SEMVER.test(opts.version)) fail(CHECK_USAGE);
+    if (opts.notes !== null) fail("check takes no --notes");
   } else {
-    fail('usage: node scripts/release.mjs tarball | manifest <major.minor.patch> --notes "<text>"');
+    fail(USAGE);
   }
   return opts;
 }
@@ -283,6 +293,73 @@ async function manifest(root, version, notes) {
   process.stdout.write(`  kept ${[version, ...(previous === undefined ? [] : [previous])].join(", ")}${dropped.length === 0 ? "" : `; removed ${dropped.join(", ")}`}\n`);
 }
 
+/** @param {string} text @param {string} where */
+function offered(text, where) {
+  const data = (() => {
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      fail(`${where} is not JSON: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  })();
+  const version = data?.version;
+  if (typeof version !== "string" || !SEMVER.test(version)) fail(`${where} carries no major.minor.patch version: ${JSON.stringify(version) ?? "none"}`);
+  return { version, platforms: data.platforms };
+}
+
+/** @param {unknown} e */
+function reason(e) {
+  if (!(e instanceof Error)) return String(e);
+  return e.cause instanceof Error ? `${e.message} (${e.cause.message})` : e.message;
+}
+
+/** @param {string} url */
+async function liveVersion(url) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(20_000) }).catch((e) => fail(`could not read ${url}: ${reason(e)}; ${PUBLISH_HINT}`));
+  if (res.status !== 200) fail(`${url} answered ${res.status}, not 200; ${PUBLISH_HINT}`);
+  return offered(await res.text(), url).version;
+}
+
+/** @param {string} file @param {unknown} platforms */
+function releaseFiles(file, platforms) {
+  if (typeof platforms !== "object" || platforms === null || Array.isArray(platforms) || Object.keys(platforms).length === 0) fail(`${file} names no platform`);
+  const files = Object.entries(platforms).map(([name, p]) => {
+    const url = p?.url;
+    if (typeof url !== "string" || !url.startsWith(`${BASE_URL}/`)) fail(`${file} gives platform ${name} the url ${JSON.stringify(url) ?? "none"}, not one under ${BASE_URL}/`);
+    return url.slice(BASE_URL.length + 1);
+  });
+  return ["latest.json", ...files, FIRST_INSTALL];
+}
+
+/** @param {string} root @param {string | null} version @param {string} liveUrl */
+async function check(root, version, liveUrl) {
+  const releases = join(root, RELEASES);
+  const file = join(releases, "latest.json");
+  if (!(await exists(file))) {
+    fail(`${file} is missing: this checkout holds no release, and a deploy from it would take the release files off ${BASE_URL}/. Deploy from the checkout where node scripts/release.mjs manifest wrote the release that is live${version === null ? "" : ` or ${version}`}.`);
+  }
+  const latest = offered(await readFile(file, "utf8"), file);
+  const files = releaseFiles(file, latest.platforms);
+  const present = await Promise.all(files.map((rel) => exists(join(releases, rel))));
+  const absent = files.filter((_, i) => !present[i]);
+  if (absent.length > 0) {
+    fail(`${join(releases, absent[0])} is missing: the release in ${releases} is incomplete; run node scripts/release.mjs manifest ${latest.version} --notes "<text>" again in this checkout`);
+  }
+  if (version !== null) {
+    if (latest.version !== version) {
+      fail(`${file} offers ${latest.version}, not ${version}, the version being published: run node scripts/release.mjs manifest ${version} --notes "<text>" in this checkout first`);
+    }
+    process.stdout.write(`release: ${file} offers ${version}, the version being published\n`);
+  } else {
+    const live = await liveVersion(liveUrl);
+    if (live !== latest.version) {
+      fail(`${file} offers ${latest.version}, but ${liveUrl} offers ${live}: a deploy from this checkout would put ${latest.version} in place of the live release. Deploy from the checkout that holds ${live}; to publish ${latest.version}, run node scripts/release.mjs check ${latest.version} instead.`);
+    }
+    process.stdout.write(`release: ${file} offers ${live}, the same as ${liveUrl}\n`);
+  }
+  files.forEach((rel) => process.stdout.write(`  /releases/${rel}\n`));
+}
+
 /** @param {string} root */
 async function tarball(root) {
   if (process.platform !== "darwin") fail("tarball runs on the Mac: it packs the macOS build with bsdtar");
@@ -316,6 +393,7 @@ async function main() {
     const opts = parse(process.argv.slice(2));
     const root = opts.root ?? fileURLToPath(new URL("..", import.meta.url));
     if (opts.command === "manifest") await manifest(root, opts.version ?? "", opts.notes ?? "");
+    else if (opts.command === "check") await check(root, opts.version, opts.live ?? LIVE);
     else await tarball(root);
   } catch (e) {
     if (!(e instanceof ReleaseError)) throw e;
@@ -324,4 +402,4 @@ async function main() {
   }
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
+if (process.argv[1] !== undefined && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
