@@ -350,8 +350,7 @@ export class Room extends YServer {
 
   async purge(): Promise<number> {
     const open = [...this.getConnections()];
-    this.isGone();
-    if (this.tombstone === 'stored') {
+    if (this.isGone() && this.tombstone === 'stored') {
       open.forEach((conn) => conn.close(4410, 'Plan deleted'));
       return open.length;
     }

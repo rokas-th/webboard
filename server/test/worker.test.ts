@@ -409,6 +409,7 @@ describe('the worker', () => {
     const a = await enrol(devA, 'Mac');
     const doc = newDoc();
     const ticket = await ticketFor(a, doc);
+    expect(await roomExists(doc)).toBe(false);
     const seen: { url: string; device: string | null; props: string | null }[] = [];
     await runInDurableObject(env.Room.getByName(doc), (instance: Room) => {
       const real = instance.getConnectionTags.bind(instance);
@@ -432,6 +433,7 @@ describe('the worker', () => {
     );
     clients.push(client);
     await client.synced;
+    expect(await roomExists(doc)).toBe(true);
     expect(seen).toHaveLength(1);
     expect(seen[0].device).toBe(devA);
     expect(seen[0].props).toBeNull();

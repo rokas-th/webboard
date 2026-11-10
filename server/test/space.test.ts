@@ -664,7 +664,7 @@ describe('Space purge', () => {
     expect(await alarmOf(space)).toBeNull();
     const id = env.Room.idFromName(doc);
     expect((await listDurableObjectIds(env.Room)).some((listed) => listed.equals(id))).toBe(false);
-    expect(await storedText(space)).not.toContain(doc);
+    expect((await storedText(space)).filter((cell) => cell.includes(doc))).toEqual([]);
   });
 
   it('a device purges a plan that only another device of the space joined', async () => {
