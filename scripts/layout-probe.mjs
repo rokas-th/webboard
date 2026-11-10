@@ -52,6 +52,7 @@ const STATUS_REFUSED = "Holidays for 2031 not available — open calendar";
 
 const expect = (selector, text) => ({ expect: text === undefined ? [selector] : [selector, text] });
 const count = (selector, n) => ({ count: [selector, n] });
+const loaded = (selector) => ({ loaded: selector });
 const click = (selector, text) => ({ click: [selector, text] });
 const tap = (selector, text) => ({ tap: [selector, text] });
 const none = (selector, text) => ({ none: [selector, text] });
@@ -163,6 +164,7 @@ function states() {
       tap(".palette-item .palette-label", "About WebBoard"),
       expect('.modal[role="dialog"] h3', "About WebBoard"),
       count('.modal[role="dialog"] img.about-mark', 1),
+      loaded('.modal[role="dialog"] img.about-mark'),
     ],
   });
   add("linux-toolbar", "mesa-linux", {
@@ -282,6 +284,7 @@ function states() {
       click(".plan-sheet button.about-row", "About WebBoard"),
       expect('.sheet[role="dialog"] .sheet-title', "About WebBoard"),
       count('.sheet[role="dialog"] .about-sheet img.about-mark', 1),
+      loaded('.sheet[role="dialog"] .about-sheet img.about-mark'),
     ],
   });
   add("phone-status/strip", "phone-status", {
@@ -391,7 +394,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -1180,6 +1183,14 @@ window.__probeAct = function (a) {
   if (a.count !== undefined) {
     var n = document.querySelectorAll(a.count[0]).length;
     if (n !== a.count[1]) return { fail: a.count[0] + " matches " + n + " elements, not " + a.count[1] };
+    return { ok: true };
+  }
+  if (a.loaded !== undefined) {
+    var img = document.querySelector(a.loaded);
+    if (img === null) return { fail: "no " + a.loaded };
+    if (!img.complete || img.naturalWidth === 0) {
+      return { fail: a.loaded + " " + JSON.stringify(img.getAttribute("src")) + " did not load: complete " + img.complete + ", naturalWidth " + img.naturalWidth };
+    }
     return { ok: true };
   }
   if (a.nubs !== undefined) {
