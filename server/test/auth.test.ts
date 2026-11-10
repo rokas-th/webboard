@@ -1,6 +1,21 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { claim, consumeTicket, devices, enrol, normalizeCode, pairCode, removeDevice, schema, sha256Hex, ticket } from '../src/auth';
+import {
+  claim,
+  consumeTicket,
+  devices,
+  enrol,
+  keepUntold,
+  markErased,
+  normalizeCode,
+  pairCode,
+  purgePlan,
+  removeDevice,
+  schema,
+  sha256Hex,
+  ticket,
+  unerased,
+} from '../src/auth';
 import { int, text } from '../src/sql';
 import { value } from './helpers';
 
@@ -397,6 +412,58 @@ describe('auth', () => {
       expect(count(storage, 'joins')).toBe(501);
       const other = await enrolled(storage, DEV_B);
       expect(await ticket(storage, T, other.token, 'pX000000000')).toMatchObject({ ok: true });
+    });
+  });
+
+  it('a purge records the first purging device, drops the plan rows and is then erased once', async () => {
+    await inSpace('purge-rows', async (storage) => {
+      const a = await enrolled(storage, DEV_A);
+      const b = await enrolled(storage, DEV_B);
+      value(await ticket(storage, T, a.token, 'docA0000000'));
+      value(await ticket(storage, T, a.token, 'docB0000000'));
+      keepUntold(storage, DEV_A, ['docA0000000']);
+      expect(await purgePlan(storage, T + 1, b.token, 'docA0000000')).toEqual({ ok: true, value: { device: DEV_B } });
+      expect(await purgePlan(storage, T + 2, a.token, 'docA0000000')).toEqual({ ok: true, value: { device: DEV_A } });
+      expect(await purgePlan(storage, T + 3, a.token, 'docC0000000')).toEqual({ ok: true, value: { device: DEV_A } });
+      expect(count(storage, 'joins')).toBe(1);
+      expect(count(storage, 'tickets')).toBe(1);
+      expect(count(storage, 'untold')).toBe(0);
+      expect(unerased(storage)).toEqual([
+        { doc: 'docA0000000', device: DEV_B },
+        { doc: 'docC0000000', device: DEV_A },
+      ]);
+      markErased(storage, T + 4, 'docA0000000');
+      markErased(storage, T + 5, 'docA0000000');
+      expect(unerased(storage)).toEqual([{ doc: 'docC0000000', device: DEV_A }]);
+      expect(int(storage.sql.exec("SELECT erased_at FROM purged WHERE doc = 'docA0000000'").one(), 'erased_at')).toBe(T + 4);
+    });
+  });
+
+  it('a purge refuses unknown and removed devices and docs that are not plans', async () => {
+    await inSpace('purge-refused', async (storage) => {
+      const a = await enrolled(storage, DEV_A);
+      const b = await enrolled(storage, DEV_B);
+      const bad = { ok: false, status: 400, error: 'bad_request', message: 'The document id is not valid. Update WebBoard on this device.' };
+      expect(await purgePlan(storage, T, a.token, 'ix-' + a.spaceId)).toEqual(bad);
+      expect(await purgePlan(storage, T, a.token, '../x')).toEqual(bad);
+      expect(await purgePlan(storage, T, 'nope', 'docA0000000')).toEqual(UNKNOWN);
+      value(await removeDevice(storage, T, a.token, DEV_B));
+      expect(await purgePlan(storage, T, b.token, 'docA0000000')).toEqual(REVOKED);
+      expect(count(storage, 'purged')).toBe(0);
+    });
+  });
+
+  it('a purged plan gets no ticket and its issued tickets are 410', async () => {
+    await inSpace('purge-tickets', async (storage) => {
+      const a = await enrolled(storage, DEV_A);
+      const issued = value(await ticket(storage, T, a.token, 'docA0000000'));
+      value(await purgePlan(storage, T, a.token, 'docA0000000'));
+      const gone = { ok: false, status: 410, error: 'gone', message: 'This plan was deleted forever on another device.' };
+      expect(await ticket(storage, T, a.token, 'docA0000000')).toEqual(gone);
+      expect(await consumeTicket(storage, T, issued.ticket, 'docA0000000')).toEqual(gone);
+      expect(await consumeTicket(storage, T, 'tik_unknown', 'docA0000000')).toEqual(gone);
+      expect(count(storage, 'joins')).toBe(0);
+      expect(await ticket(storage, T, a.token, 'ix-' + a.spaceId)).toMatchObject({ ok: true });
     });
   });
 

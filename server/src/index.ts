@@ -212,6 +212,17 @@ const ROUTES: readonly Route[] = [
       return answer(await space(env).removeDevice(token, match[1]));
     },
   },
+  {
+    path: /^\/plans\/([^/]+)$/,
+    method: 'DELETE',
+    run: async ({ env, req, match }) => {
+      const token = bearer(req);
+      if (token === null) {
+        return refuse(401, 'unauthorized', UNKNOWN_DEVICE);
+      }
+      return answer(await space(env).purgePlan(token, match[1]));
+    },
+  },
 ];
 
 async function api(req: Request, env: Env, pathname: string): Promise<Response> {

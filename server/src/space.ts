@@ -30,12 +30,14 @@ const ROOM_RESTORE_FAILED: Failure = {
 export interface RoomCalls {
   close(doc: string, deviceId: string): Promise<number>;
   restore(doc: string, deviceId: string): Promise<void>;
+  purge(doc: string): Promise<number>;
 }
 
 export class Space extends DurableObject<Env> {
   readonly rooms: RoomCalls = {
     close: (doc, deviceId) => this.env.Room.getByName(doc).closeDevice(deviceId),
     restore: (doc, deviceId) => this.env.Room.getByName(doc).restoreDevice(deviceId),
+    purge: (doc) => this.env.Room.getByName(doc).purge(),
   };
 
   private readonly queues = new Map<string, Promise<void>>();
@@ -84,6 +86,19 @@ export class Space extends DurableObject<Env> {
     });
   }
 
+  async purgePlan(token: string, doc: string): Promise<Result<{ closed: number }>> {
+    const purged = await auth.purgePlan(this.ctx.storage, Date.now(), token, doc);
+    if (!purged.ok) {
+      return purged;
+    }
+    const erased = await this.erase(purged.value.device, doc);
+    if (erased === null) {
+      await this.retryLater();
+      return auth.PURGE_PENDING;
+    }
+    return { ok: true, value: { closed: erased } };
+  }
+
   async alarm(): Promise<void> {
     await auth
       .untoldDevices(this.ctx.storage)
@@ -96,6 +111,30 @@ export class Space extends DurableObject<Env> {
         },
         Promise.resolve(),
       );
+    await auth.unerased(this.ctx.storage).reduce<Promise<void>>(async (done, { doc, device }) => {
+      await done;
+      await this.erase(device, doc);
+    }, Promise.resolve());
+    if (auth.unerased(this.ctx.storage).length > 0) {
+      await this.retryLater();
+    }
+  }
+
+  private async erase(device: string, doc: string): Promise<number | null> {
+    const settled = await Promise.allSettled([this.rooms.purge(doc)]);
+    this.logFailures('purge', device, [doc], settled);
+    const [outcome] = settled;
+    if (outcome.status === 'rejected') {
+      return null;
+    }
+    auth.markErased(this.ctx.storage, Date.now(), doc);
+    return outcome.value;
+  }
+
+  private async retryLater(): Promise<void> {
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now() + CLOSE_RETRY_MS);
+    }
   }
 
   private async tell(id: string, docs: readonly string[]): Promise<{ untold: number; closed: number }> {
@@ -106,8 +145,8 @@ export class Space extends DurableObject<Env> {
     this.logFailures('closeDevice', id, docs, settled);
     const untold = docs.filter((_doc, index) => settled[index].status === 'rejected');
     auth.keepUntold(this.ctx.storage, id, untold);
-    if (untold.length > 0 && (await this.ctx.storage.getAlarm()) === null) {
-      await this.ctx.storage.setAlarm(Date.now() + CLOSE_RETRY_MS);
+    if (untold.length > 0) {
+      await this.retryLater();
     }
     const closed = settled.reduce((sum, outcome) => (outcome.status === 'fulfilled' ? sum + outcome.value : sum), 0);
     return { untold: untold.length, closed };

@@ -131,6 +131,29 @@ async function stateBytes(doc: string): Promise<number> {
   return runInDurableObject(stubOf(doc), (room: Room) => room.stateBytes);
 }
 
+const PLAN_DELETED = { code: 4410, reason: 'Plan deleted' };
+
+async function tablesOf(doc: string): Promise<string[]> {
+  return runInDurableObject(stubOf(doc), (_room, state) =>
+    state.storage.sql
+      .exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\' ORDER BY name")
+      .toArray()
+      .map((row) => String(row.name)),
+  );
+}
+
+async function goneRows(doc: string): Promise<number> {
+  return runInDurableObject(stubOf(doc), (_room, state) => int(state.storage.sql.exec('SELECT COUNT(*) AS n FROM gone').one(), 'n'));
+}
+
+async function alarmIn(doc: string): Promise<number | null> {
+  return runInDurableObject(stubOf(doc), (_room, state) => state.storage.getAlarm());
+}
+
+async function keysIn(doc: string): Promise<string[]> {
+  return runInDurableObject(stubOf(doc), async (_room, state) => [...(await state.storage.list()).keys()]);
+}
+
 describe('Room', () => {
   it('persists every update across a restarted object', async () => {
     const doc = 'persist';
@@ -526,5 +549,81 @@ describe('Room', () => {
     expect(Date.now() - started).toBeLessThan(20_000);
     expect(actions(c).size).toBe(writes);
     await closeAll(c);
+  });
+});
+
+describe('Room purge', () => {
+  it('erases a plan: closes its sockets with 4410, keeps no history, no alarm and one gone row', async () => {
+    const doc = 'purge-erase';
+    const a = await join(doc, DEV_A);
+    actions(a).set('a1', { lbl: 'one' });
+    await until(async () => (await count(doc, 'updates')) === 1, 'a1 to be stored');
+    expect(await alarmIn(doc)).not.toBeNull();
+    expect(await stubOf(doc).purge()).toBe(1);
+    expect(await a.closed).toEqual(PLAN_DELETED);
+    expect(await tablesOf(doc)).toEqual(['gone']);
+    expect(await goneRows(doc)).toBe(1);
+    expect(await alarmIn(doc)).toBeNull();
+    expect(await keysIn(doc)).toEqual([]);
+  });
+
+  it('a purge of a purged room closes what is open and keeps one gone row', async () => {
+    const doc = 'purge-twice';
+    expect(await stubOf(doc).purge()).toBe(0);
+    expect(await stubOf(doc).purge()).toBe(0);
+    expect(await tablesOf(doc)).toEqual(['gone']);
+    expect(await goneRows(doc)).toBe(1);
+  });
+
+  it('refuses a WebSocket to a purged room with 4410, also after eviction, and creates no tables', async () => {
+    const doc = 'purge-refuse';
+    const a = await join(doc, DEV_A);
+    expect(await stubOf(doc).purge()).toBe(1);
+    await a.closed;
+    const logged = vi.spyOn(console, 'error');
+    const late = await connectDoc(opener(doc, DEV_B));
+    expect(await late.closed).toEqual(PLAN_DELETED);
+    await evictDurableObject(stubOf(doc));
+    const cold = await connectDoc(routed(doc, DEV_C));
+    expect(await cold.closed).toEqual(PLAN_DELETED);
+    expect(await tablesOf(doc)).toEqual(['gone']);
+    expect(logged.mock.calls.filter((call) => String(call[0]).startsWith(`Room ${doc}`))).toEqual([]);
+    logged.mockRestore();
+  });
+
+  it('a room that was never purged opens and has no gone table', async () => {
+    const doc = 'purge-never';
+    const a = await join(doc, DEV_A);
+    expect(await tablesOf(doc)).toEqual(['revoked', 'snapshot', 'updates']);
+    await closeAll(a);
+  });
+
+  it('closes an open socket with 4410 on its next message once the room is gone', async () => {
+    const doc = 'purge-receive';
+    const a = await join(doc, DEV_A);
+    await runInDurableObject(stubOf(doc), (_room, state) => {
+      state.storage.sql.exec('CREATE TABLE gone (at INTEGER NOT NULL)');
+      state.storage.sql.exec('INSERT INTO gone (at) VALUES (1)');
+    });
+    actions(a).set('a1', { lbl: 'late' });
+    expect(await a.closed).toEqual(PLAN_DELETED);
+    expect(await count(doc, 'updates')).toBe(0);
+  });
+
+  it('an alarm on a purged room writes nothing', async () => {
+    const doc = 'purge-alarm';
+    expect(await stubOf(doc).purge()).toBe(0);
+    await evictDurableObject(stubOf(doc));
+    await runInDurableObject(stubOf(doc), async (_room, state) => state.storage.setAlarm(Date.now() + 60_000));
+    expect(await runDurableObjectAlarm(stubOf(doc))).toBe(true);
+    expect(await tablesOf(doc)).toEqual(['gone']);
+  });
+
+  it('closing or restoring a device in a purged room does nothing', async () => {
+    const doc = 'purge-devices';
+    expect(await stubOf(doc).purge()).toBe(0);
+    expect(await stubOf(doc).closeDevice(DEV_A)).toBe(0);
+    await stubOf(doc).restoreDevice(DEV_A);
+    expect(await tablesOf(doc)).toEqual(['gone']);
   });
 });

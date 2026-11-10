@@ -2,6 +2,7 @@ import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { getServerByName } from 'partyserver';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEVICE_HEADER } from '../src/limits';
+import type { Room } from '../src/room';
 import type { Space } from '../src/space';
 import { connectDoc, type TestClient } from './client';
 import { newDoc, value } from './helpers';
@@ -26,6 +27,14 @@ const RESTORE_FAILED = {
   message: 'This device joined, but the server could not reconnect it to every plan. Join again.',
 };
 const REMOVED = { code: 4403, reason: 'Device removed' };
+const PLAN_DELETED = { code: 4410, reason: 'Plan deleted' };
+const GONE = { ok: false, status: 410, error: 'gone', message: 'This plan was deleted forever on another device.' };
+const PURGE_PENDING = {
+  ok: false,
+  status: 500,
+  error: 'purge_pending',
+  message: 'The plan is deleted, but the server has not erased its history yet. It tries again every minute.',
+};
 
 function spaceOf(name: string): DurableObjectStub<Space> {
   return env.Space.getByName('t-' + name);
@@ -64,6 +73,62 @@ async function untoldIn(space: DurableObjectStub<Space>): Promise<string[]> {
 
 async function alarmOf(space: DurableObjectStub<Space>): Promise<number | null> {
   return runInDurableObject(space, async (_space, state) => state.storage.getAlarm());
+}
+
+async function purgedIn(space: DurableObjectStub<Space>): Promise<{ doc: string; device: string; erased: boolean }[]> {
+  return runInDurableObject(space, (_space, state) =>
+    state.storage.sql
+      .exec('SELECT doc, device, erased_at IS NOT NULL AS erased FROM purged ORDER BY at, doc')
+      .toArray()
+      .map((row) => ({ doc: String(row.doc), device: String(row.device), erased: row.erased === 1 })),
+  );
+}
+
+async function rowsFor(space: DurableObjectStub<Space>, doc: string): Promise<number> {
+  return runInDurableObject(space, (_space, state) =>
+    ['joins', 'tickets', 'untold']
+      .map((table) => Number(state.storage.sql.exec(`SELECT COUNT(*) AS n FROM ${table} WHERE doc = ?`, doc).one().n))
+      .reduce((sum, n) => sum + n, 0),
+  );
+}
+
+async function roomTables(doc: string): Promise<string[]> {
+  return runInDurableObject(env.Room.getByName(doc), (_room, state) =>
+    state.storage.sql
+      .exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\' ORDER BY name")
+      .toArray()
+      .map((row) => String(row.name)),
+  );
+}
+
+function cellText(cell: unknown): string {
+  return cell instanceof ArrayBuffer ? new TextDecoder().decode(cell) : String(cell);
+}
+
+async function storedText(stub: DurableObjectStub<Space> | DurableObjectStub<Room>): Promise<string[]> {
+  return runInDurableObject(stub, async (_instance, state) => {
+    const tables = state.storage.sql
+      .exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\'")
+      .toArray()
+      .map((row) => String(row.name));
+    const cells = tables.flatMap((table) =>
+      state.storage.sql.exec(`SELECT * FROM ${table}`).toArray().flatMap((row) => Object.values(row).map(cellText)),
+    );
+    const stored = [...(await state.storage.list()).entries()].flatMap(([key, kept]) => [key, cellText(kept)]);
+    return [...cells, ...stored];
+  });
+}
+
+async function failPurgeIn(space: DurableObjectStub<Space>, failing: () => boolean): Promise<void> {
+  await runInDurableObject(space, (instance: Space) => {
+    const real = instance.rooms.purge;
+    vi.spyOn(instance.rooms, 'purge').mockImplementation(async (doc) => {
+      if (failing()) {
+        throw new Error('room down');
+      }
+      return real(doc);
+    });
+  });
 }
 
 async function closeAll(...clients: TestClient[]): Promise<void> {
@@ -117,7 +182,7 @@ describe('Space', () => {
         .toArray()
         .map((row) => row.name),
     );
-    expect(tables).toEqual(['attempts', 'codes', 'devices', 'joins', 'meta', 'tickets', 'untold']);
+    expect(tables).toEqual(['attempts', 'codes', 'devices', 'joins', 'meta', 'purged', 'tickets', 'untold']);
   });
 
   it('removing a device closes its sockets in every room it joined', async () => {
@@ -390,5 +455,126 @@ describe('Space', () => {
     expect(await revokedIn('docE0000000', DEV_A)).toBe(false);
     const back = await synced(space, again.token, 'docE0000000', DEV_A);
     await closeAll(back);
+  });
+});
+
+describe('Space purge', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('a purge closes the plan everywhere, erases its room and forgets its joins', async () => {
+    const space = spaceOf('purge');
+    const { a, b } = await twoDevices(space);
+    const doc = newDoc();
+    const open = await synced(space, a, doc, DEV_A);
+    value(await space.ticket(b, doc));
+    expect(await space.purgePlan(b, doc)).toEqual({ ok: true, value: { closed: 1 } });
+    expect(await open.closed).toEqual(PLAN_DELETED);
+    expect(await roomTables(doc)).toEqual(['gone']);
+    expect(await purgedIn(space)).toEqual([{ doc, device: DEV_B, erased: true }]);
+    expect(await rowsFor(space, doc)).toBe(0);
+    expect(await space.ticket(a, doc)).toEqual(GONE);
+    expect(await space.ticket(b, doc)).toEqual(GONE);
+    expect(await space.purgePlan(a, doc)).toEqual({ ok: true, value: { closed: 0 } });
+    expect(await purgedIn(space)).toEqual([{ doc, device: DEV_B, erased: true }]);
+  });
+
+  it('after a purge no stored value on the server holds the plan name or content', async () => {
+    const space = spaceOf('purge-traces');
+    const { a } = await twoDevices(space);
+    const doc = newDoc();
+    const name = 'Probe plan name 7f3a';
+    const content = 'Probe task label 9c1e';
+    const client = await synced(space, a, doc, DEV_A);
+    client.ydoc.getMap('meta').set('name', name);
+    client.ydoc.getMap('actions').set('a1', { lbl: content });
+    const holds = (cells: string[]): boolean => cells.some((cell) => cell.includes(name) || cell.includes(content));
+    const deadline = Date.now() + 10_000;
+    while (!holds(await storedText(env.Room.getByName(doc)))) {
+      if (Date.now() > deadline) {
+        throw new Error('the room never stored the plan');
+      }
+      await scheduler.wait(10);
+    }
+    value(await space.purgePlan(a, doc));
+    await client.closed;
+    expect(holds(await storedText(env.Room.getByName(doc)))).toBe(false);
+    expect(holds(await storedText(space))).toBe(false);
+  });
+
+  it('a ticket for a purged plan is 410, also for a device at the plan cap', async () => {
+    const space = spaceOf('purge-cap');
+    const { a, b } = await twoDevices(space);
+    const doc = newDoc();
+    value(await space.purgePlan(b, doc));
+    await runInDurableObject(space, (_space, state) => {
+      Array.from({ length: 500 }, () => newDoc()).forEach((joined) =>
+        state.storage.sql.exec('INSERT INTO joins (device, doc) VALUES (?, ?)', DEV_A, joined),
+      );
+    });
+    expect(await space.ticket(a, doc)).toEqual(GONE);
+  });
+
+  it('a ticket issued before the purge is refused with 410 at connect', async () => {
+    const space = spaceOf('purge-late-ticket');
+    const { a, b } = await twoDevices(space);
+    const doc = newDoc();
+    const issued = value(await space.ticket(a, doc));
+    value(await space.purgePlan(b, doc));
+    expect(await space.consumeTicket(issued.ticket, doc)).toEqual(GONE);
+  });
+
+  it('removing a device after a purge never tells the purged plan', async () => {
+    const space = spaceOf('purge-remove');
+    const { a, b } = await twoDevices(space);
+    const doc = newDoc();
+    const kept = newDoc();
+    value(await space.ticket(a, doc));
+    value(await space.ticket(a, kept));
+    value(await space.purgePlan(b, doc));
+    const closes = await runInDurableObject(space, (instance: Space) => vi.spyOn(instance.rooms, 'close'));
+    expect(await space.removeDevice(b, DEV_A)).toEqual({ ok: true, value: { closed: 0 } });
+    expect(closes.mock.calls.map((call) => call[0])).toEqual([kept]);
+  });
+
+  it('a purge drops the untold rows of the plan', async () => {
+    const space = spaceOf('purge-untold');
+    const { a, b } = await twoDevices(space);
+    const doc = 'docU0000000';
+    value(await space.ticket(a, doc));
+    await failCloseIn(space, doc);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
+    expect(await untoldIn(space)).toEqual([`${DEV_A} ${doc}`]);
+    value(await space.purgePlan(b, doc));
+    expect(await untoldIn(space)).toEqual([]);
+  });
+
+  it('a purge whose room fails answers purge_pending, and the alarm erases it later', async () => {
+    const space = spaceOf('purge-pending');
+    const { a, b } = await twoDevices(space);
+    const doc = newDoc();
+    const client = await synced(space, a, doc, DEV_A);
+    let down = true;
+    await failPurgeIn(space, () => down);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const before = Date.now();
+    expect(await space.purgePlan(b, doc)).toEqual(PURGE_PENDING);
+    expect(logged.mock.calls).toEqual([[`Space: purge(${DEV_B}) failed in room ${doc}`, expect.objectContaining({ message: 'room down' })]]);
+    expect(await purgedIn(space)).toEqual([{ doc, device: DEV_B, erased: false }]);
+    expect(await space.ticket(a, doc)).toEqual(GONE);
+    expect(await alarmOf(space)).toBeGreaterThanOrEqual(before + 60_000);
+    logged.mockClear();
+    expect(await runDurableObjectAlarm(space)).toBe(true);
+    expect(logged.mock.calls).toHaveLength(1);
+    expect(await purgedIn(space)).toEqual([{ doc, device: DEV_B, erased: false }]);
+    expect(await alarmOf(space)).not.toBeNull();
+    down = false;
+    expect(await runDurableObjectAlarm(space)).toBe(true);
+    expect(await client.closed).toEqual(PLAN_DELETED);
+    expect(await purgedIn(space)).toEqual([{ doc, device: DEV_B, erased: true }]);
+    expect(await roomTables(doc)).toEqual(['gone']);
+    expect(await alarmOf(space)).toBeNull();
   });
 });

@@ -9,12 +9,14 @@ export type ErrorCode =
   | 'not_found'
   | 'too_large'
   | 'too_many_plans'
+  | 'gone'
+  | 'purge_pending'
   | 'not_configured'
   | 'internal';
 
 export type Failure = {
   ok: false;
-  status: 400 | 401 | 403 | 404 | 405 | 409 | 413 | 429 | 500 | 503;
+  status: 400 | 401 | 403 | 404 | 405 | 409 | 410 | 413 | 429 | 500 | 503;
   error: ErrorCode;
   message: string;
   retryAfter?: number;
@@ -101,6 +103,13 @@ const TOO_MANY_PLANS: Failure = {
   error: 'too_many_plans',
   message: `This device has joined ${MAX_PLANS_PER_DEVICE} plans, the most one device may join.`,
 };
+const GONE: Failure = { ok: false, status: 410, error: 'gone', message: 'This plan was deleted forever on another device.' };
+export const PURGE_PENDING: Failure = {
+  ok: false,
+  status: 500,
+  error: 'purge_pending',
+  message: 'The plan is deleted, but the server has not erased its history yet. It tries again every minute.',
+};
 const REMOVE_SELF: Failure = { ok: false, status: 400, error: 'bad_request', message: 'Remove this device from another device.' };
 const NO_SUCH_DEVICE: Failure = { ok: false, status: 404, error: 'not_found', message: 'This device is not in the space.' };
 
@@ -151,6 +160,9 @@ export function schema(sql: SqlStorage): void {
   );
   sql.exec('CREATE TABLE IF NOT EXISTS joins (device TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY (device, doc))');
   sql.exec('CREATE TABLE IF NOT EXISTS untold (device TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY (device, doc))');
+  sql.exec(
+    'CREATE TABLE IF NOT EXISTS purged (doc TEXT PRIMARY KEY, device TEXT NOT NULL, at INTEGER NOT NULL, erased_at INTEGER)',
+  );
   sql.exec('CREATE TABLE IF NOT EXISTS attempts (scope TEXT NOT NULL, at INTEGER NOT NULL)');
   sql.exec('CREATE INDEX IF NOT EXISTS attempts_scope ON attempts (scope, at)');
 }
@@ -200,6 +212,10 @@ function joinsOf(sql: SqlStorage, device: string): string[] {
     .exec('SELECT doc FROM joins WHERE device = ? ORDER BY doc', device)
     .toArray()
     .map((row) => text(row, 'doc'));
+}
+
+function isPurged(sql: SqlStorage, doc: string): boolean {
+  return sql.exec('SELECT 1 FROM purged WHERE doc = ?', doc).toArray().length > 0;
 }
 
 function plansFull(sql: SqlStorage, device: string, doc: string, index: string): boolean {
@@ -356,6 +372,9 @@ export async function ticket(
     if (!PLAN_DOC.test(doc) && doc !== index) {
       return BAD_DOC;
     }
+    if (doc !== index && isPurged(sql, doc)) {
+      return GONE;
+    }
     if (doc !== index && plansFull(sql, who.id, doc, index)) {
       return TOO_MANY_PLANS;
     }
@@ -382,6 +401,9 @@ export async function consumeTicket(
 ): Promise<Result<{ deviceId: string }>> {
   const ticketHash = await sha256Hex(presented);
   return inTransaction(storage, (sql): Result<{ deviceId: string }> => {
+    if (isPurged(sql, doc)) {
+      return GONE;
+    }
     const rows = sql
       .exec(
         'SELECT device FROM tickets WHERE hash = ? AND doc = ? AND used_at IS NULL AND expires_at > ?',
@@ -469,4 +491,36 @@ export function untoldOf(storage: DurableObjectStorage, device: string): string[
     .exec('SELECT doc FROM untold WHERE device = ? ORDER BY doc', device)
     .toArray()
     .map((row) => text(row, 'doc'));
+}
+
+export async function purgePlan(
+  storage: DurableObjectStorage,
+  now: number,
+  token: string,
+  doc: string,
+): Promise<Result<{ device: string }>> {
+  const tokenHash = await sha256Hex(token);
+  return inTransaction(storage, (sql): Result<{ device: string }> => {
+    const who = caller(sql, tokenHash);
+    if (!who.ok) {
+      return who;
+    }
+    if (!PLAN_DOC.test(doc)) {
+      return BAD_DOC;
+    }
+    sql.exec('INSERT INTO purged (doc, device, at, erased_at) VALUES (?, ?, ?, NULL) ON CONFLICT (doc) DO NOTHING', doc, who.id, now);
+    ['joins', 'tickets', 'untold'].forEach((table) => sql.exec(`DELETE FROM ${table} WHERE doc = ?`, doc));
+    return ok({ device: who.id });
+  });
+}
+
+export function markErased(storage: DurableObjectStorage, now: number, doc: string): void {
+  storage.sql.exec('UPDATE purged SET erased_at = ? WHERE doc = ? AND erased_at IS NULL', now, doc);
+}
+
+export function unerased(storage: DurableObjectStorage): { doc: string; device: string }[] {
+  return storage.sql
+    .exec('SELECT doc, device FROM purged WHERE erased_at IS NULL ORDER BY at, doc')
+    .toArray()
+    .map((row) => ({ doc: text(row, 'doc'), device: text(row, 'device') }));
 }

@@ -21,6 +21,7 @@ const NO_ADDRESS = { error: 'bad_request', message: 'The request carries no clie
 const EMPTY_NAME = { error: 'bad_request', message: 'The name is empty. Type at least one character.' };
 const BAD_TICKET = { error: 'unauthorized', message: 'The connection ticket is unknown, used or expired. Connect again.' };
 const REVOKED = { error: 'revoked', message: 'This device was removed from the space.' };
+const GONE = { error: 'gone', message: 'This plan was deleted forever on another device.' };
 const BAD_CODE = {
   error: 'bad_code',
   message: 'The pairing code is wrong, used or expired. Show a new code on a device in the space.',
@@ -346,6 +347,42 @@ describe('the worker', () => {
       [`Space: closeDevice(${devB}) failed in room ${failing}`, expect.objectContaining({ message: 'room down' })],
     ]);
     await refused(await send('/devices', { token: b }), 403, REVOKED);
+  });
+
+  it('DELETE /plans/<doc> purges a plan, and its tickets and sockets answer 410', async () => {
+    const devA = newDevice();
+    const devB = newDevice();
+    const a = await enrol(devA, 'Mac');
+    const b = await enrol(devB, 'iPad');
+    const doc = newDoc();
+    const late = await ticketFor(a, doc);
+    const purged = await send('/plans/' + doc, { method: 'DELETE', token: b });
+    expect(purged.status).toBe(200);
+    expect(await json(purged)).toEqual({ closed: 0 });
+    const again = await send('/plans/' + doc, { method: 'DELETE', token: a });
+    expect(again.status).toBe(200);
+    expect(await json(again)).toEqual({ closed: 0 });
+    await refused(await send('/ticket', { method: 'POST', token: a, body: { doc } }), 410, GONE);
+    await refused(await exports.default.fetch(upgrade('/parties/room/' + doc + '?ticket=' + encodeURIComponent(late))), 410, GONE);
+  });
+
+  it('DELETE /plans/<doc> refuses unknown and removed devices and docs that are not plans', async () => {
+    const devB = newDevice();
+    const a = await enrol(newDevice(), 'Mac');
+    const b = await enrol(devB, 'iPad');
+    const doc = newDoc();
+    await refused(await send('/plans/' + doc, { method: 'DELETE' }), 401, UNKNOWN_DEVICE);
+    await refused(await send('/plans/' + doc, { method: 'DELETE', token: 'not-a-token' }), 401, UNKNOWN_DEVICE);
+    const spaceId = await runInDurableObject(env.Space.getByName('space'), (_space, state) =>
+      String(state.storage.sql.exec("SELECT value FROM meta WHERE key = 'spaceId'").one().value),
+    );
+    const badDoc = { error: 'bad_request', message: 'The document id is not valid. Update WebBoard on this device.' };
+    await refused(await send('/plans/ix-' + spaceId, { method: 'DELETE', token: a }), 400, badDoc);
+    await refused(await send('/plans/local', { method: 'DELETE', token: a }), 400, badDoc);
+    expect((await send('/devices/' + devB, { method: 'DELETE', token: a })).status).toBe(200);
+    await refused(await send('/plans/' + doc, { method: 'DELETE', token: b }), 403, REVOKED);
+    await refused(await send('/plans/' + doc, { token: a }), 405, expect.objectContaining({ error: 'not_found' }));
+    expect(await ticketFor(a, doc)).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
 
   it('an upgrade without a ticket never reaches a room', async () => {

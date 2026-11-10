@@ -91,6 +91,20 @@ export class Room extends YServer {
 
   private loaded = false;
 
+  private erased = false;
+
+  private hasTombstone(): boolean {
+    const sql = this.ctx.storage.sql;
+    if (sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'gone'").toArray().length === 0) {
+      return false;
+    }
+    return sql.exec('SELECT 1 FROM gone LIMIT 1').toArray().length > 0;
+  }
+
+  private isGone(): boolean {
+    return this.erased || this.hasTombstone();
+  }
+
   private tables(): void {
     const sql = this.ctx.storage.sql;
     sql.exec('CREATE TABLE IF NOT EXISTS snapshot (part INTEGER PRIMARY KEY, data BLOB NOT NULL)');
@@ -105,6 +119,9 @@ export class Room extends YServer {
       return super.fetch(request);
     }
     try {
+      if (this.isGone()) {
+        return closedSocket(4410, 'Plan deleted');
+      }
       deviceOf(request);
       this.load();
     } catch (error) {
@@ -115,7 +132,7 @@ export class Room extends YServer {
   }
 
   private load(): void {
-    if (this.loaded) {
+    if (this.loaded || this.isGone()) {
       return;
     }
     this.tables();
@@ -153,6 +170,10 @@ export class Room extends YServer {
 
   private async receive(conn: Connection, message: WSMessage): Promise<void> {
     if (conn.readyState !== WebSocket.READY_STATE_OPEN) {
+      return;
+    }
+    if (this.isGone()) {
+      conn.close(4410, 'Plan deleted');
       return;
     }
     if (typeof message === 'string') {
@@ -265,6 +286,10 @@ export class Room extends YServer {
   }
 
   private admit(conn: Connection, ctx: ConnectionContext): void {
+    if (this.isGone()) {
+      conn.close(4410, 'Plan deleted');
+      return;
+    }
     const device = ctx.request.headers.get(DEVICE_HEADER);
     const revoked = this.ctx.storage.sql.exec('SELECT 1 FROM revoked WHERE device = ?', device).toArray().length > 0;
     if (revoked) {
@@ -282,6 +307,9 @@ export class Room extends YServer {
   }
 
   onAlarm(): void {
+    if (this.isGone()) {
+      return;
+    }
     this.compact();
   }
 
@@ -299,6 +327,9 @@ export class Room extends YServer {
   }
 
   async closeDevice(deviceId: string): Promise<number> {
+    if (this.isGone()) {
+      return 0;
+    }
     this.tables();
     this.ctx.storage.sql.exec('INSERT INTO revoked (device) VALUES (?) ON CONFLICT (device) DO NOTHING', deviceId);
     const open = [...this.getConnections('d:' + deviceId)];
@@ -307,7 +338,24 @@ export class Room extends YServer {
   }
 
   async restoreDevice(deviceId: string): Promise<void> {
+    if (this.isGone()) {
+      return;
+    }
     this.tables();
     this.ctx.storage.sql.exec('DELETE FROM revoked WHERE device = ?', deviceId);
+  }
+
+  async purge(): Promise<number> {
+    const open = [...this.getConnections()];
+    if (this.hasTombstone()) {
+      open.forEach((conn) => conn.close(4410, 'Plan deleted'));
+      return open.length;
+    }
+    this.erased = true;
+    open.forEach((conn) => conn.close(4410, 'Plan deleted'));
+    await this.ctx.storage.deleteAll();
+    this.ctx.storage.sql.exec('CREATE TABLE gone (at INTEGER NOT NULL)');
+    this.ctx.storage.sql.exec('INSERT INTO gone (at) VALUES (?)', Date.now());
+    return open.length;
   }
 }
