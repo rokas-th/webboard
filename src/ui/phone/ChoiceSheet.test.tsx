@@ -10,6 +10,7 @@ import type { PlanSession } from "../../store/session";
 import { phoneRegistry } from "../../test/phone";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { setScreen } from "../../test/setup";
+import { withSync } from "../../test/withSync";
 import { impactText } from "../calendar/impact";
 import { describeUnit, unitSubject } from "../choices/describe";
 import { orderedSides } from "../choices/order";
@@ -86,7 +87,7 @@ const peerOf = async (t: TestSession, device = "iphone"): Promise<{ session: Pla
 const shown = async (t: TestSession): Promise<Registry> => {
   const registry = await phoneRegistry(t);
   registries.push(registry);
-  render(<PhoneShell registry={registry} clock={t.clock} />);
+  render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
   await settle();
   return registry;
 };

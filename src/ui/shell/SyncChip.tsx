@@ -8,13 +8,21 @@ const tone = (s: SyncState): string => {
   return "chip-cyan";
 };
 
-export function SyncChip() {
+export function SyncChip(p: { compact?: boolean }) {
   const { state } = useSyncState();
   const registry = useSyncRegistry();
   const { setUi } = useUiValue();
   const text = chipText(state, docName(registry));
+  const open = (): void => setUi({ dialog: { t: "sync", pane: null } });
+  if (p.compact === true) {
+    return (
+      <button type="button" className={`sync-chip chip-compact ${tone(state)}`} aria-label={text} title={text} onClick={open}>
+        <span className={state.kind === "synced" ? "chip-compact-dot dot-live" : "chip-compact-dot"} aria-hidden="true" />
+      </button>
+    );
+  }
   return (
-    <button type="button" className={`sync-chip ${tone(state)}`} title={text} onClick={() => setUi({ dialog: { t: "sync", pane: null } })}>
+    <button type="button" className={`sync-chip ${tone(state)}`} title={text} onClick={open}>
       {state.kind === "synced" && <span className="dot dot-live" aria-hidden="true" />}
       <span className="sync-chip-text">{text}</span>
     </button>

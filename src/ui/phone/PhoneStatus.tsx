@@ -6,6 +6,9 @@ import { noticeText, type HolidayNotice } from "../../services/holidays";
 import type { PlanView } from "../../store/doc";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
+import { chipText, holdsPlan, type SyncState } from "../../sync/manager";
+import { canReload } from "../../sync/reload";
+import { docName } from "../../sync/SyncProvider";
 import type { CalendarReview } from "../calendar/CalendarDialog";
 import { CALENDAR_BANNER } from "../choices/CalendarBanner";
 import { conflictSuccessor, countedConflicts } from "../choices/HeadCounts";
@@ -13,9 +16,10 @@ import { orderedSides } from "../choices/order";
 import { Sheet } from "../common/Sheet";
 import { OpenChoice } from "../run";
 import { NOTICE_LABELS, reviewOf } from "../shell/HolidayState";
-import { FILES_STAY } from "../shell/PlanFailed";
-import { RELOAD_LABEL, ReloadConfirm } from "../shell/ReloadConfirm";
+import { FILES_STAY, ReloadButton } from "../shell/PlanFailed";
+import { ReloadConfirm } from "../shell/ReloadConfirm";
 import { useUiValue } from "../state";
+import { SyncActionButtons } from "../sync/SyncDialog";
 import { CalendarSheet } from "./PlanSheet";
 
 type Tone = "bad" | "cyan" | "amber" | "magenta" | "warn" | "note";
@@ -25,8 +29,14 @@ interface Line {
   text: string;
   tone: Tone;
   detail: string | null;
+  message: string | null;
   onText: (() => void) | null;
   actions: ReactNode;
+}
+
+export interface PhoneSync {
+  state: SyncState;
+  open(): void;
 }
 
 export const NO_REGION = "No holiday region — dates use weekdays and closures";
@@ -38,6 +48,7 @@ const line = (key: string, text: string, tone: Tone, actions: ReactNode = null, 
   text,
   tone,
   detail,
+  message: null,
   onText,
   actions,
 });
@@ -50,7 +61,7 @@ function Act(p: { label: string; onPress(): void }) {
   );
 }
 
-export function PhoneStatus(p: { session: PlanSession | null; registry: Registry; clock: Clock; onOpenItem: (item: ItemId) => void }) {
+export function PhoneStatus(p: { session: PlanSession | null; registry: Registry; clock: Clock; sync?: PhoneSync; onOpenItem: (item: ItemId) => void }) {
   const { session, registry } = p;
   const holidays = registry.holidays;
   const [, bump] = useReducer((n: number) => n + 1, 0);
@@ -76,6 +87,28 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
   };
   const openCalendar = (): void => leave(() => setUi({ dialog: { t: "calendar" } }));
 
+  const reloadable = p.sync === undefined || canReload(p.sync.state);
+
+  const syncLead = (sync: PhoneSync): Line[] => {
+    const s = sync.state;
+    if (s.kind !== "error") return [];
+    const holds = s.doc !== null && !s.doc.startsWith("ix-") && holdsPlan(registry, s.doc);
+    const actions = (
+      <SyncActionButtons holds={holds} small>
+        <Act label="Open sync" onPress={() => leave(sync.open)} />
+      </SyncActionButtons>
+    );
+    return [{ ...line("sync", chipText(s, docName(registry)), "magenta", actions), message: s.message }];
+  };
+
+  const syncTail = (sync: PhoneSync): Line[] => {
+    const s = sync.state;
+    const text = chipText(s, docName(registry));
+    if (s.kind === "offline") return [line("sync", text, "amber")];
+    if (s.kind === "receiving" && (session === null || session.view().pending === 0)) return [line("sync", text, "cyan")];
+    return [];
+  };
+
   const registryLines = (): Line[] => {
     const index = registry.indexError();
     const doc = registry.indexErrorDoc();
@@ -92,7 +125,7 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
               "bad",
               <>
                 <Act label="Try again" onPress={() => void registry.retryIndex()} />
-                {space !== null && !spaceReadOnly && <Act label={RELOAD_LABEL} onPress={() => setConfirm(space)} />}
+                {space !== null && !spaceReadOnly && <ReloadButton enabled={reloadable} small onOpen={() => setConfirm(space)} />}
               </>,
               space !== null && spaceReadOnly ? FILES_STAY : null,
             ),
@@ -157,7 +190,14 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
     ];
   };
 
-  const lines = [...(session === null ? [] : storeLines(session)), ...registryLines(), ...(session === null ? [] : planLines(session))];
+  const sync = p.sync;
+  const lines = [
+    ...(sync === undefined ? [] : syncLead(sync)),
+    ...(session === null ? [] : storeLines(session)),
+    ...registryLines(),
+    ...(session === null ? [] : planLines(session)),
+    ...(sync === undefined ? [] : syncTail(sync)),
+  ];
   const none = lines.length === 0;
   useEffect(() => {
     if (none) setOpen(false);
@@ -187,6 +227,7 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
                   </button>
                 )}
                 {l.detail !== null && <span className="status-detail">{l.detail}</span>}
+                {l.message !== null && <p className="sync-message bad">{l.message}</p>}
                 {l.actions !== null && <div className="status-actions">{l.actions}</div>}
               </li>
             ))}

@@ -7,6 +7,7 @@ import type { PlanSession } from "../../store/session";
 import { phoneRegistry } from "../../test/phone";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { setScreen } from "../../test/setup";
+import { withSync } from "../../test/withSync";
 import { bannerText } from "../choices/describe";
 import { clearToasts, Toasts } from "../common/Toast";
 import { OpenChoice } from "../run";
@@ -369,7 +370,7 @@ describe("ItemSheet", () => {
     setScreen(390, 844);
     const registry = await phoneRegistry(linked);
     registries.push(registry);
-    render(<PhoneShell registry={registry} clock={linked.clock} />);
+    render(withSync(<PhoneShell registry={registry} clock={linked.clock} />));
     await settle();
     const setUi = (patch: Partial<UiState>): void => act(() => uiNow()[1](patch));
     for (const item of ["A", "B"]) {
@@ -573,7 +574,7 @@ describe("ItemSheet choices (Task 5.8 Step 2)", () => {
     setScreen(390, 844);
     const registry = await phoneRegistry(t);
     registries.push(registry);
-    render(<PhoneShell registry={registry} clock={t.clock} />);
+    render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
     await settle();
     const list = document.querySelector(".phone-list");
     if (!(list instanceof HTMLElement)) throw new Error("no phone list");

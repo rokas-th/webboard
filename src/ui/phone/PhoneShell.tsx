@@ -3,6 +3,9 @@ import type { ItemId, PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
+import type { SyncState } from "../../sync/manager";
+import { canReload, stopsArrival } from "../../sync/reload";
+import { docName, useSyncState } from "../../sync/SyncProvider";
 import { About } from "../common/About";
 import { toast, Toasts } from "../common/Toast";
 import { ghostIds } from "../ghosts";
@@ -10,7 +13,9 @@ import { OpenChoice } from "../run";
 import { FailedPlanView } from "../shell/PlanFailed";
 import { usePlanFiles, usePlanSelection, type PlanFiles, type PlanMain } from "../shell/selection";
 import { NewPlanButton } from "../shell/Sidebar";
-import { UiContext, useUi, useUiValue, type DialogState } from "../state";
+import { RemovedBanner } from "../sync/RemovedBanner";
+import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
+import { UiContext, useUi, useUiValue, type DialogState, type SyncPane } from "../state";
 import { Timeline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { ChoiceSheet } from "./ChoiceSheet";
@@ -48,8 +53,8 @@ function PlanDialog(p: { session: PlanSession; registry: Registry; clock: Clock;
     case "revert":
       return <RevertDialog key={d.id} session={p.session} id={d.id} frame="sheet" onClose={p.onClose} />;
     case "about":
-      return null;
     case "sync":
+      return null;
     case "palette":
       throw new Error(`PhoneShell cannot show dialog ${d.t}`);
   }
@@ -135,8 +140,10 @@ function Main(p: {
   clock: Clock;
   main: PlanMain;
   files: PlanFiles;
+  sync: SyncState;
   error: string | null;
   onNew(name: string): void;
+  onSync(pane: SyncPane | null): void;
   open(id: PlanId): void;
   trash(id: PlanId): void;
 }) {
@@ -147,20 +154,38 @@ function Main(p: {
         <div className="empty-actions">
           <NewPlanButton creating={p.files.creating} onNew={() => p.onNew(NEW_PLAN)} />
           <ImportButton files={p.files} />
+          <button type="button" onClick={() => p.onSync("join")}>
+            Join with a code
+          </button>
+          <button type="button" onClick={() => p.onSync("setup")}>
+            Set up sync
+          </button>
         </div>
         <CreateError error={p.error} />
       </div>
     );
   }
   if (m.k === "opening") return null;
-  if (m.k === "incomplete") return <p className="main-note">{m.message}</p>;
+  if (m.k === "incomplete") {
+    if (!stopsArrival(p.sync, m.id)) return <p className="main-note">{m.message}</p>;
+    return (
+      <div className="plan-stopped">
+        <p className="sync-message bad">{syncMessage(p.sync, docName(p.registry))}</p>
+        <SyncActionButtons holds={false}>
+          <button type="button" onClick={() => p.onSync(null)}>
+            Open sync
+          </button>
+        </SyncActionButtons>
+      </div>
+    );
+  }
   if (m.k === "failed") {
     return (
       <FailedPlanView
         registry={p.registry}
         id={m.id}
         error={m.error}
-        reloadEnabled
+        reloadEnabled={canReload(p.sync)}
         frame="sheet"
         onRetry={() => (m.recorded ? void p.registry.retryPlan(m.id) : p.open(m.id))}
         onTrash={p.trash}
@@ -180,16 +205,19 @@ function Main(p: {
   return <OpenPlan key={m.id} session={m.session} registry={p.registry} clock={p.clock} />;
 }
 
-function listedName(registry: Registry, id: PlanId | null): string | null {
-  if (id === null) return null;
-  const listing = registry.plans().find((l) => l.id === id);
-  if (listing === undefined) throw new Error(`Plan ${id} is not listed`);
-  return listing.name ?? "Loading…";
+function listedName(registry: Registry, main: PlanMain, selected: PlanId | null): string | null {
+  if (main.k === "empty") return null;
+  const listing = registry.plans().find((l) => l.id === main.id);
+  if (listing !== undefined) return listing.name ?? "Loading…";
+  if (main.id !== selected) return null;
+  throw new Error(`Plan ${main.id} is not listed`);
 }
 
 function PhoneBody(p: { registry: Registry; clock: Clock }) {
   const { ui, setUi } = useUiValue();
   const { main, open, trashOwn } = usePlanSelection(p.registry);
+  const { state: syncState } = useSyncState();
+  const name = listedName(p.registry, main, ui.plan);
   const [plans, setPlans] = useState(false);
   const [emptyError, setEmptyError] = useState<string | null>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
@@ -232,11 +260,16 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
     closePlans();
     setUi({ dialog: { t: "about" } });
   };
+  const openSync = (pane: SyncPane | null): void => {
+    closePlans();
+    setUi({ dialog: { t: "sync", pane } });
+  };
   return (
     <OpenChoice.Provider value={openChoice}>
       <div className="app phone">
+        <RemovedBanner session={session} />
         <PhoneTopBar
-          name={listedName(p.registry, main.k === "empty" ? null : main.id)}
+          name={name}
           session={session}
           files={files}
           today={() => p.clock.today()}
@@ -244,8 +277,25 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
           onChoose={(choice) => openChoice(choice)}
           onCreated={(id) => setUi({ selected: id, naming: id })}
         />
-        <PhoneStatus session={session} registry={p.registry} clock={p.clock} onOpenItem={(id) => setUi({ selected: id })} />
-        <Main registry={p.registry} clock={p.clock} main={main} files={files} error={emptyError} onNew={newFromEmpty} open={open} trash={trash} />
+        <PhoneStatus
+          session={session}
+          registry={p.registry}
+          clock={p.clock}
+          sync={{ state: syncState, open: () => openSync(null) }}
+          onOpenItem={(id) => setUi({ selected: id })}
+        />
+        <Main
+          registry={p.registry}
+          clock={p.clock}
+          main={main}
+          files={files}
+          sync={syncState}
+          error={emptyError}
+          onNew={newFromEmpty}
+          onSync={openSync}
+          open={open}
+          trash={trash}
+        />
         {plans && (
           <PlansSheet
             registry={p.registry}
@@ -256,10 +306,14 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
             onOpen={openPlan}
             onTrash={trash}
             onAbout={main.k === "empty" ? about : undefined}
+            onSync={openSync}
             onClose={closePlans}
           />
         )}
         {ui.dialog !== null && ui.dialog.t === "about" && <About frame="sheet" onClose={closeDialog} />}
+        {ui.dialog !== null && ui.dialog.t === "sync" && (
+          <SyncDialog pane={ui.dialog.pane} frame="sheet" onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />
+        )}
         <Toasts />
       </div>
     </OpenChoice.Provider>

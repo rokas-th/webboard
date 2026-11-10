@@ -30,6 +30,11 @@ import { HOLIDAY_ATTRIBUTION } from "../common/About";
 import { calendarSummary } from "../panel/calendarText";
 import { revertText } from "../panel/historyText";
 import type { HistoryEntry } from "../../store/session";
+import { SyncManager, type SyncState } from "../../sync/manager";
+import { fakeFactory, type FakeFactory, type FakeProvider } from "../../test/fakeProvider";
+import { argsOf, fail, IX, ip, ixAct, NOW, own, RESET_HINT, seedIndex, seedPlan, seedSpace, SPACE, syncWorld, TODAY, type SyncWorld } from "../../test/syncWorld";
+import type { Answer } from "../../test/tauriMock";
+import { NO_REGION } from "./PhoneStatus";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
@@ -114,7 +119,7 @@ const made = async (): Promise<TestSession> => {
 const shown = async (t: TestSession): Promise<void> => {
   const registry = await phoneRegistry(t);
   registries.push(registry);
-  render(<PhoneShell registry={registry} clock={t.clock} />);
+  render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
   await settle();
 };
 
@@ -366,8 +371,8 @@ const indexOpen = async (): Promise<{ registry: Registry; clock: Clock }> => {
   return { registry, clock };
 };
 
-const showIndex = async (r: { registry: Registry; clock: Clock }): Promise<void> => {
-  render(<PhoneShell registry={r.registry} clock={r.clock} />);
+const showIndex = async (r: { registry: Registry; clock: Clock }, connected = false): Promise<void> => {
+  render(withSync(<PhoneShell registry={r.registry} clock={r.clock} />, { connected }));
   await settle();
 };
 
@@ -670,13 +675,13 @@ describe("PhoneShell plans (Step 1)", () => {
 });
 
 describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
-  const failing = async (code = "store.locked", message = "Locked by another process."): Promise<{ s: SeededStore; registry: Registry }> => {
+  const failing = async (code = "store.locked", message = "Locked by another process.", connected = false): Promise<{ s: SeededStore; registry: Registry }> => {
     const s = await seededStore(["Alpha", "Beta", "Gamma"]);
     s.mem.fail("store_load", s.ids[1], { code, message });
     s.mem.fail("store_load", s.ids[2], { code: "store.corrupt", message: "Bad record in seg-0.log." });
     const r = await indexOpen();
     await r.registry.warm();
-    await showIndex(r);
+    await showIndex(r, connected);
     return { s, registry: r.registry };
   };
 
@@ -736,7 +741,7 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
   });
 
   it("a corrupt space plan loads again from the server", async () => {
-    const { s, registry } = await failing();
+    const { s, registry } = await failing(undefined, undefined, true);
     const gamma = s.ids[2];
     withSpace(registry, new Set([gamma]));
     const reload = vi.spyOn(registry, "reloadFromServer");
@@ -778,7 +783,7 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
   });
 
   it("Escape in a row's reload sheet closes only that sheet", async () => {
-    const { s, registry } = await failing();
+    const { s, registry } = await failing(undefined, undefined, true);
     withSpace(registry, new Set([s.ids[2]]));
     openPlans();
     fireEvent.click(within(planRow("Gamma")).getByRole("button", { name: RELOAD }));
@@ -894,7 +899,7 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
   });
 
   it("a corrupt space plan in the main area opens the reload sheet", async () => {
-    const { s, registry } = await failing();
+    const { s, registry } = await failing(undefined, undefined, true);
     const gamma = s.ids[2];
     withSpace(registry, new Set([gamma]));
     const reload = vi.spyOn(registry, "reloadFromServer");
@@ -915,7 +920,7 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
   });
 
   it("Load again stays disabled while the registry reloads the plan", async () => {
-    const { s, registry } = await failing();
+    const { s, registry } = await failing(undefined, undefined, true);
     const gamma = s.ids[2];
     withSpace(registry, new Set([gamma]));
     vi.spyOn(registry, "reloading").mockImplementation((doc) => doc === gamma);
@@ -954,7 +959,7 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     await showIndex(r);
     expect(screen.getByRole("button", { name: "New plan" })).toBeTruthy();
     expect(document.querySelector(".phone-list")).toBeNull();
-    expect(within(topBar()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Plans"]);
+    expect(within(topBar()).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["Plans", "Local only"]);
     expect(screen.queryByRole("button", { name: "+" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "New plan" }));
     await settle();
@@ -1000,7 +1005,7 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     await showIndex(r);
     const state = emptyState();
     if (state === null) throw new Error("no empty state");
-    expect(within(state).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…"]);
+    expect(within(state).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…", "Join with a code", "Set up sync"]);
     fireEvent.click(within(state).getByRole("button", { name: "Import plan…" }));
     await settle();
     expect(importPlan).toHaveBeenCalledTimes(1);
@@ -1726,7 +1731,7 @@ describe("PhoneShell read-only plan sheet (Task 5.8 Step 3b)", () => {
     const registry = await phoneRegistry(t);
     registries.push(registry);
     const restorePlan = vi.spyOn(registry, "restorePlan");
-    render(<PhoneShell registry={registry} clock={t.clock} />);
+    render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
     await settle();
     openPlanSheet();
     expect(within(planSheet()).getAllByRole("button", { name: "Bring this action back" }).length).toBeGreaterThan(0);
@@ -1755,5 +1760,477 @@ describe("PhoneShell read-only plan sheet (Task 5.8 Step 3b)", () => {
     expect(restorePlan).not.toHaveBeenCalled();
     act(() => t.session.setReadOnly(false));
     expect(nameField().value).toBe("MESA 1.0");
+  });
+});
+
+describe("PhoneShell sync (Task 6.7 Step 2)", () => {
+  const NAMES = { P: "Launch", L: "Alpha", P2: "Pod" };
+  const REMOVED = "This device was removed from the space. Its plans are read-only. Export saves changes the server never received.";
+  const NO_KEY = "This device has no sync key. Join the space again with a pairing code.";
+  const TOO_LARGE_HELD = "This plan is too large to sync. It keeps working on this device; export it to keep a copy.";
+  const TOO_LARGE_MISSING = "This plan is too large to send to this device. Export it on a device that has it.";
+  const REJECTED = "The server refused a change from this device. Update WebBoard, then try again.";
+  const NOT_IN_SPACE = "Not in the space — set up sync again";
+  const ACTIONS = ["Export…", "Reset sync", "Try again", RELOAD, "Open sync"];
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+
+  const deep = async (): Promise<void> => {
+    await act(async () => {
+      for (let i = 0; i < 12; i += 1) await new Promise<void>((r) => setTimeout(r, 0));
+    });
+  };
+  const tap = async (el: Element): Promise<void> => {
+    act(() => {
+      fireEvent.click(el);
+    });
+    await deep();
+  };
+  const openNamed = async (name: string): Promise<void> => {
+    await tap(within(topBar()).getByRole("button", { name: "Plans" }));
+    await tap(within(screen.getByRole("dialog", { name: "Plans" })).getByRole("button", { name }));
+    listShows(name);
+  };
+  const world = (o: Parameters<typeof seedSpace>[1] & { answers?: Record<string, Answer> } = {}): SyncWorld => {
+    const w = syncWorld({ names: NAMES, platform: "ios", answers: o.answers });
+    seedSpace(w, o);
+    return w;
+  };
+  const mounted = async (w: SyncWorld): Promise<{ r: Registry; f: FakeFactory }> => {
+    const clock = fixedClock(TODAY, NOW);
+    const r = await Registry.open({ clock });
+    registries.push(r);
+    const f = fakeFactory();
+    const el = withSync(<PhoneShell registry={r} clock={clock} />, { factory: f });
+    tauri.answers.sync_status = () => w.status();
+    render(el);
+    await deep();
+    return { r, f };
+  };
+  const fresh = async (): Promise<void> => {
+    cleanup();
+    clearToasts();
+    vi.restoreAllMocks();
+    vi.mocked(exportFlow).mockReset();
+    await Promise.all(registries.splice(0).map((r) => r.close()));
+    window.localStorage.clear();
+  };
+  const prov = (f: FakeFactory, doc: string): FakeProvider => {
+    const p = f.providers.get(doc);
+    if (p === undefined) throw new Error("no provider for " + doc);
+    return p;
+  };
+  const syncAll = (f: FakeFactory): void => {
+    act(() => {
+      [...f.providers.values()].forEach((p) => {
+        p.emitStatus("connected");
+        p.emitSynced(true);
+      });
+    });
+  };
+  const stubState = (s: SyncState): void => {
+    vi.spyOn(SyncManager.prototype, "state").mockReturnValue(s);
+  };
+  const names = (root: HTMLElement, wanted: readonly string[] = ACTIONS): string[] =>
+    within(root)
+      .queryAllByRole("button")
+      .map((b) => b.textContent ?? "")
+      .filter((n) => wanted.includes(n));
+  const strip = (): HTMLElement => {
+    const el = document.querySelector(".phone-status .status-strip");
+    if (!(el instanceof HTMLElement)) throw new Error("no status strip");
+    return el;
+  };
+  const stripText = (): string => strip().textContent ?? "";
+  const statusSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Status" });
+  const syncRow = async (text: string): Promise<HTMLElement> => {
+    await tap(strip());
+    const hit = [...statusSheet().querySelectorAll(".status-line")].find((li) => li.querySelector(".status-text")?.textContent === text);
+    if (!(hit instanceof HTMLElement)) throw new Error("no status line " + text);
+    return hit;
+  };
+  const messages = (root: HTMLElement): (string | null)[] => [...root.querySelectorAll(".sync-message.bad")].map((e) => e.textContent);
+  const syncSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Sync" });
+  const compact = (): HTMLElement => {
+    const el = topBar().querySelector("button.sync-chip.chip-compact");
+    if (!(el instanceof HTMLElement)) throw new Error("no compact chip");
+    return el;
+  };
+  const planMenu = async (): Promise<HTMLElement> => {
+    await tap(within(topBar()).getByRole("button", { name: "Plan" }));
+    return screen.getByRole("dialog", { name: "Plan" });
+  };
+  const removedBanner = (): HTMLElement => {
+    const el = screen.getByText(REMOVED).closest(".removed-banner");
+    if (!(el instanceof HTMLElement)) throw new Error("no removed banner");
+    return el;
+  };
+  const mainArea = (): HTMLElement => {
+    const el = document.querySelector(".app.phone");
+    if (!(el instanceof HTMLElement)) throw new Error("no phone shell");
+    return el;
+  };
+
+  it("the removed banner shows on the phone", async () => {
+    vi.mocked(exportFlow).mockResolvedValue(undefined);
+    const w = world();
+    w.status = () => ({ space: SPACE, revoked: true });
+    const { r } = await mounted(w);
+    await openNamed("Launch");
+    expect(names(removedBanner(), ["Export…", "Join with a code", "Set up sync"])).toEqual(["Export…", "Join with a code", "Set up sync"]);
+    expect(removedBanner().compareDocumentPosition(topBar()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await tap(within(removedBanner()).getByRole("button", { name: "Export…" }));
+    expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P")]]);
+    await tap(within(topBar()).getByRole("button", { name: "Plans" }));
+    await tap(within(screen.getByRole("dialog", { name: "Plans" })).getByRole("button", { name: "Alpha" }));
+    listShows("Alpha");
+    expect(names(removedBanner(), ["Export…", "Join with a code", "Set up sync"])).toEqual(["Join with a code", "Set up sync"]);
+    await fresh();
+    const v = syncWorld({ platform: "ios" });
+    v.status = () => ({ space: SPACE, revoked: true });
+    await mounted(v);
+    expect(emptyState()).not.toBeNull();
+    expect(names(removedBanner(), ["Export…", "Join with a code", "Set up sync"])).toEqual(["Join with a code", "Set up sync"]);
+  });
+
+  it("Move to space on the phone", async () => {
+    const w = world();
+    const { r, f } = await mounted(w);
+    syncAll(f);
+    await deep();
+    listShows("Alpha");
+    const move = vi.spyOn(r, "movePlanToSpace");
+    await tap(within(await planMenu()).getByRole("button", { name: "Move to space" }));
+    expect(move.mock.calls).toEqual([["L"]]);
+    expect(toastTexts()).toEqual(["Moved to the space"]);
+    expect(within(screen.getByRole("dialog", { name: "Plan" })).queryByRole("button", { name: "Move to space" })).toBeNull();
+    await fresh();
+    const none = world();
+    none.status = fail({ code: "ipc.failed", message: "sync_status: channel closed" });
+    await mounted(none);
+    listShows("Alpha");
+    expect(within(await planMenu()).queryByRole("button", { name: "Move to space" })).toBeNull();
+    await fresh();
+    const spaced = world();
+    const s = await mounted(spaced);
+    syncAll(s.f);
+    await deep();
+    await openNamed("Launch");
+    expect(within(await planMenu()).queryByRole("button", { name: "Move to space" })).toBeNull();
+    await fresh();
+    const removed = world();
+    removed.status = () => ({ space: SPACE, revoked: true });
+    const rm = await mounted(removed);
+    expect(rm.r.spaceReadOnly()).toBe(true);
+    listShows("Alpha");
+    expect(within(await planMenu()).queryByRole("button", { name: "Move to space" })).toBeNull();
+  });
+
+  describe("sync errors show on the phone", () => {
+    it("a missing sync key", async () => {
+      const w = world();
+      w.ticket = fail({ code: "keychain.missing", message: NO_KEY });
+      await mounted(w);
+      expect(stripText().startsWith(NOT_IN_SPACE)).toBe(true);
+      expect(strip().classList.contains("magenta")).toBe(true);
+      const row = await syncRow(NOT_IN_SPACE);
+      expect(messages(row)).toEqual([NO_KEY]);
+      expect(names(row)).toEqual(["Open sync"]);
+      await tap(within(row).getByRole("button", { name: "Open sync" }));
+      expect(screen.queryByRole("dialog", { name: "Status" })).toBeNull();
+      expect(messages(syncSheet())).toEqual([NO_KEY]);
+    });
+
+    it("a plan too large to sync", async () => {
+      vi.mocked(exportFlow).mockResolvedValue(undefined);
+      const w = world();
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await deep();
+      await openNamed("Launch");
+      act(() => prov(f, "P").closeWith(4413, "Too large to sync"));
+      await deep();
+      expect(within(topBar()).getByRole("button", { name: "Too large to sync: Launch" })).toBe(compact());
+      expect(stripText().startsWith("Too large to sync: Launch")).toBe(true);
+      const row = await syncRow("Too large to sync: Launch");
+      expect(messages(row)).toEqual([TOO_LARGE_HELD]);
+      expect(names(row)).toEqual(["Export…", "Try again", "Open sync"]);
+      await tap(within(row).getByRole("button", { name: "Export…" }));
+      expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P")]]);
+    });
+
+    it("a removed device whose state could not be saved", async () => {
+      const message = "Could not save the sync state: Permission denied (os error 13)";
+      const w = world({ answers: { sync_mark_revoked: fail({ code: "sync.io", message }) } });
+      const { f } = await mounted(w);
+      act(() => prov(f, IX).closeWith(4403, "Device removed"));
+      await deep();
+      expect(stripText().startsWith("Device removed")).toBe(true);
+      const row = await syncRow("Device removed");
+      expect(messages(row)).toEqual([message]);
+      expect(names(row)).toEqual(["Open sync"]);
+    });
+
+    it("offline and receiving", async () => {
+      const t = await made();
+      const registry = await phoneRegistry(t);
+      registries.push(registry);
+      const lineTone = async (text: string): Promise<string[]> => {
+        const row = await syncRow(text);
+        return [...row.classList];
+      };
+      const sheetLines = (): (string | null)[] => [...statusSheet().querySelectorAll(".status-line > .status-text")].map((e) => e.textContent);
+      for (const [waiting, text] of [
+        [1, "Offline — 1 change waiting"],
+        [3, "Offline — 3 changes waiting"],
+      ] as const) {
+        stubState({ kind: "offline", waiting });
+        render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
+        await deep();
+        expect(await lineTone(text)).toContain("amber");
+        expect(sheetLines()[sheetLines().length - 1]).toBe(text);
+        expect(names(statusSheet(), ["Export…", "Reset sync", "Try again", "Open sync"])).toEqual([]);
+        cleanup();
+        vi.mocked(SyncManager.prototype.state).mockRestore();
+      }
+      stubState({ kind: "receiving" });
+      render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
+      await deep();
+      expect(await lineTone("Receiving…")).toContain("cyan");
+      expect(sheetLines()[sheetLines().length - 1]).toBe("Receiving…");
+      expect(names(statusSheet(), ["Export…", "Reset sync", "Try again", "Open sync"])).toEqual([]);
+      cleanup();
+      const v = t.session.view();
+      vi.spyOn(t.session, "view").mockReturnValue({ ...v, pending: 2 });
+      render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
+      await deep();
+      await tap(strip());
+      expect(sheetLines()).toContain("Receiving… · 2 changes waiting");
+      expect(sheetLines()).not.toContain("Receiving…");
+    });
+
+    it("refused changes", async () => {
+      vi.mocked(exportFlow).mockResolvedValue(undefined);
+      const w = world();
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await deep();
+      await openNamed("Launch");
+      act(() => prov(f, "P").closeWith(1007, "Malformed update"));
+      await deep();
+      const line = "The server refused a change from this device — export this plan and check for an update";
+      expect(stripText().startsWith(line)).toBe(true);
+      const row = await syncRow(line);
+      expect(messages(row)).toEqual(["The server refused a change to “Launch” from this device. Update WebBoard, then try again."]);
+      expect(names(row)).toEqual(["Export…", "Try again", "Open sync"]);
+      await tap(within(row).getByRole("button", { name: "Export…" }));
+      expect(vi.mocked(exportFlow).mock.calls).toEqual([[await r.session("P")]]);
+      await fresh();
+      const v = world();
+      const second = await mounted(v);
+      syncAll(second.f);
+      await deep();
+      act(() => prov(second.f, IX).closeWith(1007, "Malformed update"));
+      await deep();
+      const ixLine = "The server refused a change to the plan list — update WebBoard";
+      expect(stripText().startsWith(ixLine)).toBe(true);
+      const ixRow = await syncRow(ixLine);
+      expect(messages(ixRow)).toEqual([REJECTED]);
+      expect(names(ixRow)).toEqual(["Try again", "Open sync"]);
+    });
+
+    it("a plan list too large to sync", async () => {
+      const w = world();
+      const { f } = await mounted(w);
+      syncAll(f);
+      await deep();
+      act(() => prov(f, IX).closeWith(4413, "Too large to sync"));
+      await deep();
+      expect(stripText().startsWith("The plan list is too large to sync")).toBe(true);
+      const row = await syncRow("The plan list is too large to sync");
+      expect(messages(row)).toEqual(["The plan list is too large to sync. Plans keep working on this device."]);
+      expect(names(row)).toEqual(["Try again", "Open sync"]);
+    });
+
+    it("a store failure on a plan, and Try again reconnects once", async () => {
+      const w = world();
+      const { f } = await mounted(w);
+      syncAll(f);
+      await deep();
+      await openNamed("Launch");
+      act(() => prov(f, "P").closeWith(4500, "Store failed"));
+      await deep();
+      const line = "Server could not store changes to “Launch” since 14:02";
+      expect(stripText().startsWith(line)).toBe(true);
+      const row = await syncRow(line);
+      expect(messages(row)).toEqual(["The server could not store a change to “Launch”. Try again; if it repeats, export it."]);
+      expect(names(row)).toEqual(["Export…", "Try again", "Open sync"]);
+      const connects = (): number => f.all.filter((p) => p.doc === "P").reduce((n, p) => n + p.connects(), 0);
+      const before = connects();
+      await tap(within(row).getByRole("button", { name: "Try again" }));
+      expect(connects()).toBe(before + 1);
+    });
+
+    it.each([
+      [4413, "Too large to sync: a plan", TOO_LARGE_MISSING],
+      [1007, "The server refused a change from this device — update WebBoard", REJECTED],
+    ])("a plan that never arrived offers no export (%s)", async (code, line, message) => {
+      const w = syncWorld({ names: NAMES, platform: "ios" });
+      seedIndex(w.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("l-L", ["l-n"], [ip("L", false)])]);
+      seedPlan(w.mem, "L", "Alpha");
+      seedIndex(w.mem, IX, [ixAct("s-S", [], [ip("S", false)], "dev-B")]);
+      const { f } = await mounted(w);
+      act(() => prov(f, "S").closeWith(code, "closed"));
+      await deep();
+      expect(stripText().startsWith(line)).toBe(true);
+      const row = await syncRow(line);
+      expect(messages(row)).toEqual([message]);
+      expect(names(row)).toEqual(["Try again", "Open sync"]);
+    });
+
+    it("synced shows no sync line", async () => {
+      const w = world();
+      const { f } = await mounted(w);
+      syncAll(f);
+      await deep();
+      expect(compact().getAttribute("aria-label")).toBe("Synced");
+      expect(stripText()).toBe(NO_REGION);
+    });
+  });
+
+  it("a plan that will not arrive says why on the phone", async () => {
+    const w = syncWorld({ names: { L: "Alpha" }, platform: "ios" });
+    seedIndex(w.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("l-L", ["l-n"], [ip("L", false)])]);
+    seedPlan(w.mem, "L", "Alpha");
+    seedIndex(w.mem, IX, [ixAct("s-S", [], [ip("S", false)], "dev-B")]);
+    const { r, f } = await mounted(w);
+    const real = r.session.bind(r);
+    vi.spyOn(r, "session").mockImplementation((id) => (id === "S" ? Promise.reject(new AppError("plan.incomplete", INCOMPLETE)) : real(id)));
+    await tap(within(topBar()).getByRole("button", { name: "Plans" }));
+    await tap(within(screen.getByRole("dialog", { name: "Plans" })).getByRole("button", { name: "Loading…" }));
+    expect(within(mainArea()).getByText(INCOMPLETE)).toBeTruthy();
+    act(() => prov(f, "S").closeWith(4413, "Too large to sync"));
+    await deep();
+    const stopped = (): HTMLElement => {
+      const el = mainArea().querySelector(".plan-stopped");
+      if (!(el instanceof HTMLElement)) throw new Error("no stopped plan view");
+      return el;
+    };
+    expect(messages(stopped())).toEqual([TOO_LARGE_MISSING]);
+    expect(names(stopped())).toEqual(["Try again", "Open sync"]);
+    expect(within(mainArea()).queryByText(INCOMPLETE)).toBeNull();
+    expect(document.querySelector(".phone-list")).toBeNull();
+    const restart = vi.spyOn(SyncManager.prototype, "restart");
+    w.status = () => ({ space: SPACE, revoked: true });
+    await tap(within(stopped()).getByRole("button", { name: "Try again" }));
+    expect(restart).toHaveBeenCalledTimes(1);
+    expect(messages(stopped())).toEqual(["Device removed"]);
+    expect(names(stopped())).toEqual(["Open sync"]);
+    await tap(within(stopped()).getByRole("button", { name: "Open sync" }));
+    expect(syncSheet()).toBeTruthy();
+    await fresh();
+    const io = syncWorld({ names: { L: "Alpha" }, platform: "ios" });
+    seedIndex(io.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("l-L", ["l-n"], [ip("L", false)])]);
+    seedPlan(io.mem, "L", "Alpha");
+    seedIndex(io.mem, IX, [ixAct("s-S", [], [ip("S", false)], "dev-B")]);
+    io.status = fail({ code: "sync.io", message: "Could not read the sync state: invalid JSON" });
+    await mounted(io);
+    await tap(within(topBar()).getByRole("button", { name: "Plans" }));
+    await tap(within(screen.getByRole("dialog", { name: "Plans" })).getByRole("button", { name: "Loading…" }));
+    expect(messages(stopped())).toEqual(["Could not read the sync state: invalid JSON" + RESET_HINT]);
+    expect(names(stopped())).toEqual(["Reset sync", "Try again", "Open sync"]);
+    await tap(within(stopped()).getByRole("button", { name: "Open sync" }));
+    expect(within(syncSheet()).getByRole("tab", { selected: true }).textContent).toBe("Join with a code");
+  });
+
+  it("an unmapped failure shows on the phone", async () => {
+    const w = world();
+    w.ticket = (doc) => {
+      if (doc === IX) throw { code: "ipc.failed", message: "sync_ticket: channel closed" };
+      return { ticket: "tk", expiresAt: 0 };
+    };
+    await mounted(w);
+    expect(stripText().startsWith("Sync stopped: sync_ticket: channel closed")).toBe(true);
+    const row = await syncRow("Sync stopped: sync_ticket: channel closed");
+    expect(messages(row)).toEqual(["sync_ticket: channel closed"]);
+    expect(names(row)).toEqual(["Try again", "Open sync"]);
+    const restart = vi.spyOn(SyncManager.prototype, "restart");
+    await tap(within(row).getByRole("button", { name: "Try again" }));
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+
+  it("the device name is checked on the phone", async () => {
+    const w = syncWorld({ platform: "ios", answers: { sync_pair_join: () => SPACE } });
+    w.status = () => ({ space: null, revoked: false });
+    await mounted(w);
+    await tap(within(topBar()).getByRole("button", { name: "Plans" }));
+    await tap(within(screen.getByRole("dialog", { name: "Plans" })).getByRole("button", { name: "Set up sync" }));
+    const setup = screen.getByRole("tabpanel", { name: "Set up sync" });
+    act(() => {
+      fireEvent.change(within(setup).getByLabelText("Device name"), { target: { value: "   " } });
+    });
+    await tap(within(setup).getByRole("button", { name: "Create or join space" }));
+    expect([...setup.querySelectorAll(".sync-error.bad")].map((e) => e.textContent)).toEqual([EMPTY_NAME]);
+    expect(tauri.calls.filter((c) => c.cmd === "sync_setup")).toHaveLength(0);
+    await tap(within(syncSheet()).getByRole("tab", { name: "Join with a code" }));
+    const join = screen.getByRole("tabpanel", { name: "Join with a code" });
+    act(() => {
+      fireEvent.change(within(join).getByLabelText("Device name"), { target: { value: "  iPad\t2 " } });
+    });
+    await tap(within(join).getByRole("button", { name: "Join space" }));
+    expect(tauri.calls.filter((c) => c.cmd === "sync_pair_join").map((c) => argsOf(c).deviceName)).toEqual(["iPad 2"]);
+  });
+
+  it("read-only on the phone", async () => {
+    const managers: SyncManager[] = [];
+    const start = SyncManager.prototype.start;
+    vi.spyOn(SyncManager.prototype, "start").mockImplementation(function (this: SyncManager) {
+      managers.push(this);
+      return start.call(this);
+    });
+    const w = world();
+    const { f } = await mounted(w);
+    syncAll(f);
+    await deep();
+    await openNamed("Launch");
+    const plus = (): HTMLElement => within(topBar()).getByRole("button", { name: "+" });
+    expect(plus().hasAttribute("disabled")).toBe(false);
+    const m = managers[managers.length - 1];
+    await act(async () => m.markRevoked());
+    await deep();
+    expect(plus().hasAttribute("disabled")).toBe(true);
+  });
+
+  it("the empty state shows sync", async () => {
+    const w = syncWorld({ platform: "ios" });
+    w.ticket = fail({ code: "keychain.missing", message: NO_KEY });
+    await mounted(w);
+    const empty = emptyState();
+    if (empty === null) throw new Error("no empty state");
+    expect(within(empty).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…", "Join with a code", "Set up sync"]);
+    expect(within(topBar()).getByRole("button", { name: "Plans" })).toBeTruthy();
+    expect(within(topBar()).getByRole("button", { name: NOT_IN_SPACE })).toBe(compact());
+    expect(stripText().startsWith(NOT_IN_SPACE)).toBe(true);
+    const row = await syncRow(NOT_IN_SPACE);
+    await tap(within(row).getByRole("button", { name: "Open sync" }));
+    expect(syncSheet()).toBeTruthy();
+  });
+
+  it("the top bar survives a space index reload", async () => {
+    const w = world();
+    const { r, f } = await mounted(w);
+    syncAll(f);
+    await deep();
+    await openNamed("Launch");
+    await act(async () => r.reloadFromServer(IX));
+    await deep();
+    listShows("Alpha");
+    const real = r.plans.bind(r);
+    vi.spyOn(r, "plans").mockImplementation(() => real().filter((l) => l.id !== "L"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() => setUiNow({ view: "board" })).toThrow(new Error("Plan L is not listed"));
   });
 });

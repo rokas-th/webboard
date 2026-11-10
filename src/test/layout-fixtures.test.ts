@@ -188,7 +188,9 @@ describe("layout fixtures", () => {
       "mesa-linux",
       "phone-choice",
       "phone-plans",
+      "phone-removed-banner",
       "phone-status",
+      "phone-sync-sheet",
       "scale",
       "sync-dialog",
       "sync-receiving",
@@ -204,7 +206,7 @@ describe("layout fixtures", () => {
 
   it("answers sync_status in every state, local only unless the state joins a space", () => {
     const joined = { space: { server: "https://probe.invalid", spaceId: "sp000000000", deviceId: "mac", deviceName: "Mac" }, revoked: false };
-    const expected: Record<string, unknown> = { "sync-space": joined, "sync-receiving": joined, "sync-removed": { ...joined, revoked: true } };
+    const expected: Record<string, unknown> = { "sync-space": joined, "sync-receiving": joined, "sync-removed": { ...joined, revoked: true }, "phone-removed-banner": { ...joined, revoked: true } };
     Object.entries(FIXTURES).forEach(([name, f]) => expect(f.ipc.sync_status, name).toEqual(expected[name] ?? { space: null, revoked: false }));
   });
 
@@ -235,7 +237,7 @@ describe("layout fixtures", () => {
 
   it("gives every space state its index doc and a ticket, and no other state either", () => {
     Object.entries(FIXTURES).forEach(([name, f]) => {
-      const space = name === "sync-space" || name === "sync-receiving" || name === "sync-removed";
+      const space = ["sync-space", "sync-receiving", "sync-removed", "phone-removed-banner"].includes(name);
       expect("ix-sp000000000" in f.docs, name).toBe(space);
       expect(f.ipc.sync_ticket, name).toEqual(space ? { ticket: "tk_probe", expiresAt: new Date(2026, 10, 9, 10, 0, 0, 0).getTime() } : undefined);
     });
@@ -252,6 +254,16 @@ describe("layout fixtures", () => {
     expect(fixture("sync-dialog")).not.toBe(fixture("mesa"));
     expect(fixture("sync-dialog").ipc).not.toBe(fixture("mesa").ipc);
     expect(fixture("sync-dialog")).toEqual(fixture("mesa"));
+  });
+
+  it("phone-sync-sheet is the mesa plan, local only, and phone-removed-banner is the removed space", () => {
+    expect(fixture("phone-sync-sheet")).not.toBe(fixture("mesa"));
+    expect(fixture("phone-sync-sheet")).toEqual(fixture("mesa"));
+    expect(fixture("phone-removed-banner").ipc).not.toBe(fixture("sync-removed").ipc);
+    expect(fixture("phone-removed-banner").ipc).toEqual(fixture("sync-removed").ipc);
+    const plans = (name: string): unknown => Object.fromEntries(Object.entries(fixture(name).docs).filter(([doc]) => doc !== "ix-sp000000000"));
+    expect(plans("phone-removed-banner")).toEqual(plans("mesa"));
+    expect(Object.keys(fixture("phone-removed-banner").docs)).toContain("ix-sp000000000");
   });
 
   it("shares no ipc answers object between states", () => {

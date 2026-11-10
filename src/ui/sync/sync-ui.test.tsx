@@ -14,6 +14,7 @@ import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { shellFor } from "../../test/shell";
 import { IX, itemNamed, ixAct, NOW, own, ip, RESET_HINT, seedIndex, seedPlan, seedSpace, SP, SPACE, syncWorld, TODAY, fail, argsOf, remoteIndex, type SyncWorld } from "../../test/syncWorld";
 import { tauri, type Answer } from "../../test/tauriMock";
+import { setScreen } from "../../test/setup";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { exportFlow } from "../shell/fileFlows";
@@ -1157,5 +1158,150 @@ describe("the sync provider outside the shell", () => {
     );
     await settle();
     expect(screen.getByText("inside")).toBeTruthy();
+  });
+});
+
+describe("sync on the phone", () => {
+  beforeEach(() => {
+    setScreen(390, 844);
+  });
+
+  const topBar = (): HTMLElement => {
+    const el = document.querySelector(".phone-head");
+    if (!(el instanceof HTMLElement)) throw new Error("no phone top bar");
+    return el;
+  };
+  const plansSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Plans" });
+  const openPlans = async (): Promise<HTMLElement> => {
+    await click(within(topBar()).getByRole("button", { name: "Plans" }));
+    return plansSheet();
+  };
+  const planRow = (name: string): HTMLElement => {
+    const li = within(plansSheet()).getByText(name).closest("li");
+    if (!(li instanceof HTMLElement)) throw new Error("no Plans row " + name);
+    return li;
+  };
+  const planSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Plan" });
+  const syncSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Sync" });
+  const selectedTab = (): string | null => within(syncSheet()).getByRole("tab", { selected: true }).textContent;
+  const strip = (): HTMLElement => {
+    const el = document.querySelector(".phone-status .status-strip");
+    if (!(el instanceof HTMLElement)) throw new Error("no status strip");
+    return el;
+  };
+  const statusSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Status" });
+  const lineOf = (text: string): HTMLElement => {
+    const hit = [...statusSheet().querySelectorAll(".status-line")].find((li) => li.querySelector(".status-text")?.textContent === text);
+    if (!(hit instanceof HTMLElement)) throw new Error("no status line " + text);
+    return hit;
+  };
+
+  it("the phone sheet's Sync row opens the dialog", async () => {
+    const w = await spaceWorld();
+    place("P");
+    const { f } = await mounted(w);
+    syncAll(f);
+    await settle();
+    await click(within(topBar()).getByRole("button", { name: "Plan" }));
+    const row = within(planSheet()).getByRole("button", { name: "Sync Synced" });
+    expect(row.querySelector(".sync-row-state")?.textContent).toBe(chipText({ kind: "synced" }, () => null));
+    await click(row);
+    expect(uiNow()[0].dialog).toEqual({ t: "sync", pane: null });
+    expect(syncSheet().classList.contains("sheet")).toBe(true);
+    expect(selectedTab()).toBe("Devices");
+    expect(within(syncSheet()).getAllByRole("button", { name: "Close" })).toHaveLength(1);
+    await click(within(syncSheet()).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Sync" })).toBeNull();
+    expect(uiNow()[0].dialog).toBeNull();
+  });
+
+  it("removed device offers joining on the phone", async () => {
+    const w = await spaceWorld();
+    w.status = () => ({ space: SPACE, revoked: true });
+    await mounted(w);
+    await openPlans();
+    await click(within(plansSheet()).getByRole("button", { name: "Join with a code" }));
+    expect(screen.queryByRole("dialog", { name: "Plans" })).toBeNull();
+    expect(selectedTab()).toBe("Join with a code");
+    await click(within(syncSheet()).getByRole("button", { name: "Close" }));
+    await openPlans();
+    await click(within(plansSheet()).getByRole("button", { name: "Set up sync" }));
+    expect(selectedTab()).toBe("Set up sync");
+  });
+
+  it("no Move to Trash for space plans while removed on the phone", async () => {
+    const w = await spaceWorld({ trashedP2: true });
+    w.status = () => ({ space: SPACE, revoked: true });
+    await mounted(w);
+    await openPlans();
+    expect(within(planRow("Launch")).getByRole("button", { name: "Move to Trash" }).hasAttribute("disabled")).toBe(true);
+    expect(within(planRow("Pod")).getByRole("button", { name: "Restore" }).hasAttribute("disabled")).toBe(true);
+    expect(within(planRow("Alpha")).getByRole("button", { name: "Move to Trash" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("loading again needs a connection on the phone", async () => {
+    for (const on of [false, true]) {
+      const w = await spaceWorld();
+      w.mem.fail("store_load", "P", { code: "store.corrupt", message: "The plan file is damaged at record 12." });
+      vi.spyOn(navigator, "onLine", "get").mockReturnValue(on);
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await settle();
+      await act(async () => r.warm());
+      await settle();
+      expect(r.failures().get("P")?.code).toBe("store.corrupt");
+      const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      await openPlans();
+      const button = within(planRow("Launch")).getByRole("button", { name: RELOAD });
+      expect([button.hasAttribute("disabled"), within(planRow("Launch")).queryByText(NEEDS) !== null]).toEqual([!on, !on]);
+      await click(button);
+      expect(screen.queryByRole("dialog", { name: RELOAD }) !== null).toBe(on);
+      expect(reload).not.toHaveBeenCalled();
+      if (on) {
+        await click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
+        expect(reload.mock.calls).toEqual([["P"]]);
+      }
+      await fresh();
+    }
+    for (const s of [{ kind: "offline", waiting: 0 }, { kind: "synced" }] as const) {
+      stubState(s);
+      const reload = vi.fn(async () => undefined);
+      await stubShell({
+        indexError: () => new AppError("store.corrupt", "The space plan list is damaged at record 4."),
+        indexErrorDoc: () => IX,
+        retryIndex: vi.fn(async () => undefined),
+        reloadFromServer: reload,
+      });
+      await click(strip());
+      const line = lineOf("The space plan list is damaged at record 4.");
+      const button = within(line).getByRole("button", { name: RELOAD });
+      const on = s.kind === "synced";
+      expect([button.hasAttribute("disabled"), within(line).queryByText(NEEDS) !== null]).toEqual([!on, !on]);
+      await click(button);
+      expect(screen.queryByRole("dialog", { name: RELOAD }) !== null).toBe(on);
+      expect(reload).not.toHaveBeenCalled();
+      if (on) {
+        await click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
+        expect(reload.mock.calls).toEqual([[IX]]);
+      }
+      await fresh();
+    }
+  });
+
+  it("a remote plan shows in the phone list", async () => {
+    const w = await spaceWorld();
+    const { f } = await mounted(w);
+    syncAll(f);
+    act(() => remoteIndex(prov(f, IX), "s-S", [ip("S", false)]));
+    await settle();
+    const s = prov(f, "S");
+    act(() => {
+      s.deliver(Y.encodeStateAsUpdate(seedPlan(null, "S", "Bridge")));
+      s.emitStatus("connected");
+      s.emitSynced(true);
+    });
+    await settle();
+    await openPlans();
+    expect(within(plansSheet()).getByText("Bridge")).toBeTruthy();
   });
 });

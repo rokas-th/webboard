@@ -16,13 +16,15 @@ import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts 
 import { setScreen } from "../../test/setup";
 import { seededStore, type SeededStore } from "../../test/shell";
 import { tauri, type Answer } from "../../test/tauriMock";
+import { withSync } from "../../test/withSync";
 import { CALENDAR_BANNER } from "../choices/CalendarBanner";
 import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
 import { RELOAD_LABEL, RELOAD_TEXT } from "../shell/ReloadConfirm";
-import { useUi, type UiState } from "../state";
+import { OpenChoice } from "../run";
+import { UiContext, useUi, type UiState } from "../state";
 import { PhoneShell } from "./PhoneShell";
-import { NO_REGION } from "./PhoneStatus";
+import { NO_REGION, PhoneStatus } from "./PhoneStatus";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -79,7 +81,7 @@ const shown = async (t: TestSession, opts?: { holidays?: HolidayService; device?
   tauri.answers.device_info = () => (opts?.device === "iphone" ? { deviceId: "iphone", platform: "ios" } : { deviceId: "mac", platform: "macos" });
   const registry = await phoneRegistry(t, { holidays: opts?.holidays });
   registries.push(registry);
-  render(<PhoneShell registry={registry} clock={t.clock} />);
+  render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
   await settle();
   return registry;
 };
@@ -94,8 +96,8 @@ const indexShown = async (names: readonly string[]): Promise<{ s: SeededStore; r
   return { s, registry, clock, ids };
 };
 
-const renderIndex = async (r: { registry: Registry; clock: Clock }): Promise<void> => {
-  render(<PhoneShell registry={r.registry} clock={r.clock} />);
+const renderIndex = async (r: { registry: Registry; clock: Clock }, connected = false): Promise<void> => {
+  render(withSync(<PhoneShell registry={r.registry} clock={r.clock} />, { connected }));
   await settle();
 };
 
@@ -170,6 +172,35 @@ const unreadableRaw = (): Record<string, unknown> => {
 
 const NO_CHANGE: Preview = { itemsChanged: 0, endsChanged: 0, movedLater: 0, stopped: [], conflictsAfter: 0, kept: [] };
 
+describe("PhoneStatus without sync (Task 6.7)", () => {
+  it("without sync there is no sync line", async () => {
+    const t = await made(SEED);
+    const registry = await phoneRegistry(t);
+    registries.push(registry);
+    vi.spyOn(registry, "indexError").mockReturnValue(new AppError("store.corrupt", CORRUPT_SPACE));
+    vi.spyOn(registry, "indexErrorDoc").mockReturnValue("ix-sp000000000");
+    function Host() {
+      const [ui, setUi] = useUi();
+      return (
+        <UiContext.Provider value={{ ui, setUi }}>
+          <OpenChoice.Provider value={vi.fn()}>
+            <PhoneStatus session={null} registry={registry} clock={t.clock} onOpenItem={vi.fn()} />
+          </OpenChoice.Provider>
+        </UiContext.Provider>
+      );
+    }
+    render(<Host />);
+    await settle();
+    expect(within(strip()).queryByRole("button", { name: "Open sync" })).toBeNull();
+    expect(strip().textContent).toBe(CORRUPT_SPACE);
+    openStatus();
+    expect(within(statusSheet()).queryByRole("button", { name: "Open sync" })).toBeNull();
+    const load = within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL });
+    expect(load.hasAttribute("disabled")).toBe(false);
+    expect(within(statusSheet()).queryByText("Needs a connection to the server.")).toBeNull();
+  });
+});
+
 describe("PhoneStatus lines (Step 1)", () => {
   it("a store error offers Try again, which retries the plan's document once", async () => {
     const r = await indexShown(["Alpha"]);
@@ -227,7 +258,7 @@ describe("PhoneStatus lines (Step 1)", () => {
   it("a damaged space index offers Load again from the server through its confirmation", async () => {
     const r = await indexShown(["Alpha"]);
     const reload = corruptSpace(r.registry);
-    await renderIndex(r);
+    await renderIndex(r, true);
     openStatus();
     expect(lineOf(CORRUPT_SPACE).classList.contains("bad")).toBe(true);
     expect(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: "Try again" })).toBeTruthy();

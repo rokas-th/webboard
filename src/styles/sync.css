@@ -203,3 +203,72 @@ button.sync-chip {
 .removed-banner {
   flex-wrap: wrap;
 }
+
+button.sync-chip.chip-compact {
+  justify-content: center;
+  min-width: 28px;
+  min-height: 32px;
+  padding: 6px;
+}
+
+.chip-compact .chip-compact-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.phone-head > .chip-compact {
+  margin-left: auto;
+}
+
+.choice-row.sync-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.sync-row-label {
+  flex-shrink: 0;
+  color: var(--heading);
+}
+
+.sync-row-state {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--dim);
+}
+
+.plans-sync {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.plans-sync .choice-row {
+  min-height: 44px;
+  padding: 12px 20px;
+}
+
+.sync-sheet {
+  padding: 16px 20px 24px;
+}
+
+.status-line .sync-message {
+  overflow-wrap: anywhere;
+}
+
+.phone .removed-banner {
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+.phone .removed-banner .banner-text {
+  flex-basis: 100%;
+}

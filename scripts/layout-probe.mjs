@@ -300,6 +300,36 @@ function states() {
     actions: [click(".toolbar .sync-chip", "Local only"), expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"), expect('[role="dialog"] button', "Create or join space")],
   });
   add("long-names/touch", "long-names", { sizes: "touch-wide", clip: true, actions: [viewExpect("timeline"), expect(".tl-row .name")] });
+  const phoneChip = (tone, label) => expect(`.phone-head button.sync-chip.chip-compact.${tone}[aria-label="${label}"]`);
+  add("phone-sync/off", "mesa", { sizes: "phone", actions: [phoneChip("chip-cyan", "Local only")] });
+  add("phone-sync/syncing", "sync-space", { sizes: "phone", net: { ws: "silent" }, actions: [phoneChip("chip-cyan", "Syncing")] });
+  add("phone-sync/synced", "sync-space", {
+    sizes: "phone",
+    net: { ws: "sync" },
+    actions: [count(".phone-head .chip-compact .dot-live", 1), phoneChip("chip-cyan", "Synced")],
+  });
+  add("phone-sync/receiving", "sync-receiving", { sizes: "phone", net: { ws: "sync" }, actions: [phoneChip("chip-cyan", "Receiving…")] });
+  add("phone-sync/offline", "sync-space", { sizes: "phone", net: { ws: "silent", online: false }, actions: [phoneChip("chip-amber", "Offline — 1 change waiting")] });
+  add("phone-sync/error", "sync-removed", { sizes: "phone", actions: [phoneChip("chip-magenta", "Device removed")] });
+  add("phone-sync-sheet", "phone-sync-sheet", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-head button", "Plans"),
+      click(".plans-sync button", "Set up sync"),
+      expect('.sheet[role="dialog"] .sheet-title', "Sync"),
+      expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"),
+      expect('[role="dialog"] button', "Create or join space"),
+    ],
+  });
+  add("phone-removed-banner", "phone-removed-banner", {
+    sizes: "phone",
+    actions: [
+      expect(".removed-banner button", "Join with a code"),
+      expect(".removed-banner button", "Set up sync"),
+      count(".removed-banner button", 2),
+    ],
+  });
   add("long-names/phone", "long-names", { sizes: "phone", clip: true, actions: [expect(".phone-list .prow .prow-name")] });
   add("history", "mesa", { actions: [reveal(".slot-panel .panel h2", "History"), count(".slot-panel .history li", 40)] });
   add("revert-preview", "mesa", {

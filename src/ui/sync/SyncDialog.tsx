@@ -4,6 +4,7 @@ import { chipText, holdsPlan, type SyncState } from "../../sync/manager";
 import { canReload, syncActions } from "../../sync/reload";
 import { useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
 import { Dialog } from "../common/Dialog";
+import { Sheet } from "../common/Sheet";
 import { toast } from "../common/Toast";
 import { ReloadButton } from "../shell/PlanFailed";
 import { exportFlow } from "../shell/fileFlows";
@@ -32,7 +33,7 @@ export function resolvePane(state: SyncState, pane: SyncPane | null): SyncPane {
 
 export const syncMessage = (state: SyncState, name: (doc: string) => string | null): string => (state.kind === "error" && state.message !== null ? state.message : chipText(state, name));
 
-export function SyncActionButtons(p: { holds: boolean; onReset?(): void; children?: ReactNode }) {
+export function SyncActionButtons(p: { holds: boolean; small?: boolean; onReset?(): void; children?: ReactNode }) {
   const { state, restart } = useSyncState();
   const registry = useSyncRegistry();
   const [resetError, setResetError] = useState<string | null>(null);
@@ -61,6 +62,7 @@ export function SyncActionButtons(p: { holds: boolean; onReset?(): void; childre
       },
     );
   };
+  const small = p.small === true ? "button-small" : undefined;
   if (actions.length === 0 && p.children === undefined) return null;
   return (
     <>
@@ -68,18 +70,18 @@ export function SyncActionButtons(p: { holds: boolean; onReset?(): void; childre
         {actions.map((a) => {
           if (a === "export")
             return (
-              <button key={a} type="button" onClick={exportPlan}>
+              <button key={a} type="button" className={small} onClick={exportPlan}>
                 Export…
               </button>
             );
           if (a === "reset")
             return (
-              <button key={a} type="button" className="button-danger" onClick={reset}>
+              <button key={a} type="button" className={small === undefined ? "button-danger" : "button-danger button-small"} onClick={reset}>
                 Reset sync
               </button>
             );
           return (
-            <button key={a} type="button" onClick={() => void restart()}>
+            <button key={a} type="button" className={small} onClick={() => void restart()}>
               Try again
             </button>
           );
@@ -91,7 +93,7 @@ export function SyncActionButtons(p: { holds: boolean; onReset?(): void; childre
   );
 }
 
-function IndexActions(p: { cause: string | null }) {
+function IndexActions(p: { cause: string | null; frame?: "dialog" | "sheet" }) {
   const registry = useSyncRegistry();
   const enabled = canReload(useSyncState().state);
   const [confirm, setConfirm] = useState<string | null>(null);
@@ -105,12 +107,12 @@ function IndexActions(p: { cause: string | null }) {
         </button>
       </div>
       {reloadable && <ReloadButton enabled={enabled} onOpen={() => setConfirm(doc)} />}
-      {confirm !== null && <ReloadConfirm registry={registry} docId={confirm} onClose={() => setConfirm(null)} />}
+      {confirm !== null && <ReloadConfirm registry={registry} docId={confirm} frame={p.frame} onClose={() => setConfirm(null)} />}
     </>
   );
 }
 
-export function SyncDialog(p: { pane: SyncPane | null; onPane(pane: SyncPane): void; onClose(): void }) {
+export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet"; onPane(pane: SyncPane): void; onClose(): void }) {
   const { state } = useSyncState();
   const registry = useSyncRegistry();
   const [opened] = useState(() => resolvePane(state, null));
@@ -118,12 +120,12 @@ export function SyncDialog(p: { pane: SyncPane | null; onPane(pane: SyncPane): v
   const error = state.kind === "error" ? state : null;
   const indexDoc = error !== null && error.code === "local-failed" && error.doc !== null && error.doc.startsWith("ix-");
   const holds = error !== null && error.doc !== null && !error.doc.startsWith("ix-") && holdsPlan(registry, error.doc);
-  return (
-    <Dialog label="Sync" wide onClose={p.onClose}>
+  const body = (
+    <>
       {error !== null && (
         <div className="sync-status">
           {error.message !== null && <p className="sync-message bad">{error.message}</p>}
-          {indexDoc ? <IndexActions cause={error.cause} /> : <SyncActionButtons holds={holds} onReset={() => p.onPane("join")} />}
+          {indexDoc ? <IndexActions cause={error.cause} frame={p.frame} /> : <SyncActionButtons holds={holds} onReset={() => p.onPane("join")} />}
         </div>
       )}
       <div className="sync-tabs" role="tablist" aria-label="Sync">
@@ -139,6 +141,18 @@ export function SyncDialog(p: { pane: SyncPane | null; onPane(pane: SyncPane): v
         {pane === "pair" && <PairPane />}
         {pane === "devices" && <DevicesPane />}
       </section>
+    </>
+  );
+  if (p.frame === "sheet") {
+    return (
+      <Sheet open title="Sync" onClose={p.onClose}>
+        <div className="sync-sheet">{body}</div>
+      </Sheet>
+    );
+  }
+  return (
+    <Dialog label="Sync" wide onClose={p.onClose}>
+      {body}
     </Dialog>
   );
 }

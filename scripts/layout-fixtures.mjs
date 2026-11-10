@@ -578,6 +578,8 @@ export function buildFixtures() {
     "sync-space": inSpace(mesaOnMac, false),
     "sync-receiving": inSpace(unreadable, false),
     "sync-removed": inSpace(mesaOnMac, true),
+    "phone-sync-sheet": copyOf(mesaOnMac),
+    "phone-removed-banner": inSpace(mesaOnMac, true),
     "update-available": withUpdate(mesaOnMac, { "plugin:updater|check": { ...UPDATE_FOUND } }),
     "update-check-failed": withUpdate(mesaOnMac, { "plugin:updater|check": { __reject: UPDATE_CHECK_FAILED } }),
     "update-downloading": withUpdate(mesaOnMac, {

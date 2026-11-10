@@ -25,6 +25,7 @@ import {
   syncWorld,
   type SyncWorld,
 } from "../test/syncWorld";
+import { setScreen } from "../test/setup";
 import { requestWindowClose, tauri } from "../test/tauriMock";
 import { clearToasts } from "../ui/common/Toast";
 import { useUi, type UiState } from "../ui/state";
@@ -484,5 +485,213 @@ describe("SyncProvider", () => {
       await requestWindowClose();
     });
     expect(order.slice(0, 2)).toEqual(["stop", "close"]);
+  });
+});
+
+describe("SyncProvider on the phone", () => {
+  beforeEach(() => {
+    setScreen(390, 844);
+  });
+
+  const topBar = (): HTMLElement => {
+    const el = document.querySelector(".phone-head");
+    if (!(el instanceof HTMLElement)) throw new Error("no phone top bar");
+    return el;
+  };
+  const compactChip = (): HTMLElement => {
+    const el = topBar().querySelector(".sync-chip.chip-compact");
+    if (!(el instanceof HTMLElement)) throw new Error("no compact sync chip");
+    return el;
+  };
+  const plansSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Plans" });
+  const openPlans = async (): Promise<HTMLElement> => {
+    await click(within(topBar()).getByRole("button", { name: "Plans" }));
+    return plansSheet();
+  };
+  const closePlans = async (): Promise<void> => {
+    await click(within(plansSheet()).getByRole("button", { name: "Close" }));
+  };
+  const rowNames = (): (string | null)[] => [...plansSheet().querySelectorAll(".entries:not(section .entries) .entry-name")].map((e) => e.textContent);
+  const planName = (): string | null => topBar().querySelector(".phone-plan-name")?.textContent ?? null;
+  const emptyState = (): HTMLElement => {
+    const el = document.querySelector(".empty-state");
+    if (!(el instanceof HTMLElement)) throw new Error("no empty state");
+    return el;
+  };
+  const emptyButtons = (): (string | null)[] =>
+    within(emptyState())
+      .getAllByRole("button")
+      .map((b) => b.textContent);
+  const closeSync = async (): Promise<void> => {
+    await click(within(dialog()).getByRole("button", { name: "Close" }));
+  };
+  const EMPTY = ["New plan", "Import plan…", "Join with a code", "Set up sync"];
+
+  it("joining shows the space's plans without a remount", async () => {
+    const w = syncWorld({ platform: "ios", names: { L: "Alpha" }, answers: { sync_pair_join: () => SPACE } });
+    w.status = () => ({ space: null, revoked: false });
+    seedIndex(w.mem, "local", localIndex(ixAct("l-L", ["l-n"], [ip("L", false)])));
+    seedPlan(w.mem, "L", "Alpha");
+    spyOpen();
+    render(<App />);
+    await settle();
+    const before = root();
+    await openPlans();
+    expect(rowNames()).toEqual(["Alpha"]);
+    await click(within(plansSheet()).getByRole("button", { name: "Join with a code" }));
+    expect(pane("Join with a code")).toBeTruthy();
+    w.status = () => ({ space: SPACE, revoked: false });
+    await click(within(pane("Join with a code")).getByRole("button", { name: "Join space" }));
+    await closeSync();
+    act(() => remoteIndex(prov(IX), "s-S", [ip("S", false)]));
+    await settle();
+    await openPlans();
+    expect(rowNames()).toEqual(["Alpha", "Loading…"]);
+    act(() => {
+      const s = prov("S");
+      s.deliver(Y.encodeStateAsUpdate(seedPlan(null, "S", "Site")));
+      s.emitStatus("connected");
+      s.emitSynced(true);
+    });
+    await settle();
+    expect(rowNames()).toEqual(["Alpha", "Site"]);
+    expect(root()).toBe(before);
+  });
+
+  it("a fresh iPhone joins from the empty state", async () => {
+    const w = syncWorld({ platform: "ios", answers: { sync_pair_join: () => SPACE } });
+    w.status = () => ({ space: null, revoked: false });
+    spyOpen();
+    render(<App />);
+    await settle();
+    const before = root();
+    expect(emptyButtons()).toEqual(EMPTY);
+    await openPlans();
+    expect(within(plansSheet()).queryByRole("button", { name: "Set up sync" })).not.toBeNull();
+    expect(within(plansSheet()).queryByRole("button", { name: "Join with a code" })).not.toBeNull();
+    await closePlans();
+    await click(within(emptyState()).getByRole("button", { name: "Join with a code" }));
+    expect(pane("Join with a code")).toBeTruthy();
+    w.status = () => ({ space: SPACE, revoked: false });
+    await click(within(pane("Join with a code")).getByRole("button", { name: "Join space" }));
+    await closeSync();
+    act(() => remoteIndex(prov(IX), "s-S", [ip("S", false)]));
+    act(() => remoteIndex(prov(IX), "s-T", [ip("T", false)]));
+    await settle();
+    expect(document.querySelector(".empty-state")).toBeNull();
+    expect(screen.getByText(INCOMPLETE)).toBeTruthy();
+    expect(uiNow()[0].plan).toBe("S");
+    await openPlans();
+    expect(rowNames()).toEqual(["Loading…", "Loading…"]);
+    await closePlans();
+    act(() => {
+      const s = prov("S");
+      s.deliver(Y.encodeStateAsUpdate(seedPlan(null, "S", "Site")));
+      s.emitStatus("connected");
+      s.emitSynced(true);
+    });
+    await settle();
+    expect(planName()).toBe("Site");
+    act(() => [...f.providers.values()].forEach((p) => {
+      p.emitStatus("connected");
+      p.emitSynced(true);
+    }));
+    await settle();
+    expect(compactChip().getAttribute("aria-label")).toBe("Synced");
+    await openPlans();
+    expect(within(plansSheet()).queryByRole("button", { name: "Set up sync" })).toBeNull();
+    expect(within(plansSheet()).queryByRole("button", { name: "Join with a code" })).toBeNull();
+    expect(root()).toBe(before);
+  });
+
+  it("a plan trashed on a peer leaves the open phone plan", async () => {
+    const w = syncWorld({ platform: "ios", names: { P: "Plan P", R: "Plan R" } });
+    spaceStore(w, [
+      ["P", "Plan P"],
+      ["R", "Plan R"],
+    ]);
+    spyOpen();
+    render(<App />);
+    await settle();
+    expect(planName()).toBe("Plan P");
+    const appends = vi.spyOn(PlanDoc.prototype, "append");
+    act(() => remoteIndex(prov(IX), "t-P", [ip("P", true)]));
+    await settle();
+    expect(planName()).toBe("Plan R");
+    expect(toasts()).toEqual(["“Plan P” was moved to the Trash on another device. Restore it from the Trash."]);
+    await openPlans();
+    expect(within(within(plansSheet()).getByRole("region", { name: "Trash" })).getByText("Plan P")).toBeTruthy();
+    await closePlans();
+    act(() => remoteIndex(prov(IX), "t-R", [ip("R", true)]));
+    await settle();
+    expect(emptyButtons()).toEqual(EMPTY);
+    expect(toasts()).toEqual(["“Plan P” was moved to the Trash on another device. Restore it from the Trash.", "“Plan R” was moved to the Trash on another device. Restore it from the Trash."]);
+    expect(appends).not.toHaveBeenCalled();
+  });
+
+  it("an item trashed on a peer closes the sheet", async () => {
+    const w = syncWorld({ platform: "ios", names: { P: "Plan P" } });
+    spaceStore(w, [["P", "Plan P"]]);
+    const registry = spyOpen();
+    render(<App />);
+    await settle();
+    const r = await registry();
+    const p = await r.session("P");
+    const a = itemNamed(prov("P").ydoc, "A");
+    act(() => uiNow()[1]({ selected: a }));
+    await settle();
+    expect(screen.getByRole("dialog", { name: "A" })).toBeTruthy();
+    act(() => remoteIndex(prov(IX), "n-B", [own("dn:dev-B", "iPhone")]));
+    await settle();
+    const appends = vi.spyOn(PlanDoc.prototype, "append");
+    act(() => remotePlan(prov("P"), "x-B", [own("e:" + a, { k: "task", t: true })]));
+    await settle();
+    expect(p.authorOf("e:" + a)).toEqual({ dev: "dev-B", device: "iPhone" });
+    expect(uiNow()[0].selected).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "A" })).toBeNull();
+    expect(toasts()).toEqual(["“A” was moved to the Trash on iPhone. Restore it from the Trash."]);
+    expect(appends).not.toHaveBeenCalled();
+  });
+
+  it("resetting sync, then joining, re-attaches on the phone", async () => {
+    const message = "Could not read the sync state: invalid JSON";
+    const w = syncWorld({ platform: "ios", names: { P: "Plan P" }, answers: { sync_reset: () => null, sync_pair_join: () => SPACE } });
+    seedIndex(w.mem, "local", localIndex(ixAct("l-P", ["l-n"], [ip("P", false)]), ixAct("l-Pt", ["l-P"], [ip("P", true)], "dev-A", "Move plan to Trash")));
+    seedIndex(w.mem, IX, [ixAct("s-P", [], [ip("P", false)])]);
+    seedPlan(w.mem, "P", "Plan P");
+    w.status = fail({ code: "sync.io", message });
+    const registry = spyOpen();
+    render(<App />);
+    await settle();
+    const r = await registry();
+    const before = root();
+    await openPlans();
+    expect(rowNames()).toEqual(["Plan P"]);
+    await closePlans();
+    const strip = document.querySelector(".phone-status .status-strip");
+    if (!(strip instanceof HTMLElement)) throw new Error("no status strip");
+    expect(strip.querySelector(".status-text")?.textContent).toBe("Sync state on this device could not be read");
+    await click(strip);
+    const status = screen.getByRole("dialog", { name: "Status" });
+    await click(within(status).getByRole("button", { name: "Open sync" }));
+    expect(screen.queryByRole("dialog", { name: "Status" })).toBeNull();
+    expect(pane("Join with a code")).toBeTruthy();
+    expect([...dialog().querySelectorAll(".sync-message.bad")].map((e) => e.textContent)).toEqual([message + RESET_HINT]);
+    expect(within(dialog()).getByRole("button", { name: "Reset sync" })).toBeTruthy();
+    expect(within(dialog()).getByRole("button", { name: "Try again" })).toBeTruthy();
+    w.status = () => ({ space: null, revoked: false });
+    await click(within(dialog()).getByRole("button", { name: "Reset sync" }));
+    expect(calls("sync_reset")).toBe(1);
+    expect(compactChip().getAttribute("aria-label")).toBe("Local only");
+    expect(pane("Join with a code")).toBeTruthy();
+    w.status = () => ({ space: SPACE, revoked: false });
+    await click(within(pane("Join with a code")).getByRole("button", { name: "Join space" }));
+    expect(prov(IX).calls).toContain("connect");
+    expect(tauri.calls.filter((c) => c.cmd === "store_load" && argsOf(c).doc === IX)).toHaveLength(1);
+    await closeSync();
+    await openPlans();
+    expect(rowNames()).toEqual(["Plan P"]);
+    expect(r.plans().filter((l) => l.id === "P").map((l) => l.space)).toEqual([SP]);
+    expect(root()).toBe(before);
   });
 });

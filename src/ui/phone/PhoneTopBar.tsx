@@ -6,6 +6,7 @@ import { HeldChip } from "../choices/HeldChip";
 import { createdItem, createIntent, NEW_NAME } from "../palette/commands";
 import { useRun } from "../run";
 import type { PlanFiles } from "../shell/selection";
+import { SyncChip } from "../shell/SyncChip";
 import { useUiValue } from "../state";
 import { PlanSheet } from "./PlanSheet";
 import { useReadOnly } from "./readOnly";
@@ -95,6 +96,7 @@ function PlanTools(p: { session: PlanSession; files: PlanFiles; today(): IsoDate
       <button type="button" className="button-small" disabled={readOnly || !p.session.canRedo()} onClick={() => run.redo()}>
         Redo
       </button>
+      <SyncChip compact />
       <button type="button" className="button-small phone-more" aria-label="Plan" aria-haspopup="dialog" onClick={() => setSheet(true)}>
         ⋯
       </button>
@@ -120,7 +122,10 @@ export function PhoneTopBar(p: {
       {p.session !== null ? (
         <PlanTools key={p.session.view().plan.id} session={p.session} files={p.files} today={p.today} onChoose={p.onChoose} onCreated={p.onCreated} />
       ) : (
-        p.name !== null && <span className="phone-plan-name">{p.name}</span>
+        <>
+          {p.name !== null && <span className="phone-plan-name">{p.name}</span>}
+          <SyncChip compact />
+        </>
       )}
     </header>
   );

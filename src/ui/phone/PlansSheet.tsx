@@ -1,11 +1,15 @@
 import { useState } from "react";
 import type { PlanId } from "../../domain/model";
 import type { PlanListing, Registry } from "../../store/registry";
+import type { SyncState } from "../../sync/manager";
+import { canReload } from "../../sync/reload";
+import { useSyncState } from "../../sync/SyncProvider";
 import { ABOUT_TITLE } from "../common/About";
 import { Sheet } from "../common/Sheet";
 import { FailedPlanView } from "../shell/PlanFailed";
 import { restorePlan, type PlanFiles } from "../shell/selection";
 import { NewPlanButton } from "../shell/Sidebar";
+import type { SyncPane } from "../state";
 
 export const NEW_PLAN = "New plan";
 
@@ -29,7 +33,15 @@ export function CreateError(p: { error: string | null }) {
   return p.error === null ? null : <p className="entry-bad bad">{p.error}</p>;
 }
 
-function PlanRow(p: { registry: Registry; listing: PlanListing; current: boolean; locked: boolean; onOpen(id: PlanId): void; onTrash(id: PlanId): void }) {
+function PlanRow(p: {
+  registry: Registry;
+  listing: PlanListing;
+  current: boolean;
+  locked: boolean;
+  reloadEnabled: boolean;
+  onOpen(id: PlanId): void;
+  onTrash(id: PlanId): void;
+}) {
   const l = p.listing;
   const failure = p.registry.failures().get(l.id);
   return (
@@ -48,13 +60,32 @@ function PlanRow(p: { registry: Registry; listing: PlanListing; current: boolean
           registry={p.registry}
           id={l.id}
           error={failure}
-          reloadEnabled
+          reloadEnabled={p.reloadEnabled}
           frame="sheet"
           onRetry={() => void p.registry.retryPlan(l.id)}
           onTrash={p.onTrash}
         />
       )}
     </li>
+  );
+}
+
+function SyncRows(p: { state: SyncState; onSync(pane: SyncPane): void }) {
+  const s = p.state;
+  const out = s.kind === "off" || (s.kind === "error" && s.code === "revoked");
+  const join = out || (s.kind === "error" && s.code === "unauthorized");
+  if (!join) return null;
+  return (
+    <div className="plans-sync">
+      {out && (
+        <button type="button" className="choice-row" onClick={() => p.onSync("setup")}>
+          Set up sync
+        </button>
+      )}
+      <button type="button" className="choice-row" onClick={() => p.onSync("join")}>
+        Join with a code
+      </button>
+    </div>
   );
 }
 
@@ -67,8 +98,10 @@ export function PlansSheet(p: {
   onOpen(id: PlanId): void;
   onTrash(id: PlanId): void;
   onAbout?: () => void;
+  onSync(pane: SyncPane): void;
   onClose(): void;
 }) {
+  const { state } = useSyncState();
   const [name, setName] = useState(NEW_PLAN);
   const registry = p.registry;
   const plans = registry.plans();
@@ -85,10 +118,20 @@ export function PlansSheet(p: {
           <CreateError error={p.error} />
           <ImportButton files={p.files} />
         </div>
+        <SyncRows state={state} onSync={p.onSync} />
         <div className="group-title">Plans</div>
         <ul className="entries">
           {live.map((l) => (
-            <PlanRow key={l.id} registry={registry} listing={l} current={l.id === p.selected} locked={locked(l)} onOpen={p.onOpen} onTrash={p.onTrash} />
+            <PlanRow
+              key={l.id}
+              registry={registry}
+              listing={l}
+              current={l.id === p.selected}
+              locked={locked(l)}
+              reloadEnabled={canReload(state)}
+              onOpen={p.onOpen}
+              onTrash={p.onTrash}
+            />
           ))}
         </ul>
         {trashed.length > 0 && (
