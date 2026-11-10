@@ -153,7 +153,7 @@ export class Registry {
   private readonly trackers = new Map<PlanId, Tracker>();
   private readonly failed = new Map<PlanId, AppError>();
   private readonly indexFailed = new Map<string, AppError>();
-  private readonly reloadingDocs = new Set<string>();
+  private readonly reloads = new Map<string, Promise<void>>();
   private readonly sessionMemo = new Map<PlanId, Promise<PlanSession>>();
   private readonly sessions = new Map<PlanId, PlanSession>();
   private readonly deviceCbs = new Set<() => void>();
@@ -736,8 +736,15 @@ export class Registry {
     this.usable();
     if (this.spaceReadOnly()) throw new Refused(READ_ONLY);
     if (docId === LOCAL_INDEX) throw new Error("The local plan list is not loaded from the server");
-    this.reloadingDocs.add(docId);
+    const inFlight = this.reloads.get(docId);
+    if (inFlight !== undefined) return inFlight;
+    const reload = Promise.resolve().then(() => this.reload(docId));
+    this.reloads.set(docId, reload);
     this.emit();
+    return reload;
+  }
+
+  private async reload(docId: string): Promise<void> {
     try {
       const p: Promise<PersistedDoc> = this.setAside(docId).then(
         () =>
@@ -753,13 +760,13 @@ export class Registry {
       await p;
       if (docId.startsWith(SPACE_PREFIX)) this.putSpace(docId, await this.openIndex(docId));
     } finally {
-      this.reloadingDocs.delete(docId);
+      this.reloads.delete(docId);
       this.emit();
     }
   }
 
   reloading(doc: string): boolean {
-    return this.reloadingDocs.has(doc);
+    return this.reloads.has(doc);
   }
 
   private async setAside(id: string): Promise<void> {

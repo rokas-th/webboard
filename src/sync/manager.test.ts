@@ -1228,6 +1228,32 @@ describe("SyncManager: loading the space index again", () => {
     expect(fresh.ydoc).toBe((await r.doc("P")).ydoc);
   });
 
+  it("a reload destroys the old provider while its doc is still open", async () => {
+    const { r, f } = await started();
+    syncAll(f);
+    await settle();
+    const old = prov(f, "P");
+    const d = await r.doc("P");
+    const openAtDestroy: boolean[] = [];
+    const destroy = old.destroy.bind(old);
+    old.destroy = () => {
+      try {
+        d.ydoc.getMap("probe").set("k", 1);
+        openAtDestroy.push(true);
+      } catch (e) {
+        if (!(e instanceof AppError) || e.code !== "store.closed") throw e;
+        openAtDestroy.push(false);
+      }
+      destroy();
+    };
+    const held = hold("store_set_aside");
+    const reload = r.reloadFromServer("P");
+    await settle();
+    expect(openAtDestroy).toEqual([true]);
+    held.resolve(null);
+    await reload;
+  });
+
   it("this space index's own error is shown when the local one fails too", async () => {
     const { w, r, f, m } = await started();
     syncAll(f);

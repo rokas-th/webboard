@@ -1271,6 +1271,27 @@ describe("Registry: lifecycle and failures", () => {
     expect(callsOf(from, "store_compact").filter((c) => xdoc(c) === "P")).toHaveLength(0);
   });
 
+  it("a second reload of the same doc joins the one in flight", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    await r.doc("P");
+    const from = tauri.calls.length;
+    const heldAside = hold("store_set_aside");
+    const first = r.reloadFromServer("P");
+    await flush();
+    const second = r.reloadFromServer("P");
+    await flush();
+    expect(r.reloading("P")).toBe(true);
+    heldAside.resolve(e.mem.answers.store_set_aside({ doc: "P" }));
+    await first;
+    expect(r.reloading("P")).toBe(false);
+    await second;
+    expect(callsOf(from, "store_set_aside")).toHaveLength(1);
+    expect(loadsOf(from, "P")).toBe(1);
+  });
+
   it("a reload whose set-aside ends after close loads nothing", async () => {
     const e = env();
     seedIndex(e.mem, "local", listing("P"));
