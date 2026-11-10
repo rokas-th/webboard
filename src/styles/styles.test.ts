@@ -212,7 +212,6 @@ describe("the Cyberdeck look", () => {
 
   it("anchors every absolute box to a positioned box in its pane", () => {
     const anchors: Record<string, string> = {
-      ".seg-modes": ".toolbar",
       ".choice-list": ".plan-head",
       ".plan-menu-list": ".plan-menu",
       ".tl-month": ".tl-scale",

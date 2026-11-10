@@ -216,8 +216,11 @@ export class Registry {
       const ix = this.spaces.get(id);
       return ix !== undefined && ix.plans().length === 0;
     });
-    if (this.local.plans().length > 0 || !spacesEmpty) return;
-    await this.createExample();
+    if (this.local.plans().length === 0 && spacesEmpty) {
+      const id = await this.createExample();
+      await this.loadedDoc(id).flush();
+      await this.loadedDoc(LOCAL_INDEX).flush();
+    }
     this.settings = { ...this.settings, exampleOffered: true };
     await this.writeSettings();
   }
@@ -605,7 +608,7 @@ export class Registry {
       if (text === undefined) throw new Error(`The import lists a note for ${item} without its text`);
       return [item, text];
     });
-    return this.writePlan(r.planId, { ...r.action, at: this.clock.now() }, r.newNotes, texts, this.addTarget());
+    return this.writePlan(r.planId, { ...r.action, at: this.clock.now() }, r.newNotes, texts, () => this.addTarget());
   }
 
   async createExample(): Promise<PlanId> {
@@ -614,17 +617,17 @@ export class Registry {
     const calendar = await this.newCalendar(exampleYears(today));
     const id = newPlanId();
     const ex = buildExample({ id, dev: this.deviceId, ses: newId(), now: this.clock.now(), today, calendar });
-    return this.writePlan(id, ex.action, ex.newNotes, [...ex.notes], this.local);
+    return this.writePlan(id, ex.action, ex.newNotes, [...ex.notes], () => this.local);
   }
 
-  private async writePlan(id: PlanId, action: Action, newNotes: readonly ItemId[], texts: readonly (readonly [ItemId, string])[], target: IndexDoc): Promise<PlanId> {
+  private async writePlan(id: PlanId, action: Action, newNotes: readonly ItemId[], texts: readonly (readonly [ItemId, string])[], target: () => IndexDoc): Promise<PlanId> {
     const doc = await this.load(id, false);
     const planDoc = new PlanDoc(doc.ydoc);
     doc.ydoc.transact(() => {
       planDoc.append(action, newNotes);
       texts.forEach(([item, text]) => planDoc.note(item).insert(0, text));
     }, LOCAL);
-    target.addPlan(id);
+    target().addPlan(id);
     const session = await this.session(id);
     if (this.cacheName(id, session.view().plan.name)) this.emit();
     return id;

@@ -258,6 +258,18 @@ function codeOf(e: unknown): string {
   return e.code;
 }
 
+function appErrorOf(e: unknown): AppError {
+  expect(e).toBeInstanceOf(AppError);
+  if (!(e instanceof AppError)) throw new Error(`not an AppError: ${String(e)}`);
+  return e;
+}
+
+function errorOf(e: unknown): Error {
+  expect(e).toBeInstanceOf(Error);
+  if (!(e instanceof Error)) throw new Error(`not an Error: ${String(e)}`);
+  return e;
+}
+
 const setScreen = (width: number, height: number): void => {
   Object.defineProperty(window.screen, "width", { value: width, configurable: true });
   Object.defineProperty(window.screen, "height", { value: height, configurable: true });
@@ -1632,6 +1644,26 @@ describe("Registry: spaces", () => {
     expect(planOf(r, id).space).toBe(SP);
   });
 
+  it("createPlanFrom picks where it lists the import after the plan doc loads, so a space attached during the load gets it", async () => {
+    spaceEnv();
+    const r = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    const imported = buildImport(VALID_WEBBOARD.bytes, "valid.webboard", r.device.deviceId, "s1", 1000);
+    const from = tauri.calls.length;
+    const held = hold("store_load");
+    const creating = r.createPlanFrom(imported);
+    await flush();
+    expect(callsOf(from, "store_load").map(docOfArgs)).toEqual([imported.planId]);
+    await r.attachSpace(SP);
+    held.resolve(encodeLoad({ lastSeq: 0 }));
+    const id = await creating;
+    await flush();
+    expect(id).toBe(imported.planId);
+    expect(ipWrites(appendsTo(from, IX), id)).toEqual([ip(id, false)]);
+    expect(ipWrites(appendsTo(from, "local"), id)).toEqual([]);
+    expect(planOf(r, id).space).toBe(SP);
+  });
+
   it("trashing and restoring a space plan writes the space index", async () => {
     const e = spaceEnv();
     seedIndex(e.mem, "local", listing("P"));
@@ -2145,15 +2177,40 @@ describe("Registry: the example plan", () => {
     expect(s.view().derived.conflicts).toEqual([]);
   });
 
-  it("a start with plans, trashed ones included, creates nothing and records nothing", async () => {
+  it("writes the flag only after the example's plan doc and the plan list reach the disk: a failed append fails the start, unflagged", async () => {
+    const failing = [
+      ["the plan doc", (c: Call) => xdoc(c) !== "local"],
+      ["the plan list", (c: Call) => xdoc(c) === "local" && writesOf(c).some((w) => w.u.startsWith("ip:"))],
+    ] as const;
+    for (const [what, fails] of failing) {
+      const e = env({ settings: null });
+      const append = tauri.answers.store_append;
+      if (append === undefined) throw new Error("no store_append answer");
+      tauri.answers.store_append = (args, o) => {
+        if (fails({ cmd: "store_append", args, options: o })) throw { code: "store.io", message: `Disk full: ${what}.` };
+        return append(args, o);
+      };
+      const err = errorOf(await rejection(Registry.open({ clock: fixedClock(TODAY) })));
+      expect(err.message).toBe(`Disk full: ${what}. (closing the plan list afterwards failed too: Disk full: ${what}.)`);
+      expect(err).toHaveProperty("cause", expect.any(AppError));
+      expect(err).toHaveProperty("cause.code", "store.io");
+      expect(err).toHaveProperty("cause.message", `Disk full: ${what}.`);
+      expect(callsOf(0, "store_append").filter(fails), what).toHaveLength(1);
+      expect(flagWrites(0), what).toBe(0);
+      expect(e.state.settings, what).not.toMatchObject({ exampleOffered: true });
+    }
+  });
+
+  it("a start with plans, trashed ones included, creates nothing and records the flag only", async () => {
     const e = env({ settings: FRESH });
     seedIndex(e.mem, "local", listing("P"));
     seedPlan(e.mem, "P", "Alpha");
     const r = await open({ clock: fixedClock(TODAY) });
     await flush();
     expect(r.plans().map((l) => l.id)).toEqual(["P"]);
-    expect(flagWrites(0)).toBe(0);
+    expect(flagWrites(0)).toBe(1);
     expect(r.openSessions()).toEqual([]);
+    expect(e.state.settings).toEqual({ ...FRESH, exampleOffered: true });
     await closeAll();
 
     const t = env({ settings: FRESH });
@@ -2162,11 +2219,28 @@ describe("Registry: the example plan", () => {
     const trashed = await open({ clock: fixedClock(TODAY) });
     await flush();
     expect(trashed.plans().map((l) => [l.id, l.trashed])).toEqual([["P", true]]);
-    expect(flagWrites(0)).toBe(0);
-    expect(t.state.settings).toEqual(FRESH);
+    expect(flagWrites(0)).toBe(1);
+    expect(t.state.settings).toEqual({ ...FRESH, exampleOffered: true });
+    await closeAll();
+
+    const again = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    expect(again.plans().map((l) => [l.id, l.trashed])).toEqual([["P", true]]);
+    expect(flagWrites(0)).toBe(1);
   });
 
-  it("a plan listed only in a space index on disk counts, and so does a space index that does not load", async () => {
+  it("a start with plans whose flag write fails fails the start with that error and creates nothing", async () => {
+    const e = env({ settings: FRESH });
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha");
+    e.state.writeFail = { code: "settings.io", message: "Could not save settings.json: disk full" };
+    const err = appErrorOf(await rejection(Registry.open({ clock: fixedClock(TODAY) })));
+    expect([err.code, err.message]).toEqual(["settings.io", "Could not save settings.json: disk full"]);
+    expect(callsOf(0, "store_append").filter((c) => xdoc(c) !== "local")).toEqual([]);
+    expect(e.state.settings).toEqual(FRESH);
+  });
+
+  it("a plan listed only in a space index on disk counts, and so does a space index that does not load: each records the flag only", async () => {
     const e = env({ settings: FRESH });
     seedIndex(e.mem, "local", listing());
     seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
@@ -2174,7 +2248,8 @@ describe("Registry: the example plan", () => {
     await flush();
     expect(r.plans()).toEqual([]);
     expect(r.localSpaces()).toEqual([SP]);
-    expect(flagWrites(0)).toBe(0);
+    expect(flagWrites(0)).toBe(1);
+    expect(e.state.settings).toEqual({ ...FRESH, exampleOffered: true });
     await closeAll();
 
     const f = env({ settings: FRESH });
@@ -2185,7 +2260,8 @@ describe("Registry: the example plan", () => {
     await flush();
     expect(failed.indexError()?.code).toBe("store.io");
     expect(failed.plans()).toEqual([]);
-    expect(flagWrites(0)).toBe(0);
+    expect(flagWrites(0)).toBe(1);
+    expect(f.state.settings).toEqual({ ...FRESH, exampleOffered: true });
     await closeAll();
 
     const g = env({ settings: FRESH });
@@ -2251,24 +2327,23 @@ describe("Registry: the example plan", () => {
     expect(s.view().derived.conflicts).toEqual([]);
   });
 
-  it("a failed flag write fails the start, the example stays, and the next start records nothing", async () => {
+  it("a failed flag write fails the start, the example stays, and the next start records the flag only", async () => {
     const e = env({ settings: null });
     e.state.writeFail = { code: "settings.io", message: "Could not save settings.json: disk full" };
-    const err = await rejection(Registry.open({ clock: fixedClock(TODAY) }));
-    expect(err).toBeInstanceOf(AppError);
-    expect((err as AppError).message).toBe("Could not save settings.json: disk full");
-    expect(codeOf(err)).toBe("settings.io");
+    const err = appErrorOf(await rejection(Registry.open({ clock: fixedClock(TODAY) })));
+    expect([err.code, err.message]).toEqual(["settings.io", "Could not save settings.json: disk full"]);
     expect(e.state.settings).toBeNull();
     const next = env({ settings: e.state.settings, mem: e.mem });
     const again = await open({ clock: fixedClock(TODAY) });
     await flush();
+    expect(settingsWrites(0)).toEqual([{ v: 1, lastRegion: null, names: {}, exampleOffered: true }]);
     const [only, ...more] = again.plans();
     expect(more).toEqual([]);
     expect([only.trashed, only.space]).toEqual([false, null]);
     expect((await again.session(only.id)).view().plan.name).toBe(EXAMPLE);
     await flush();
-    expect(flagWrites(0)).toBe(0);
-    expect(next.state.settings).toEqual({ v: 1, lastRegion: null, names: { [only.id]: EXAMPLE } });
+    expect(callsOf(0, "store_append").filter((c) => xdoc(c) !== "local" && xdoc(c) !== only.id)).toEqual([]);
+    expect(next.state.settings).toEqual({ v: 1, lastRegion: null, names: { [only.id]: EXAMPLE }, exampleOffered: true });
   });
 
   it("a failed example create fails the start and records no flag", async () => {
@@ -2279,17 +2354,15 @@ describe("Registry: the example plan", () => {
       if (docOfArgs({ cmd: "store_load", args, options: o }) !== "local") throw { code: "store.io", message: "Disk full." };
       return load(args, o);
     };
-    const err = await rejection(Registry.open({ clock: fixedClock(TODAY) }));
-    expect(codeOf(err)).toBe("store.io");
-    expect((err as AppError).message).toBe("Disk full.");
+    const err = appErrorOf(await rejection(Registry.open({ clock: fixedClock(TODAY) })));
+    expect([err.code, err.message]).toEqual(["store.io", "Disk full."]);
     expect(flagWrites(0)).toBe(0);
     expect(e.state.settings).toBeNull();
   });
 
   it("reads exampleOffered strictly", async () => {
     env({ settings: { ...FRESH, exampleOffered: "yes" } });
-    const err = await rejection(Registry.open());
-    expect(codeOf(err)).toBe("settings.corrupt");
-    expect((err as AppError).message).toBe("settings.json does not hold WebBoard settings: exampleOffered is not true or false.");
+    const err = appErrorOf(await rejection(Registry.open()));
+    expect([err.code, err.message]).toEqual(["settings.corrupt", "settings.json does not hold WebBoard settings: exampleOffered is not true or false."]);
   });
 });

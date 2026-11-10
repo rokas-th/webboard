@@ -431,6 +431,11 @@ const SHIM = String.raw`
   Object.keys(P.fixture.docs).forEach(function (id) {
     docs[id] = bytes(P.fixture.docs[id]);
   });
+  var newDoc = P.fixture.newDoc === null ? null : bytes(P.fixture.newDoc);
+  var newDocServed = null;
+  function isPlanId(id) {
+    return typeof id === "string" && /^[A-Za-z0-9_-]{11}$/.test(id) && id.indexOf("ix-") !== 0;
+  }
   var ipc = P.fixture.ipc;
   function missing(cmd, why) {
     window.__PROBE_MISSING__.push(cmd + ": " + why);
@@ -445,9 +450,10 @@ const SHIM = String.raw`
     }
     if (cmd === "store_load") {
       var doc = args && args.doc;
-      if (!(doc in docs) && P.fixture.newDocs === true) return Promise.resolve(new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]).buffer);
-      if (!(doc in docs)) return missing(cmd, "doc " + doc);
-      return Promise.resolve(docs[doc].slice().buffer);
+      if (doc in docs) return Promise.resolve(docs[doc].slice().buffer);
+      if (newDoc === null || newDocServed !== null || !isPlanId(doc)) return missing(cmd, "doc " + doc);
+      newDocServed = doc;
+      return Promise.resolve(newDoc.slice().buffer);
     }
     if (!(cmd in ipc)) return missing(cmd, "no fixture");
     var a = ipc[cmd];
@@ -1004,6 +1010,48 @@ const MEASURE = String.raw`
     return { count: 1, box: { left: Math.round(box.left), top: Math.round(box.top), right: Math.round(box.right), bottom: Math.round(box.bottom) }, faults: faults.slice(0, 12) };
   }
 
+  function textLines(el) {
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    var tops = [];
+    for (var n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+      if (n.textContent.trim() === "") continue;
+      var range = document.createRange();
+      range.selectNodeContents(n);
+      Array.prototype.forEach.call(range.getClientRects(), function (r) {
+        if (r.width < 1) return;
+        var top = Math.round(r.top);
+        if (tops.every(function (t) { return Math.abs(t - top) > 2; })) tops.push(top);
+      });
+    }
+    return tops.length;
+  }
+  function toolbarControls() {
+    var bar = document.querySelector(".toolbar");
+    if (bar === null) return { found: false, controls: [], overlaps: [] };
+    var picked = Array.prototype.slice.call(bar.querySelectorAll("button, .seg, .wordmark, .toolbar-plan")).filter(rendered);
+    var tops = picked.filter(function (el) {
+      return !picked.some(function (other) { return other !== el && other.contains(el); });
+    });
+    var controls = tops.map(function (el) {
+      var r = el.getBoundingClientRect();
+      return { name: sel(el) + " " + JSON.stringify(el.textContent.trim().slice(0, 30)), lines: textLines(el), box: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } };
+    });
+    var overlaps = [];
+    for (var i = 0; i < controls.length; i++) {
+      for (var j = i + 1; j < controls.length; j++) {
+        var hit = crosses(controls[i].box, controls[j].box);
+        if (hit !== null) overlaps.push({ a: controls[i].name, b: controls[j].name, x: one(hit.x), y: one(hit.y) });
+      }
+    }
+    return {
+      found: true,
+      controls: controls.map(function (c) {
+        return { name: c.name, lines: c.lines, left: one(c.box.left), right: one(c.box.right), top: one(c.box.top), bottom: one(c.box.bottom) };
+      }),
+      overlaps: overlaps,
+    };
+  }
+
   walk(document.documentElement, { top: -HUGE, bottom: HUGE, left: -HUGE, right: HUGE });
   var overpainting = overpaints();
   var coverings = coveredUp();
@@ -1053,6 +1101,7 @@ const MEASURE = String.raw`
     panes: panes(),
     overpaints: overpainting,
     covered: coverings,
+    toolbar: toolbarControls(),
     names: names(),
     dialogs: dialogs(),
     text: (app === null ? "" : app.textContent.trim()).length,
@@ -1430,6 +1479,11 @@ function judge(state, viewport, r, errors, notFound) {
     problems.push(`${o.a} paints ${o.overY}x${o.overX}px over ${o.b}, both children of ${o.parent} — by ${by}`);
   });
   r.covered.forEach((c) => problems.push(`${c.path} is not the topmost thing at its own centre (${c.at}): ${c.on} is, over ${c.stack.join(" / ")}`));
+  if (DESKTOP.includes(viewport)) {
+    if (r.toolbar.found && r.toolbar.controls.length < 2) problems.push(`the toolbar shows ${r.toolbar.controls.length} control, so nothing was checked for overlap`);
+    r.toolbar.overlaps.forEach((o) => problems.push(`toolbar controls overlap by ${o.x}x${o.y}px: ${o.a} and ${o.b}`));
+    r.toolbar.controls.filter((c) => c.lines > 1).forEach((c) => problems.push(`toolbar control ${c.name} wraps onto ${c.lines} lines`));
+  }
   if (state.clip.length > 0) {
     if (r.names.checked === 0) problems.push("no element shows one of the long names");
     r.names.faults.forEach((f) => problems.push(f));
@@ -1622,7 +1676,7 @@ async function main() {
     [...new Set(picked.map((s) => s.fixture))].map((name) => {
       const f = built[name];
       if (f === undefined) throw new Error(`layout-probe: no fixture ${name}`);
-      return [name, { docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, base64(b)])), ipc: f.ipc, newDocs: f.newDocs === true }];
+      return [name, { docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, base64(b)])), ipc: f.ipc, newDoc: f.newDoc === undefined ? null : base64(f.newDoc) }];
     }),
   );
 

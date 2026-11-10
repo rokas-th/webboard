@@ -38,7 +38,12 @@
   pointer-events: none;
 }
 
+.toolbar > button:not(.sync-chip) {
+  flex-shrink: 0;
+}
+
 .toolbar-plan {
+  flex-shrink: 1000;
   min-width: 0;
   max-width: 220px;
   overflow: hidden;
@@ -86,14 +91,18 @@
   box-shadow: 0 0 10px rgba(36, 224, 255, 0.18);
 }
 
-.seg-modes {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
 .seg-modes button {
   min-width: 112px;
+}
+
+@media not all and (max-width: 1240px) {
+  .seg-modes {
+    margin-inline: auto;
+  }
+
+  .seg-modes + .toolbar-spacer {
+    display: none;
+  }
 }
 
 .seg-zoom button {
@@ -718,11 +727,6 @@ button.chip {
 
   .toolbar > button {
     padding: 7px 10px;
-  }
-
-  .seg-modes {
-    position: static;
-    transform: none;
   }
 
   .seg-modes button {

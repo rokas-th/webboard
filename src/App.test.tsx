@@ -171,7 +171,7 @@ describe("the example plan at the first start", () => {
     expect(s.state.settings).toMatchObject({ exampleOffered: true });
   });
 
-  it("shows a failed flag write as the start failure, and Try again opens the example made before it", async () => {
+  it("shows a failed flag write as the start failure, and Try again opens the example made before it and records the flag only", async () => {
     const s = await seededStore([]);
     s.state.settings = null;
     const write = tauri.answers.settings_write;
@@ -196,7 +196,7 @@ describe("the example plan at the first start", () => {
     await settle();
     expect(current()).toBe("Example: Website relaunch");
     expect(within(screen.getByRole("navigation", { name: "Plans" })).getAllByText("Example: Website relaunch")).toHaveLength(1);
-    expect(s.state.settings).not.toHaveProperty("exampleOffered");
+    expect(s.state.settings).toMatchObject({ exampleOffered: true });
   });
 });
 

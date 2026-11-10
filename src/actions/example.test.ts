@@ -23,7 +23,7 @@ const TABLE: readonly (readonly [string, string, string, number, string, number,
   ["Design", "Design sign-off", "milestone", 0, "todo", 0, ["Visual design"]],
   ["Build › Backend", "CMS setup", "task", 4, "done", 100, ["Requirements"]],
   ["Build › Backend", "Content migration", "task", 5, "todo", 0, ["CMS setup", "Design sign-off"]],
-  ["Build › Backend", "Search", "task", 3, "todo", 0, ["CMS setup"]],
+  ["Build › Backend", "Search", "task", 3, "todo", 0, ["CMS setup", "Design sign-off"]],
   ["Build › Frontend", "Page templates", "task", 6, "doing", 30, ["Wireframes"]],
   ["Build › Frontend", "Responsive pass", "task", 3, "todo", 0, ["Page templates", "Design sign-off"]],
   ["Launch", "QA and fixes", "task", 4, "todo", 0, ["Content migration", "Search", "Responsive pass"]],
@@ -160,23 +160,26 @@ describe.each(CASES)("the example plan, today on %s", (_, today, calendar, first
     });
   });
 
-  it("puts done work before today's first working day, doing work across it and todo work from it on", () => {
+  it("ends done work before today's first working day, runs doing work from before it to after it and starts todo work after it", () => {
     const p = project(today, calendar);
     expect(toIso(p.t)).toBe(firstWorkday);
-    TABLE.forEach(([, name, , , status]) => {
-      const s = startOfItem(p, name);
-      const e = endOfItem(p, name);
-      if (status === "done") expect(e < p.t, name).toBe(true);
-      if (status === "doing") expect(s <= p.t && p.t <= e, name).toBe(true);
-      if (status === "todo") expect(s >= p.t, name).toBe(true);
+    const named = (keep: (row: (typeof TABLE)[number]) => boolean): string[] => TABLE.filter(keep).map((row) => row[1]);
+    expect(named((row) => row[4] === "doing")).toEqual(["Visual design", "Page templates"]);
+    expect(named((row) => row[4] === "todo" && row[2] === "milestone")).toEqual(["Design sign-off", "Go live"]);
+    named((row) => row[4] === "done").forEach((name) => expect(endOfItem(p, name) < p.t, name).toBe(true));
+    named((row) => row[4] === "doing").forEach((name) => {
+      expect(startOfItem(p, name) < p.t, name).toBe(true);
+      expect(endOfItem(p, name) > p.t, name).toBe(true);
     });
+    named((row) => row[4] === "todo").forEach((name) => expect(startOfItem(p, name) > p.t, name).toBe(true));
   });
 
-  it("anchors Kickoff 12 working days before today's first working day, moved from 14 because Search would start before it", () => {
+  it("starts Visual design and Page templates 3 working days before today's first working day, so Kickoff sits 15 working days before it", () => {
     const p = project(today, calendar);
-    expect(toIso(startOfItem(p, "Kickoff"))).toBe(toIso(p.cal.subWork(p.t, 12)));
-    expect(toIso(startOfItem(p, "Search"))).toBe(toIso(p.t));
-    expect(toIso(endOfItem(p, "CMS setup"))).toBe(toIso(p.cal.subWork(p.t, 1)));
+    const lead = toIso(p.cal.subWork(p.t, 3));
+    expect([toIso(startOfItem(p, "Visual design")), toIso(startOfItem(p, "Page templates"))]).toEqual([lead, lead]);
+    expect(toIso(startOfItem(p, "Kickoff"))).toBe(toIso(p.cal.subWork(p.t, 15)));
+    expect(toIso(startOfItem(p, "Search"))).toBe(toIso(p.cal.after(endOfItem(p, "Design sign-off"))));
   });
 
   it("closes the 6th and 7th working days after today's first working day for the Team offsite, and dates skip them", () => {
@@ -187,14 +190,16 @@ describe.each(CASES)("the example plan, today on %s", (_, today, calendar, first
     expect(p.plan.calendar.region).toEqual(calendar.region);
     expect(p.plan.calendar.workdays).toEqual([1, 2, 3, 4, 5]);
     expect([...p.plan.calendar.holidays.keys()]).toEqual([...calendar.holidays.keys()]);
-    const migration = p.byName("Content migration");
-    const s = startOfItem(p, migration.name);
-    const e = endOfItem(p, migration.name);
+    const s = startOfItem(p, "Content migration");
+    const e = endOfItem(p, "Content migration");
+    const [from, to] = [toDay(closures[0].from), toDay(closures[0].to)];
+    expect(s < from && to < e, `${toIso(s)}..${toIso(e)} around ${closures[0].from}..${closures[0].to}`).toBe(true);
+    expect(toIso(e)).toBe(toIso(p.cal.addWork(s, 4)));
+    expect(toIso(e)).toBe(toIso(p.base.addWork(p.base.addWork(s, 4), 2)));
     expect(p.cal.workBetween(s, e)).toBe(5);
-    expect(e - s).toBeGreaterThanOrEqual(6);
   });
 
-  it("keeps the Agreed plan baseline: the same dates with Visual design at 3 days, so Design sign-off slips by 2", () => {
+  it("keeps the Agreed plan baseline: the same dates with Visual design at 3 days, so Design sign-off and the work that waits on it slip", () => {
     const p = project(today, calendar);
     const baselines = [...p.plan.baselines.values()];
     expect(baselines.map((b) => b.name)).toEqual(["Agreed plan"]);
@@ -219,10 +224,22 @@ describe.each(CASES)("the example plan, today on %s", (_, today, calendar, first
     });
     const slip = p.derived.slip(b.id);
     const slipOf = (name: string): number | undefined => slip.get(id(name));
-    expect(["Kickoff", "Stakeholder interviews", "Requirements", "Wireframes", "Visual design", "CMS setup", "Search", "Page templates"].map(slipOf)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
-    expect(slipOf("Design sign-off")).toBe(2);
-    expect(slipOf("Content migration")).toBe(2);
-    expect(["Responsive pass", "QA and fixes", "Go live", "Retrospective"].map(slipOf)).toEqual([0, 1, 1, 1]);
+    expect(Object.fromEntries(TABLE.map((row) => [row[1], slipOf(row[1])]))).toEqual({
+      Kickoff: 0,
+      "Stakeholder interviews": 0,
+      Requirements: 0,
+      Wireframes: 0,
+      "Visual design": 0,
+      "Design sign-off": 2,
+      "CMS setup": 0,
+      "Content migration": 2,
+      Search: 2,
+      "Page templates": 0,
+      "Responsive pass": 0,
+      "QA and fixes": 1,
+      "Go live": 1,
+      Retrospective: 1,
+    });
   });
 
   it("makes fresh ids for every creation", () => {

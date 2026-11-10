@@ -12,6 +12,7 @@ import { parseKey, validateWrite } from "../plan/units";
 import { fixedClock } from "../services/clock";
 import { decodeAction, encodeAction, PlanDoc } from "../store/doc";
 import { indexRules } from "../store/index-doc";
+import { SPACE_PREFIX } from "../store/plan-id";
 import { Registry } from "../store/registry";
 import { encodeLoad } from "./fixtures/store";
 import { MESA_SEED } from "./session";
@@ -80,7 +81,11 @@ function answerOf(value: unknown): Answer {
   };
 }
 
-function answersOf(f: Fixture): Record<string, Answer> {
+const PLAN_ID = /^[A-Za-z0-9_-]{11}$/;
+
+const isPlanId = (id: string): boolean => PLAN_ID.test(id) && !id.startsWith(SPACE_PREFIX);
+
+function answersOf(f: Fixture, served: string[] = []): Record<string, Answer> {
   const docArg = (args: InvokeArgs | undefined): string => {
     if (!isRecord(args) || typeof args.doc !== "string") throw new Error("store_load without a doc");
     return args.doc;
@@ -88,10 +93,12 @@ function answersOf(f: Fixture): Record<string, Answer> {
   return {
     ...Object.fromEntries(Object.entries(f.ipc).map(([cmd, v]) => [cmd, answerOf(v)])),
     store_load: (args) => {
-      const bytes = f.docs[docArg(args)];
-      if (bytes === undefined && f.newDocs === true) return encodeLoad({ lastSeq: 0 });
-      if (bytes === undefined) throw new Error(`fixture has no doc ${docArg(args)}`);
-      return bytes.slice().buffer;
+      const id = docArg(args);
+      const bytes = f.docs[id];
+      if (bytes !== undefined) return bytes.slice().buffer;
+      if (f.newDoc === undefined || !isPlanId(id) || served.length > 0) throw new Error(`fixture has no doc ${id}`);
+      served.push(id);
+      return f.newDoc.slice().buffer;
     },
   };
 }
@@ -518,19 +525,25 @@ describe("layout fixtures", () => {
     expect(first.kind === "early" && first.succ).toBe("B");
   });
 
-  it("records the example plan as offered in every fixture but example, a first start with no plans whose new docs load empty", async () => {
+  it("records the example plan as offered in every fixture but example, a first start with no plans whose one new plan doc loads empty", async () => {
     Object.entries(FIXTURES)
       .filter(([name]) => name !== "example")
       .forEach(([name, f]) => {
         expect(f.ipc.settings_read, name).toMatchObject({ exampleOffered: true });
-        expect(f.newDocs, name).toBeUndefined();
+        expect(f.newDoc, name).toBeUndefined();
       });
     const f = fixture("example");
-    expect(f.newDocs).toBe(true);
+    if (f.newDoc === undefined) throw new Error("the example fixture has no new doc");
+    expect([...f.newDoc]).toEqual([...new Uint8Array(encodeLoad({ lastSeq: 0 }))]);
+    expect(readFrame(f.newDoc)).toEqual({ flags: 0, lastSeq: 0, entries: [new Uint8Array()] });
     expect(f.ipc.settings_read).toEqual({ v: 1, lastRegion: { src: "openholidays", country: "CH", subdivision: "CH-ZH" }, names: {} });
     expect(Object.keys(f.docs)).toEqual(["local"]);
     expect({ ...f.ipc, settings_read: null }).toEqual({ ...fixture("empty").ipc, settings_read: null });
-    resetTauri(answersOf(f));
+    const served: string[] = [];
+    const answers = answersOf(f, served);
+    const load = answers.store_load;
+    if (load === undefined) throw new Error("no store_load answer");
+    resetTauri(answers);
     const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
     openRegistries.push(registry);
     const [only] = registry.plans();
@@ -538,6 +551,12 @@ describe("layout fixtures", () => {
     const view = (await registry.session(only.id)).view();
     expect(view.derived.conflicts).toEqual([]);
     expect(view.derived.missingYears).toEqual([]);
+    expect(served).toEqual([only.id]);
+    expect(() => load({ doc: "planOther01" })).toThrow("fixture has no doc planOther01");
+    const fresh = answersOf(f).store_load;
+    if (fresh === undefined) throw new Error("no store_load answer");
+    ["ix-sp000000", "probe", "local-copy"].forEach((doc) => expect(() => fresh({ doc })).toThrow(`fixture has no doc ${doc}`));
+    expect(() => answersOf(fixture("empty")).store_load?.({ doc: "planOther01" })).toThrow("fixture has no doc planOther01");
   });
 
   it("opens every plan through the Registry with the fixture's answers, the plan names cached", async () => {

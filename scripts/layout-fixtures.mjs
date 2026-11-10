@@ -86,13 +86,12 @@ export function encodeTuple(a) {
   return a.meta === undefined ? t : [...t, { ...a.meta }];
 }
 
-function frame(ydoc) {
-  const entries = [Y.encodeStateAsUpdate(ydoc)];
-  const size = 13 + entries.reduce((n, e) => n + 4 + e.length, 0);
-  const out = new Uint8Array(size);
+export function encodeLoad(l) {
+  const entries = [l.snapshot ?? new Uint8Array(), ...(l.records ?? [])];
+  const out = new Uint8Array(13 + entries.reduce((n, e) => n + 4 + e.length, 0));
   const view = new DataView(out.buffer);
-  view.setUint8(0, 0);
-  view.setBigUint64(1, BigInt(entries.length), true);
+  view.setUint8(0, l.torn === true ? 1 : 0);
+  view.setBigUint64(1, BigInt(l.lastSeq), true);
   view.setUint32(9, entries.length, true);
   entries.reduce((at, e) => {
     view.setUint32(at, e.length, true);
@@ -101,6 +100,8 @@ function frame(ydoc) {
   }, 13);
   return out;
 }
+
+const frame = (ydoc) => encodeLoad({ snapshot: Y.encodeStateAsUpdate(ydoc), lastSeq: 1 });
 
 function docOf(entries, notes) {
   const ydoc = new Y.Doc();
@@ -514,7 +515,7 @@ function fixtureOf(plans, o = { trashed: false }) {
 function firstStart() {
   const f = fixtureOf([]);
   const settings = Object.fromEntries(Object.entries(f.ipc.settings_read).filter(([k]) => k !== "exampleOffered"));
-  return { ...f, newDocs: true, ipc: { ...f.ipc, settings_read: settings } };
+  return { ...f, newDoc: encodeLoad({ lastSeq: 0 }), ipc: { ...f.ipc, settings_read: settings } };
 }
 
 const copyOf = (f) => ({ docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, b.slice()])), ipc: JSON.parse(JSON.stringify(f.ipc)) });
