@@ -26,6 +26,7 @@ export interface Action {
 export interface Rules {
   same(u: UnitKey, a: unknown, b: unknown): boolean;
   mergeDerived(u: UnitKey, a: Write, b: Write): Write;
+  mergeable(u: UnitKey, a: Write, b: Write): boolean;
 }
 
 export interface UnitState {

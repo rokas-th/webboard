@@ -66,3 +66,22 @@ describe("planRules.mergeDerived", () => {
     expect(log.unit("s:x")).toEqual({ value: ["2026-11-20", 3, "todo", 0, "later"], from: "p1", clash: null });
   });
 });
+
+describe("planRules.mergeable", () => {
+  const derived = (v: unknown[]): Write => ({ u: "s:x", v, c: "push" });
+
+  it("lets two schedules merge only when they agree on everything but the start", () => {
+    const base = derived(["2026-11-16", 3, "todo", 0, "later"]);
+    expect(planRules.mergeable("s:x", base, derived(["2026-11-20", 3, "todo", 0, "later"]))).toBe(true);
+    expect(planRules.mergeable("s:x", base, base)).toBe(true);
+    expect(planRules.mergeable("s:x", base, derived(["2026-11-20", 4, "todo", 0, "later"]))).toBe(false);
+    expect(planRules.mergeable("s:x", base, derived(["2026-11-16", 3, "doing", 0, "later"]))).toBe(false);
+    expect(planRules.mergeable("s:x", base, derived(["2026-11-16", 3, "todo", 50, "later"]))).toBe(false);
+    expect(planRules.mergeable("s:x", base, derived(["2026-11-16", 3, "todo", 0, "now"]))).toBe(false);
+  });
+
+  it("refuses every unit but a schedule", () => {
+    const w: Write = { u: "n:x", v: "A", c: "push" };
+    expect(() => planRules.mergeable("n:x", w, w)).toThrow("Derived write to n:x");
+  });
+});

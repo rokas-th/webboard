@@ -1,9 +1,9 @@
 import type { Calendar, Closure, HolidayYear, Tuning } from "../domain/calendar";
 import type { IsoDate } from "../domain/dates";
-import type { Baseline, BaselineId, Item, ItemId, ItemKind, Link, LinkKey, PlanId, PlanState, Schedule } from "../domain/model";
+import { linkKey, type Baseline, type BaselineId, type Item, type ItemId, type ItemKind, type Link, type LinkKey, type PlanId, type PlanState, type Schedule } from "../domain/model";
 import type { LogState } from "../log/state";
 import type { UnitKey, Write } from "../log/types";
-import { decodeAs, decodeUnit, parseKey, validateWrite, type UnitKind } from "./units";
+import { decodeAs, decodeHolidayYear, linkEnds, parseKey, validateWrite, type UnitKind } from "./units";
 
 export class PlanIncomplete extends Error {}
 
@@ -17,7 +17,6 @@ interface Parsed {
   v: unknown;
   kind: UnitKind;
   arg: string;
-  to?: string;
 }
 
 interface Raw {
@@ -54,6 +53,7 @@ const checkSchedule = (id: ItemId, kind: ItemKind, schedule: Schedule | null): v
   if (kind === "group" && schedule !== null) throw new Error(`Group ${id} has a schedule`);
   if (kind !== "group" && schedule === null) throw new Error(`Item ${id} has no schedule`);
   if (kind === "task" && schedule !== null && schedule.dur < 1) throw new Error(`Task ${id} has a duration under 1 working day`);
+  if (kind === "milestone" && schedule !== null && schedule.dur !== 0) throw new Error(`Milestone ${id} has a duration of ${schedule.dur} working days, not 0`);
 };
 
 const rawItem = (id: ItemId, t: Table): Raw => {
@@ -122,7 +122,9 @@ const projectItems = (ids: readonly ItemId[], t: Table): Map<ItemId, Item> => {
     const known = trashed.get(id);
     if (known !== undefined) return known;
     const parent = parentOf.get(id) ?? null;
-    const value = (raws.get(id) as Raw).own || (parent !== null && isTrashed(parent));
+    const raw = raws.get(id);
+    if (raw === undefined) throw new Error(`Item ${id} is not in the plan`);
+    const value = raw.own || (parent !== null && isTrashed(parent));
     trashed.set(id, value);
     return value;
   };
@@ -144,8 +146,9 @@ const build = (id: PlanId, t: Table): PlanState => {
   const of = (k: UnitKind) => parsed.filter((p) => p.kind === k);
   const links = nonNull<Link>(
     of("l").map((p): [LinkKey, Link | null] => {
+      const { from, to } = linkEnds(p.u);
       const v = decodeAs("link", p.u, p.v);
-      return [`${p.arg}>${p.to as string}`, v === null ? null : { from: p.arg, to: p.to as string, type: v.type, lag: v.lag }];
+      return [linkKey(from, to), v === null ? null : { from, to, type: v.type, lag: v.lag }];
     }),
   );
   const calendar: Calendar = {
@@ -161,7 +164,7 @@ const build = (id: PlanId, t: Table): PlanState => {
     ),
     tuning: new Map(nonNull<Tuning>(of("ct").map((p): [IsoDate, Tuning | null] => [p.arg, decodeAs("tuning", p.u, p.v)]))),
     holidays: new Map(
-      nonNull<HolidayYear>(of("ch").map((p): [string, HolidayYear | null] => [p.arg, decodeUnit(p.u, p.v) as HolidayYear | null])).map(
+      nonNull<HolidayYear>(of("ch").map((p): [string, HolidayYear | null] => [p.arg, decodeHolidayYear(p.u, p.v)])).map(
         ([y, v]): [number, HolidayYear] => [Number(y), v],
       ),
     ),

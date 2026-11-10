@@ -257,6 +257,11 @@ export class LogState {
       const differ = owners.some((e, i) => owners.slice(i + 1).some((o) => !this.rules.same(u, e.w.v, o.w.v)));
       return { value: latest.w.v, from: latest.id, clash: differ ? owners.map((e) => e.id) : null };
     }
+    const apart = entries.some((e, i) => entries.slice(i + 1).some((o) => !this.rules.mergeable(u, e.w, o.w)));
+    if (apart) {
+      const latest = entries[entries.length - 1];
+      return { value: latest.w.v, from: latest.id, clash: entries.map((e) => e.id) };
+    }
     const merged = entries.reduce((acc, next) => {
       const m = this.rules.mergeDerived(u, acc.w, next.w);
       if (m === acc.w) return acc;

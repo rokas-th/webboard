@@ -1,4 +1,4 @@
-import type { HolidayDay, HolidayKind, HolidayYear, RegionRef, Tuning } from "../domain/calendar";
+import { CLOSURE_TOO_LONG, closureTooLong, type HolidayDay, type HolidayKind, type HolidayYear, type RegionRef, type Tuning } from "../domain/calendar";
 import { toDay, type IsoDate, type Weekday } from "../domain/dates";
 import type { BaselineId, Horizon, ItemId, ItemKind, LinkType, PlanState, Place, Schedule, Status } from "../domain/model";
 import type { ActionId, Cause, UnitKey, Write } from "../log/types";
@@ -261,6 +261,7 @@ const closureSpec: Spec<ClosureValue> = {
     const [from, to, name] = tuple(unit, v, 3);
     const c: ClosureValue = { from: date(unit, "from", from), to: date(unit, "to", to), name: nameRule(unit, "name", name) };
     if (toDay(c.from) > toDay(c.to)) throw fail(unit, "closure ends before it starts");
+    if (closureTooLong(c.from, c.to)) throw fail(unit, CLOSURE_TOO_LONG);
     return c;
   },
 };
@@ -469,13 +470,23 @@ export const key: {
   a: (i) => checked(`a:${i}`),
 };
 
-export function decodeUnit(u: UnitKey, v: unknown): unknown {
-  const { kind, arg } = parseKey(u);
-  const value = SPECS[CODEC_OF[kind]].dec(v, u);
-  if (kind === "ch" && value !== null && (value as HolidayYear).year !== Number(arg)) {
-    throw fail(u, `year ${(value as HolidayYear).year} does not match the key`);
-  }
+export function linkEnds(u: UnitKey): { from: ItemId; to: ItemId } {
+  const k = parseKey(u);
+  if (k.kind !== "l" || k.to === undefined) throw new Error(`Unit ${u} is not a link`);
+  return { from: k.arg, to: k.to };
+}
+
+export function decodeHolidayYear(u: UnitKey, v: unknown): HolidayYear | null {
+  const k = parseKey(u);
+  if (k.kind !== "ch") throw new Error(`Unit ${u} is not a holiday year`);
+  const value = decodeAs("holidayYear", u, v);
+  if (value !== null && value.year !== Number(k.arg)) throw fail(u, `year ${value.year} does not match the key`);
   return value;
+}
+
+export function decodeUnit(u: UnitKey, v: unknown): unknown {
+  const { kind } = parseKey(u);
+  return kind === "ch" ? decodeHolidayYear(u, v) : SPECS[CODEC_OF[kind]].dec(v, u);
 }
 
 export function validateWrite(w: Write): void {

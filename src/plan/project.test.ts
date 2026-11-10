@@ -288,6 +288,15 @@ describe("projectPlan", () => {
     const log = logOf(act("a0", [], [...plan0, ...item("T", "task", "T", null, "a0", ["2026-11-16", 0, "todo", 0, "later"])]));
     expect(() => projectPlan("P", log)).toThrow(new Error("Task T has a duration under 1 working day"));
   });
+
+  it("refuses a milestone with a duration, so the stored and the scheduled duration never differ", () => {
+    const log = logOf(act("a0", [], [...plan0, ...item("M", "milestone", "Ship", null, "a0", ["2026-12-01", 5, "todo", 0, "later"])]));
+    expect(() => projectPlan("P", log)).toThrow(new Error("Milestone M has a duration of 5 working days, not 0"));
+    const ok = logOf(act("a0", [], [...plan0, ...item("M", "milestone", "Ship", null, "a0", ["2026-12-01", 0, "todo", 0, "later"])]));
+    const plan = projectPlan("P", ok);
+    expect(plan.items.get("M")?.schedule?.dur).toBe(0);
+    expect(() => applySchedules(plan, [w("s:M", ["2026-12-02", 2, "todo", 0, "later"])])).toThrow(new Error("Milestone M has a duration of 2 working days, not 0"));
+  });
 });
 
 describe("trashRoots", () => {

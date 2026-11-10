@@ -5,10 +5,12 @@ import {
   baseline,
   closure,
   codecOf,
+  decodeHolidayYear,
   existence,
   holidayYear,
   key,
   link,
+  linkEnds,
   name,
   parseKey,
   place,
@@ -126,6 +128,20 @@ describe("unit keys", () => {
     expect(() => parseKey("ch:20x6")).toThrow("ch:20x6");
     expect(() => key.ch(2026.5)).toThrow("ch:2026.5");
   });
+
+  it("reads a link key's two ends and refuses any other key", () => {
+    expect(linkEnds("l:A>B")).toEqual({ from: "A", to: "B" });
+    expect(() => linkEnds("n:A")).toThrow("Unit n:A is not a link");
+    expect(() => linkEnds("l:A")).toThrow("Malformed unit key “l:A”");
+  });
+
+  it("decodes a holiday year only under its own year's key", () => {
+    expect(decodeHolidayYear("ch:2027", zh)).toEqual(zh);
+    expect(decodeHolidayYear("ch:2027", null)).toBeNull();
+    expect(() => decodeHolidayYear("ch:2026", zh)).toThrow("ch:2026: year 2027 does not match the key");
+    expect(() => validateWrite({ u: "ch:2026", v: zh, c: "own" })).toThrow("ch:2026: year 2027 does not match the key");
+    expect(() => decodeHolidayYear("cr", zh)).toThrow("Unit cr is not a holiday year");
+  });
 });
 
 describe("codecs", () => {
@@ -168,6 +184,13 @@ describe("codecs", () => {
   it("refuses a closure that ends before it starts", () => {
     expect(() => closure.dec(["2026-12-31", "2026-12-24", "X"])).toThrow("cc: closure ends before it starts");
     expect(() => validateWrite({ u: "cc:Z", v: ["2026-12-31", "2026-12-24", "X"], c: "own" })).toThrow("cc:Z: closure ends before it starts");
+  });
+
+  it("accepts a closure of 366 days and refuses one of 367", () => {
+    expect(closure.dec(["2026-12-24", "2027-12-24", "X"])).toEqual({ from: "2026-12-24", to: "2027-12-24", name: "X" });
+    expect(closure.dec(["2028-01-01", "2028-12-31", "X"])).toEqual({ from: "2028-01-01", to: "2028-12-31", name: "X" });
+    expect(() => closure.dec(["2026-12-24", "2027-12-25", "X"])).toThrow("cc: A closure can last at most 366 days.");
+    expect(() => validateWrite({ u: "cc:Z", v: ["2026-12-24", "3026-01-02", "X"], c: "own" })).toThrow("cc:Z: A closure can last at most 366 days.");
   });
 
   it("refuses an encode of a malformed value", () => {

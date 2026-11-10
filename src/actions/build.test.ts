@@ -375,6 +375,13 @@ describe("buildAction: refusals", () => {
     refusedWith(ctx, { t: "calendar", next: closure("2026-11-18", "2026-11-20", "  ") }, "A closure needs a name and a first day.");
     refusedWith(ctx, { t: "calendar", next: closure("", "2026-11-20", "Offsite") }, "A closure needs a name and a first day.");
     refusedWith(ctx, { t: "calendar", next: closure("2026-11-20", "2026-11-18", "Offsite") }, "The last day is before the first day.");
+    refusedWith(ctx, { t: "calendar", next: closure("2026-12-24", "2027-12-25", "Offsite") }, "A closure can last at most 366 days.");
+    refusedWith(ctx, { t: "calendar", next: closure("2026-12-24", "9999-12-31", "Offsite") }, "A closure can last at most 366 days.");
+    expect(buildAction(ctx, { t: "calendar", next: closure("2026-12-24", "2027-12-24", "Offsite") }).action.w).toContainEqual({
+      u: "cc:c1",
+      v: ["2026-12-24", "2027-12-24", "Offsite"],
+      c: "own",
+    });
     refusedWith(ctx, { t: "resize", item: "Admin", dur: 0 }, "A task lasts at least 1 working day.");
     refusedWith(ctx, { t: "resize", item: "Launch", dur: 2 }, "Milestones have no duration.");
     refusedWith(ctx, { t: "schedule", item: "Admin", set: { progress: 101 } }, "Progress is a whole number from 0 to 100.");

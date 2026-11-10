@@ -667,6 +667,22 @@ describe("weekdays, days off and closures", () => {
     expect(toastTexts()).toEqual(["A day off needs a name and a first day.", "A day off needs a name and a first day.", "The last day is before the first day."]);
     expect(applyButton().disabled).toBe(true);
   });
+
+  it("caps the last day at 366 days from the first, and refuses a longer range typed past the cap", async () => {
+    const t = await made([]);
+    await shown(t);
+    await openDialog();
+    expect(field("Last day").max).toBe("");
+    type("First day", "2026-12-24");
+    expect(field("Last day").max).toBe("2027-12-24");
+    type("First day", "2028-01-01");
+    expect(field("Last day").max).toBe("2028-12-31");
+    type("Day off name", "Freeze");
+    type("Last day", "2029-01-01");
+    fireEvent.click(inDialog().getByRole("button", { name: "Add a day off" }));
+    expect(toastTexts()).toEqual(["A closure can last at most 366 days."]);
+    expect(applyButton().disabled).toBe(true);
+  });
 });
 
 describe("day list", () => {

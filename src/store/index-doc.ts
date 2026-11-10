@@ -26,6 +26,9 @@ export const indexRules: Rules = {
   mergeDerived(u) {
     throw new Error(`Index unit ${u} has no derived writes`);
   },
+  mergeable(u) {
+    throw new Error(`Index unit ${u} has no derived writes`);
+  },
 };
 
 const PLAN = "ip:";

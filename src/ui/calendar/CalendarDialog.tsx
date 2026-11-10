@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { Refused, type Built, type Intent } from "../../actions/intents";
-import { regionKey, type Calendar, type HolidayYear, type RegionRef, type Tuning } from "../../domain/calendar";
-import { isCalendarDate, toDay, yearOf, type Day, type IsoDate, type Weekday } from "../../domain/dates";
+import { CLOSURE_TOO_LONG, closureTooLong, MAX_CLOSURE_DAYS, regionKey, type Calendar, type HolidayYear, type RegionRef, type Tuning } from "../../domain/calendar";
+import { isCalendarDate, toDay, toIso, yearOf, type Day, type IsoDate, type Weekday } from "../../domain/dates";
 import { planRules } from "../../plan/rules";
 import { key } from "../../plan/units";
 import type { Clock } from "../../services/clock";
@@ -218,6 +218,10 @@ export function CalendarBody(p: CalendarProps) {
       toast("The last day is before the first day.", "bad");
       return;
     }
+    if (closureTooLong(dayFrom, to)) {
+      toast(CLOSURE_TOO_LONG, "bad");
+      return;
+    }
     change((c) => (to === dayFrom ? tune(c, dayFrom, { kind: "add", name }) : addClosure(c, { from: dayFrom, to, name })));
     setDayName("");
     setDayFrom("");
@@ -309,7 +313,7 @@ export function CalendarBody(p: CalendarProps) {
           <div className="closure-add">
             <input type="text" aria-label="Day off name" placeholder="Name, e.g. Team offsite" value={dayName} onChange={(e) => setDayName(e.target.value)} />
             <input type="date" aria-label="First day" value={dayFrom} onChange={(e) => setDayFrom(e.target.value)} />
-            <input type="date" aria-label="Last day" value={dayTo} onChange={(e) => setDayTo(e.target.value)} />
+            <input type="date" aria-label="Last day" value={dayTo} max={isCalendarDate(dayFrom) ? toIso(toDay(dayFrom) + MAX_CLOSURE_DAYS - 1) : undefined} onChange={(e) => setDayTo(e.target.value)} />
             <button type="button" className="button-small" onClick={addDay}>
               Add a day off
             </button>

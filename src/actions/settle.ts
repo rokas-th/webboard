@@ -4,9 +4,10 @@ import type { LogState } from "../log/state";
 import { OWNER_CAUSES, type Action, type UnitKey, type Write } from "../log/types";
 import { choices, type Choice } from "../plan/choices";
 import { applyWrites, projectPlan } from "../plan/project";
-import { decodeAs, parseKey, type UnitKind } from "../plan/units";
+import { parseKey, type UnitKind } from "../plan/units";
 import { items, q } from "./copy";
 import type { Ctx } from "./intents";
+import { baselineName } from "./names";
 
 export const CALENDAR_UNITS: ReadonlySet<UnitKind> = new Set<UnitKind>(["cr", "cw", "cc", "ct", "ch"]);
 
@@ -38,23 +39,6 @@ const nameIn = (plans: readonly PlanState[], id: ItemId): string => {
   const it = plans.map((p) => p.items.get(id)).find((x) => x !== undefined);
   if (it === undefined) throw new Error(`No item ${id}`);
   return it.name;
-};
-
-const baselineName = (log: LogState, plans: readonly PlanState[], u: UnitKey, id: string): string => {
-  const live = plans.map((p) => p.baselines.get(id)).find((x) => x !== undefined);
-  if (live !== undefined) return live.name;
-  const written = [...log.writers(u)]
-    .reverse()
-    .map((a) => {
-      const action = log.get(a);
-      if (action === undefined) throw new Error(`Action ${a} is not ready`);
-      const x = action.w.find((y) => y.u === u);
-      if (x === undefined) throw new Error(`Action ${a} holds no write to ${u}`);
-      return decodeAs("baseline", u, x.v);
-    })
-    .find((v) => v !== null);
-  if (written === undefined) throw new Error(`No baseline ${id}`);
-  return written.name;
 };
 
 const unitSubject = (log: LogState, plans: readonly PlanState[], u: UnitKey): string => {

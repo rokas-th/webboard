@@ -264,11 +264,11 @@ const placeLoops = (r: Reader): Found[] => {
       if (st === undefined) throw new Error(`Unit ${u} in a parent loop has no live value`);
       return [u, st.from];
     });
-    const kept = froms.filter(([, f]) => froms.some(([, g]) => r.concurrent(f, g)));
-    if (kept.length < 2) return [];
-    const parts = unique(kept.map(([, f]) => f));
-    const lists = parts.flatMap((f, i) => parts.slice(i + 1).filter((g) => r.concurrent(f, g)).map((g) => [f, g]));
-    return [{ units: kept.map(([u]) => u), parts, lists, bound: [], deletions: [] }];
+    const parts = unique(froms.map(([, f]) => f));
+    if (parts.length < 2) return [];
+    const pairs = parts.flatMap((f, i) => parts.slice(i + 1).map((g) => [f, g]));
+    const apart = pairs.filter(([f, g]) => r.concurrent(f, g));
+    return [{ units: froms.map(([u]) => u), parts, lists: apart.length > 0 ? apart : pairs, bound: [], deletions: [] }];
   });
 };
 

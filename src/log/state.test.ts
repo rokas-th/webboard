@@ -12,6 +12,7 @@ const num = (w: Write): number => {
 const rules: Rules = {
   same: (_u, a, b) => JSON.stringify(a) === JSON.stringify(b),
   mergeDerived: (_u, a, b) => (num(a) > num(b) ? a : b),
+  mergeable: (_u, a, b) => num(a) % 1 === num(b) % 1,
 };
 
 type W = readonly [UnitKey, unknown, Cause?];
@@ -247,6 +248,17 @@ describe("LogState", () => {
     expect(tie.unit("x")).toEqual({ value: 4, from: "b", clash: null });
   });
 
+  it("clashes derived writes made apart that differ in more than what mergeDerived picks, like owner writes", () => {
+    const pair = logOf(act("a", [], [["x", 4.5, "push"]]), act("b", [], [["x", 7, "push"]], "d2"));
+    expect(pair.unit("x")).toEqual({ value: 7, from: "b", clash: ["a", "b"] });
+    const three = logOf(act("a", [], [["x", 4, "push"]]), act("b", [], [["x", 7, "recalendar"]], "d2"), act("c", [], [["x", 5.5, "push"]], "d3"));
+    expect(three.unit("x")).toEqual({ value: 5.5, from: "c", clash: ["a", "b", "c"] });
+    const agreeing = logOf(act("a", [], [["x", 4.5, "push"]]), act("b", [], [["x", 7.5, "push"]], "d2"));
+    expect(agreeing.unit("x")).toEqual({ value: 7.5, from: "b", clash: null });
+    const owned = logOf(act("a", [], [["x", 4.5, "push"]]), act("b", [], [["x", 7, "push"]], "d2"), act("c", [], [["x", 1]], "d3"));
+    expect(owned.unit("x")).toEqual({ value: 1, from: "c", clash: null });
+  });
+
   it("takes the larger of two derived pushes, 4 then 7", () => {
     const apart = logOf(act("a", [], [["x", 4, "push"]]), act("b", [], [["x", 7, "push"]], "d2"));
     expect(apart.unit("x")).toEqual({ value: 7, from: "b", clash: null });
@@ -426,7 +438,7 @@ interface Case {
 const arbWrite = fc.record({
   activity: fc.boolean(),
   unit: fc.nat(5),
-  value: fc.nat(3),
+  value: fc.constantFrom(0, 1, 2, 3, 0.5, 2.5),
   cause: fc.nat(CAUSES.length - 1),
   target: fc.nat(),
   toActivity: fc.boolean(),
@@ -575,6 +587,7 @@ describe("LogState properties", () => {
   it("incremental adds equal a full replay and the brute-force oracle, refusals and pending included", () => {
     let flips = 0;
     let clashes = 0;
+    let derivedClashes = 0;
     let largest = 0;
     let refusedRuns = 0;
     let releasedRefusals = 0;
@@ -653,6 +666,11 @@ describe("LogState properties", () => {
             !first.w.some((w) => w.u === "a:" + id);
         }).length;
         clashes += [...final.units.values()].filter((s) => s.clash !== null).length > 0 ? 1 : 0;
+        derivedClashes += [...final.units].some(
+          ([u, s]) => s.clash !== null && s.clash.every((id) => byId.get(id)?.w.some((w) => w.u === u && !OWNER_CAUSES.has(w.c)) === true),
+        )
+          ? 1
+          : 0;
         refusedRuns += final.refused.size > 0 ? 1 : 0;
         pendingRuns += final.pending.length > 0 ? 1 : 0;
       }),
@@ -661,6 +679,7 @@ describe("LogState properties", () => {
     expect(largest).toBeGreaterThan(MAX_ACTIONS / 2);
     expect(flips).toBeGreaterThan(NUM_RUNS);
     expect(clashes).toBeGreaterThan(NUM_RUNS / 4);
+    expect(derivedClashes).toBeGreaterThan(NUM_RUNS / 10);
     expect(refusedRuns).toBeGreaterThan(NUM_RUNS / 2);
     expect(releasedRefusals).toBeGreaterThan(NUM_RUNS / 10);
     expect(pendingRuns).toBeGreaterThan(NUM_RUNS / 2);

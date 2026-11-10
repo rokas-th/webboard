@@ -6,7 +6,7 @@ import { act } from "../test/act";
 import { ctxOf } from "../test/planCtx";
 import { buildAction } from "./build";
 import { Refused, type Built, type Ctx, type Intent } from "./intents";
-import { buildRevert, buildUndo, OfferRefused, undoOffer } from "./undo";
+import { buildRevert, buildUndo, OfferRefused, undoChanges, undoOffer } from "./undo";
 
 const TODAY = "2026-11-09";
 
@@ -445,5 +445,146 @@ describe("kept lines for items that no longer project", () => {
     const b = buildRevert(ctx, "L");
     expect(b.action.w).toEqual([w("a:L", false, "revert")]);
     expect(b.preview.kept).toEqual(["The link “Draft” → “R” was changed since on the iPhone — kept"]);
+  });
+
+  it("reverting a baseline removal after a rename made apart and a second removal names the baseline by its last name", () => {
+    const saved = act("a0", [], [...ROOT, w("b:B", BASELINE("Before"))]);
+    const removed = act("x1", ["a0"], [w("b:B", null)], { dev: "d1", lbl: "Removed baseline “Before”" });
+    const renamed = act("y1", ["a0"], [w("b:B", BASELINE("Launch plan"))], { dev: "d2", lbl: "Renamed baseline “Before” to “Launch plan”" });
+    let again = ctxOf(logOf(saved, removed, renamed), "d1", TODAY);
+    expect(again.view.plan.baselines.get("B")?.name).toBe("Launch plan");
+    again = applied(again, buildAction(again, { t: "baseline", op: "remove", id: "B" }));
+    expect(again.view.choices).toEqual([]);
+    expect(undoOffer(again, "x1")).toBeNull();
+    expect(buildRevert(again, "x1").preview.kept).toEqual(["Baseline “Launch plan” was changed since on the Mac — kept"]);
+
+    let kept = ctxOf(logOf(saved, removed, renamed), "d1", TODAY);
+    const choice = kept.view.choices[0];
+    kept = add(kept, act("r", ["x1", "y1"], [w("b:B", null, "resolution")], { dev: "d1", meta: { resolves: choice.id } }));
+    expect(kept.view.plan.baselines.has("B")).toBe(false);
+    expect(undoOffer(kept, "x1")).toBeNull();
+    expect(buildRevert(kept, "x1").preview.kept).toEqual(["Baseline “Launch plan” was changed since on the Mac — kept"]);
+  });
+
+  it("undoing a group's create that the iPhone placed an item inside names the item it moves to the top level", () => {
+    const group = act("c", ["a0"], [w("e:G", { k: "group", t: false }), w("n:G", "Sprint 4"), w("p:G", [null, "a3"])], { dev: "d1", lbl: "Added group “Sprint 4”" });
+    let ctx = on(ctxFrom(group), "d2");
+    ctx = on(applied(ctx, buildAction(ctx, { t: "create", kind: "task", name: "Review", parent: "G", after: null, start: "2026-11-17", dur: 2 })), "d1");
+    const u = buildUndo(ctx, "c");
+    expect(u.preview.kept).toEqual(["“Review” was placed inside it on iPhone — moved to the top level"]);
+    expect(u.toast).toBe("Undid: Added group “Sprint 4”. “Review” was placed inside it on iPhone — moved to the top level.");
+    ctx = applied(ctx, u);
+    const review = [...ctx.view.plan.items.values()].find((i) => i.name === "Review");
+    expect(review?.place.parent).toBeNull();
+    expect(ctx.view.plan.items.has("G")).toBe(false);
+  });
+});
+
+describe("undo and redo labels", () => {
+  it("an undo and redo cycle names the original action and never nests past one prefix", () => {
+    let ctx = ctxFrom(act("b", ["a0"], [w("n:A", "B")], { dev: "d1", lbl: "Renamed “A” to “B”" }));
+    const steps = Array.from({ length: 6 }).reduce<{ target: string; seen: [string, unknown][] }>(
+      (acc) => {
+        const built = buildUndo(ctx, acc.target);
+        ctx = applied(ctx, built);
+        return { target: built.action.id, seen: [...acc.seen, [built.action.lbl, valueOf(ctx, "n:A")]] };
+      },
+      { target: "b", seen: [] },
+    );
+    expect(steps.seen).toEqual([
+      ["Undid: Renamed “A” to “B”", "A"],
+      ["Redid: Renamed “A” to “B”", "B"],
+      ["Undid: Redid: Renamed “A” to “B”", "A"],
+      ["Redid: Renamed “A” to “B”", "B"],
+      ["Undid: Redid: Renamed “A” to “B”", "A"],
+      ["Redid: Renamed “A” to “B”", "B"],
+    ]);
+  });
+
+  it("undoing a revert that brings the action back names the original action", () => {
+    let ctx = ctxFrom(act("b", ["a0"], [w("n:A", "B")], { dev: "d1", lbl: "Renamed “A” to “B”" }));
+    const v = buildRevert(ctx, "b");
+    ctx = applied(ctx, v);
+    const u = buildUndo(ctx, v.action.id);
+    expect(u.action.w).toEqual([{ u: "a:b", v: true, c: "undo" }]);
+    expect(u.action.lbl).toBe("Redid: Renamed “A” to “B”");
+  });
+});
+
+describe("undoChanges", () => {
+  it("is false for a redo whose action another device reverted meanwhile, and true for a plain undo and a redo that brings it back", () => {
+    let mac = ctxFrom(act("b", ["a0"], [w("n:A", "B")], { dev: "d1", lbl: "Renamed “A” to “B”" }));
+    expect(undoChanges(mac.log, "b")).toBe(true);
+    let phone = ctxOf(mac.log.fork(), "d2", TODAY);
+    const undone = buildUndo(mac, "b");
+    mac = applied(mac, undone);
+    expect(undoChanges(mac.log, undone.action.id)).toBe(true);
+    const reverted = buildRevert(phone, "b");
+    phone = applied(phone, reverted);
+    mac = add(mac, reverted.action);
+    expect(mac.view.choices).toEqual([]);
+    expect(valueOf(mac, "n:A")).toBe("A");
+    expect(undoChanges(mac.log, undone.action.id)).toBe(false);
+  });
+});
+
+describe("parent loops closed by an undo", () => {
+  const groups = act("a0", [], [
+    w("pn", "Plan"),
+    w("cw", [1, 2, 3, 4, 5]),
+    w("cr", null),
+    w("e:G1", { k: "group", t: false }),
+    w("n:G1", "Design"),
+    w("p:G1", [null, "a0"]),
+    w("e:G2", { k: "group", t: false }),
+    w("n:G2", "Build"),
+    w("p:G2", [null, "a1"]),
+  ]);
+
+  const place = (ctx: Ctx, item: string, parent: string | null): Built => buildAction(ctx, { t: "place", item, parent, after: null });
+
+  it("undoing a move out of a group the other group was then moved into raises the loop as an items choice", () => {
+    let ctx = ctxOf(logOf(groups), "d1", TODAY);
+    const into = place(ctx, "G1", "G2");
+    ctx = applied(ctx, into);
+    const out = place(ctx, "G1", null);
+    ctx = applied(ctx, out);
+    const back = place(ctx, "G2", "G1");
+    ctx = applied(ctx, back);
+    expect(undoOffer(ctx, out.action.id)).toBeNull();
+    ctx = applied(ctx, buildUndo(ctx, out.action.id));
+    expect(ctx.view.choices).toHaveLength(1);
+    const c = ctx.view.choices[0];
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["p:G1", "p:G2"]);
+    expect(c.sides.map((s) => s.actions)).toEqual([[into.action.id], [back.action.id]]);
+    expect(c.sides.map((s) => [s.values.get("p:G1"), s.values.get("p:G2")])).toEqual([
+      [into.action.w[0].v, [null, "a1"]],
+      [[null, "a0"], back.action.w[0].v],
+    ]);
+  });
+
+  it("an undo on the Mac apart from the iPhone's move closes the same loop and raises it as a choice on both", () => {
+    let mac = ctxOf(logOf(groups), "d1", TODAY);
+    const into = place(mac, "G1", "G2");
+    mac = applied(mac, into);
+    const out = place(mac, "G1", null);
+    mac = applied(mac, out);
+    let phone = ctxOf(mac.log.fork(), "d2", TODAY);
+    const undo = buildUndo(mac, out.action.id);
+    mac = applied(mac, undo);
+    const back = place(phone, "G2", "G1");
+    phone = applied(phone, back);
+    mac = add(mac, back.action);
+    phone = add(phone, undo.action);
+    expect(mac.view.choices).toEqual(phone.view.choices);
+    expect(mac.view.choices).toHaveLength(1);
+    const c = mac.view.choices[0];
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["p:G1", "p:G2"]);
+    expect(c.sides.map((s) => [s.label, s.actions])).toEqual([
+      ["Mac", [into.action.id]],
+      ["iPhone", [back.action.id]],
+    ]);
   });
 });

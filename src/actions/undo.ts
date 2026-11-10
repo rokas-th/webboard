@@ -7,6 +7,7 @@ import { decodeAs, key, parseKey, type UnitKind } from "../plan/units";
 import { previewOf } from "./build";
 import { deviceName, linkText, q, toastOf } from "./copy";
 import { Refused, type Built, type Ctx } from "./intents";
+import { baselineName } from "./names";
 
 export interface Offer {
   choice: string;
@@ -51,14 +52,6 @@ const nameOf = (log: LogState, plans: readonly PlanState[], id: ItemId): string 
   return decodeAs("name", u, x.v);
 };
 
-const baselineName = (plans: readonly PlanState[], w: Write, id: string): string => {
-  const found = plans.map((p) => p.baselines.get(id)).find((b) => b !== undefined);
-  if (found !== undefined) return found.name;
-  const written = decodeAs("baseline", w.u, w.v);
-  if (written === null) throw new Error(`No baseline ${id}`);
-  return written.name;
-};
-
 interface Subject {
   id: string;
   item: ItemId | null;
@@ -74,7 +67,7 @@ const subjectOf = (log: LogState, plans: readonly PlanState[], w: Write): Subjec
     if (k.to === undefined) throw new Error(`Link ${w.u} has no successor`);
     return { id: w.u, item: null, text: `The link ${linkText(nameOf(log, plans, k.arg), nameOf(log, plans, k.to))}` };
   }
-  if (k.kind === "b") return { id: w.u, item: null, text: `Baseline ${q(baselineName(plans, w, k.arg))}` };
+  if (k.kind === "b") return { id: w.u, item: null, text: `Baseline ${q(baselineName(log, plans, w.u, k.arg))}` };
   throw new Error(`No subject for ${w.u}`);
 };
 
@@ -115,6 +108,17 @@ const keptLines = (ctx: Ctx, fork: LogState, after: PlanState, flipped: readonly
         );
       });
   });
+  const removed = new Set([...ctx.view.plan.items.keys()].filter((id) => !after.items.has(id)));
+  [...after.items.values()]
+    .filter((it) => !lines.has("i:" + it.id))
+    .forEach((it) => {
+      const u = key.p(it.id);
+      const st = fork.unit(u);
+      if (st === undefined) return;
+      const parent = decodeAs("place", u, st.value).parent;
+      if (parent === null || !removed.has(parent)) return;
+      lines.set("i:" + it.id, `${q(it.name)} was placed inside it on ${fromDevice(ctx, fork, u)} — moved to the top level`);
+    });
   return [...lines.values()];
 };
 
@@ -129,27 +133,40 @@ const built = (ctx: Ctx, w: readonly Write[], lbl: string, meta: NonNullable<Act
   return { action, newNotes: [], toast: toastOf(lbl, kept.map((k) => k + ".")), preview: previewOf(ctx, after, { push: null, recal: null }, kept) };
 };
 
-const labelOf = (ctx: Ctx, target: Action): string => {
-  if (isHistoryAction(target)) {
-    const undone = target.meta?.undo;
-    if (undone === undefined) return "Undid: " + target.lbl;
-    const original = ctx.log.get(undone);
-    if (original === undefined) throw new Error(`Action ${undone} is not in this plan`);
-    return "Redid: " + original.lbl;
-  }
-  return "Undid: " + target.lbl;
+const baseOf = (log: LogState, a: Action): Action => {
+  const next = a.meta?.undo ?? a.meta?.redo ?? a.meta?.revert;
+  if (next === undefined) return a;
+  const b = log.get(next);
+  if (b === undefined) throw new Error(`Action ${next} is not in this plan`);
+  return baseOf(log, b);
 };
+
+const historyLabel = (log: LogState, target: Action, w: readonly Write[]): string => {
+  const base = baseOf(log, target);
+  return w.some((x) => x.u === key.a(base.id) && x.v === true) ? "Redid: " + base.lbl : "Undid: " + target.lbl;
+};
+
+const historyWrites = (log: LogState, a: Action): Write[] => {
+  const stray = a.w.find((x) => parseKey(x.u).kind !== "a");
+  if (a.w.length === 0 || stray !== undefined) {
+    throw new Error(`History action ${a.id} writes ${stray?.u ?? "nothing"}; expected only a: units`);
+  }
+  return a.w.map((x): Write => ({ u: x.u, v: log.valueWithout(x.u, new Set([a.id]))?.value ?? true, c: "undo" }));
+};
+
+export function undoChanges(log: LogState, target: ActionId): boolean {
+  const a = log.get(target);
+  if (a === undefined) throw new Error(`Action ${target} is not in this plan`);
+  if (!log.active(target)) throw new Error(`Action ${target} is already undone`);
+  return !isHistoryAction(a) || historyWrites(log, a).some((x) => (log.unit(x.u)?.value ?? true) !== x.v);
+}
 
 export function buildUndo(ctx: Ctx, target: ActionId): Built {
   const a = targetOf(ctx, target, "undone");
   if (!ctx.log.active(target)) throw new Error(`Action ${target} is already undone`);
-  if (!isHistoryAction(a)) return built(ctx, [{ u: key.a(target), v: false, c: "undo" }], labelOf(ctx, a), { undo: target });
-  const stray = a.w.find((x) => parseKey(x.u).kind !== "a");
-  if (a.w.length === 0 || stray !== undefined) {
-    throw new Error(`History action ${target} writes ${stray?.u ?? "nothing"}; expected only a: units`);
-  }
-  const w = a.w.map((x): Write => ({ u: x.u, v: ctx.log.valueWithout(x.u, new Set([target]))?.value ?? true, c: "undo" }));
-  return built(ctx, w, labelOf(ctx, a), { redo: target });
+  if (!isHistoryAction(a)) return built(ctx, [{ u: key.a(target), v: false, c: "undo" }], "Undid: " + a.lbl, { undo: target });
+  const w = historyWrites(ctx.log, a);
+  return built(ctx, w, historyLabel(ctx.log, a, w), { redo: target });
 }
 
 export function buildRevert(ctx: Ctx, target: ActionId): Built {

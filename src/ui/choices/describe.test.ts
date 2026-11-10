@@ -180,6 +180,23 @@ describe("reachability helpers", () => {
     expect(heldChoice(view)).toBe(view.choices[0]);
   });
 
+  it("finds the choice that holds the item, not an earlier rename choice that only lists it", async () => {
+    const t = await made(AB, {
+      clashes: [
+        { unit: "n:A", mac: "North", iphone: "South" },
+        { unit: "s:A", mac: ["2026-11-10", 3, "todo", 0, "now"], iphone: ["2026-11-12", 3, "todo", 0, "now"] },
+      ],
+    });
+    const view = t.session.view();
+    const rename = view.choices.find((c) => c.units.includes("n:A"));
+    const schedule = view.choices.find((c) => c.units.includes("s:A"));
+    if (rename === undefined || schedule === undefined) throw new Error("fixture: expected a rename and a schedule choice");
+    expect(rename).not.toBe(schedule);
+    expect([...view.held]).toEqual(["A"]);
+    expect(heldChoice({ ...view, choices: [rename, schedule] })).toBe(schedule);
+    expect(heldChoice({ ...view, choices: [schedule, rename] })).toBe(schedule);
+  });
+
   it("names the sides in the banner, this device first, then by label", async () => {
     const t = await made(AB, { clashes: [{ unit: "n:A", mac: "North", iphone: "South" }] });
     const found = t.session.view().choices[0];

@@ -27,12 +27,22 @@ const startOf = (u: UnitKey, w: Write): number => {
   return toDay(start);
 };
 
+const derivedUnit = (u: UnitKey): void => {
+  if (parseKey(u).kind !== "s") throw new Error(`Derived write to ${u}`);
+};
+
 export const planRules: Rules = {
   same(u, a, b) {
     return parseKey(u).kind === "ch" ? sameYear(u, a, b) : deepEqual(a, b);
   },
   mergeDerived(u, earlier, later) {
-    if (parseKey(u).kind !== "s") throw new Error(`Derived write to ${u}`);
+    derivedUnit(u);
     return startOf(u, earlier) > startOf(u, later) ? earlier : later;
+  },
+  mergeable(u, a, b) {
+    derivedUnit(u);
+    const x = decodeAs("sched", u, a.v);
+    const y = decodeAs("sched", u, b.v);
+    return x.dur === y.dur && x.status === y.status && x.progress === y.progress && x.horizon === y.horizon;
   },
 };

@@ -1,5 +1,5 @@
 import { generateKeyBetween } from "fractional-indexing";
-import { regionKey, workCalendar, type Calendar, type Closure, type Tuning, type WorkCalendar } from "../domain/calendar";
+import { closureTooLong, regionKey, workCalendar, type Calendar, type Closure, type Tuning, type WorkCalendar } from "../domain/calendar";
 import { toDay, toIso, type Day, type IsoDate } from "../domain/dates";
 import { derive, lockOf, schedView, type Derived } from "../domain/derive";
 import { linkKey, type Item, type ItemId, type Link, type PlanState, type Schedule } from "../domain/model";
@@ -163,6 +163,7 @@ const checkedCalendar = (cal: Calendar): Calendar => {
     [...cal.closures].map(([id, c]): [string, Closure] => {
       if (c.name.trim() === "" || c.from === "") throw new Refused(refusal.closure);
       if (toDay(c.to) < toDay(c.from)) throw new Refused(refusal.closureOrder);
+      if (closureTooLong(c.from, c.to)) throw new Refused(refusal.closureLength);
       return [id, { ...c, name: normalizeName(c.name) }];
     }),
   );

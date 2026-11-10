@@ -407,6 +407,34 @@ describe("choices", () => {
     expect(cs).toEqual([]);
   });
 
+  it("two pushes made apart that disagree on more than the start are a choice, so the iPhone's progress edit is not dropped", () => {
+    const edited = ["2026-11-16", 3, "todo", 50, "later"];
+    const iphonePush = ["2026-11-23", 3, "todo", 50, "later"];
+    const macPush = ["2026-11-30", 3, "todo", 0, "later"];
+    const { log, cs, held } = run(
+      act("E", ["a0"], [w("s:A", edited)], iph),
+      act("Bp", ["E"], [w("s:A", iphonePush, "push")], iph),
+      act("Ap", ["a0"], [w("s:A", macPush, "push")], mac),
+    );
+    expect(log.unit("s:A")).toEqual({ value: iphonePush, from: "Bp", clash: ["Ap", "Bp"] });
+    const c = only(cs);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["s:A"]);
+    expect(labels(c)).toEqual(["Mac", "iPhone"]);
+    expect(c.sides.map((s) => s.actions)).toEqual([["Ap"], ["Bp"]]);
+    expect(c.sides.map((s) => s.values.get("s:A"))).toEqual([macPush, iphonePush]);
+    expect([...held]).toEqual(["A"]);
+  });
+
+  it("two pushes made apart that differ only in the start merge to the later start without a choice", () => {
+    const { log, cs } = run(
+      act("Bp", ["a0"], [w("s:A", sched("2026-11-23"), "push")], iph),
+      act("Ap", ["a0"], [w("s:A", sched("2026-11-30"), "push")], mac),
+    );
+    expect(log.unit("s:A")).toEqual({ value: sched("2026-11-30"), from: "Ap", clash: null });
+    expect(cs).toEqual([]);
+  });
+
   it("iPhone moves Q into S while the Mac trashes S", () => {
     const { cs, plan } = run(
       act("q", ["a0"], item("Q", "task", "Quote", null, "a5", sched("2026-11-16")), mac),

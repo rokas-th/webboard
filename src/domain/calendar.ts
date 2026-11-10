@@ -30,6 +30,12 @@ export interface Closure {
   name: string;
 }
 
+export const MAX_CLOSURE_DAYS = 366;
+
+export const CLOSURE_TOO_LONG = `A closure can last at most ${MAX_CLOSURE_DAYS} days.`;
+
+export const closureTooLong = (from: IsoDate, to: IsoDate): boolean => toDay(to) - toDay(from) + 1 > MAX_CLOSURE_DAYS;
+
 export type Tuning = { kind: "off" } | { kind: "work" } | { kind: "add"; name: string };
 
 export interface Calendar {

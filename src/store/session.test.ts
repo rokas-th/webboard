@@ -1095,6 +1095,29 @@ describe("PlanSession", () => {
     expect(s.canRedo()).toBe(true);
   });
 
+  it("a redo whose action another device reverted meanwhile is not offered and is refused, building nothing", async () => {
+    const e = env();
+    const s = await open(e);
+    const a = itemId(s, "A");
+    const n = s.apply({ t: "rename", item: a, name: "North" }).action.id;
+    const r = remoteOf(s);
+    expect(s.undo()).not.toBeNull();
+    expect(s.canRedo()).toBe(true);
+    new PlanDoc(r).append(buildRevert(ctxOf(logOf(r), "dev-B", TODAY, DEVICES), n).action, []);
+    deliver(r, e);
+    expect(s.view().choices).toEqual([]);
+    expect(nameOf(s, a)).toBe("A");
+    await settle(e);
+    const before = appends();
+    expect(s.canRedo()).toBe(false);
+    const err = thrown(() => s.redo());
+    expect(err).toBeInstanceOf(Refused);
+    expect(err instanceof Error && err.message).toBe("Nothing to change.");
+    await settle(e);
+    expect(appends()).toBe(before);
+    expect(nameOf(s, a)).toBe("A");
+  });
+
   it("usePlanView subscribes once per session", async () => {
     const s = await open(env());
     const sub = vi.spyOn(s, "subscribe");

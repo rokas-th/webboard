@@ -215,7 +215,15 @@ function remoteRaw(local: Y.Doc, id: ActionId, raw: unknown): void {
 }
 
 const headsOf = (ydoc: Y.Doc, unreadableIds: readonly ActionId[] = []): ActionId[] => {
-  const log = new LogState({ same: (_u, a, b) => JSON.stringify(a) === JSON.stringify(b), mergeDerived: (u) => { throw new Error(u); } });
+  const log = new LogState({
+    same: (_u, a, b) => JSON.stringify(a) === JSON.stringify(b),
+    mergeDerived: (u) => {
+      throw new Error(u);
+    },
+    mergeable: (u) => {
+      throw new Error(u);
+    },
+  });
   const { ok, unreadable } = readActions(ydoc.getMap("actions").entries(), () => undefined);
   expect(unreadable.map((u) => u.id)).toEqual(unreadableIds);
   log.add(ok);

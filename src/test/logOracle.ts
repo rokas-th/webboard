@@ -98,6 +98,11 @@ export function oracle(delivered: Iterable<Action>, rules: Rules): OracleResult 
       const allSame = owners.every(([, a]) => owners.every(([, b]) => rules.same(u, a.v, b.v)));
       return { value: lastW.v, from: lastId, clash: owners.length >= 2 && !allSame ? owners.map(([id]) => id) : null };
     }
+    const allMergeable = pairs.every(([, a]) => pairs.every(([, b]) => rules.mergeable(u, a, b)));
+    if (!allMergeable) {
+      const [lastId, lastW] = pairs[pairs.length - 1];
+      return { value: lastW.v, from: lastId, clash: pairs.map(([id]) => id) };
+    }
     let [fromId, acc] = pairs[0];
     pairs.slice(1).forEach(([id, w]) => {
       const m = rules.mergeDerived(u, acc, w);

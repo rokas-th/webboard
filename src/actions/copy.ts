@@ -1,3 +1,4 @@
+import { CLOSURE_TOO_LONG } from "../domain/calendar";
 import type { Horizon, ItemKind, LinkType, Status } from "../domain/model";
 import type { Lock } from "../domain/schedule";
 import type { DeviceId } from "../log/types";
@@ -99,6 +100,7 @@ export const refusal = {
   noWorkdays: "A calendar needs at least one working day.",
   closure: "A closure needs a name and a first day.",
   closureOrder: "The last day is before the first day.",
+  closureLength: CLOSURE_TOO_LONG,
   taskDur: "A task lasts at least 1 working day.",
   milestoneDur: "Milestones have no duration.",
   progress: "Progress is a whole number from 0 to 100.",

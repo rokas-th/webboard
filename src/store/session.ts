@@ -1,10 +1,10 @@
 import { useCallback, useSyncExternalStore } from "react";
 import * as Y from "yjs";
 import { buildAction } from "../actions/build";
-import { deviceName } from "../actions/copy";
+import { deviceName, refusal } from "../actions/copy";
 import { Refused, type Built, type Ctx, type Intent, type Preview } from "../actions/intents";
 import { buildResolve, previewResolve, type Pick, type ResolveOptions, type ResolvePreview } from "../actions/resolve";
-import { buildRevert, buildUndo, OfferRefused, undoOffer, type Offer } from "../actions/undo";
+import { buildRevert, buildUndo, OfferRefused, undoChanges, undoOffer, type Offer } from "../actions/undo";
 import { yearOf, toDay, type IsoDate } from "../domain/dates";
 import { derive } from "../domain/derive";
 import type { ItemId, PlanId } from "../domain/model";
@@ -325,6 +325,7 @@ export class PlanSession implements HolidayHost {
     const target = this.prune(this.redoStack);
     if (target === null) return null;
     this.offerFor(target);
+    if (!undoChanges(this.log, target)) throw new Refused(refusal.nothing);
     const built = buildUndo(this.ctx(), target);
     return this.commit(built, () => {
       this.redoStack.pop();
@@ -337,7 +338,8 @@ export class PlanSession implements HolidayHost {
   }
 
   canRedo(): boolean {
-    return this.liveTop(this.redoStack) !== null;
+    const target = this.liveTop(this.redoStack);
+    return target !== null && (undoOffer(this.ctx(), target) !== null || undoChanges(this.log, target));
   }
 
   revert(id: ActionId): Built {

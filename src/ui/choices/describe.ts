@@ -3,7 +3,7 @@ import { regionKey } from "../../domain/calendar";
 import { fmtShort } from "../../domain/dates";
 import type { ItemId, PlanState } from "../../domain/model";
 import type { ActionId, UnitKey } from "../../log/types";
-import { choiceOf, type Choice } from "../../plan/choices";
+import { choiceOf, heldItems, type Choice } from "../../plan/choices";
 import { decodeAs, key, parseKey } from "../../plan/units";
 import type { PlanView } from "../../store/doc";
 import { planGroupPath } from "../list/groups";
@@ -142,7 +142,8 @@ export function itemChoices(view: PlanView, item: ItemId): Choice[] {
 }
 
 export function heldChoice(view: PlanView): Choice | null {
-  return view.choices.find((c) => c.items.some((i) => view.held.has(i))) ?? null;
+  const [item] = view.held;
+  return item === undefined ? null : (view.choices.find((c) => heldItems([c], view.plan).has(item)) ?? null);
 }
 
 export function bannerText(choice: Choice, local: string): string {
