@@ -8,7 +8,7 @@ import { shellFor } from "../../test/shell";
 import { clearToasts } from "../common/Toast";
 import { READ_ONLY } from "../run";
 import { useUi, type UiState } from "../state";
-import { geometry, LEAD, ROW } from "../timeline/geometry";
+import { geometry, leadFor, ROW } from "../timeline/geometry";
 import { timelineRows } from "../timeline/rows";
 import type { Command } from "./commands";
 import { shownCommands } from "./Palette";
@@ -314,7 +314,7 @@ describe("the palette list", () => {
     const scroll = document.querySelector(".tl-scroll");
     if (!(scroll instanceof HTMLElement)) throw new Error("no timeline");
     const view = t.session.view();
-    const todayAt = Math.max(0, geometry(view, "W").x(toDay(view.today)) - LEAD);
+    const todayAt = Math.max(0, geometry(view, "W").x(toDay(view.today)) - leadFor(0));
     expect(todayAt).toBeGreaterThan(0);
     setUi({ view: "list" });
     runFromPalette("Jump to today");

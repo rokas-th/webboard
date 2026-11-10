@@ -8,6 +8,8 @@ export const PPD: Readonly<Record<Zoom, number>> = { W: 40, M: 16, Q: 6 };
 export const ROW = 34;
 export const LEAD = 160;
 
+export const leadFor = (visible: number): number => Math.max(0, Math.min(LEAD, Math.floor(visible / 3)));
+
 export interface Geometry {
   origin: Day;
   days: number;

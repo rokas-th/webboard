@@ -349,7 +349,7 @@ describe("Registry: creating plans", () => {
     const err = await rejection(r.createPlan("Beta"));
     expect(err).toBeInstanceOf(AppError);
     expect(codeOf(err)).toBe("store.io");
-    expect((err as AppError).message).toBe("Disk full.");
+    expect(appErrorOf(err).message).toBe("Disk full.");
     await flush();
     expect(appendsTo(from, "local")).toHaveLength(0);
     expect(r.plans()).toEqual(before);
@@ -850,7 +850,7 @@ describe("Registry: listing and loading", () => {
     const err = await rejection(r.session("P"));
     expect(err).toBeInstanceOf(AppError);
     expect(codeOf(err)).toBe("plan.incomplete");
-    expect((err as AppError).message).toBe(INCOMPLETE);
+    expect(appErrorOf(err).message).toBe(INCOMPLETE);
     expect(r.failures().has("P")).toBe(false);
     const first = await r.doc("P");
     expect(await r.doc("P")).toBe(first);
@@ -993,7 +993,7 @@ describe("Registry: listing and loading", () => {
     e.mem.fail("store_load", "local", { code: "store.corrupt", message: "local: a record is damaged" });
     const b = await rejection(Registry.open());
     expect(codeOf(b)).toBe("store.corrupt");
-    expect((b as AppError).message).toBe("local: a record is damaged");
+    expect(appErrorOf(b).message).toBe("local: a record is damaged");
   });
 
   it("retryPlan", async () => {
@@ -1129,7 +1129,7 @@ describe("Registry: reloadFromServer", () => {
     const from = tauri.calls.length;
     const err = await rejection(r.reloadFromServer("P"));
     expect(err).toBeInstanceOf(AppError);
-    expect({ code: codeOf(err), message: (err as AppError).message }).toEqual(locked);
+    expect({ code: codeOf(err), message: appErrorOf(err).message }).toEqual(locked);
     expect(r.failures().get("P")?.code).toBe("store.locked");
     expect([...r.failures().keys()]).toEqual(["P"]);
     expect(cb).toHaveBeenCalled();
@@ -1144,7 +1144,7 @@ describe("Registry: reloadFromServer", () => {
     f.mem.fail("store_set_aside", "ix-S1", ixLocked);
     const from2 = tauri.calls.length;
     const err2 = await rejection(ri.reloadFromServer("ix-S1"));
-    expect({ code: codeOf(err2), message: (err2 as AppError).message }).toEqual(ixLocked);
+    expect({ code: codeOf(err2), message: appErrorOf(err2).message }).toEqual(ixLocked);
     const ie = ri.indexError();
     expect(ie === null ? null : { code: ie.code, message: ie.message }).toEqual(ixLocked);
     expect(ri.indexErrorDoc()).toBe("ix-S1");
@@ -1879,7 +1879,7 @@ describe("Registry: spaces", () => {
     const r = await open();
     const err = await rejection(r.attachSpace(SP));
     expect(err).toBeInstanceOf(AppError);
-    expect((err as AppError).message).toBe("Bad record in seg-0.log.");
+    expect(appErrorOf(err).message).toBe("Bad record in seg-0.log.");
     expect(r.indexError()?.code).toBe("store.corrupt");
     expect(r.attachedSpace()).toBeNull();
     expect(r.plans().filter((p) => p.space !== null)).toEqual([]);

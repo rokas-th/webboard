@@ -14,7 +14,7 @@ import { shellFor } from "../../test/shell";
 import { impactText } from "../calendar/impact";
 import { clearToasts } from "../common/Toast";
 import { useUi, type UiState } from "../state";
-import { geometry, ROW } from "../timeline/geometry";
+import { geometry, leadFor, ROW } from "../timeline/geometry";
 import { timelineRows } from "../timeline/rows";
 import { bannerText, heldChoice, itemChoices, unitSubject } from "./describe";
 import { conflictSuccessor } from "./HeadCounts";
@@ -199,8 +199,8 @@ describe("head counts", () => {
     const geo = geometry(view, uiNow()[0].zoom);
     const span = geo.span(first.succ);
     if (span === null) throw new Error("fixture: successor has no dates");
-    expect(scroll.scrollLeft).toBe(Math.max(0, geo.x(span.start) - 160));
-    expect(scroll.scrollLeft).not.toBe(Math.max(0, geo.x(toDay(view.today)) - 160));
+    expect(scroll.scrollLeft).toBe(Math.max(0, geo.x(span.start) - leadFor(0)));
+    expect(scroll.scrollLeft).not.toBe(Math.max(0, geo.x(toDay(view.today)) - leadFor(0)));
     expect(uiNow()[0].reveal).toBeNull();
   });
 

@@ -8,7 +8,7 @@ import { EMPTY_PLAN } from "../copy";
 import { useRun } from "../run";
 import { useUiValue } from "../state";
 import { Chart, itemOf, type DropGhost, type Point, type TempLink, type TouchHost } from "./Chart";
-import { geometry, LEAD, ROW, type Geometry } from "./geometry";
+import { geometry, leadFor, ROW, type Geometry } from "./geometry";
 import { gestureIntent, isClick, startIntent } from "./gesture";
 import { Grid, type Marks, type Placed } from "./Grid";
 import { timelineRows, visibleRange } from "./rows";
@@ -40,6 +40,12 @@ const marksOf = (view: PlanView): Marks => {
     early.set(c.succ, { pred: c.pred, type: link.type, doneOrDoing: c.succLock === "done" || c.succLock === "doing" });
   });
   return { early, badLinks, dayoff };
+};
+
+const leadIn = (scroller: HTMLElement): number => {
+  const grid = scroller.querySelector(".tl-grid");
+  if (!(grid instanceof HTMLElement)) throw new Error("Timeline: no task column to lead past");
+  return leadFor(scroller.clientWidth - grid.offsetWidth);
 };
 
 const isEmptyPlan = (view: PlanView, rows: number): boolean => rows === 0 && [...view.plan.items.values()].every((i) => i.trashed);
@@ -101,7 +107,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     if (el === null) throw new Error("Timeline: no scroller");
     if (empty || scrolledFor.current === scrollKey) return;
     scrolledFor.current = scrollKey;
-    el.scrollLeft = Math.max(0, geo.x(today) - LEAD);
+    el.scrollLeft = Math.max(0, geo.x(today) - leadIn(el));
   }, [scrollKey, empty, geo, today]);
 
   const reveal = ui.reveal;
@@ -110,7 +116,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     const el = scroller.current;
     if (el === null) throw new Error("Timeline: no scroller");
     if (reveal === "today") {
-      el.scrollLeft = Math.max(0, geo.x(today) - LEAD);
+      if (!empty) el.scrollLeft = Math.max(0, geo.x(today) - leadIn(el));
       setUi({ reveal: null });
       return;
     }
@@ -118,9 +124,9 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     if (index < 0) throw new Error(`Timeline: no row for ${reveal} to reveal`);
     el.scrollTop = index * ROW;
     const span = geo.span(reveal);
-    if (span !== null) el.scrollLeft = Math.max(0, geo.x(span.start) - LEAD);
+    if (span !== null) el.scrollLeft = Math.max(0, geo.x(span.start) - leadIn(el));
     setUi({ reveal: null });
-  }, [reveal, rows, geo, today, setUi]);
+  }, [reveal, rows, geo, today, empty, setUi]);
 
   const cancel = (): void => {
     drag.current = null;

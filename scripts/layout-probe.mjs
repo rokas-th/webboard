@@ -31,6 +31,8 @@ const PORTRAIT = [touch(820, 1180, "compact")];
 const LANDSCAPE = [touch(1180, 820, "full"), touch(1366, 1024, "full")];
 const NARROW = [{ size: [500, 820], screen: [820, 1180], touch: true, form: "compact" }];
 const VIEWPORTS = [...DESKTOP, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
+const TOOLBAR = [...DESKTOP, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
+const LOAD_MS = 2000;
 
 const nameOf = (v) => `${v.size[0]}x${v.size[1]}`;
 const READY_MS = 5000;
@@ -59,6 +61,7 @@ const none = (selector, text) => ({ none: [selector, text] });
 const key = (k, code, modifiers) => ({ key: { key: k, code, modifiers } });
 const reveal = (selector, text) => ({ reveal: [selector, text] });
 const nubs = (reach) => ({ nubs: reach });
+const todayShown = () => ({ today: true });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -198,9 +201,9 @@ function states() {
   const UPDATE_DOWNLOADING = `Downloading ${UPDATE_VERSION}… 50%`;
   const exampleHead = expect(".plan-head h1", EXAMPLE_PLAN);
   add("example/timeline", "example", {
-    sizes: "standard",
+    sizes: "toolbar",
     place: { view: "timeline", zoom: "W" },
-    actions: [viewExpect("timeline"), exampleHead, expect(".tl-row .name", "Visual design"), count(".plan-head .chip-magenta", 0), count(".plan-head .chip-amber", 0)],
+    actions: [viewExpect("timeline"), todayShown(), exampleHead, expect(".tl-row .name", "Visual design"), count(".plan-head .chip-magenta", 0), count(".plan-head .chip-amber", 0)],
   });
   add("example/board", "example", {
     sizes: "standard",
@@ -219,6 +222,7 @@ function states() {
       click('.phone-views [role="tab"]', "Timeline"),
       expect('.phone-views [role="tab"][aria-selected="true"]', "Timeline"),
       expect(".tl-canvas"),
+      todayShown(),
       expect(".tl-row .name", "Visual design"),
     ],
   });
@@ -414,6 +418,7 @@ const SIZES = {
   "ipad-pro": ["1366x1024"],
   narrow: namesOf(NARROW),
   "touch-wide": namesOf([...PORTRAIT, ...LANDSCAPE, ...NARROW]),
+  toolbar: namesOf(TOOLBAR),
 };
 
 const sizesOf = (s) => {
@@ -1134,7 +1139,7 @@ const MEASURE = String.raw`
 `;
 
 const ACT = String.raw`
-window.__probeAct = function (a) {
+window.__probeAct = function (a, state) {
   function matching(selector, text) {
     var nodes = Array.prototype.slice.call(document.querySelectorAll(selector));
     if (text === undefined) return { nodes: nodes, hit: nodes[0] };
@@ -1186,10 +1191,31 @@ window.__probeAct = function (a) {
     return { ok: true };
   }
   if (a.loaded !== undefined) {
-    var img = document.querySelector(a.loaded);
-    if (img === null) return { fail: "no " + a.loaded };
-    if (!img.complete || img.naturalWidth === 0) {
-      return { fail: a.loaded + " " + JSON.stringify(img.getAttribute("src")) + " did not load: complete " + img.complete + ", naturalWidth " + img.naturalWidth };
+    var begun = performance.now();
+    return new Promise(function (resolve) {
+      (function poll() {
+        var img = document.querySelector(a.loaded);
+        var done = img !== null && img.complete && img.naturalWidth > 0;
+        if (done) return resolve({ ok: true });
+        if (performance.now() - begun < ${LOAD_MS}) return setTimeout(poll, 25);
+        resolve({
+          fail: state + ": " + a.loaded + (img === null ? " never appeared" :
+            " " + JSON.stringify(img.getAttribute("src")) + " did not load in " + ${LOAD_MS} + " ms: last seen complete " + img.complete + ", naturalWidth " + img.naturalWidth),
+        });
+      })();
+    });
+  }
+  if (a.today !== undefined) {
+    var line = document.querySelector(".tl-today");
+    var pane = document.querySelector(".tl-scroll");
+    var column = document.querySelector(".tl-grid");
+    if (line === null || pane === null || column === null) return { fail: "no .tl-today, .tl-scroll and .tl-grid to place today against" };
+    var lr = line.getBoundingClientRect();
+    var from = column.getBoundingClientRect().right;
+    var to = pane.getBoundingClientRect().left + pane.clientWidth;
+    if (lr.left < from || lr.right > to) {
+      return { fail: "today line at " + Math.round(lr.left) + ".." + Math.round(lr.right) + " is outside the visible chart " + Math.round(from) + ".." + Math.round(to) +
+        " (scrollLeft " + Math.round(pane.scrollLeft) + ", pane " + pane.clientWidth + " px)" };
     }
     return { ok: true };
   }
@@ -1472,7 +1498,7 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
     if (action.key !== undefined) {
       await press(cdp, sessionId, action.key);
     } else {
-      const got = await evaluate(cdp, sessionId, `window.__probeAct(${JSON.stringify(action)})`);
+      const got = await evaluate(cdp, sessionId, `window.__probeAct(${JSON.stringify(action)}, ${JSON.stringify(state.name)})`, true);
       if (got.fail !== undefined) return unreached(`${describeAction(action)}: ${got.fail}`);
       if (got.at !== undefined) await pointer(cdp, sessionId, got.at);
     }
@@ -1509,7 +1535,8 @@ function judge(state, viewport, r, errors, notFound) {
     problems.push(`${o.a} paints ${o.overY}x${o.overX}px over ${o.b}, both children of ${o.parent} — by ${by}`);
   });
   r.covered.forEach((c) => problems.push(`${c.path} is not the topmost thing at its own centre (${c.at}): ${c.on} is, over ${c.stack.join(" / ")}`));
-  if (DESKTOP.includes(viewport)) {
+  if (TOOLBAR.includes(viewport)) {
+    if (!r.toolbar.found) problems.push("this viewport renders no .toolbar, so nothing was checked for overlap");
     if (r.toolbar.found && r.toolbar.controls.length < 2) problems.push(`the toolbar shows ${r.toolbar.controls.length} control, so nothing was checked for overlap`);
     r.toolbar.overlaps.forEach((o) => problems.push(`toolbar controls overlap by ${o.x}x${o.y}px: ${o.a} and ${o.b}`));
     r.toolbar.controls.filter((c) => c.lines > 1).forEach((c) => problems.push(`toolbar control ${c.name} wraps onto ${c.lines} lines`));

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { toDay, toIso } from "../../domain/dates";
 import type { PlanSession } from "../../store/session";
 import { testSession } from "../../test/session";
-import { PPD, ROW, geometry } from "./geometry";
+import { LEAD, PPD, ROW, geometry, leadFor } from "./geometry";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
@@ -54,5 +54,23 @@ describe("geometry", () => {
     expect(g.span("g")).toEqual({ start: toDay("2026-11-11"), end: toDay("2026-11-12") });
     expect(g.span("u")).toBeNull();
     expect(g.cal.isWork(toDay("2026-11-14"))).toBe(false);
+  });
+});
+
+describe("leadFor", () => {
+  it("keeps the full lead when the visible chart is wide", () => {
+    expect(LEAD).toBe(160);
+    expect(leadFor(1140)).toBe(160);
+    expect(leadFor(480)).toBe(160);
+  });
+
+  it("takes a third of a narrow visible chart, rounded down", () => {
+    expect(leadFor(138)).toBe(46);
+    expect(leadFor(479)).toBe(159);
+  });
+
+  it("is 0 for a chart with no visible width", () => {
+    expect(leadFor(0)).toBe(0);
+    expect(leadFor(-40)).toBe(0);
   });
 });

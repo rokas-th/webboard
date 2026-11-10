@@ -11,7 +11,7 @@ import { clearToasts } from "../common/Toast";
 import { EMPTY_PLAN } from "../copy";
 import { OpenChoice } from "../run";
 import { UiContext, useUi, type UiState } from "../state";
-import { geometry } from "./geometry";
+import { geometry, leadFor } from "./geometry";
 import { Timeline } from "./Timeline";
 import { withSync } from "../../test/withSync";
 
@@ -24,6 +24,8 @@ vi.mock("../state", async (importOriginal) => {
 const ZH: RegionRef = { src: "openholidays", country: "CH", subdivision: "CH-ZH" };
 const sessions: PlanSession[] = [];
 const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+const offsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+const widths = { scroll: 1440, grid: 300 };
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -31,6 +33,20 @@ beforeEach(() => {
     configurable: true,
     get(this: HTMLElement) {
       return this.classList.contains("tl-scroll") ? 700 : 0;
+    },
+  });
+  widths.scroll = 1440;
+  widths.grid = 300;
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains("tl-scroll") ? widths.scroll : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains("tl-grid") ? widths.grid : 0;
     },
   });
 });
@@ -43,6 +59,9 @@ afterEach(async () => {
   vi.mocked(useUi).mockClear();
   if (clientHeight === undefined) Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
   else Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeight);
+  Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+  if (offsetWidth === undefined) Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
+  else Object.defineProperty(HTMLElement.prototype, "offsetWidth", offsetWidth);
   await Promise.all(sessions.splice(0).map((s) => s.close()));
   window.localStorage.clear();
 });
@@ -164,6 +183,14 @@ describe("empty plan", () => {
     expect(one('[data-slot="timeline"]').textContent).toBe(EMPTY_PLAN);
     expect(EMPTY_PLAN).toBe("No items yet. Add one with + Task.");
     expect(all(".tl-row")).toHaveLength(0);
+  });
+
+  it("takes a jump to today without moving or failing", async () => {
+    await shown([]);
+    act(() => uiNow()[1]({ reveal: "today" }));
+    expect(one(".tl-scroll").scrollLeft).toBe(0);
+    expect(uiNow()[0].reveal).toBeNull();
+    expect(one(".tl-scroll").textContent).toBe(EMPTY_PLAN);
   });
 
   it("says so when every item is trashed and none is a ghost", async () => {
@@ -394,6 +421,22 @@ describe("today and baselines", () => {
       fireEvent.click(within(one(".seg-zoom")).getByRole("button", { name: "M" }));
     });
     expect(scroll.scrollLeft).toBe(Math.max(0, geometry(t.session.view(), "M").x(toDay("2026-12-07")) - 160));
+  });
+
+  it("opens a narrow chart with today a third of the way into the visible chart", async () => {
+    widths.scroll = 390;
+    widths.grid = 252;
+    const t = await shown([{ name: "A", start: "2026-12-10", dur: 3 }], { today: "2026-12-07" });
+    const at = geometry(t.session.view(), "W").x(toDay("2026-12-07"));
+    expect(leadFor(390 - 252)).toBe(46);
+    expect(one(".tl-scroll").scrollLeft).toBe(at - 46);
+  });
+
+  it("opens a chart with no visible width on today itself", async () => {
+    widths.scroll = 0;
+    widths.grid = 0;
+    const t = await shown([{ name: "A", start: "2026-12-10", dur: 3 }], { today: "2026-12-07" });
+    expect(one(".tl-scroll").scrollLeft).toBe(geometry(t.session.view(), "W").x(toDay("2026-12-07")));
   });
 
   it("scrolls to today when the plan changes", async () => {
