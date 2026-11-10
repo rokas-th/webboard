@@ -161,6 +161,8 @@ pub fn run() {
             commands::device::device_info,
             commands::file::file_write,
             commands::file::file_read,
+            commands::file::plan_export,
+            commands::file::plan_import,
             #[cfg(target_os = "ios")]
             commands::file::file_stage,
             #[cfg(target_os = "ios")]
