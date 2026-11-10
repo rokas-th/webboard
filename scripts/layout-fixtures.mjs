@@ -537,14 +537,15 @@ const UPDATE_FOUND = {
 
 const withUpdate = (f, answers) => ({ docs: copyOf(f).docs, ipc: { ...copyOf(f).ipc, ...answers } });
 
-function spaceIndex() {
+function spaceIndex(plans) {
   const log = new Log("ixSpc", START);
   log.act({ lbl: "Name device", w: [own("dn:mac", "Mac"), own("dn:iphone", "iPhone")] });
+  plans.forEach((id) => log.act({ lbl: "Add plan", w: [own(`ip:${id}`, { t: false })] }));
   return log.doc();
 }
 
-function inSpace(f, revoked) {
-  const docs = { ...f.docs, [SPACE_INDEX]: frame(spaceIndex()) };
+function inSpace(f, revoked, plans = []) {
+  const docs = { ...f.docs, [SPACE_INDEX]: frame(spaceIndex(plans)) };
   return {
     docs,
     ipc: { ...f.ipc, store_list: Object.keys(docs), sync_status: { space: { ...PROBE_SPACE }, revoked }, sync_ticket: { ...PROBE_TICKET } },
@@ -579,7 +580,7 @@ export function buildFixtures() {
     "sync-receiving": inSpace(unreadable, false),
     "sync-removed": inSpace(mesaOnMac, true),
     "phone-sync-sheet": copyOf(mesaOnMac),
-    "phone-removed-banner": inSpace(mesaOnMac, true),
+    "phone-removed-banner": inSpace(mesaOnMac, true, [PLAN_IDS.mesa]),
     "update-available": withUpdate(mesaOnMac, { "plugin:updater|check": { ...UPDATE_FOUND } }),
     "update-check-failed": withUpdate(mesaOnMac, { "plugin:updater|check": { __reject: UPDATE_CHECK_FAILED } }),
     "update-downloading": withUpdate(mesaOnMac, {

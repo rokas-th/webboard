@@ -583,7 +583,14 @@ describe("SyncProvider on the phone", () => {
     expect(uiNow()[0].plan).toBe("S");
     await openPlans();
     expect(rowNames()).toEqual(["Loading…", "Loading…"]);
-    await closePlans();
+    const rows = (): HTMLElement[] => [...plansSheet().querySelectorAll<HTMLElement>(".entries:not(section .entries) .entry-open")];
+    expect(rows().map((b) => b.getAttribute("aria-current"))).toEqual(["page", null]);
+    await click(rows()[1]);
+    expect(uiNow()[0].plan).toBe("T");
+    await openPlans();
+    expect(rows().map((b) => b.getAttribute("aria-current"))).toEqual([null, "page"]);
+    await click(rows()[0]);
+    expect(uiNow()[0].plan).toBe("S");
     act(() => {
       const s = prov("S");
       s.deliver(Y.encodeStateAsUpdate(seedPlan(null, "S", "Site")));
@@ -683,6 +690,12 @@ describe("SyncProvider on the phone", () => {
     await click(within(dialog()).getByRole("button", { name: "Reset sync" }));
     expect(calls("sync_reset")).toBe(1);
     expect(compactChip().getAttribute("aria-label")).toBe("Local only");
+    expect(pane("Join with a code")).toBeTruthy();
+    await closeSync();
+    await openPlans();
+    expect(rowNames()).toEqual(["Plan P"]);
+    await click(within(plansSheet()).getByRole("button", { name: "Join with a code" }));
+    expect(screen.queryByRole("dialog", { name: "Plans" })).toBeNull();
     expect(pane("Join with a code")).toBeTruthy();
     w.status = () => ({ space: SPACE, revoked: false });
     await click(within(pane("Join with a code")).getByRole("button", { name: "Join space" }));

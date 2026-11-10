@@ -93,10 +93,9 @@ export function SyncActionButtons(p: { holds: boolean; small?: boolean; onReset?
   );
 }
 
-function IndexActions(p: { cause: string | null; frame?: "dialog" | "sheet" }) {
+function IndexActions(p: { cause: string | null; onReload(doc: string): void }) {
   const registry = useSyncRegistry();
   const enabled = canReload(useSyncState().state);
-  const [confirm, setConfirm] = useState<string | null>(null);
   const doc = registry.indexErrorDoc();
   const reloadable = p.cause === "store.corrupt" && doc !== null && !registry.spaceReadOnly();
   return (
@@ -106,8 +105,7 @@ function IndexActions(p: { cause: string | null; frame?: "dialog" | "sheet" }) {
           Try again
         </button>
       </div>
-      {reloadable && <ReloadButton enabled={enabled} onOpen={() => setConfirm(doc)} />}
-      {confirm !== null && <ReloadConfirm registry={registry} docId={confirm} frame={p.frame} onClose={() => setConfirm(null)} />}
+      {reloadable && <ReloadButton enabled={enabled} onOpen={() => p.onReload(doc)} />}
     </>
   );
 }
@@ -116,6 +114,7 @@ export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet
   const { state } = useSyncState();
   const registry = useSyncRegistry();
   const [opened] = useState(() => resolvePane(state, null));
+  const [confirm, setConfirm] = useState<string | null>(null);
   const pane = p.pane ?? opened;
   const error = state.kind === "error" ? state : null;
   const indexDoc = error !== null && error.code === "local-failed" && error.doc !== null && error.doc.startsWith("ix-");
@@ -125,7 +124,7 @@ export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet
       {error !== null && (
         <div className="sync-status">
           {error.message !== null && <p className="sync-message bad">{error.message}</p>}
-          {indexDoc ? <IndexActions cause={error.cause} frame={p.frame} /> : <SyncActionButtons holds={holds} onReset={() => p.onPane("join")} />}
+          {indexDoc ? <IndexActions cause={error.cause} onReload={setConfirm} /> : <SyncActionButtons holds={holds} onReset={() => p.onPane("join")} />}
         </div>
       )}
       <div className="sync-tabs" role="tablist" aria-label="Sync">
@@ -143,6 +142,7 @@ export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet
       </section>
     </>
   );
+  if (confirm !== null) return <ReloadConfirm registry={registry} docId={confirm} frame={p.frame} onClose={() => setConfirm(null)} />;
   if (p.frame === "sheet") {
     return (
       <Sheet open title="Sync" onClose={p.onClose}>

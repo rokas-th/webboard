@@ -917,6 +917,22 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog", { name: RELOAD })).toBeNull();
     expect(reload).not.toHaveBeenCalled();
+    cleanup();
+    await Promise.all(registries.splice(0).map((r) => r.close()));
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const offline = await failing(undefined, undefined, true);
+    withSpace(offline.registry, new Set([offline.s.ids[2]]));
+    const offlineReload = vi.spyOn(offline.registry, "reloadFromServer");
+    fireEvent.click(within(openPlans()).getByRole("button", { name: "Gamma" }));
+    await settle();
+    expect(within(topBar()).getByRole("button", { name: "Offline" }).classList.contains("chip-compact")).toBe(true);
+    const button = within(mainFailed()).getByRole("button", { name: RELOAD });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(within(mainFailed()).getByText("Needs a connection to the server.").classList.contains("dim")).toBe(true);
+    fireEvent.click(button);
+    await settle();
+    expect(screen.queryByRole("dialog", { name: RELOAD })).toBeNull();
+    expect(offlineReload).not.toHaveBeenCalled();
   });
 
   it("Load again stays disabled while the registry reloads the plan", async () => {
@@ -2232,5 +2248,22 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     vi.spyOn(r, "plans").mockImplementation(() => real().filter((l) => l.id !== "L"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect(() => setUiNow({ view: "board" })).toThrow(new Error("Plan L is not listed"));
+  });
+
+  it("a space index reload that drops the only plan reaches the empty state", async () => {
+    const w = syncWorld({ names: { P: "Launch" }, platform: "ios" });
+    seedIndex(w.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device")]);
+    seedIndex(w.mem, IX, [ixAct("s-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("s-P", ["s-n"], [ip("P", false)])]);
+    seedPlan(w.mem, "P", "Launch");
+    const { r, f } = await mounted(w);
+    syncAll(f);
+    await deep();
+    listShows("Launch");
+    expect(r.plans().map((l) => [l.id, l.space])).toEqual([["P", "sp000000000"]]);
+    await act(async () => r.reloadFromServer(IX));
+    await deep();
+    expect(r.plans()).toEqual([]);
+    expect(emptyState()).not.toBeNull();
+    expect(topBar().querySelector(".phone-plan-name")).toBeNull();
   });
 });

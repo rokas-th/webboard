@@ -1251,9 +1251,11 @@ describe("sync on the phone", () => {
       await settle();
       expect(r.failures().get("P")?.code).toBe("store.corrupt");
       const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      expect(within(topBar()).getByRole("button", { name: on ? "Synced" : "Offline" }).classList.contains("chip-compact")).toBe(true);
       await openPlans();
       const button = within(planRow("Launch")).getByRole("button", { name: RELOAD });
       expect([button.hasAttribute("disabled"), within(planRow("Launch")).queryByText(NEEDS) !== null]).toEqual([!on, !on]);
+      if (!on) expect(within(planRow("Launch")).getByText(NEEDS).classList.contains("dim")).toBe(true);
       await click(button);
       expect(screen.queryByRole("dialog", { name: RELOAD }) !== null).toBe(on);
       expect(reload).not.toHaveBeenCalled();
@@ -1277,6 +1279,7 @@ describe("sync on the phone", () => {
       const button = within(line).getByRole("button", { name: RELOAD });
       const on = s.kind === "synced";
       expect([button.hasAttribute("disabled"), within(line).queryByText(NEEDS) !== null]).toEqual([!on, !on]);
+      if (!on) expect(within(line).getByText(NEEDS).classList.contains("dim")).toBe(true);
       await click(button);
       expect(screen.queryByRole("dialog", { name: RELOAD }) !== null).toBe(on);
       expect(reload).not.toHaveBeenCalled();
@@ -1286,6 +1289,27 @@ describe("sync on the phone", () => {
       }
       await fresh();
     }
+  });
+
+  it("the index reload confirmation takes the Sync sheet's place on the phone", async () => {
+    const w = await spaceWorld();
+    w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+    const { r } = await mounted(w);
+    expect(r.indexErrorDoc()).toBe(IX);
+    const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+    const dialogs = (): (string | null)[] => screen.queryAllByRole("dialog").map((d) => d.getAttribute("aria-label"));
+    await click(within(topBar()).getByRole("button", { name: "The space’s plan list on this device is damaged" }));
+    expect(dialogs()).toEqual(["Sync"]);
+    await click(within(syncSheet()).getByRole("button", { name: RELOAD }));
+    expect(dialogs()).toEqual([RELOAD]);
+    await click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Cancel" }));
+    expect(dialogs()).toEqual(["Sync"]);
+    expect(within(syncSheet()).getAllByRole("button", { name: "Close" })).toHaveLength(1);
+    expect(reload).not.toHaveBeenCalled();
+    await click(within(syncSheet()).getByRole("button", { name: RELOAD }));
+    expect(dialogs()).toEqual([RELOAD]);
+    await click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
+    expect(reload.mock.calls).toEqual([[IX]]);
   });
 
   it("a remote plan shows in the phone list", async () => {

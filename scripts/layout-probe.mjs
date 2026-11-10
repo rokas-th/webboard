@@ -325,9 +325,10 @@ function states() {
   add("phone-removed-banner", "phone-removed-banner", {
     sizes: "phone",
     actions: [
+      expect(".removed-banner button", "Export…"),
       expect(".removed-banner button", "Join with a code"),
       expect(".removed-banner button", "Set up sync"),
-      count(".removed-banner button", 2),
+      count(".removed-banner button", 3),
     ],
   });
   add("long-names/phone", "long-names", { sizes: "phone", clip: true, actions: [expect(".phone-list .prow .prow-name")] });

@@ -256,14 +256,21 @@ describe("layout fixtures", () => {
     expect(fixture("sync-dialog")).toEqual(fixture("mesa"));
   });
 
-  it("phone-sync-sheet is the mesa plan, local only, and phone-removed-banner is the removed space", () => {
+  it("phone-sync-sheet is the mesa plan, local only, and phone-removed-banner is the removed space holding the mesa plan", async () => {
     expect(fixture("phone-sync-sheet")).not.toBe(fixture("mesa"));
     expect(fixture("phone-sync-sheet")).toEqual(fixture("mesa"));
     expect(fixture("phone-removed-banner").ipc).not.toBe(fixture("sync-removed").ipc);
     expect(fixture("phone-removed-banner").ipc).toEqual(fixture("sync-removed").ipc);
     const plans = (name: string): unknown => Object.fromEntries(Object.entries(fixture(name).docs).filter(([doc]) => doc !== "ix-sp000000000"));
     expect(plans("phone-removed-banner")).toEqual(plans("mesa"));
-    expect(Object.keys(fixture("phone-removed-banner").docs)).toContain("ix-sp000000000");
+    const ix = new LogState(indexRules);
+    expect(ix.add([...new PlanDoc(ydocOf(fixture("phone-removed-banner"), "ix-sp000000000")).actions()]).refused).toEqual([]);
+    resetTauri(answersOf(fixture("phone-removed-banner")));
+    const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
+    openRegistries.push(registry);
+    expect(registry.plans().map((l) => [l.id, l.space])).toEqual([["planMesa001", null]]);
+    await registry.attachSpace("sp000000000");
+    expect(registry.plans().map((l) => [l.id, l.name, l.trashed, l.space])).toEqual([["planMesa001", "MESA 1.0", false, "sp000000000"]]);
   });
 
   it("shares no ipc answers object between states", () => {
