@@ -1223,6 +1223,53 @@ describe("Registry: lifecycle and failures", () => {
     expect((await r.doc("P")).ydoc.getMap("actions").size).toBe(0);
   });
 
+  it("reloadFromServer writes nothing of a doc that failed to save, so a different second fault cannot block it", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Alpha", { items: ["A"] });
+    const r = await open();
+    await r.warm();
+    await flush();
+    e.mem.fail("store_append", "P", { code: "store.corrupt", message: "P: a record is damaged" });
+    const ydoc = (await r.doc("P")).ydoc;
+    remote(ydoc, () => ({ t: "rename", item: itemNamed(ydoc, "A"), name: "North" }));
+    await flush();
+    expect(r.failures().get("P")?.code).toBe("store.corrupt");
+    e.mem.recover("store_append", "P");
+    e.mem.fail("store_compact", "P", { code: "store.io", message: "Disk full." });
+    const from = tauri.calls.length;
+    await r.reloadFromServer("P");
+    expect(callsOf(from, "store_set_aside").map((c) => c.args)).toEqual([{ doc: "P" }]);
+    expect(appendsTo(from, "P")).toHaveLength(0);
+    expect(callsOf(from, "store_compact").map(xdoc)).not.toContain("P");
+    expect(r.failures().has("P")).toBe(false);
+  });
+
+  it("reloadFromServer writes nothing of an index that failed to save", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing());
+    seedIndex(e.mem, "ix-S1", [ixAct("s1", [], [ip("P", false)])]);
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    await r.warm();
+    await flush();
+    e.mem.fail("store_append", "ix-S1", { code: "store.corrupt", message: "ix-S1: a record is damaged" });
+    const ydoc = (await persistedOf("ix-S1"))[0].ydoc;
+    const [id, raw] = ixAct("s2", ["s1"], [ip("Q", false)]);
+    ydoc.getMap("actions").set(id, raw);
+    await flush();
+    expect(r.indexError()?.code).toBe("store.corrupt");
+    e.mem.recover("store_append", "ix-S1");
+    e.mem.fail("store_compact", "ix-S1", { code: "store.io", message: "Disk full." });
+    const from = tauri.calls.length;
+    await r.reloadFromServer("ix-S1");
+    await flush();
+    expect(callsOf(from, "store_set_aside").map((c) => c.args)).toEqual([{ doc: "ix-S1" }]);
+    expect(appendsTo(from, "ix-S1")).toHaveLength(0);
+    expect(callsOf(from, "store_compact").map(xdoc)).not.toContain("ix-S1");
+    expect(r.indexError()).toBeNull();
+  });
+
   it("reloadFromServer reports a failure that first happens while discarding", async () => {
     const e = env();
     seedIndex(e.mem, "local", listing("P"));

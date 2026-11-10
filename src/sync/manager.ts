@@ -316,7 +316,7 @@ export class SyncManager {
       if (!(e instanceof AppError)) throw e;
       if (gen !== this.gen) return;
       this.global = this.statusFault(e);
-      if (e.code === "sync.io") await this.attachTheOneOnDisk();
+      if (e.code === "sync.io") await this.attachTheOneOnDisk(true);
       if (gen === this.gen) this.emit();
       return;
     }
@@ -335,7 +335,7 @@ export class SyncManager {
         this.revokedLatch = true;
         this.global = this.fault("revoked", null, null, null);
       }
-      await this.attachRecorded(space.spaceId);
+      await this.attachRecorded(space.spaceId, true);
       if (gen === this.gen) this.emit();
       return;
     }
@@ -414,10 +414,10 @@ export class SyncManager {
     return this.fault("failed", null, e.message, e.code);
   }
 
-  private async attachTheOneOnDisk(): Promise<void> {
+  private async attachTheOneOnDisk(joined: boolean): Promise<void> {
     const spaces = this.registry.localSpaces();
     if (spaces.length !== 1) return;
-    await this.attachRecorded(spaces[0]);
+    await this.attachRecorded(spaces[0], joined);
   }
 
   private async attachTheOnlyOne(): Promise<void> {
@@ -431,11 +431,11 @@ export class SyncManager {
       );
       return;
     }
-    await this.attachTheOneOnDisk();
+    await this.attachTheOneOnDisk(false);
   }
 
-  private async attachRecorded(spaceId: string): Promise<void> {
-    await this.registry.attachSpace(spaceId).then(
+  private async attachRecorded(spaceId: string, joined: boolean): Promise<void> {
+    await this.registry.attachSpace(spaceId, joined).then(
       () => undefined,
       (e: unknown) => {
         if (!(e instanceof AppError) || this.registry.indexErrorOf(SPACE_PREFIX + spaceId) !== e) throw e;

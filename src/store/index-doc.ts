@@ -203,4 +203,13 @@ export class IndexDoc {
     }
     return this.closing;
   }
+
+  discard(): Promise<void> {
+    if (this.closing === null) {
+      this.actionMap.unobserve(this.observer);
+      this.subscribers.clear();
+      this.closing = this.doc.discard();
+    }
+    return this.closing;
+  }
 }

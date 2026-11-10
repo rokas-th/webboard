@@ -429,6 +429,7 @@ export function parseKey(u: UnitKey): { kind: UnitKind; arg: string; to?: string
   }
   if (prefix === "ct") {
     if (!isDate(arg)) throw malformed(u);
+    if (!inPlanWindow(arg)) throw new Error(`Unit key “${u}” names a date outside ${FIRST_PLAN_DATE} to ${LAST_PLAN_DATE}`);
     return { kind, arg };
   }
   if (prefix === "ch") {

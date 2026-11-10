@@ -912,7 +912,30 @@ describe("buildAction: the plan's limits (schedule-1)", () => {
     refusedWith(ctx, { t: "link", from: "Admin", to: "Ship", type: "FS", lag: 1001 }, LAG);
     refusedWith(ctx, { t: "link", from: "Admin", to: "Ship", type: "SS", lag: -5_000_000 }, LAG);
     refusedWith(ctx, { t: "move", items: ["Launch"], days: 60_000 }, RANGE);
-    refusedWith(ctx, { t: "schedule", item: "PFF", set: { start: "2199-12-16" } }, RANGE);
+    refusedWith(ctx, { t: "schedule", item: "PFF", set: { start: "2199-12-16" } }, "“Ship” would move past 31 Dec 2199.");
+  });
+
+  it("refuses a typed single day off or working day outside the date window", () => {
+    const ctx = chain();
+    const cal = ctx.view.plan.calendar;
+    refusedWith(ctx, { t: "calendar", next: { ...cal, tuning: new Map([["0026-12-24", { kind: "off" }]]) } }, RANGE);
+    refusedWith(ctx, { t: "calendar", next: { ...cal, tuning: new Map([["2500-01-01", { kind: "work" }]]) } }, RANGE);
+    expect(units(buildAction(ctx, { t: "calendar", next: { ...cal, tuning: new Map([["2199-12-31", { kind: "off" }]]) } }))).toContain(
+      "ct:2199-12-31",
+    );
+  });
+
+  it("names the item a push would carry outside the date window", () => {
+    refusedWith(chain(), { t: "schedule", item: "PFF", set: { start: "2199-12-23" } }, "“Review” would move past 31 Dec 2199.");
+  });
+
+  it("names the done task a calendar change would stretch past the longest duration", () => {
+    const ctx = ctxFrom(replaced(CHAIN, [w("s:Admin", sched("2010-01-04", 3650, "done", 100))]));
+    refusedWith(
+      ctx,
+      { t: "calendar", next: { ...ctx.view.plan.calendar, workdays: [1, 2, 3, 4, 5, 6, 7] } },
+      "“Admin” would last more than 3650 working days on this calendar.",
+    );
   });
 
   it("accepts the edges of the limits", () => {

@@ -125,6 +125,9 @@ describe("unit keys", () => {
     expect(() => parseKey("pn:x")).toThrow("pn:x");
     expect(() => parseKey("n:")).toThrow("n:");
     expect(() => parseKey("ct:2026-02-30")).toThrow("ct:2026-02-30");
+    expect(() => parseKey("ct:0026-12-24")).toThrow("Unit key “ct:0026-12-24” names a date outside 1900-01-01 to 2199-12-31");
+    expect(() => parseKey("ct:2200-01-01")).toThrow("Unit key “ct:2200-01-01” names a date outside 1900-01-01 to 2199-12-31");
+    expect(parseKey("ct:2199-12-31")).toEqual({ kind: "ct", arg: "2199-12-31" });
     expect(() => parseKey("ch:20x6")).toThrow("ch:20x6");
     expect(() => key.ch(2026.5)).toThrow("ch:2026.5");
   });

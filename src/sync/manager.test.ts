@@ -376,6 +376,14 @@ describe("SyncManager: connecting", () => {
     expect(f.all).toHaveLength(0);
   });
 
+  it("with no space joined, a new plan goes into the local plan list, not the space index on disk", async () => {
+    const { r } = await started({ before: (w) => (w.status = () => ({ space: null, revoked: false })) });
+    expect(r.attachedSpace()).toBe(SP);
+    const id = await r.createPlan("Fresh");
+    expect(r.plans().find((p) => p.id === id)).toMatchObject({ space: null });
+    expect(r.plans().filter((p) => p.space === SP).map((p) => p.id).sort()).toEqual(["P", "P2"]);
+  });
+
   it("with no space joined and two space indexes on disk, nothing is attached and the error names both", async () => {
     const f = fakeFactory();
     const other = "sp111111111";

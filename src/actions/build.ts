@@ -1,6 +1,6 @@
 import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing";
 import { closureTooLong, regionKey, workCalendar, type Calendar, type Closure, type Tuning, type WorkCalendar } from "../domain/calendar";
-import { fmtNear, inPlanWindow, isCalendarDate, toDay, toIso, type Day, type IsoDate } from "../domain/dates";
+import { FIRST_PLAN_DATE, fmtNear, inPlanWindow, LAST_PLAN_DATE, isCalendarDate, toDay, toIso, type Day, type IsoDate } from "../domain/dates";
 import { derive, lockOf, schedView, type Derived } from "../domain/derive";
 import { linkKey, MAX_LAG, MAX_TASK_DUR, type Item, type ItemId, type Link, type PlanState, type Schedule } from "../domain/model";
 import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type PushResult, type RecalResult, type Sched, type SchedView, type Stop } from "../domain/schedule";
@@ -200,6 +200,7 @@ const checkedCalendar = (cal: Calendar): Calendar => {
       return [id, { ...c, name: normalizeName(c.name) }];
     }),
   );
+  if ([...cal.tuning.keys()].some((d) => !inPlanWindow(d))) throw new Refused(refusal.dateRange);
   const tuning = new Map(
     [...cal.tuning].map(([date, t]): [IsoDate, Tuning] => [date, t.kind === "add" ? { kind: "add", name: normalizeName(t.name) } : t]),
   );
@@ -590,6 +591,9 @@ export function withDerived(ctx: Ctx, ownWrites: readonly Write[], roots: readon
     if (sc.start === null) {
       throw new Error(ownUnits.has(u) ? `Derived write to ${u}, which this action unschedules` : `Derived write to unscheduled ${id}`);
     }
+    if (start !== undefined && start > toDay(LAST_PLAN_DATE)) throw new Refused(refusal.movedPast(nameOf(ctx, id)));
+    if (start !== undefined && start < toDay(FIRST_PLAN_DATE)) throw new Refused(refusal.movedBefore(nameOf(ctx, id)));
+    if (dur !== undefined && dur > MAX_TASK_DUR) throw new Refused(refusal.stretched(nameOf(ctx, id)));
     return { u, v: codec.sched.enc(bounded({ ...sc, start: start === undefined ? sc.start : toIso(start), dur: dur ?? sc.dur })), c };
   };
   const recalWrites: Write[] =

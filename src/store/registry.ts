@@ -153,6 +153,7 @@ export class Registry {
   private offSpace: (() => void) | null = null;
   private readonly attaching = new Map<string, Promise<IndexDoc>>();
   private readOnlySpace = false;
+  private spaceJoined = true;
   private readonly memo = new Map<string, Promise<PersistedDoc>>();
   private readonly loaded = new Map<string, PersistedDoc>();
   private readonly docOffs = new Map<string, () => void>();
@@ -446,8 +447,9 @@ export class Registry {
     this.hookedSpace = null;
   }
 
-  attachSpace(spaceId: string): Promise<IndexDoc> {
+  attachSpace(spaceId: string, joined = true): Promise<IndexDoc> {
     this.usable();
+    this.spaceJoined = joined;
     const id = SPACE_PREFIX + spaceId;
     if (this.attachedId !== id) {
       this.unhookSpace();
@@ -507,7 +509,7 @@ export class Registry {
 
   private addTarget(): IndexDoc {
     const ix = this.spaceIndex();
-    return ix !== null && !this.readOnlySpace ? ix : this.local;
+    return ix !== null && !this.readOnlySpace && this.spaceJoined ? ix : this.local;
   }
 
   session(id: PlanId): Promise<PlanSession> {
@@ -846,11 +848,11 @@ export class Registry {
       if (d === undefined) throw new Error(`Index ${id} is open without a loaded document`);
     }
     if (d === undefined) return;
-    try {
-      await (ix === undefined ? d.close() : ix.close());
-    } catch (e) {
-      if (before === null || !(e instanceof AppError) || e.code !== before.code || e.message !== before.message) throw e;
+    if (before !== null) {
+      await (ix === undefined ? d.discard() : ix.discard());
+      return;
     }
+    await (ix === undefined ? d.close() : ix.close());
   }
 
   private detach(id: string): void {
