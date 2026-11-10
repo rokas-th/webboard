@@ -78,7 +78,7 @@ interface ChartProps {
   setUi: SetUi;
   mounted: readonly Placed[];
   index: ReadonlyMap<ItemId, number>;
-  window: readonly [number, number];
+  range: readonly [number, number];
   count: number;
   marks: Marks;
   readOnly: boolean;
@@ -288,7 +288,7 @@ const Shading = memo(function Shading(p: { geo: Geometry }) {
 
 function Links(p: ChartProps & { height: number }) {
   const { geo, view } = p;
-  const [first, last] = p.window;
+  const [first, last] = p.range;
   const rowOf = (id: ItemId): number | null => {
     const index = p.index.get(id);
     return index === undefined || geo.span(id) === null ? null : index;

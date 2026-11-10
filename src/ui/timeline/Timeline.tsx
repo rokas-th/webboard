@@ -368,7 +368,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
               setUi={setUi}
               mounted={mounted}
               index={index}
-              window={[first, last]}
+              range={[first, last]}
               count={rows.length}
               marks={marks}
               readOnly={readOnly}
