@@ -27,6 +27,7 @@ function lineOf(s: UpdateState): Line | null {
   switch (s.k) {
     case "idle":
     case "closeFailed":
+    case "restartFailed":
       return null;
     case "checking":
       return { text: "Checking for updates…", tone: "plain", control: null };

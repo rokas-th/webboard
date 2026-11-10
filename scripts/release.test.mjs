@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { gzipSync } from "node:zlib";
 
-import { tarNames } from "./release.mjs";
+import { tarEntries, tarNames } from "./release.mjs";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const TOOL = join(REPO, "scripts", "release.mjs");
@@ -179,6 +180,48 @@ test("a .sig made with another key than tauri.conf.json's pubkey is refused by k
   failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.deb}.sig was signed with key`, "but the pubkey in src-tauri/tauri.conf.json is key", "owner step R2");
 });
 
+function rewriteSig(file, edit) {
+  return readFile(file, "utf8").then((text) => {
+    const lines = Buffer.from(text.trim(), "base64").toString("utf8").split("\n");
+    return writeFile(file, Buffer.from(edit(lines).join("\n")).toString("base64"));
+  });
+}
+
+test("a .sig of another file made with the right key is refused, naming both files and owner step R2", async () => {
+  const p = await project();
+  const other = join(p.root, "other.deb");
+  await writeFile(other, "!<arch>\nanother build\n");
+  sign(KEY, other);
+  await cp(`${other}.sig`, `${p.deb}.sig`);
+  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.deb}.sig is not a signature of ${p.deb}`, `run owner step R2: npx tauri signer sign -f ~/.tauri/webboard.key ${p.deb}`);
+  assert.equal(await readdir(p.releases).catch((e) => e.code), "ENOENT");
+});
+
+test("a .sig whose trusted comment was edited is refused", async () => {
+  const p = await project();
+  await rewriteSig(`${p.tarball}.sig`, (lines) => lines.map((l) => (l.startsWith("trusted comment: ") ? `${l}x` : l)));
+  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.tarball}.sig`, "trusted comment", "owner step R2");
+});
+
+test("a .sig in another minisign algorithm than the prehashed ED is refused, naming it", async () => {
+  const p = await project();
+  await rewriteSig(`${p.deb}.sig`, (lines) => {
+    const raw = Buffer.from(lines[1], "base64");
+    raw.write("Ed", 0, "latin1");
+    return [lines[0], raw.toString("base64"), ...lines.slice(2)];
+  });
+  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.deb}.sig uses the minisign algorithm "Ed"`, '"ED"');
+});
+
+test("manifest clears an earlier attempt's files from releases/<v>/", async () => {
+  const p = await project();
+  await mkdir(join(p.releases, CURRENT), { recursive: true });
+  await writeFile(join(p.releases, CURRENT, "WebBoard_0.0.9_amd64.deb"), "from an earlier attempt");
+  const r = release(p.root, "manifest", CURRENT, "--notes", "n");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual((await readdir(join(p.releases, CURRENT))).sort(), [DEB_NAME, TARBALL].sort());
+});
+
 test("an empty pubkey is refused and names owner step R1", async () => {
   const p = await project({ pubkey: "" });
   failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), "plugins.updater.pubkey", "is empty: run owner step R1");
@@ -240,7 +283,7 @@ test("manifest needs notes and a version", async () => {
 
 const onMac = { skip: process.platform !== "darwin" ? "tarball packs with the Mac's bsdtar" : false };
 
-test("tarball packs the built WebBoard.app as the single top-level entry with no AppleDouble entries", onMac, async () => {
+test("tarball packs the built WebBoard.app as the single top-level entry with no AppleDouble entries", onMac, async (t) => {
   const p = await project();
   await rm(p.tarball);
   await rm(`${p.tarball}.sig`);
@@ -253,7 +296,11 @@ test("tarball packs the built WebBoard.app as the single top-level entry with no
   must("/usr/bin/tar", ["-czf", plain, "-C", join(p.root, MAC), "WebBoard.app"]);
   const plainList = tarNames(await readFile(plain));
   assert.ok(plainList.includes("WebBoard.app/Contents/MacOS/._webboard"), `plain bsdtar wrote no ._ entry for the marked file, so this test proves nothing: ${plainList.join(", ")}`);
-  assert.ok(!must("tar", ["-tzf", plain]).stdout.includes("._"), "the Mac's tar -t lists ._ entries after all; tarNames is no longer needed");
+  t.diagnostic(
+    must("tar", ["-tzf", plain]).stdout.includes("._")
+      ? "note: this host's tar -t lists ._ entries"
+      : "note: this host's tar -t hides the ._ entries tarNames reads, which is why release.mjs reads the headers itself",
+  );
 
   const r = release(p.root, "tarball");
   assert.equal(r.status, 0, r.stderr);
@@ -275,6 +322,7 @@ test("tarball refuses a built app whose version is not the repo's", onMac, async
 
 test("tarNames reads every header name, pax and ustar alike", async () => {
   const dir = await mkdtemp(join(tmpdir(), "webboard-tarnames-"));
+  ROOTS.push(dir);
   const deep = join(dir, "WebBoard.app", "Contents", "Resources", "a".repeat(90), "b".repeat(90));
   await mkdir(deep, { recursive: true });
   await writeFile(join(deep, "c".repeat(60)), "x");
@@ -282,5 +330,50 @@ test("tarNames reads every header name, pax and ustar alike", async () => {
   must("tar", ["-czf", out, "-C", dir, "WebBoard.app"]);
   const names = tarNames(await readFile(out));
   assert.ok(names.includes(`WebBoard.app/Contents/Resources/${"a".repeat(90)}/${"b".repeat(90)}/${"c".repeat(60)}`), names.join("\n"));
-  await rm(dir, { recursive: true });
+});
+
+const GNU_MAGIC = "ustar  \0";
+const USTAR_MAGIC = "ustar\u000000";
+
+function header({ name, size, magic, at345 = "" }) {
+  const b = Buffer.alloc(512);
+  b.write(name, 0, "latin1");
+  b.write("0000644\0", 100, "latin1");
+  b.write("0000000\0", 108, "latin1");
+  b.write("0000000\0", 116, "latin1");
+  b.write(typeof size === "string" ? size : `${size.toString(8).padStart(11, "0")}\0`, 124, "latin1");
+  b.write("15100000000\0", 136, "latin1");
+  b.write("        ", 148, "latin1");
+  b.write("0", 156, "latin1");
+  b.write(magic, 257, "latin1");
+  b.write(at345, 345, "latin1");
+  const sum = b.reduce((a, x) => a + x, 0);
+  b.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148, "latin1");
+  return b;
+}
+
+const archive = (...blocks) => gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]));
+const body = (text) => Buffer.concat([Buffer.from(text), Buffer.alloc(512 - text.length)]);
+
+test("tarNames reads the ustar prefix, and ignores what a GNU header keeps at the same offset", () => {
+  assert.deepEqual(tarNames(archive(header({ name: "webboard", size: 0, magic: USTAR_MAGIC, at345: "WebBoard.app/Contents/MacOS" }))), ["WebBoard.app/Contents/MacOS/webboard"]);
+  assert.deepEqual(tarNames(archive(header({ name: "WebBoard.app/Contents/MacOS/webboard", size: 0, magic: GNU_MAGIC, at345: "15100000000\0" }))), ["WebBoard.app/Contents/MacOS/webboard"]);
+});
+
+test("tarNames refuses a size field that is not all octal digits, naming the byte offset and the field", () => {
+  const good = header({ name: "WebBoard.app/a", size: 1, magic: USTAR_MAGIC });
+  const corrupt = header({ name: "WebBoard.app/b", size: "0000000001x\0", magic: USTAR_MAGIC });
+  assert.throws(() => tarNames(archive(good, body("a"), corrupt, body("b"))), { message: 'tar entry at byte 1024 has the size field "0000000001x", which is not octal digits' });
+  const padded = header({ name: "WebBoard.app/c", size: " 0000000001 ", magic: USTAR_MAGIC });
+  assert.deepEqual(tarNames(archive(padded, body("c"))), ["WebBoard.app/c"]);
+});
+
+test("tarEntries lets a file system error through as itself; only a parse error is called not a tarball", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "webboard-tarentries-"));
+  ROOTS.push(dir);
+  await assert.rejects(tarEntries(dir), (e) => e.code === "EISDIR" && !e.message.includes("gzip tarball"));
+  await assert.rejects(tarEntries(join(dir, "missing.tar.gz")), (e) => e.code === "ENOENT" && !e.message.includes("gzip tarball"));
+  const junk = join(dir, "junk.tar.gz");
+  await writeFile(junk, "not gzip");
+  await assert.rejects(tarEntries(junk), { message: new RegExp(`^${junk.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")} is not a gzip tarball WebBoard can read: `) });
 });

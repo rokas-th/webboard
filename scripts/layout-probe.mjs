@@ -80,6 +80,7 @@ function states() {
       sizes: o.sizes ?? "desktop",
       dialog: o.dialog === true,
       clip: o.clip === true ? LONG_NAMES : o.clip ?? [],
+      logs: o.logs ?? [],
       net: { ws: o.net?.ws ?? "none", online: o.net?.online ?? true },
     });
 
@@ -181,6 +182,7 @@ function states() {
   });
   add("update/check-failed", "update-check-failed", {
     clip: [UPDATE_FAILED],
+    logs: [UPDATE_CHECK_FAILED],
     actions: [viewExpect("timeline"), expect(".sidebar .update-line button", "Try again"), expect(".sidebar .update-line .update-status.bad", UPDATE_FAILED)],
   });
   add("update/downloading", "update-downloading", {
@@ -1229,7 +1231,8 @@ function judge(state, r, errors, notFound) {
   const unloaded = r.fonts.filter((f) => !f.loaded).map((f) => `${f.family} (${f.faces} faces)`);
   if (unloaded.length > 0) problems.push(`fonts not loaded: ${unloaded.join(", ")}`);
   notFound.forEach((p) => problems.push(`dist has no ${p}: the page asked for it and got 404`));
-  errors.forEach((e) => problems.push(`the page reported an error: ${e}`));
+  state.logs.filter((l) => !errors.includes(l)).forEach((l) => problems.push(`the page did not log the error this state expects: ${l}`));
+  errors.filter((e) => !state.logs.includes(e)).forEach((e) => problems.push(`the page reported an error: ${e}`));
   return { ok: problems.length === 0, problems };
 }
 

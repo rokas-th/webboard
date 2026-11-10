@@ -378,6 +378,7 @@ describe("updates", () => {
   it("a failed install closes nothing and shows the failure on the line", async () => {
     await seededStore(["Alpha"]);
     vi.mocked(checkUpdate).mockResolvedValueOnce(offer([], async () => Promise.reject("signature verification failed")));
+    const log = logged();
     const close = vi.spyOn(Registry.prototype, "close");
     spyOpen();
     render(<App />);
@@ -385,6 +386,7 @@ describe("updates", () => {
     fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
     await settle();
     expect(screen.getByText("Could not install 0.2.0: signature verification failed")).toBeTruthy();
+    expect(log.mock.calls).toEqual([["signature verification failed"]]);
     expect(close).not.toHaveBeenCalled();
     expect(restart).not.toHaveBeenCalled();
     expect(toolbar()).not.toBeNull();
@@ -393,19 +395,65 @@ describe("updates", () => {
   it("a failed close after the install shows the installed-but-not-saved screen, never restarts, and lets the next close through", async () => {
     await seededStore(["Alpha"]);
     vi.mocked(checkUpdate).mockResolvedValueOnce(offer([]));
+    const failure = new AppError("store.io", "Could not save “Alpha”: disk full.");
+    const log = logged();
     spyOpen();
     render(<App />);
     await settle();
-    const close = vi.spyOn(Registry.prototype, "close").mockRejectedValueOnce(new AppError("store.io", "Could not save “Alpha”: disk full."));
+    const close = vi.spyOn(Registry.prototype, "close").mockRejectedValueOnce(failure);
     fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
     await settle();
     const line = "WebBoard 0.2.0 is installed, but WebBoard could not save everything before restarting: Could not save “Alpha”: disk full. Close the window again to quit, then start WebBoard.";
     expect(screen.getByText(line).className).toBe("start-bad");
     expect(toolbar()).toBeNull();
     expect(restart).not.toHaveBeenCalled();
+    expect(log.mock.calls).toEqual([[failure]]);
+    expect(log.mock.calls[0]?.[0]).toBe(failure);
     await requestClose();
     expect(windowState.destroyed).toBe(1);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed restart after the install and the close shows the restart failure screen, and the next close quits", async () => {
+    await seededStore(["Alpha"]);
+    const failure = new Error("could not relaunch");
+    const log = logged();
+    vi.mocked(checkUpdate).mockResolvedValueOnce(offer([]));
+    vi.mocked(restart).mockRejectedValueOnce(failure);
+    const close = vi.spyOn(Registry.prototype, "close");
+    spyOpen();
+    render(
+      <>
+        <App />
+        <Toasts />
+      </>,
+    );
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
+    await settle();
+    const line = "WebBoard 0.2.0 is installed and everything is saved, but WebBoard could not restart: could not relaunch Quit WebBoard and start it again.";
+    expect(screen.getByText(line).className).toBe("start-bad");
+    expect(toolbar()).toBeNull();
+    expect(screen.queryAllByRole("status")).toEqual([]);
+    expect(log.mock.calls).toEqual([[failure]]);
+    expect(log.mock.calls[0]?.[0]).toBe(failure);
+    expect(close).toHaveBeenCalledTimes(1);
+    await requestClose();
+    expect(windowState.destroyed).toBe(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed check logs the original error", async () => {
+    await seededStore(["Alpha"]);
+    const failure = new Error("error sending request");
+    const log = logged();
+    vi.mocked(checkUpdate).mockRejectedValueOnce(failure);
+    spyOpen();
+    render(<App />);
+    await settle();
+    expect(screen.getByText("Could not check for updates: error sending request")).toBeTruthy();
+    expect(log.mock.calls).toEqual([[failure]]);
+    expect(log.mock.calls[0]?.[0]).toBe(failure);
   });
 });
 

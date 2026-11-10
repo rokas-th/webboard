@@ -85,6 +85,7 @@ describe("UpdateLine", () => {
     ["checkFailed", { k: "checkFailed", message: LONG }, [`Could not check for updates: ${LONG}`], ["Try again"]],
     ["installFailed", { k: "installFailed", version: "0.2.0", message: "signature verification failed" }, ["Could not install 0.2.0: signature verification failed"], ["Try again"]],
     ["closeFailed", { k: "closeFailed", version: "0.2.0", line: "WebBoard 0.2.0 is installed, but …" }, [], []],
+    ["restartFailed", { k: "restartFailed", version: "0.2.0", line: "WebBoard 0.2.0 is installed and everything is saved, but …" }, [], []],
   ];
 
   it.each(ROWS)("%s shows the version first, then its text and control", (_name, state, lines, controls) => {

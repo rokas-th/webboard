@@ -45,6 +45,8 @@
   "bundle": {
     "active": true,
     "category": "Productivity",
+    "shortDescription": "Project timeline planner",
+    "longDescription": "WebBoard plans projects on a timeline and keeps the plans in sync between your computers.",
     "macOS": {
       "signingIdentity": "-"
     },

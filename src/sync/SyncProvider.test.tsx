@@ -37,6 +37,10 @@ const fake = vi.hoisted(() => ({ factory: null as ProviderFactory | null }));
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 vi.mock("@tauri-apps/api/window", () => import("../test/tauriMock"));
+vi.mock("../services/updates", () => ({
+  check: vi.fn(async () => null),
+  restart: vi.fn(async () => undefined),
+}));
 vi.mock("./provider", async (importOriginal) => {
   const m = await importOriginal<typeof import("./provider")>();
   const yProviderFactory: ProviderFactory = (host, doc, ydoc, params) => {

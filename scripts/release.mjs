@@ -1,5 +1,6 @@
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { createHash, createPublicKey, verify } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { basename, join } from "node:path";
@@ -88,23 +89,34 @@ function repoVersion(root) {
   return m[1];
 }
 
+const TRUSTED = "trusted comment: ";
+
 /** @param {string} text @param {string} what */
-function keyIdOf(text, what) {
+function minisignLines(text, what) {
   const lines = Buffer.from(text.trim(), "base64").toString("utf8").split("\n");
   if (!lines[0].startsWith("untrusted comment:") || lines[1] === undefined) fail(`${what} is not a base64 minisign file`);
-  const raw = Buffer.from(lines[1].trim(), "base64");
-  if (raw.length < 10) fail(`${what} holds no minisign key id`);
-  return raw.subarray(2, 10).toString("hex").toUpperCase();
+  return lines;
 }
 
+/** @param {Buffer} raw */
+const keyIdOf = (raw) => raw.subarray(2, 10).toString("hex").toUpperCase();
+
 /** @param {string} root */
-async function pubkeyId(root) {
+async function pubkeyOf(root) {
   const conf = JSON.parse(await readFile(join(root, CONF), "utf8"));
   const pubkey = conf?.plugins?.updater?.pubkey;
   if (typeof pubkey !== "string" || pubkey.trim() === "") {
     fail(`plugins.updater.pubkey in ${join(root, CONF)} is empty: run owner step R1 (npx tauri signer generate -w ~/.tauri/webboard.key), put the content of ~/.tauri/webboard.key.pub there, commit, and build again.`);
   }
-  return keyIdOf(pubkey, `plugins.updater.pubkey in ${CONF}`);
+  const what = `plugins.updater.pubkey in ${CONF}`;
+  const raw = Buffer.from(minisignLines(pubkey, what)[1].trim(), "base64");
+  if (raw.length !== 42) fail(`${what} is ${raw.length} bytes, not a 42-byte minisign public key`);
+  const algorithm = raw.subarray(0, 2).toString("latin1");
+  if (algorithm !== "Ed") fail(`${what} is a minisign key of algorithm ${JSON.stringify(algorithm)}, not "Ed"`);
+  return {
+    id: keyIdOf(raw),
+    key: createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: raw.subarray(10).toString("base64url") }, format: "jwk" }),
+  };
 }
 
 /** @param {Buffer} block @param {number} at @param {number} len */
@@ -131,16 +143,16 @@ export function tarNames(gz) {
     const block = buf.subarray(off, off + 512);
     if (block.every((b) => b === 0)) return names;
     if ((block[124] & 0x80) !== 0) throw new Error(`tar entry at byte ${off} has a base-256 size, over any file a release holds`);
-    const sizeText = field(block, 124, 12).trim();
+    const sizeText = block.subarray(124, 136).toString("latin1").replace(/^[\0 ]+|[\0 ]+$/g, "");
+    if (!/^[0-7]*$/.test(sizeText)) throw new Error(`tar entry at byte ${off} has the size field ${JSON.stringify(sizeText)}, which is not octal digits`);
     const size = sizeText === "" ? 0 : parseInt(sizeText, 8);
-    if (Number.isNaN(size)) throw new Error(`tar entry at byte ${off} has the size field ${JSON.stringify(sizeText)}`);
     const type = String.fromCharCode(block[156]);
     const body = buf.subarray(off + 512, off + 512 + size);
     off += 512 + Math.ceil(size / 512) * 512;
     if (type === "x") next = paxPath(body) ?? next;
     else if (type === "L") next = field(body, 0, body.length);
     else if (type !== "g") {
-      const prefix = field(block, 257, 6).startsWith("ustar") ? field(block, 345, 155) : "";
+      const prefix = block.subarray(257, 263).toString("latin1") === "ustar\0" ? field(block, 345, 155) : "";
       const name = field(block, 0, 100);
       names.push(next ?? (prefix === "" ? name : `${prefix}/${name}`));
       next = null;
@@ -150,9 +162,10 @@ export function tarNames(gz) {
 }
 
 /** @param {string} file */
-async function tarEntries(file) {
+export async function tarEntries(file) {
+  const gz = await readFile(file);
   try {
-    return tarNames(await readFile(file));
+    return tarNames(gz);
   } catch (e) {
     fail(`${file} is not a gzip tarball WebBoard can read: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -184,14 +197,32 @@ function versionInName(file, version) {
   if (m[1] !== version) fail(`${file} is version ${m[1]}, not ${version}: build ${version} and take that artifact`);
 }
 
-/** @param {string} file @param {string} keyId */
-async function signatureOf(file, keyId) {
+/** @param {string} file @param {{ id: string, key: import("node:crypto").KeyObject }} pubkey */
+async function signatureOf(file, pubkey) {
   const sig = `${file}.sig`;
   if (!(await exists(sig))) fail(`${sig} is missing: ${SIGN(file)}`);
   const text = (await readFile(sig, "utf8")).trim();
-  const id = keyIdOf(text, sig);
-  if (id !== keyId) {
-    fail(`${sig} was signed with key ${id}, but the pubkey in ${CONF} is key ${keyId}: ${SIGN(file)} with the key whose .pub is in ${CONF}`);
+  const lines = minisignLines(text, sig);
+  const raw = Buffer.from(lines[1].trim(), "base64");
+  if (raw.length !== 74) fail(`${sig} holds a ${raw.length}-byte signature, not minisign's 74 bytes: ${SIGN(file)}`);
+  const id = keyIdOf(raw);
+  if (id !== pubkey.id) {
+    fail(`${sig} was signed with key ${id}, but the pubkey in ${CONF} is key ${pubkey.id}: ${SIGN(file)} with the key whose .pub is in ${CONF}`);
+  }
+  const algorithm = raw.subarray(0, 2).toString("latin1");
+  if (algorithm !== "ED") {
+    fail(`${sig} uses the minisign algorithm ${JSON.stringify(algorithm)}; only the prehashed "ED" that tauri signer writes is accepted: ${SIGN(file)}`);
+  }
+  const signature = raw.subarray(10);
+  const digest = createHash("blake2b512").update(await readFile(file)).digest();
+  if (!verify(null, digest, pubkey.key, signature)) {
+    fail(`${sig} is not a signature of ${file} by the key in ${CONF} (it was made for another file or another build of it): ${SIGN(file)}`);
+  }
+  const trusted = lines[2] ?? "";
+  if (!trusted.startsWith(TRUSTED) || lines[3] === undefined) fail(`${sig} has no trusted comment and global signature: ${SIGN(file)}`);
+  const global = Buffer.from(lines[3].trim(), "base64");
+  if (!verify(null, Buffer.concat([signature, Buffer.from(trusted.slice(TRUSTED.length), "utf8")]), pubkey.key, global)) {
+    fail(`${sig}'s trusted comment does not match its global signature, so the .sig was edited after signing: ${SIGN(file)}`);
   }
   return text;
 }
@@ -205,7 +236,7 @@ async function underLimit(file) {
 /** @param {string} root @param {string} version @param {string} notes */
 async function manifest(root, version, notes) {
   checkRepoVersion(root, version);
-  const keyId = await pubkeyId(root);
+  const pubkey = await pubkeyOf(root);
   const tarball = await onlyFile(join(root, MAC_DIR), (n) => n.endsWith("_aarch64.app.tar.gz"), "macOS update tarball (*_aarch64.app.tar.gz)", "run node scripts/release.mjs tarball after the Mac build");
   const deb = await onlyFile(join(root, DEB_DIR), (n) => n.endsWith(".deb"), ".deb", "copy the pop-os .deb there with scp (release.md section 6)");
   versionInName(tarball, version);
@@ -213,8 +244,8 @@ async function manifest(root, version, notes) {
   await underLimit(tarball);
   await underLimit(deb);
   await checkTarball(tarball);
-  const macSig = await signatureOf(tarball, keyId);
-  const debSig = await signatureOf(deb, keyId);
+  const macSig = await signatureOf(tarball, pubkey);
+  const debSig = await signatureOf(deb, pubkey);
 
   const releases = join(root, RELEASES);
   await mkdir(releases, { recursive: true });
@@ -226,6 +257,7 @@ async function manifest(root, version, notes) {
   const dropped = older.filter((v) => v !== previous);
 
   const dir = join(releases, version);
+  await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
   await copyFile(tarball, join(dir, basename(tarball)));
   await copyFile(deb, join(dir, basename(deb)));

@@ -49,6 +49,10 @@ fn close_every_window<R: tauri::Runtime>(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(not(target_vendor = "apple"))]
+    webboard_core::tls::install_default_provider()
+        .expect("WebBoard could not set its TLS provider");
+
     let builder = tauri::Builder::default();
 
     #[cfg(all(not(debug_assertions), any(target_os = "macos", target_os = "linux")))]
@@ -355,6 +359,55 @@ mod tests {
                 "target.'cfg(target_os = \"linux\")'.dependencies]",
             ],
             "the update plugins are declared outside the macOS and Linux dependency sections"
+        );
+        let updater_lines: Vec<&str> = MANIFEST
+            .lines()
+            .filter(|l| l.starts_with("tauri-plugin-updater"))
+            .collect();
+        assert_eq!(updater_lines.len(), 2, "tauri-plugin-updater is not declared once for macOS and once for Linux: {updater_lines:?}");
+        assert!(
+            updater_lines.iter().all(|l| l.contains("default-features = false") && !l.contains("\"zip\"")),
+            "tauri-plugin-updater keeps its default features or the zip feature, which neither the macOS tarball nor the Linux .deb uses: {updater_lines:?}"
+        );
+    }
+
+    #[test]
+    fn run_installs_one_tls_provider_before_anything_else_off_apple() {
+        let body = run_body();
+        let lines: Vec<&str> = body
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(
+            lines.first().copied(),
+            Some("#[cfg(not(target_vendor = \"apple\"))]"),
+            "run() does not open with the non-Apple TLS provider install: {:?}",
+            lines.first()
+        );
+        assert!(
+            lines
+                .get(1)
+                .is_some_and(|l| l.starts_with("webboard_core::tls::install_default_provider()")),
+            "run()'s first statement is not webboard_core::tls::install_default_provider(), so the updater's first check could make ring the TLS provider of holidays and sync: {:?}",
+            lines.get(1)
+        );
+    }
+
+    #[test]
+    fn the_package_describes_itself() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("tauri.conf.json is JSON");
+        assert_eq!(
+            conf["bundle"]["shortDescription"].as_str(),
+            Some("Project timeline planner"),
+            "bundle.shortDescription is not set, so the .deb says Description: (none)"
+        );
+        assert!(
+            conf["bundle"]["longDescription"]
+                .as_str()
+                .is_some_and(|d| d.ends_with('.') && d.len() > 20),
+            "bundle.longDescription is not one plain sentence"
         );
     }
 

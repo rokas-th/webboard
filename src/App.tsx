@@ -49,6 +49,7 @@ export default function App() {
         live.current = null;
       },
       restart: updater.restart,
+      report: (e) => console.error(e),
       now: Date.now,
       setTimer: (cb, ms) => {
         const id = window.setInterval(cb, ms);
@@ -102,7 +103,7 @@ export default function App() {
     if (updates === null) return;
     const off = updates.subscribe(() => {
       const s = updates.state();
-      if (s.k !== "closeFailed") return;
+      if (s.k !== "closeFailed" && s.k !== "restartFailed") return;
       live.current = null;
       setStart({ k: "failed", message: s.line, recovery: null });
     });

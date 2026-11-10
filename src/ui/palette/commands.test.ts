@@ -451,6 +451,7 @@ describe("update commands", () => {
     [{ k: "checkFailed", message: "offline" }, false],
     [{ k: "installFailed", version: "0.2.0", message: "x" }, true],
     [{ k: "closeFailed", version: "0.2.0", line: "x" }, false],
+    [{ k: "restartFailed", version: "0.2.0", line: "x" }, false],
   ];
 
   it.each(STATES)("in %j lists Check for updates always and Install update and restart only when it can install (%s)", async (state, installable) => {

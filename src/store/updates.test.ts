@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createUpdates, installedButNotSaved, type InstallProgress, type UpdateDeps, type UpdateState } from "./updates";
+import { createUpdates, installedButNotSaved, restartFailedLine, type InstallProgress, type UpdateDeps, type UpdateState } from "./updates";
 
 interface Found {
   version: string;
@@ -35,6 +35,7 @@ interface Harness {
   install: ReturnType<typeof vi.fn<(u: Found, onProgress: (p: InstallProgress) => void) => Promise<void>>>;
   closeRegistry: ReturnType<typeof vi.fn<() => Promise<void>>>;
   restart: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  report: ReturnType<typeof vi.fn<(e: unknown) => void>>;
 }
 
 function harness(over: Partial<UpdateDeps<Found>> = {}): Harness {
@@ -52,11 +53,13 @@ function harness(over: Partial<UpdateDeps<Found>> = {}): Harness {
   const restart = vi.fn<() => Promise<void>>(async () => {
     calls.push("restart");
   });
+  const report = vi.fn<(e: unknown) => void>(() => undefined);
   const deps: UpdateDeps<Found> = {
     check,
     install,
     closeRegistry,
     restart,
+    report,
     now: () => AT,
     setTimer: (cb, ms) => {
       const id = setInterval(cb, ms);
@@ -64,7 +67,7 @@ function harness(over: Partial<UpdateDeps<Found>> = {}): Harness {
     },
     ...over,
   };
-  return { deps, calls, check, install, closeRegistry, restart };
+  return { deps, calls, check, install, closeRegistry, restart, report };
 }
 
 afterEach(() => {
@@ -208,6 +211,38 @@ describe("checking", () => {
     expect(u.state().k).toBe(phase);
     u.stop();
   });
+
+  it.each(["available", "installFailed"] as const)("the 24 h check is skipped while an update is known (%s); the palette's check still checks", async (known) => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.check.mockResolvedValueOnce({ version: "0.2.0" });
+    if (known === "installFailed") h.install.mockRejectedValueOnce(new Error("connection reset"));
+    const u = createUpdates(h.deps);
+    u.start();
+    await vi.advanceTimersByTimeAsync(0);
+    if (known === "installFailed") await u.install();
+    expect(u.state().k).toBe(known);
+    h.check.mockRejectedValue(new Error("offline"));
+    await vi.advanceTimersByTimeAsync(3 * DAY);
+    expect(h.check).toHaveBeenCalledTimes(1);
+    expect(u.state().k).toBe(known);
+    await u.check();
+    expect(h.check).toHaveBeenCalledTimes(2);
+    expect(u.state()).toEqual({ k: "checkFailed", message: "offline" });
+    u.stop();
+  });
+
+  it("a subscriber's error after a check propagates as itself, not as a failed check", async () => {
+    const h = harness();
+    const u = createUpdates(h.deps);
+    const boom = new Error("the sidebar broke");
+    u.subscribe(() => {
+      if (u.state().k === "current") throw boom;
+    });
+    await expect(u.check()).rejects.toBe(boom);
+    expect(u.state()).toEqual({ k: "current", at: AT });
+    expect(h.report).not.toHaveBeenCalled();
+  });
 });
 
 describe("installing", () => {
@@ -330,12 +365,57 @@ describe("installing", () => {
     u.stop();
   });
 
-  it("a failed restart rejects install unchanged", async () => {
+  it("a failed restart after the install and the close is restartFailed with its copy, and nothing else is called", async () => {
     const h = harness();
     const u = await available(h);
     const failure = new Error("could not relaunch");
-    h.restart.mockRejectedValueOnce(failure);
-    await expect(u.install()).rejects.toBe(failure);
+    h.restart.mockImplementationOnce(async () => {
+      h.calls.push("restart");
+      throw failure;
+    });
+    await expect(u.install()).resolves.toBeUndefined();
+    const line = "WebBoard 0.2.0 is installed and everything is saved, but WebBoard could not restart: could not relaunch Quit WebBoard and start it again.";
+    expect(restartFailedLine("0.2.0", "could not relaunch")).toBe(line);
+    expect(u.state()).toEqual({ k: "restartFailed", version: "0.2.0", line });
+    await u.install();
+    await u.check();
+    expect(h.calls).toEqual(["check", "install 0.2.0", "closeRegistry", "restart"]);
+    u.stop();
+  });
+});
+
+describe("reporting", () => {
+  const failure = new Error("the original");
+
+  it("a failed check reports the original error", async () => {
+    const h = harness();
+    h.check.mockRejectedValueOnce(failure);
+    const u = createUpdates(h.deps);
+    await u.check();
+    expect(h.report.mock.calls).toEqual([[failure]]);
+    expect(h.report.mock.calls[0]?.[0]).toBe(failure);
+  });
+
+  it.each([
+    ["install", (h: Harness) => h.install.mockRejectedValueOnce(failure), "installFailed"],
+    ["closeRegistry", (h: Harness) => h.closeRegistry.mockRejectedValueOnce(failure), "closeFailed"],
+    ["restart", (h: Harness) => h.restart.mockRejectedValueOnce(failure), "restartFailed"],
+  ] as const)("a failed %s reports the original error", async (_name, fail, k) => {
+    const h = harness();
+    const u = await available(h);
+    fail(h);
+    await u.install();
+    expect(u.state().k).toBe(k);
+    expect(h.report).toHaveBeenCalledTimes(1);
+    expect(h.report.mock.calls[0]?.[0]).toBe(failure);
+    u.stop();
+  });
+
+  it("nothing is reported when every step succeeds", async () => {
+    const h = harness();
+    const u = await available(h);
+    await u.install();
+    expect(h.report).not.toHaveBeenCalled();
     u.stop();
   });
 });
