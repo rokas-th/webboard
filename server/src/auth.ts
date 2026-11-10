@@ -137,7 +137,7 @@ export function schema(sql: SqlStorage): void {
   sql.exec(
     'CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, revoked_at INTEGER)',
   );
-  sql.exec('CREATE TABLE IF NOT EXISTS codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER)');
+  sql.exec('CREATE TABLE IF NOT EXISTS codes (hash TEXT PRIMARY KEY, issuer TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)');
   sql.exec(
     'CREATE TABLE IF NOT EXISTS tickets (hash TEXT PRIMARY KEY, doc TEXT NOT NULL, device TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)',
   );
@@ -275,7 +275,7 @@ export async function pairCode(
       );
     }
     const expiresAt = now + CODE_TTL_MS;
-    sql.exec('INSERT INTO codes (hash, expires_at, used_at) VALUES (?, ?, NULL)', codeHash, expiresAt);
+    sql.exec('INSERT INTO codes (hash, issuer, expires_at, used_at) VALUES (?, ?, ?, NULL)', codeHash, who.id, expiresAt);
     return ok({ code: code.slice(0, 4) + '-' + code.slice(4), expiresAt });
   });
 }
@@ -305,7 +305,11 @@ export async function claim(
       return limited('Too many wrong pairing codes.', Math.max(...waits));
     }
     const found = sql
-      .exec('SELECT hash FROM codes WHERE hash = ? AND used_at IS NULL AND expires_at > ?', codeHash, now)
+      .exec(
+        'SELECT codes.hash FROM codes JOIN devices ON devices.id = codes.issuer WHERE codes.hash = ? AND codes.used_at IS NULL AND codes.expires_at > ? AND devices.revoked_at IS NULL',
+        codeHash,
+        now,
+      )
       .toArray();
     if (found.length === 0) {
       recordFailure(sql, [ipScope, spaceScope], now);
@@ -419,6 +423,7 @@ export async function removeDevice(
       return NO_SUCH_DEVICE;
     }
     sql.exec('UPDATE devices SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?', now, id);
+    sql.exec('DELETE FROM codes WHERE issuer = ? AND used_at IS NULL', id);
     return ok({ joins: joinsOf(sql, id) });
   });
 }

@@ -303,6 +303,50 @@ describe('auth', () => {
     });
   });
 
+  it('a pairing code records the device that made it', async () => {
+    await inSpace('code-issuer', async (storage) => {
+      const { token } = await enrolled(storage, DEV_A);
+      const code = await liveCode(storage, token);
+      const row = storage.sql.exec('SELECT issuer FROM codes WHERE hash = ?', await sha256Hex(code.replace('-', ''))).one();
+      expect(text(row, 'issuer')).toBe(DEV_A);
+    });
+  });
+
+  it('removing a device deletes the unused codes it made, and only those', async () => {
+    await inSpace('remove-codes', async (storage) => {
+      const a = await enrolled(storage, DEV_A);
+      const b = await enrolled(storage, DEV_B);
+      const used = await liveCode(storage, a.token);
+      value(await claim(storage, T, used, DEV_C, 'iPhone', '1.1.1.1'));
+      const stashed = await liveCode(storage, a.token);
+      const kept = await liveCode(storage, b.token);
+      value(await removeDevice(storage, T, b.token, DEV_A));
+      expect(
+        storage.sql
+          .exec('SELECT issuer, used_at IS NOT NULL AS used FROM codes ORDER BY issuer')
+          .toArray()
+          .map((row) => [text(row, 'issuer'), int(row, 'used')]),
+      ).toEqual([
+        [DEV_A, 1],
+        [DEV_B, 0],
+      ]);
+      expect(await claim(storage, T + 1, stashed, 'devD0000000', 'Laptop', '2.2.2.2')).toEqual(BAD_CODE);
+      expect(await claim(storage, T + 1, stashed, DEV_A, 'Phone', '3.3.3.3')).toEqual(BAD_CODE);
+      expect(await devices(storage, a.token)).toEqual(REVOKED);
+      expect(value(await claim(storage, T + 1, kept, 'devD0000000', 'Laptop', '4.4.4.4')).enrolled.deviceId).toBe('devD0000000');
+    });
+  });
+
+  it('a claim refuses a code whose issuer was removed', async () => {
+    await inSpace('claim-revoked-issuer', async (storage) => {
+      const a = await enrolled(storage, DEV_A);
+      const code = await liveCode(storage, a.token);
+      storage.sql.exec('UPDATE devices SET revoked_at = ? WHERE id = ?', T, DEV_A);
+      expect(await claim(storage, T + 1, code, DEV_B, 'iPad', '1.1.1.1')).toEqual(BAD_CODE);
+      expect(int(storage.sql.exec('SELECT used_at IS NULL AS unused FROM codes').one(), 'unused')).toBe(1);
+    });
+  });
+
   it('a ticket is single use, lives 60 s and is bound to its doc', async () => {
     await inSpace('ticket-life', async (storage) => {
       const { token } = await enrolled(storage, DEV_A);
