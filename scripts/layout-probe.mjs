@@ -1248,6 +1248,7 @@ window.__probeAct = function (a) {
     sp.scrollLeft = was;
     if (!stuck) return { fail: "the month label sits at " + Math.round(lr2.left) + " px, not " + Math.round(want) + " px, or is covered" };
     if (!under) return { fail: "the TODAY pill paints over the pinned corner: " + (over === null ? "nothing" : over.tagName.toLowerCase() + "." + String(over.className)) + " is in front" };
+    if (parseFloat(fade.left) < gr.clientWidth + 1) return { fail: "the chart's left fade starts at " + fade.left + ", on the task column's " + gr.clientWidth + " px border, not past it" };
     if (fade.width !== "28px" || fade.pointerEvents !== "none" || fade.backgroundImage.indexOf("linear-gradient") === -1) {
       return { fail: "the chart's left fade is " + fade.width + ", pointer-events " + fade.pointerEvents + ", " + fade.backgroundImage };
     }

@@ -498,7 +498,7 @@ describe("today and baselines", () => {
     act(() => {
       fireEvent.click(row("z"));
     });
-    expect([uiNow()[0].selected, uiNow()[0].reveal, scroll.scrollLeft, scroll.scrollTop]).toEqual(["z", null, g.x(toDay("2027-03-01")) - 160, 0]);
+    expect([uiNow()[0].selected, uiNow()[0].follow, scroll.scrollLeft, scroll.scrollTop]).toEqual(["z", null, g.x(toDay("2027-03-01")) - 160, 0]);
     act(() => {
       scroll.scrollLeft = g.x(toDay("2027-03-01")) - 600;
       fireEvent.scroll(scroll);
@@ -978,6 +978,50 @@ describe("keyboard rows", () => {
     act(() => uiNow()[1]({ selected: "t5" }));
     key("ArrowUp");
     expect([uiNow()[0].selected, scroll.scrollTop]).toEqual(["t4", 5 * 34]);
+  });
+
+  it("moves focus with the selection when a row has it", async () => {
+    await shown(SEED);
+    const row = (id: string): HTMLElement => one(`.tl-row[data-row="${id}"]`);
+    act(() => {
+      fireEvent.click(row("t3"));
+      row("t3").focus();
+    });
+    expect(document.activeElement).toBe(row("t3"));
+    key("ArrowDown", row("t3"));
+    expect([uiNow()[0].selected, document.activeElement === row("t4"), row("t4").getAttribute("aria-selected"), row("t4").tabIndex]).toEqual(["t4", true, "true", 0]);
+    key("ArrowUp", row("t4"));
+    key("ArrowUp", row("t3"));
+    expect([uiNow()[0].selected, document.activeElement === row("t2")]).toEqual(["t2", true]);
+  });
+
+  it("leaves focus where it is when no row has it", async () => {
+    await shown(SEED);
+    const outside = screen.getByRole("button", { name: "Today" });
+    act(() => outside.focus());
+    act(() => uiNow()[1]({ selected: "t3" }));
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it("puts a Go to row at the top and its start at the lead-in, even when it is already in view", async () => {
+    const t = await shown([
+      { id: "g", name: "G", kind: "group" },
+      ...Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, name: `T${i}`, parent: "g", start: i === 7 ? "2026-11-12" : "2026-11-10", dur: 1 })),
+    ]);
+    const scroll = one(".tl-scroll");
+    const g = geometry(t.session.view(), "W");
+    const opened = scroll.scrollLeft;
+    expect(g.x(toDay("2026-11-12")) - leadFor(1440 - 300)).toBeGreaterThan(opened);
+    act(() => uiNow()[1]({ selected: "t7", reveal: "t7" }));
+    expect([uiNow()[0].reveal, scroll.scrollTop, scroll.scrollLeft]).toEqual([null, 8 * 34, g.x(toDay("2026-11-12")) - leadFor(1440 - 300)]);
+    act(() => uiNow()[1]({ selected: "t7", follow: "t7" }));
+    expect([uiNow()[0].follow, scroll.scrollTop, scroll.scrollLeft]).toEqual([null, 8 * 34, g.x(toDay("2026-11-12")) - leadFor(1440 - 300)]);
+    act(() => {
+      scroll.scrollTop = 0;
+      fireEvent.scroll(scroll);
+    });
+    act(() => uiNow()[1]({ follow: "t7" }));
+    expect(scroll.scrollTop).toBe(0);
   });
 
   it("does nothing while a field has focus", async () => {

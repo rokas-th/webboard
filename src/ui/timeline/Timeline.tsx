@@ -161,19 +161,33 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     }
     const at = index.get(reveal);
     if (at === undefined) throw new Error(`Timeline: no row for ${reveal} to reveal`);
+    el.scrollTop = at * ROW;
+    setScrollTop(el.scrollTop);
+    const span = geo.span(reveal);
+    if (span !== null) scrollTo(el, geo.x(span.start) - leadIn(el));
+    setUi({ reveal: null });
+  }, [reveal, index, geo, today, empty, setUi]);
+
+  const follow = ui.follow;
+  useLayoutEffect(() => {
+    if (follow === null) return;
+    const el = scroller.current;
+    if (el === null) throw new Error("Timeline: no scroller");
+    const at = index.get(follow);
+    if (at === undefined) throw new Error(`Timeline: no row for ${follow} to keep in view`);
     const top = at * ROW;
     const shown = el.clientHeight - headHeight(el);
     if (top < el.scrollTop) el.scrollTop = top;
     else if (top + ROW > el.scrollTop + shown) el.scrollTop = Math.min(top, top + ROW - shown);
     setScrollTop(el.scrollTop);
-    const span = geo.span(reveal);
+    const span = geo.span(follow);
     if (span !== null) {
       const x0 = geo.x(span.start);
       const x1 = geo.x(span.end) + geo.ppd;
       if (x1 <= el.scrollLeft || x0 >= el.scrollLeft + chartWidth(el)) scrollTo(el, x0 - leadIn(el));
     }
-    setUi({ reveal: null });
-  }, [reveal, index, geo, today, empty, setUi]);
+    setUi({ follow: null });
+  }, [follow, index, geo, setUi]);
 
   const cancel = (): void => {
     drag.current = null;

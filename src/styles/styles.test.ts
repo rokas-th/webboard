@@ -278,7 +278,7 @@ describe("the Cyberdeck look", () => {
     const plain = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
     expect(Number(plain(".tl-today-label")["z-index"])).toBeLessThan(Number(plain(".tl-corner")["z-index"]));
     const fade = plain(".tl-grid::after");
-    expect([fade["left"], fade["width"], fade["background"], fade["pointer-events"]]).toEqual(["100%", "28px", "linear-gradient(to right, var(--void), transparent)", "none"]);
+    expect([fade["left"], fade["width"], fade["background"], fade["pointer-events"]]).toEqual(["calc(100% + 1px)", "28px", "linear-gradient(to right, var(--void), transparent)", "none"]);
   });
 
   it("insets the toolbar for the traffic lights only on macOS", () => {

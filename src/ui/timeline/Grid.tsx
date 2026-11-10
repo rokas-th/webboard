@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from "react";
 import type { ItemId, LinkType } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import type { SetUi, UiState } from "../state";
@@ -36,7 +37,7 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
     "aria-selected": selected,
     tabIndex: p.tabStop ? 0 : -1,
     style: { top: index * ROW, paddingLeft: row.kind === "group" ? pad - 4 : pad },
-    onClick: () => p.setUi({ selected: row.id, reveal: row.id }),
+    onClick: () => p.setUi({ selected: row.id, follow: row.id }),
   };
   if (row.kind === "ghost") {
     return (
@@ -86,9 +87,17 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
 
 export function Grid(p: { mounted: readonly Placed[]; count: number; view: PlanView; geo: Geometry; marks: Marks; ui: UiState; setUi: SetUi }) {
   const stop = p.mounted.some((m) => m.row.id === p.ui.selected) ? p.ui.selected : p.mounted.length === 0 ? null : p.mounted[0].row.id;
+  const list = useRef<HTMLDivElement>(null);
+  const selected = p.ui.selected;
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (el === null || selected === null || !el.contains(document.activeElement)) return;
+    const row = [...el.querySelectorAll("[data-row]")].find((r): r is HTMLElement => r instanceof HTMLElement && r.dataset.row === selected);
+    if (row !== undefined && row !== document.activeElement) row.focus({ preventScroll: true });
+  }, [selected, p.mounted]);
   return (
     <div className="tl-grid">
-      <div className="tl-rows" role="listbox" aria-label="Plan rows" style={{ height: p.count * ROW }}>
+      <div className="tl-rows" ref={list} role="listbox" aria-label="Plan rows" style={{ height: p.count * ROW }}>
         {p.mounted.map((placed) => (
           <GridRow key={placed.row.id} placed={placed} view={p.view} geo={p.geo} marks={p.marks} ui={p.ui} setUi={p.setUi} tabStop={placed.row.id === stop} />
         ))}

@@ -25,6 +25,7 @@ export interface UiState {
   baseline: BaselineId | null;
   dialog: DialogState | null;
   reveal: ItemId | "today" | null;
+  follow: ItemId | null;
   naming: ItemId | null;
 }
 
@@ -47,6 +48,7 @@ const DEFAULTS: UiState = {
   baseline: null,
   dialog: null,
   reveal: null,
+  follow: null,
   naming: null,
 };
 

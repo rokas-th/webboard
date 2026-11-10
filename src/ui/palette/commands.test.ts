@@ -40,6 +40,7 @@ const UI: UiState = {
   baseline: null,
   dialog: null,
   reveal: null,
+  follow: null,
   naming: null,
 };
 
@@ -265,15 +266,15 @@ describe("commands()", () => {
       step({ selected: "g1", collapsed: new Set(["g1"]) }, "select-next"),
       step({ selected: "u" }, "select-next"),
     ]).toEqual([
-      [[{ selected: "g1", reveal: "g1" }]],
-      [[{ selected: "m", reveal: "m" }]],
-      [[{ selected: "a", reveal: "a" }]],
-      [[{ selected: "one", reveal: "one" }]],
-      [[{ selected: "b", reveal: "b" }]],
-      [[{ selected: "g1", reveal: "g1" }]],
-      [[{ selected: "m", reveal: "m" }]],
-      [[{ selected: "one", reveal: "one" }]],
-      [[{ selected: "g1", reveal: "g1" }]],
+      [[{ selected: "g1", follow: "g1" }]],
+      [[{ selected: "m", follow: "m" }]],
+      [[{ selected: "a", follow: "a" }]],
+      [[{ selected: "one", follow: "one" }]],
+      [[{ selected: "b", follow: "b" }]],
+      [[{ selected: "g1", follow: "g1" }]],
+      [[{ selected: "m", follow: "m" }]],
+      [[{ selected: "one", follow: "one" }]],
+      [[{ selected: "g1", follow: "g1" }]],
     ]);
     expect([find(harness(t).ctx, "select-next").keys, find(harness(t).ctx, "select-prev").keys]).toEqual(["↓", "↑"]);
   });

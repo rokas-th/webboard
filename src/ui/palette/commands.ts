@@ -200,7 +200,7 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
       const at = rows.findIndex((r) => r.id === ctx.ui.selected);
       const next = at < 0 ? (by > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + by));
       const target = rows[next].id;
-      ctx.setUi({ selected: target, reveal: target });
+      ctx.setUi({ selected: target, follow: target });
     },
   });
   const steps = ctx.ui.view === "timeline" ? [step("select-next", "Select the next row", "↓", 1), step("select-prev", "Select the previous row", "↑", -1)] : [];
