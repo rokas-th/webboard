@@ -16,6 +16,15 @@
   padding-top: 6px;
 }
 
+html[data-form="compact"] .cal-grid {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 6px;
+}
+
+html[data-form="compact"] .cal-grid > label {
+  padding-top: 8px;
+}
+
 .region-picker {
   display: flex;
   flex-direction: column;
@@ -86,6 +95,18 @@
   grid-template-columns: minmax(0, 1fr) 132px 132px auto;
   gap: 6px;
   margin-top: 6px;
+}
+
+.closure-add input {
+  width: 100%;
+}
+
+html[data-form="compact"] .closure-add {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+html[data-form="compact"] .closure-add input[type="text"] {
+  grid-column: 1 / -1;
 }
 
 .modal .note {
@@ -205,7 +226,9 @@
   text-decoration: underline;
 }
 
-.line-button:hover:not(:disabled) {
-  background: transparent;
-  color: var(--heading);
+@media (hover: hover) {
+  .line-button:hover:not(:disabled) {
+    background: transparent;
+    color: var(--heading);
+  }
 }

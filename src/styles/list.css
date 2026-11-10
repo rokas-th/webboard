@@ -57,8 +57,10 @@ table.list tbody tr {
   transition: background 0.12s ease-out;
 }
 
-table.list tbody tr:hover {
-  background: var(--panel-2);
+@media (hover: hover) {
+  table.list tbody tr:hover {
+    background: var(--panel-2);
+  }
 }
 
 table.list tr.selected td {
@@ -84,8 +86,10 @@ table.list tr.grp td {
   cursor: default;
 }
 
-table.list tr.grp:hover {
-  background: none;
+@media (hover: hover) {
+  table.list tr.grp:hover {
+    background: none;
+  }
 }
 
 .st.conflict {

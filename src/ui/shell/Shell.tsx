@@ -6,13 +6,15 @@ import { AppError } from "../../services/ipc";
 import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { About } from "../common/About";
+import { Sheet } from "../common/Sheet";
 import { toast, Toasts } from "../common/Toast";
 import { revealPatch } from "../choices/HeadCounts";
 import { commands, type CommandCtx } from "../palette/commands";
 import { isTyping, keyToCommand } from "../palette/keymap";
 import { Palette } from "../palette/Palette";
+import { PhoneShell } from "../phone/PhoneShell";
 import { OpenChoice, runWith } from "../run";
-import { pickPlan, UiContext, useUi } from "../state";
+import { UiContext, useUi, useUiValue } from "../state";
 import { Board } from "../board/Board";
 import { CalendarDialog } from "../calendar/CalendarDialog";
 import { ChoiceDialog } from "../choices/ChoiceDialog";
@@ -27,11 +29,12 @@ import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
 import { RemovedBanner } from "../sync/RemovedBanner";
 import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
+import { useFormFactor } from "./formFactor";
 import { FILES_STAY, PlanFailed, ReloadButton } from "./PlanFailed";
-import { importFlow } from "./fileFlows";
 import { PlanHead } from "./PlanHead";
 import { PlanMenu } from "./PlanMenu";
 import { ReloadConfirm } from "./ReloadConfirm";
+import { messageOf, quoted, surfaced, usePlanFiles, usePlanSelection } from "./selection";
 import { NewPlanButton, Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 import { Tray } from "./Tray";
@@ -42,17 +45,7 @@ export interface ShellProps {
   clock: Clock;
 }
 
-type Main =
-  | { k: "none" }
-  | { k: "opening"; id: PlanId }
-  | { k: "open"; id: PlanId; session: PlanSession }
-  | { k: "incomplete"; id: PlanId; message: string }
-  | { k: "failed"; id: PlanId }
-  | { k: "error"; id: PlanId; message: string };
-
-const quoted = (l: PlanListing | undefined): string => (l === undefined || l.name === null ? "the plan" : `“${l.name}”`);
-
-const capital = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+type CompactSheet = "plans" | "plan" | null;
 
 function trashRootOf(s: PlanSession, id: ItemId): ItemId {
   const plan = s.view().plan;
@@ -62,16 +55,10 @@ function trashRootOf(s: PlanSession, id: ItemId): ItemId {
   return parent !== undefined && parent.trashed ? trashRootOf(s, parent.id) : id;
 }
 
-const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
-function surfaced(e: unknown): string {
-  if (e instanceof AppError || e instanceof Refused) return e.message;
-  throw e;
-}
-
-function takeRepair(s: PlanSession): void {
-  const notice = s.takeRepairNotice();
-  if (notice !== null) toast(notice);
+function itemName(s: PlanSession, id: ItemId): string {
+  const it = s.view().plan.items.get(id);
+  if (it === undefined) throw new Error(`Shell: no item ${id}`);
+  return it.name;
 }
 
 function Banner(p: { message: string; children?: ReactNode }) {
@@ -101,113 +88,18 @@ function IndexBanner(p: { registry: Registry; error: AppError }) {
   );
 }
 
-export function Shell(p: ShellProps) {
+function WideBody(p: ShellProps & { compact: boolean }) {
   const registry = p.registry;
+  const compact = p.compact;
   const { state: syncState } = useSyncState();
   const updates = useUpdates();
   useUpdateState(updates);
-  const [ui, setUi] = useUi();
-  const uiValue = useMemo(() => ({ ui, setUi }), [ui, setUi]);
+  const { ui, setUi } = useUiValue();
+  const { main, open: openPlan, trashOwn } = usePlanSelection(registry);
+  const { creating, importing, newPlan, importPlan } = usePlanFiles(registry, openPlan);
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
-  const [main, setMainState] = useState<Main>({ k: "none" });
-  const [creating, setCreating] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const selected = useRef(ui.plan);
-  const mainRef = useRef<Main>(main);
-  const creatingRef = useRef(false);
-  const ownTrash = useRef(new Set<PlanId>());
+  const [sheet, setSheet] = useState<CompactSheet>(null);
   const selectedItem = useRef<ItemId | null>(ui.selected);
-  const lastTrashed = useRef(new Map<PlanId, boolean>());
-
-  const setMain = useCallback((m: Main) => {
-    mainRef.current = m;
-    setMainState(m);
-  }, []);
-
-  const select = useCallback(
-    (id: PlanId | null) => {
-      if (id === selected.current) {
-        setUi({ plan: id });
-        return;
-      }
-      selected.current = id;
-      selectedItem.current = null;
-      setUi({ plan: id, selected: null, dialog: null });
-    },
-    [setUi],
-  );
-
-  const open = useCallback(
-    (id: PlanId) => {
-      const m = mainRef.current;
-      if (!(m.k === "incomplete" && m.id === id)) setMain({ k: "opening", id });
-      registry.session(id).then(
-        (s) => {
-          if (selected.current !== id) return;
-          setMain({ k: "open", id, session: s });
-          takeRepair(s);
-        },
-        (e: unknown) => {
-          const recorded = e instanceof AppError && registry.failures().get(id) === e;
-          const incomplete = e instanceof AppError && e.code === "plan.incomplete";
-          if (!recorded && !incomplete) {
-            if (selected.current === id) setMain({ k: "error", id, message: messageOf(e) });
-            throw e;
-          }
-          if (selected.current !== id) return;
-          setMain(incomplete ? { k: "incomplete", id, message: e.message } : { k: "failed", id });
-        },
-      );
-    },
-    [registry, setMain],
-  );
-
-  useEffect(() => {
-    const takeIndexRepair = (): void => {
-      const notice = registry.takeIndexRepairNotice();
-      if (notice !== null) toast(notice);
-    };
-    const remember = (plans: readonly PlanListing[]): void => {
-      lastTrashed.current = new Map(plans.map((l) => [l.id, l.trashed]));
-    };
-    const reselect = (plans: readonly PlanListing[]): boolean => {
-      const next = pickPlan(plans, selected.current);
-      if (next === selected.current) return false;
-      select(next);
-      return true;
-    };
-    const onNotify = (): void => {
-      bump();
-      const plans = registry.plans();
-      const current = selected.current;
-      const listing = plans.find((l) => l.id === current);
-      if (current !== null && listing !== undefined && listing.trashed && lastTrashed.current.get(current) === false && !ownTrash.current.has(current)) {
-        toast(`${capital(quoted(listing))} was moved to the Trash on another device. Restore it from the Trash.`);
-      }
-      remember(plans);
-      if (!reselect(plans) && current !== null) {
-        const m = mainRef.current;
-        if (m.k === "incomplete" && m.id === current) open(current);
-        if (m.k === "failed" && m.id === current && !registry.failures().has(current)) open(current);
-      }
-      takeIndexRepair();
-    };
-    const plans = registry.plans();
-    remember(plans);
-    reselect(plans);
-    takeIndexRepair();
-    return registry.subscribe(onNotify);
-  }, [registry, select, open]);
-
-  useEffect(() => {
-    if (ui.plan === null) {
-      setMain({ k: "none" });
-      return;
-    }
-    if (pickPlan(registry.plans(), ui.plan) !== ui.plan) return;
-    selected.current = ui.plan;
-    open(ui.plan);
-  }, [ui.plan, registry, open, setMain]);
 
   const session = main.k === "open" && main.id === ui.plan ? main.session : null;
 
@@ -241,27 +133,9 @@ export function Shell(p: ShellProps) {
     };
     return session.subscribe(() => {
       bump();
-      takeRepair(session);
       letGo();
     });
   }, [session, setUi, registry]);
-
-  useEffect(() => {
-    const onError = (e: ErrorEvent): void => {
-      const error: unknown = e.error;
-      if (error === null || error === undefined) return;
-      toast(messageOf(error), "bad");
-    };
-    const onRejection = (e: PromiseRejectionEvent): void => {
-      toast(messageOf(e.reason), "bad");
-    };
-    window.addEventListener("error", onError);
-    window.addEventListener("unhandledrejection", onRejection);
-    return () => {
-      window.removeEventListener("error", onError);
-      window.removeEventListener("unhandledrejection", onRejection);
-    };
-  }, []);
 
   const openChoice = useCallback(
     (choice: string, side?: string) => setUi({ dialog: side === undefined ? { t: "choice", id: choice } : { t: "choice", id: choice, side } }),
@@ -272,43 +146,8 @@ export function Shell(p: ShellProps) {
 
   const clearNaming = useCallback(() => setUi({ naming: null }), [setUi]);
 
-  const newPlan = (): void => {
-    if (creatingRef.current) return;
-    creatingRef.current = true;
-    setCreating(true);
-    registry
-      .createPlan("New plan")
-      .then(
-        (id) => select(id),
-        (e: unknown) => toast(surfaced(e), "bad"),
-      )
-      .finally(() => {
-        creatingRef.current = false;
-        setCreating(false);
-      });
-  };
-
-  const importPlan = (): void => {
-    setImporting(true);
-    void importFlow(registry, (id) => select(id)).finally(() => setImporting(false));
-  };
-
   const plans = registry.plans();
   const listingOf = (id: PlanId): PlanListing | undefined => plans.find((l) => l.id === id);
-
-  const trash = (id: PlanId): void => {
-    const listing = listingOf(id);
-    ownTrash.current.add(id);
-    try {
-      registry.trashPlan(id);
-    } catch (e) {
-      toast(surfaced(e), "bad");
-      return;
-    } finally {
-      ownTrash.current.delete(id);
-    }
-    toast(`Moved ${quoted(listing)} to the Trash. Restore it from the Trash.`);
-  };
 
   const moveToSpace = (id: PlanId): void => {
     try {
@@ -362,7 +201,7 @@ export function Shell(p: ShellProps) {
     readOnly,
     mac,
     clock: p.clock,
-    select,
+    select: openPlan,
     newPlan,
     reveal,
     updates,
@@ -420,7 +259,7 @@ export function Shell(p: ShellProps) {
       );
     }
     if (failure !== undefined && (session === null || (listing !== undefined && !listing.loaded))) {
-      return <PlanFailed registry={registry} id={sel} error={failure} onTrash={trash} />;
+      return <PlanFailed registry={registry} id={sel} error={failure} onTrash={(id) => void trashOwn(id)} />;
     }
     if (main.k === "incomplete" && main.id === sel) {
       if (!stopsArrival(syncState, sel)) return <p className="main-note">{main.message}</p>;
@@ -435,10 +274,10 @@ export function Shell(p: ShellProps) {
         </div>
       );
     }
-    if (main.k === "error" && main.id === sel) {
+    if (main.k === "failed" && main.id === sel) {
       return (
-        <Banner message={main.message}>
-          <button type="button" className="button-small" onClick={() => open(sel)}>
+        <Banner message={main.error.message}>
+          <button type="button" className="button-small" onClick={() => openPlan(sel)}>
             Try again
           </button>
         </Banner>
@@ -459,7 +298,7 @@ export function Shell(p: ShellProps) {
           local={registry.device.name}
           onChoose={(choice) => openChoice(choice)}
           menu={(open, setOpen) => (
-            <PlanMenu session={session} registry={registry} open={open} onOpenChange={setOpen} onOpen={(id) => select(id)} />
+            <PlanMenu session={session} registry={registry} open={open} onOpenChange={setOpen} onOpen={(id) => openPlan(id)} />
           )}
         >
           <HolidayState session={session} registry={registry} clock={p.clock} />
@@ -476,81 +315,137 @@ export function Shell(p: ShellProps) {
     );
   })();
 
+  const sidebar = (
+    <Sidebar
+      registry={registry}
+      plans={plans}
+      selected={sel}
+      creating={creating}
+      onNew={newPlan}
+      onSelect={(id) => openPlan(id)}
+      onTrash={(id) => void trashOwn(id)}
+      onRestore={restore}
+      onMove={moveToSpace}
+    />
+  );
+
+  const selectedItemShown = session !== null && ui.selected !== null && session.view().plan.items.has(ui.selected) ? ui.selected : null;
+  const itemPanel = (item: ItemId, s: PlanSession) => (
+    <ItemPanel key={item} session={s} item={item} local={registry.device.name} mac={mac} readOnly={readOnly} naming={ui.naming === item} onNamed={clearNaming} />
+  );
+  const closeSheet = (): void => setSheet(null);
+  useEffect(() => {
+    if (session === null && sheet === "plan") setSheet(null);
+  }, [session, sheet]);
+  const sheets = compact && ui.dialog === null && (
+    <>
+      <Sheet open={sheet === "plans"} title="Plans" onClose={closeSheet}>
+        {sidebar}
+      </Sheet>
+      {session !== null && (
+        <Sheet open={sheet === "plan"} title="Plan" onClose={closeSheet}>
+          <PlanPanel session={session} readOnly={readOnly} />
+        </Sheet>
+      )}
+      {session !== null && selectedItemShown !== null && (
+        <Sheet open={sheet === null} title={itemName(session, selectedItemShown)} onClose={() => setUi({ selected: null })}>
+          {itemPanel(selectedItemShown, session)}
+        </Sheet>
+      )}
+    </>
+  );
+
+  return (
+    <OpenChoice.Provider value={openChoice}>
+      <div className="app">
+        <Toolbar
+          session={session}
+          readOnly={readOnly}
+          ui={ui}
+          setUi={setUi}
+          mac={mac}
+          onCommand={runCommand}
+          compact={compact ? { onPlans: () => setSheet("plans"), onPlan: () => setSheet("plan") } : null}
+        />
+        <div className="app-body">
+          {!compact && sidebar}
+          <main className="main">
+            <RemovedBanner session={session} />
+            {indexError !== null && <IndexBanner registry={registry} error={indexError} />}
+            {registry.indexUnreadable().map((line) => (
+              <p key={line} className="banner bad">
+                {line}
+              </p>
+            ))}
+            {settingsError !== null && (
+              <Banner message={settingsError.message}>
+                <button type="button" className="button-small" onClick={() => void registry.retrySettings()}>
+                  Try again
+                </button>
+              </Banner>
+            )}
+            {content}
+          </main>
+          {session !== null && !compact && (
+            <div className="slot slot-panel" data-slot="panel">
+              {selectedItemShown !== null ? itemPanel(selectedItemShown, session) : <PlanPanel session={session} readOnly={readOnly} />}
+            </div>
+          )}
+        </div>
+        {sheets}
+        {session !== null && ui.dialog !== null && ui.dialog.t === "calendar" && (
+          <CalendarDialog key={session.view().plan.id} session={session} registry={registry} clock={p.clock} onClose={() => setUi({ dialog: null })} />
+        )}
+        {session !== null && ui.dialog !== null && ui.dialog.t === "choice" && (
+          <ChoiceDialog
+            key={`${session.view().plan.id}:${ui.dialog.id}:${ui.dialog.side ?? ""}`}
+            session={session}
+            id={ui.dialog.id}
+            side={ui.dialog.side}
+            local={registry.device.name}
+            onClose={closeDialog}
+          />
+        )}
+        {session !== null && ui.dialog !== null && ui.dialog.t === "revert" && (
+          <RevertDialog key={ui.dialog.id} session={session} id={ui.dialog.id} onClose={() => setUi({ dialog: null })} />
+        )}
+        {ui.dialog !== null && ui.dialog.t === "palette" && <Palette commands={commands(ctx)} onClose={closeDialog} />}
+        {ui.dialog !== null && ui.dialog.t === "about" && <About onClose={closeDialog} />}
+        {ui.dialog !== null && ui.dialog.t === "sync" && <SyncDialog pane={ui.dialog.pane} onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />}
+        <Toasts />
+      </div>
+    </OpenChoice.Provider>
+  );
+}
+
+function WideShell(p: ShellProps & { compact: boolean }) {
+  const [ui, setUi] = useUi();
+  const uiValue = useMemo(() => ({ ui, setUi }), [ui, setUi]);
   return (
     <UiContext.Provider value={uiValue}>
-      <OpenChoice.Provider value={openChoice}>
-        <div className="app">
-          <Toolbar session={session} readOnly={readOnly} ui={ui} setUi={setUi} mac={mac} onCommand={runCommand} />
-          <div className="app-body">
-            <Sidebar
-              registry={registry}
-              plans={plans}
-              selected={sel}
-              creating={creating}
-              onNew={newPlan}
-              onSelect={(id) => select(id)}
-              onTrash={trash}
-              onRestore={restore}
-              onMove={moveToSpace}
-            />
-            <main className="main">
-              <RemovedBanner session={session} />
-              {indexError !== null && <IndexBanner registry={registry} error={indexError} />}
-              {registry.indexUnreadable().map((line) => (
-                <p key={line} className="banner bad">
-                  {line}
-                </p>
-              ))}
-              {settingsError !== null && (
-                <Banner message={settingsError.message}>
-                  <button type="button" className="button-small" onClick={() => void registry.retrySettings()}>
-                    Try again
-                  </button>
-                </Banner>
-              )}
-              {content}
-            </main>
-            {session !== null && (
-              <div className="slot slot-panel" data-slot="panel">
-                {ui.selected !== null && session.view().plan.items.has(ui.selected) ? (
-                  <ItemPanel
-                    key={ui.selected}
-                    session={session}
-                    item={ui.selected}
-                    local={registry.device.name}
-                    mac={mac}
-                    readOnly={readOnly}
-                    naming={ui.naming === ui.selected}
-                    onNamed={clearNaming}
-                  />
-                ) : (
-                  <PlanPanel session={session} readOnly={readOnly} />
-                )}
-              </div>
-            )}
-          </div>
-          {session !== null && ui.dialog !== null && ui.dialog.t === "calendar" && (
-            <CalendarDialog key={session.view().plan.id} session={session} registry={registry} clock={p.clock} onClose={() => setUi({ dialog: null })} />
-          )}
-          {session !== null && ui.dialog !== null && ui.dialog.t === "choice" && (
-            <ChoiceDialog
-              key={`${session.view().plan.id}:${ui.dialog.id}:${ui.dialog.side ?? ""}`}
-              session={session}
-              id={ui.dialog.id}
-              side={ui.dialog.side}
-              local={registry.device.name}
-              onClose={closeDialog}
-            />
-          )}
-          {session !== null && ui.dialog !== null && ui.dialog.t === "revert" && (
-            <RevertDialog key={ui.dialog.id} session={session} id={ui.dialog.id} onClose={() => setUi({ dialog: null })} />
-          )}
-          {ui.dialog !== null && ui.dialog.t === "palette" && <Palette commands={commands(ctx)} onClose={closeDialog} />}
-          {ui.dialog !== null && ui.dialog.t === "about" && <About onClose={closeDialog} />}
-          {ui.dialog !== null && ui.dialog.t === "sync" && <SyncDialog pane={ui.dialog.pane} onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />}
-          <Toasts />
-        </div>
-      </OpenChoice.Provider>
+      <WideBody registry={p.registry} clock={p.clock} compact={p.compact} />
     </UiContext.Provider>
   );
+}
+
+export function Shell(p: ShellProps) {
+  const form = useFormFactor();
+  useEffect(() => {
+    const onError = (e: ErrorEvent): void => {
+      const error: unknown = e.error;
+      if (error === null || error === undefined) return;
+      toast(messageOf(error), "bad");
+    };
+    const onRejection = (e: PromiseRejectionEvent): void => {
+      toast(messageOf(e.reason), "bad");
+    };
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, []);
+  if (form === "phone") return <PhoneShell registry={p.registry} clock={p.clock} />;
+  return <WideShell registry={p.registry} clock={p.clock} compact={form === "compact"} />;
 }

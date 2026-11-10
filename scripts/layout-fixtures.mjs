@@ -401,10 +401,11 @@ function blankLog() {
   return log;
 }
 
-function localIndex(plans) {
+function localIndex(plans, trashed) {
   const log = new Log("ixLoc", START);
   log.act({ lbl: "Name device", w: [own("dn:mac", "Mac"), own("dn:iphone", "iPhone")] });
   plans.forEach((id) => log.act({ lbl: "Add plan", w: [own(`ip:${id}`, { t: false })] }));
+  if (trashed) plans.forEach((id) => log.act({ lbl: "Move plan to Trash", w: [own(`ip:${id}`, { t: true })] }));
   return log.doc();
 }
 
@@ -426,9 +427,9 @@ const SUBDIVISIONS = {
   ],
 };
 
-function fixtureOf(plans) {
+function fixtureOf(plans, o = { trashed: false }) {
   const docs = {
-    local: frame(localIndex(plans.map((p) => p.id))),
+    local: frame(localIndex(plans.map((p) => p.id), o.trashed)),
     ...Object.fromEntries(plans.map((p) => [p.id, frame(p.log.doc())])),
   };
   return {
@@ -494,6 +495,7 @@ export function buildFixtures() {
   const unreadable = fixtureOf([mesa(unreadableLog())]);
   const fixtures = {
     empty: fixtureOf([]),
+    "all-trashed": fixtureOf([mesa(mesaLog("mesaT"))], { trashed: true }),
     "blank-plan": fixtureOf([{ id: PLAN_IDS.blank, name: "Blank plan", log: blankLog() }]),
     mesa: mesaOnMac,
     "mesa-linux": onLinux(mesaOnMac),

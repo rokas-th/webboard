@@ -18,6 +18,7 @@ interface ToolbarProps {
   setUi(patch: Partial<UiState>): void;
   mac: boolean;
   onCommand(id: string): void;
+  compact: { onPlans(): void; onPlan(): void } | null;
 }
 
 function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState; setUi(patch: Partial<UiState>): void }) {
@@ -67,6 +68,11 @@ function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState;
 export function Toolbar(p: ToolbarProps) {
   return (
     <header className={p.mac ? "toolbar toolbar-mac" : "toolbar"} data-tauri-drag-region>
+      {p.compact !== null && (
+        <button type="button" onClick={p.compact.onPlans}>
+          Plans
+        </button>
+      )}
       <span className="wordmark">WebBoard</span>
       {p.session === null ? (
         <span className="toolbar-spacer" />
@@ -87,6 +93,11 @@ export function Toolbar(p: ToolbarProps) {
         </>
       )}
       <SyncChip />
+      {p.compact !== null && p.session !== null && (
+        <button type="button" onClick={p.compact.onPlan}>
+          Plan
+        </button>
+      )}
     </header>
   );
 }

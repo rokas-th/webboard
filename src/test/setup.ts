@@ -28,8 +28,18 @@ if (Element.prototype.setPointerCapture === undefined) {
 }
 const scrollIntoView = vi.fn<(this: Element, arg?: boolean | ScrollIntoViewOptions) => void>();
 Element.prototype.scrollIntoView = scrollIntoView;
+
+export function setScreen(w: number, h: number): void {
+  Object.defineProperty(window.screen, "width", { configurable: true, value: w });
+  Object.defineProperty(window.screen, "height", { configurable: true, value: h });
+  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: w });
+  Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: h });
+  window.dispatchEvent(new Event("resize"));
+}
+
 beforeEach(() => {
   scrollIntoView.mockClear();
+  setScreen(1440, 900);
 });
 if (!("isContentEditable" in HTMLElement.prototype)) {
   Object.defineProperty(HTMLElement.prototype, "isContentEditable", {

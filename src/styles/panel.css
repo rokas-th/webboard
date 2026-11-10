@@ -46,8 +46,10 @@
   white-space: nowrap;
 }
 
-.panel .title-input:hover {
-  border-color: var(--line);
+@media (hover: hover) {
+  .panel .title-input:hover {
+    border-color: var(--line);
+  }
 }
 
 .panel .as-text {
@@ -147,9 +149,11 @@
   color: var(--dim);
 }
 
-.x:hover:not(:disabled) {
-  color: var(--magenta);
-  background: rgba(255, 59, 107, 0.06);
+@media (hover: hover) {
+  .x:hover:not(:disabled) {
+    color: var(--magenta);
+    background: rgba(255, 59, 107, 0.06);
+  }
 }
 
 .suggest {

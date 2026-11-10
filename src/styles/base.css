@@ -13,6 +13,14 @@ body,
 html,
 body {
   background: var(--void);
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+.app {
+  height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 body {
@@ -48,10 +56,12 @@ button {
   transition: color 0.12s ease-out, border-color 0.12s ease-out, background 0.12s ease-out, box-shadow 0.12s ease-out;
 }
 
-button:hover:not(:disabled) {
-  color: var(--cyan);
-  border-color: var(--cyan-dim);
-  background: var(--hover);
+@media (hover: hover) {
+  button:hover:not(:disabled) {
+    color: var(--cyan);
+    border-color: var(--cyan-dim);
+    background: var(--hover);
+  }
 }
 
 button:disabled {
@@ -73,8 +83,10 @@ textarea:focus-visible,
   border-color: var(--cyan);
 }
 
-.button-primary:hover:not(:disabled) {
-  box-shadow: 0 0 12px rgba(36, 224, 255, 0.35);
+@media (hover: hover) {
+  .button-primary:hover:not(:disabled) {
+    box-shadow: 0 0 12px rgba(36, 224, 255, 0.35);
+  }
 }
 
 .button-danger {
@@ -82,11 +94,13 @@ textarea:focus-visible,
   border-color: var(--magenta);
 }
 
-.button-danger:hover:not(:disabled) {
-  color: var(--magenta);
-  border-color: var(--magenta);
-  box-shadow: 0 0 12px rgba(255, 59, 107, 0.35);
-  background: rgba(255, 59, 107, 0.06);
+@media (hover: hover) {
+  .button-danger:hover:not(:disabled) {
+    color: var(--magenta);
+    border-color: var(--magenta);
+    box-shadow: 0 0 12px rgba(255, 59, 107, 0.35);
+    background: rgba(255, 59, 107, 0.06);
+  }
 }
 
 .button-small {

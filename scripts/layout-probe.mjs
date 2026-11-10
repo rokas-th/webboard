@@ -22,21 +22,18 @@ const TYPES = {
   ".ico": "image/x-icon",
 };
 
-const DESKTOP = [
-  [1180, 760],
-  [1440, 920],
-  [1920, 1080],
-  [1024, 700],
-];
+const desk = (w, h) => ({ size: [w, h], screen: [w, h], touch: false, form: "full" });
+const touch = (w, h, form) => ({ size: [w, h], screen: [w, h], touch: true, form });
 
-const DIALOG = [
-  [1180, 820],
-  [820, 1180],
-];
+const DESKTOP = [desk(1180, 760), desk(1440, 920), desk(1920, 1080), desk(1024, 700)];
+const PHONE = [touch(390, 844, "phone")];
+const PORTRAIT = [touch(820, 1180, "compact")];
+const LANDSCAPE = [touch(1180, 820, "full"), touch(1366, 1024, "full")];
+const NARROW = [{ size: [500, 820], screen: [820, 1180], touch: true, form: "compact" }];
+const SMALLEST = [desk(1024, 700)];
+const VIEWPORTS = [...DESKTOP, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
 
-const SMALLEST = [[1024, 700]];
-
-const FULL_MIN_WIDTH = 1024;
+const nameOf = (v) => `${v.size[0]}x${v.size[1]}`;
 const READY_MS = 5000;
 const QUIET_MS = 4000;
 const SEND_TIMEOUT_MS = 30_000;
@@ -55,6 +52,7 @@ const expect = (selector, text) => ({ expect: text === undefined ? [selector] : 
 const count = (selector, n) => ({ count: [selector, n] });
 const click = (selector, text) => ({ click: [selector, text] });
 const tap = (selector, text) => ({ tap: [selector, text] });
+const none = (selector, text) => ({ none: [selector, text] });
 const key = (k, code, modifiers) => ({ key: { key: k, code, modifiers } });
 const reveal = (selector, text) => ({ reveal: [selector, text] });
 
@@ -137,6 +135,13 @@ function states() {
     dialog: true,
     actions: [click(".slot-panel button", "Change calendar…"), expect('.modal-wide[role="dialog"] h3', "Calendar · MESA 1.0"), expect(".cal-grid select")],
   });
+  const calendarFromSheet = [
+    click(".toolbar button", "Plan"),
+    click('.sheet[role="dialog"] button', "Change calendar…"),
+    expect('.modal-wide[role="dialog"] h3', "Calendar · MESA 1.0"),
+    expect(".cal-grid select"),
+  ];
+  add("calendar-dialog/compact", "mesa", { sizes: "portrait", dialog: true, actions: calendarFromSheet });
   add("choice-dialog", "choices", {
     sizes: "dialog",
     dialog: true,
@@ -189,6 +194,50 @@ function states() {
     clip: [UPDATE_DOWNLOADING],
     actions: [viewExpect("timeline"), click(".sidebar .update-line button", "Install and restart"), expect(".sidebar .update-line .update-status", UPDATE_DOWNLOADING)],
   });
+  const planSheet = [click(".toolbar button", "Plan"), expect('.sheet[role="dialog"] .sheet-title', "Plan"), expect(".sheet .panel h2", "Plan")];
+  add("phone/list", "mesa", {
+    sizes: "phone",
+    actions: [count(".sidebar", 0), expect('.phone-views [role="tab"][aria-selected="true"]', "List"), expect(".phone-list .prow .prow-name")],
+  });
+  add("touch/full", "mesa", {
+    sizes: "landscape",
+    actions: [viewExpect("timeline"), expect(".sidebar"), expect(".slot-panel .panel h2", "Plan")],
+  });
+  add("compact/shell", "mesa", {
+    sizes: "portrait",
+    actions: [
+      viewExpect("timeline"),
+      expect(".toolbar button", "Plans"),
+      expect(".toolbar button", "Plan"),
+      count(".sidebar", 0),
+      count(".slot-panel", 0),
+      count('[role="dialog"]', 0),
+    ],
+  });
+  add("compact/plan-sheet", "mesa", { sizes: "portrait", dialog: true, actions: planSheet });
+  add("compact/empty", "all-trashed", {
+    place: null,
+    actions: [
+      expect(".toolbar button", "Plans"),
+      none(".toolbar button", "Plan"),
+      expect(".empty-state button", "New plan"),
+      expect(".empty-state button", "Import plan…"),
+      expect(".empty-state button", "Join with a code"),
+      expect(".empty-state button", "Set up sync"),
+      expect(".toolbar .sync-chip", "Local only"),
+    ],
+    sizes: "portrait",
+  });
+  add("narrow-shell", "mesa", { sizes: "narrow", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), expect(".toolbar button", "Plan")] });
+  add("narrow-sheet", "mesa", { sizes: "narrow", dialog: true, actions: planSheet });
+  add("narrow-dialog", "mesa", { sizes: "narrow", dialog: true, actions: calendarFromSheet });
+  add("narrow-sync-dialog", "sync-dialog", {
+    sizes: "narrow",
+    dialog: true,
+    actions: [click(".toolbar .sync-chip", "Local only"), expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"), expect('[role="dialog"] button', "Create or join space")],
+  });
+  add("long-names/touch", "long-names", { sizes: "touch-wide", clip: true, actions: [viewExpect("timeline"), expect(".tl-row .name")] });
+  add("long-names/phone", "long-names", { sizes: "phone", clip: true, actions: [expect(".phone-list .prow .prow-name")] });
   add("history", "mesa", { actions: [reveal(".slot-panel .panel h2", "History"), count(".slot-panel .history li", 40)] });
   add("revert-preview", "mesa", {
     dialog: true,
@@ -200,14 +249,24 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.none === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
   return out;
 }
 
-const SIZES = { desktop: DESKTOP, dialog: DIALOG, both: [...DESKTOP, ...DIALOG], smallest: SMALLEST };
+const SIZES = {
+  desktop: DESKTOP,
+  dialog: [LANDSCAPE[0], ...PORTRAIT],
+  both: [...DESKTOP, LANDSCAPE[0]],
+  smallest: SMALLEST,
+  phone: PHONE,
+  portrait: PORTRAIT,
+  landscape: LANDSCAPE,
+  narrow: NARROW,
+  "touch-wide": [...PORTRAIT, ...LANDSCAPE, ...NARROW],
+};
 
 const sizesOf = (s) => {
   const sizes = SIZES[s.sizes];
@@ -340,7 +399,7 @@ const MEASURE = String.raw`
 (function () {
   var EPS = 1;
   var P = window.__PROBE__;
-  if (typeof P.dialog !== "boolean" || typeof P.fullMinWidth !== "number") throw new Error("__PROBE__ carries no dialog flag or minimum full width");
+  if (typeof P.dialog !== "boolean") throw new Error("__PROBE__ carries no dialog flag");
   var se = document.scrollingElement || document.documentElement;
   var vw = window.innerWidth;
   var vh = window.innerHeight;
@@ -376,15 +435,10 @@ const MEASURE = String.raw`
   }
 
   var all = Array.prototype.slice.call(document.querySelectorAll("*"));
-  var narrow = P.dialog && vw < P.fullMinWidth;
   function scope() {
-    return narrow ? document.querySelector('[role="dialog"]') : document.querySelector(".app");
+    return document.querySelector(".app");
   }
   var scopeFound = scope() !== null;
-  function inScope(el) {
-    var s = scope();
-    return s !== null && s.contains(el);
-  }
 
   function offenders() {
     var out = [];
@@ -485,7 +539,7 @@ const MEASURE = String.raw`
 
   function scrollableHidden() {
     var watch = [document.documentElement, document.body, document.getElementById("root"),
-                 narrow ? null : document.querySelector(".app"), narrow ? null : document.querySelector(".app-body")];
+                 document.querySelector(".app"), document.querySelector(".app-body")];
     var out = [];
     for (var i = 0; i < watch.length; i++) {
       var el = watch[i];
@@ -697,7 +751,7 @@ const MEASURE = String.raw`
   function overpaints() {
     var out = [];
     flowKidsOf.forEach(function (kids, parent) {
-      if (kids.length < 2 || (narrow && !inScope(parent))) return;
+      if (kids.length < 2) return;
       for (var i = 0; i < kids.length; i++) {
         for (var j = i + 1; j < kids.length; j++) {
           if (!solid(kids[i]) || !solid(kids[j])) continue;
@@ -715,7 +769,6 @@ const MEASURE = String.raw`
   function coveredUp() {
     var out = [];
     var targets = all.filter(function (el) {
-      if (narrow && !inScope(el)) return false;
       return getComputedStyle(el).position === "sticky" || ON_TOP.some(function (s) { return el.matches(s); });
     });
     for (var t = 0; t < targets.length; t++) {
@@ -842,8 +895,8 @@ const MEASURE = String.raw`
   var app = document.querySelector(".app");
   return {
     chain: chain(),
-    narrow: narrow,
-    scope: { name: narrow ? '[role="dialog"]' : ".app", found: scopeFound },
+    form: document.documentElement.getAttribute("data-form"),
+    scope: { name: ".app", found: scopeFound },
     fonts: P.fonts.map(function (f) {
       var faces = [];
       document.fonts.forEach(function (face) {
@@ -917,6 +970,11 @@ window.__probeAct = function (a) {
   if (a.expect !== undefined) {
     var e = matching(a.expect[0], a.expect[1]);
     if (e.hit === undefined) return { fail: missed(a.expect[0], a.expect[1], e.nodes) };
+    return { ok: true };
+  }
+  if (a.none !== undefined) {
+    var z = matching(a.none[0], a.none[1]);
+    if (z.hit !== undefined) return { fail: a.none[0] + " " + JSON.stringify(a.none[1]) + " is there and should not be" };
     return { ok: true };
   }
   if (a.count !== undefined) {
@@ -1122,7 +1180,8 @@ async function settle(cdp, sessionId) {
     var ready = false;
     while (!ready && performance.now() - begun < ${READY_MS}) {
       ready = document.querySelector(".app") !== null &&
-        (document.querySelector(".plan-head") !== null || document.querySelector(".empty-state") !== null);
+        (document.querySelector(".plan-head") !== null || document.querySelector(".empty-state") !== null ||
+          document.querySelector(".phone-views") !== null);
       if (!ready) await new Promise(function (r) { setTimeout(r, 25); });
     }
     if (!ready) return { ready: false, quiet: false };
@@ -1145,7 +1204,7 @@ async function settle(cdp, sessionId) {
 
 const unsettled = (s) =>
   !s.ready
-    ? `app never rendered .app and .plan-head/.empty-state within ${READY_MS / 1000} s`
+    ? `app never rendered .app and .plan-head/.empty-state/.phone-views within ${READY_MS / 1000} s`
     : !s.quiet
       ? `DOM still changing after ${QUIET_MS / 1000} s`
       : null;
@@ -1197,8 +1256,9 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
   return { reading, errors: seen(), notFound: [...traffic.current.notFound] };
 }
 
-function judge(state, r, errors, notFound) {
+function judge(state, viewport, r, errors, notFound) {
   const problems = [];
+  if (r.form !== viewport.form) problems.push(`html[data-form] is ${JSON.stringify(r.form)}, not ${JSON.stringify(viewport.form)}`);
   if (r.doc.overY > 1) problems.push(`document scrolls ${r.doc.overY}px vertically`);
   if (r.doc.overX > 1) problems.push(`document scrolls ${r.doc.overX}px horizontally`);
   if (r.doc.alreadyScrolledTo.top !== 0 || r.doc.alreadyScrolledTo.left !== 0) {
@@ -1235,8 +1295,6 @@ function judge(state, r, errors, notFound) {
   errors.filter((e) => !state.logs.includes(e)).forEach((e) => problems.push(`the page reported an error: ${e}`));
   return { ok: problems.length === 0, problems };
 }
-
-const SCOPE_NOTE = "measures 3-8 judge only the dialog below 1024 px; Task 5.3's compact form brings the shell under them";
 
 function report(name, viewport, verdict, r) {
   process.stdout.write(`\n${verdict.ok ? "ok  " : "FAIL"} ${name} @ ${viewport}\n`);
@@ -1332,13 +1390,20 @@ async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffi
   await cdp.send("Emulation.setTimezoneOverride", { timezoneId: "Europe/Zurich" }, sessionId);
   await cdp.send("Emulation.setLocaleOverride", { locale: "en-GB" }, sessionId);
 
-  const sizes = [...DESKTOP, ...DIALOG].filter(([w, h]) => oneSize === null || `${w}x${h}` === oneSize);
+  const sizes = VIEWPORTS.filter((v) => oneSize === null || nameOf(v) === oneSize);
   if (sizes.length === 0) throw new NotMeasured(`--viewport ${oneSize} is none of the probe's sizes`);
   const rows = [];
-  for (const [w, h] of sizes) {
-    await cdp.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }, sessionId);
-    for (const state of picked.filter((s) => sizesOf(s).some(([sw, sh]) => sw === w && sh === h))) {
-      const viewport = `${w}x${h}`;
+  for (const size of sizes) {
+    const [w, h] = size.size;
+    const [sw, sh] = size.screen;
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: w, height: h, deviceScaleFactor: 1, mobile: size.touch, screenWidth: sw, screenHeight: sh },
+      sessionId,
+    );
+    await cdp.send("Emulation.setTouchEmulationEnabled", size.touch ? { enabled: true, maxTouchPoints: 5 } : { enabled: false }, sessionId);
+    for (const state of picked.filter((s) => sizesOf(s).includes(size))) {
+      const viewport = nameOf(size);
       const run = await runState(cdp, sessionId, origin, state, errors, traffic);
       if (run.unreached !== undefined) {
         rows.push({ state: state.name, viewport, ok: false, unreached: run.unreached, errors: run.errors });
@@ -1349,7 +1414,7 @@ async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffi
       const tickets = Object.entries(r.tickets);
       if (tickets.length > 0) process.stdout.write(`tickets ${state.name} @ ${viewport}: ${tickets.map(([doc, n]) => `${doc} ${n}`).join(", ")}\n`);
       const why = !r.scope.found
-        ? `measures 3-8 are scoped to ${r.scope.name}${r.narrow ? ` (dialog state below ${FULL_MIN_WIDTH} px)` : ""}, and the page has none`
+        ? `measures 3-8 are scoped to ${r.scope.name}, and the page has none`
         : r.missing.length > 0
           ? `the app asked for what no fixture answers: ${r.missing.join(", ")}`
           : r.text === 0
@@ -1360,10 +1425,9 @@ async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffi
         reportUnreached(state.name, viewport, why, run.errors);
         continue;
       }
-      const verdict = judge(state, r, run.errors, run.notFound);
+      const verdict = judge(state, size, r, run.errors, run.notFound);
       rows.push({ state: state.name, viewport, ...verdict, reading: r });
       if (verbose || !verdict.ok) report(state.name, viewport, verdict, r);
-      if (r.narrow) process.stdout.write(`note ${state.name} @ ${viewport}: ${SCOPE_NOTE}\n`);
       if (shotDir !== null) {
         const { data } = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
         const file = join(shotDir, `${state.name.replace(/\//g, "-")}-${viewport}.png`);
@@ -1415,7 +1479,6 @@ async function main() {
       clip: state.clip,
       dialog: state.dialog,
       net: state.net,
-      fullMinWidth: FULL_MIN_WIDTH,
       fonts: FONTS,
     }).replace(/</g, "\\u003c");
     return template.replace("<head>", `<head>\n    <script>window.__PROBE__ = ${payload};</script>\n    <script>${SHIM}</script>`);
@@ -1467,12 +1530,6 @@ async function main() {
   }, cleanup);
 
   printTable(rows);
-  const narrowRuns = rows.filter((r) => r.unreached === undefined && r.reading.narrow);
-  if (narrowRuns.length > 0) {
-    process.stdout.write(`
-${narrowRuns.length} dialog run(s) below ${FULL_MIN_WIDTH} px judged measures 3-8 on the dialog only; the desktop shell has no layout there until Task 5.3.
-`);
-  }
   if (jsonOut !== null) {
     await writeFile(jsonOut, JSON.stringify(rows, null, 1));
     process.stdout.write(`\nwritten: ${jsonOut}\n`);

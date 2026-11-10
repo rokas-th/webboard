@@ -1,7 +1,6 @@
 .app {
   display: flex;
   flex-direction: column;
-  height: 100%;
   overflow: hidden;
 }
 
@@ -72,10 +71,12 @@
   color: var(--dim);
 }
 
-.seg button:hover:not(:disabled) {
-  color: var(--text);
-  border-color: transparent;
-  background: var(--hover);
+@media (hover: hover) {
+  .seg button:hover:not(:disabled) {
+    color: var(--text);
+    border-color: transparent;
+    background: var(--hover);
+  }
 }
 
 .seg button.active {
@@ -159,8 +160,10 @@
   padding: 5px var(--rail) 7px calc(var(--rail) - 2px);
 }
 
-.entry:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .entry:hover {
+    background: var(--hover);
+  }
 }
 
 .entry.active {
@@ -186,9 +189,11 @@
   padding: 0;
 }
 
-.entry-open:hover:not(:disabled) {
-  color: var(--text);
-  background: transparent;
+@media (hover: hover) {
+  .entry-open:hover:not(:disabled) {
+    color: var(--text);
+    background: transparent;
+  }
 }
 
 .entry-name {
@@ -413,10 +418,12 @@ button.chip {
   border-radius: 4px;
 }
 
-button.chip:hover:not(:disabled) {
-  color: var(--cyan);
-  border-color: var(--cyan-dim);
-  background: var(--hover);
+@media (hover: hover) {
+  button.chip:hover:not(:disabled) {
+    color: var(--cyan);
+    border-color: var(--cyan-dim);
+    background: var(--hover);
+  }
 }
 
 .chip-button {
@@ -431,8 +438,10 @@ button.chip:hover:not(:disabled) {
   text-decoration: underline;
 }
 
-.chip-button:hover:not(:disabled) {
-  background: transparent;
+@media (hover: hover) {
+  .chip-button:hover:not(:disabled) {
+    background: transparent;
+  }
 }
 
 .choice-list {
@@ -583,12 +592,12 @@ button.chip:hover:not(:disabled) {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 12vh 20px 20px;
+  padding: calc(12vh + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
 }
 
 .overlay.center {
   align-items: center;
-  padding-top: 20px;
+  padding-top: calc(20px + env(safe-area-inset-top));
 }
 
 .modal {
@@ -635,7 +644,7 @@ button.chip:hover:not(:disabled) {
 .toasts {
   position: fixed;
   left: 50%;
-  bottom: 26px;
+  bottom: calc(26px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 300;
   display: flex;
@@ -738,4 +747,18 @@ button.chip:hover:not(:disabled) {
   border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+html[data-form="compact"] .toolbar {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 52px;
+  row-gap: 6px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+html[data-form="compact"] .wordmark,
+html[data-form="compact"] .toolbar-plan {
+  display: none;
 }

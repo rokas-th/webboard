@@ -177,6 +177,7 @@ const linksOf = (plan: ReturnType<typeof projectPlan>): string[] => [...plan.lin
 describe("layout fixtures", () => {
   it("names the fixtures the probe states use", () => {
     expect(Object.keys(FIXTURES).sort()).toEqual([
+      "all-trashed",
       "blank-plan",
       "choices",
       "empty",
@@ -313,6 +314,13 @@ describe("layout fixtures", () => {
         if (!UNREADABLE_FIXTURES.has(name)) expect(log.pending).toEqual([]);
       }),
     );
+  });
+
+  it("all-trashed holds one plan, its listing in the Trash", async () => {
+    resetTauri(answersOf(fixture("all-trashed")));
+    const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
+    openRegistries.push(registry);
+    expect(registry.plans().map((p) => ({ name: p.name, trashed: p.trashed }))).toEqual([{ name: "MESA 1.0", trashed: true }]);
   });
 
   it("empty has no plan and blank-plan has one with no items", () => {

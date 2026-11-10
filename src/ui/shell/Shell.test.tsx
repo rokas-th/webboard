@@ -169,6 +169,16 @@ function deferred<T>(): { promise: Promise<T>; resolve(v: T): void; reject(e: un
 }
 
 describe("Shell on testSession(MESA_SEED)", () => {
+  it("full by default", async () => {
+    const t = await made(MESA_SEED);
+    const { ui } = shellFor(t);
+    render(withSync(ui));
+    await settle();
+    expect(document.documentElement.dataset.form).toBe("full");
+    expect(screen.getByRole("navigation", { name: "Plans" })).toBeTruthy();
+    expect(slot("panel")).not.toBeNull();
+  });
+
   it("renders the toolbar", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);

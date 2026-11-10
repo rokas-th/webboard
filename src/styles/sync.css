@@ -161,10 +161,12 @@ button.sync-chip {
   border-color: var(--line);
 }
 
-.sync-remove.danger:hover:not(:disabled) {
-  color: var(--magenta);
-  border-color: var(--magenta);
-  background: var(--danger-bg);
+@media (hover: hover) {
+  .sync-remove.danger:hover:not(:disabled) {
+    color: var(--magenta);
+    border-color: var(--magenta);
+    background: var(--danger-bg);
+  }
 }
 
 .sync-confirm {

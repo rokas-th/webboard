@@ -128,8 +128,10 @@
   white-space: nowrap;
 }
 
-.tl-row:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .tl-row:hover {
+    background: var(--hover);
+  }
 }
 
 .tl-row.selected {
@@ -148,9 +150,11 @@
   letter-spacing: 0;
 }
 
-.tl-row .caret:hover {
-  color: var(--cyan);
-  background: none;
+@media (hover: hover) {
+  .tl-row .caret:hover {
+    color: var(--cyan);
+    background: none;
+  }
 }
 
 .tl-row .name {
@@ -320,9 +324,11 @@
   transition: box-shadow 0.12s ease-out, border-color 0.12s ease-out;
 }
 
-.bar:hover {
-  border-color: var(--cyan);
-  box-shadow: 0 0 10px rgba(36, 224, 255, 0.3);
+@media (hover: hover) {
+  .bar:hover {
+    border-color: var(--cyan);
+    box-shadow: 0 0 10px rgba(36, 224, 255, 0.3);
+  }
 }
 
 .bar.dragging {
@@ -411,11 +417,16 @@
   transition: opacity 0.12s ease-out;
 }
 
-.bar:hover .nub,
-.ms:hover .nub,
 .bar.selected .nub,
 .ms.selected .nub {
   opacity: 1;
+}
+
+@media (hover: hover) {
+  .bar:hover .nub,
+  .ms:hover .nub {
+    opacity: 1;
+  }
 }
 
 .bar .nub {
@@ -494,8 +505,10 @@
   transition: box-shadow 0.12s ease-out;
 }
 
-.ms:hover::before {
-  box-shadow: 0 0 14px rgba(255, 176, 0, 0.75);
+@media (hover: hover) {
+  .ms:hover::before {
+    box-shadow: 0 0 14px rgba(255, 176, 0, 0.75);
+  }
 }
 
 .ms.done::before {
@@ -572,9 +585,11 @@
   transition: border-color 0.12s ease-out, background 0.12s ease-out;
 }
 
-.tray-chip:hover {
-  border-color: var(--cyan-dim);
-  background: var(--hover);
+@media (hover: hover) {
+  .tray-chip:hover {
+    border-color: var(--cyan-dim);
+    background: var(--hover);
+  }
 }
 
 .tray-chip.selected {

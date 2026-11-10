@@ -79,9 +79,11 @@
   transition: border-color 0.12s ease-out, background 0.12s ease-out;
 }
 
-.card:hover {
-  border-color: var(--cyan-dim);
-  background: var(--panel-2);
+@media (hover: hover) {
+  .card:hover {
+    border-color: var(--cyan-dim);
+    background: var(--panel-2);
+  }
 }
 
 .card.selected {
