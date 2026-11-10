@@ -293,14 +293,15 @@ describe("the Cyberdeck look", () => {
     expect(sheet.rules.filter((r) => r.decls["padding"]?.includes("96px") === true || r.decls["padding-left"] === "96px").map((r) => r.selector)).toEqual([".toolbar.toolbar-mac"]);
   });
 
-  it("tightens the toolbar below 1240 px so it fits a 1024 px window", () => {
+  it("tightens the toolbar below 1240 px and hides the wordmark only in the compact form", () => {
     const narrow = (sel: string): Decls =>
       Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 1 && r.conditions[0] === "@media (max-width: 1240px)").map((r) => r.decls));
     expect(narrow(".toolbar")["gap"]).toBe("6px");
     expect(narrow(".toolbar > button")["padding"]).toBe("7px 10px");
     expect(narrow(".seg-modes button")["padding"]).toBe("4px 8px");
-    const narrower = sheet.rules.filter((r) => r.selector === ".wordmark" && r.conditions.length === 1 && r.conditions[0] === "@media (max-width: 1100px)");
-    expect(narrower.map((r) => r.decls["display"])).toEqual(["none"]);
+    expect(sheet.rules.filter((r) => r.selector.includes(".wordmark") && r.decls["display"] === "none").map((r) => [r.selector, r.conditions])).toEqual([
+      ['html[data-form="compact"] .wordmark', []],
+    ]);
   });
 
   it("fills each link arrowhead from the token its path is stroked with", () => {

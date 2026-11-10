@@ -2,7 +2,7 @@ import { useLayoutEffect, useState } from "react";
 
 export type FormFactor = "full" | "compact" | "phone";
 
-export const FULL_MIN_WIDTH = 1024;
+export const FULL_MIN_WIDTH = 1180;
 export const PHONE_MAX_SCREEN_SHORT = 600;
 
 export function formFactor(m: { width: number; screenShort: number }): FormFactor {

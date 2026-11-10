@@ -24,14 +24,16 @@ const TYPES = {
 
 const desk = (w, h) => ({ size: [w, h], screen: [w, h], touch: false, form: "full" });
 const touch = (w, h, form) => ({ size: [w, h], screen: [w, h], touch: true, form });
+const cdesk = (w, h) => ({ size: [w, h], screen: [w, h], touch: false, form: "compact" });
 
-const DESKTOP = [desk(1180, 760), desk(1440, 920), desk(1920, 1080), desk(1024, 700)];
+const DESKTOP = [desk(1180, 760), desk(1440, 920), desk(1920, 1080)];
+const COMPACT_DESK = [cdesk(1024, 700), cdesk(1100, 760), cdesk(1179, 760)];
 const PHONE = [touch(390, 844, "phone")];
 const PORTRAIT = [touch(820, 1180, "compact")];
 const LANDSCAPE = [touch(1180, 820, "full"), touch(1366, 1024, "full")];
 const NARROW = [{ size: [500, 820], screen: [820, 1180], touch: true, form: "compact" }];
-const VIEWPORTS = [...DESKTOP, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
-const TOOLBAR = [...DESKTOP, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
+const VIEWPORTS = [...DESKTOP, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
+const TOOLBAR = [...DESKTOP, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
 const LOAD_MS = 2000;
 
 const nameOf = (v) => `${v.size[0]}x${v.size[1]}`;
@@ -182,13 +184,14 @@ function states() {
     expect('.modal-wide[role="dialog"] h3', "Calendar · MESA 1.0"),
     expect(".cal-grid select"),
   ];
-  add("calendar-dialog/compact", "mesa", { sizes: "portrait", dialog: true, actions: calendarFromSheet });
+  add("calendar-dialog/compact", "mesa", { sizes: "compact-all", dialog: true, actions: calendarFromSheet });
   add("choice-dialog", "choices", {
     sizes: "dialog",
     dialog: true,
     actions: [click(".plan-head button.chip-amber", "1 held"), count('[role="dialog"] .choice-col', 3)],
   });
   add("palette", "mesa", {
+    sizes: "desktop-and-compact",
     dialog: true,
     actions: [key("k", "KeyK", 4), expect('.palette[role="dialog"]'), expect(".palette-item .palette-label")],
   });
@@ -372,16 +375,15 @@ function states() {
       expect(".status-line.magenta .status-actions button", "Go to first conflict"),
     ],
   });
-  add("touch/full", "mesa", {
-    sizes: "landscape",
-    actions: [viewExpect("timeline"), expect(".sidebar"), expect(".slot-panel .panel h2", "Plan")],
-  });
+  const fullShell = [viewExpect("timeline"), expect(".sidebar"), expect(".slot-panel .panel h2", "Plan")];
+  add("touch/full", "mesa", { sizes: "landscape", actions: fullShell });
+  add("desk/full-1180", "mesa", { sizes: "smallest", actions: [...fullShell, expect("header.toolbar .wordmark", "WebBoard"), width(".main", 628, 628)] });
   add("touch/nub", "mesa", {
     sizes: "ipad-pro",
     actions: [viewExpect("timeline"), click(".tl-row .name", PICKED), expect(".bar.selected .nub"), nubs(60), expect(".slot-panel .panel .kind", "TASK")],
   });
   add("compact/shell", "mesa", {
-    sizes: "portrait",
+    sizes: "compact-all",
     actions: [
       viewExpect("timeline"),
       expect(".toolbar button", "Plans"),
@@ -391,7 +393,12 @@ function states() {
       count('[role="dialog"]', 0),
     ],
   });
-  add("compact/plan-sheet", "mesa", { sizes: "portrait", dialog: true, actions: planSheet });
+  add("compact/plan-sheet", "mesa", { sizes: "compact-all", dialog: true, actions: planSheet });
+  add("compact/item", "mesa", {
+    sizes: "compact-all",
+    dialog: true,
+    actions: [viewExpect("timeline"), tap(".tl-row .name", PICKED), count('.sheet[role="dialog"]', 1), expect('.sheet[role="dialog"] .kind', "TASK")],
+  });
   add("compact/empty", "all-trashed", {
     place: null,
     actions: [
@@ -404,15 +411,25 @@ function states() {
       expect(".empty-state button", "Set up sync"),
       expect(".toolbar .sync-chip", "Local only"),
     ],
-    sizes: "portrait",
+    sizes: "compact-all",
   });
   add("narrow-shell", "mesa", { sizes: "narrow", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), expect(".toolbar button", "Plan")] });
   add("narrow-sheet", "mesa", { sizes: "narrow", dialog: true, actions: planSheet });
   add("narrow-dialog", "mesa", { sizes: "narrow", dialog: true, actions: calendarFromSheet });
-  add("narrow-sync-dialog", "sync-dialog", {
-    sizes: "narrow",
-    dialog: true,
-    actions: [click(".toolbar .sync-chip", "Local only"), expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"), expect('[role="dialog"] button', "Create or join space")],
+  const syncDialog = [click(".toolbar .sync-chip", "Local only"), expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"), expect('[role="dialog"] button', "Create or join space")];
+  add("narrow-sync-dialog", "sync-dialog", { sizes: "narrow", dialog: true, actions: syncDialog });
+  add("compact-desk/sync-dialog", "sync-dialog", { sizes: "compact-desk", dialog: true, actions: syncDialog });
+  add("long-names/compact/list", "long-names", {
+    sizes: "compact-all",
+    place: { view: "list", zoom: "W" },
+    clip: true,
+    actions: [viewExpect("list"), width("table.list tbody tr:not(.grp) td.item", 180, 100000)],
+  });
+  add("long-names/compact/board", "long-names", {
+    sizes: "compact-all",
+    place: { view: "board", zoom: "W" },
+    clip: true,
+    actions: [viewExpect("board"), style(".card .card-name", "-webkit-line-clamp", "2")],
   });
   add("long-names/touch", "long-names", { sizes: "touch-wide", clip: true, actions: [viewExpect("timeline"), expect(".tl-row .name")] });
   const phoneChip = (tone, label) => expect(`.phone-head button.sync-chip.chip-compact.${tone}[aria-label="${label}"]`);
@@ -472,7 +489,7 @@ const SIZES = {
   desktop: namesOf(DESKTOP),
   dialog: namesOf([LANDSCAPE[0], ...PORTRAIT]),
   both: namesOf([...DESKTOP, LANDSCAPE[0]]),
-  smallest: ["1024x700"],
+  smallest: ["1180x760"],
   standard: ["1440x920"],
   phone: namesOf(PHONE),
   portrait: namesOf(PORTRAIT),
@@ -481,6 +498,9 @@ const SIZES = {
   narrow: namesOf(NARROW),
   "touch-wide": namesOf([...PORTRAIT, ...LANDSCAPE, ...NARROW]),
   timeline: namesOf([...DESKTOP, ...PORTRAIT, ...LANDSCAPE, ...NARROW]),
+  "compact-desk": namesOf(COMPACT_DESK),
+  "compact-all": namesOf([...PORTRAIT, ...COMPACT_DESK]),
+  "desktop-and-compact": namesOf([...DESKTOP, ...COMPACT_DESK]),
 };
 
 const sizesOf = (s) => {
