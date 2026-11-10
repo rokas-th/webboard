@@ -16,7 +16,9 @@ import { CH_ZH_2026, CH_ZH_2027, FETCHED_AT } from "../test/fixtures/calendars";
 import { encodeLoad, memoryStore, type MemoryStore } from "../test/fixtures/store";
 import { ctxOf } from "../test/planCtx";
 import { hold, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
+import { VALID_WEBBOARD } from "../test/fixtures/webboard";
 import { decodeAction, encodeAction, PlanDoc } from "./doc";
+import { buildImport } from "./file";
 import { readActions } from "./read-actions";
 import { IndexDoc } from "./index-doc";
 import { openPersisted, type PersistedDoc } from "./persist";
@@ -1425,5 +1427,436 @@ describe("Registry: lifecycle and failures", () => {
     expect(ix.devices()).toEqual(new Map());
     expect(ix.plans()).toEqual([{ id: "P", trashed: false }]);
     await ix.close();
+  });
+});
+
+describe("Registry: spaces", () => {
+  const SP = "sp000000000";
+  const IX = "ix-" + SP;
+  const SPACE_SETTINGS = { v: 1, lastRegion: null, names: {} };
+
+  const spaceEnv = (o: Parameters<typeof env>[0] = {}): Env => env({ settings: SPACE_SETTINGS, ...o });
+
+  const ipWrites = (calls: readonly Call[], plan: string): Write[] => calls.flatMap(writesOf).filter((w) => w.u === "ip:" + plan);
+
+  async function peer(mine: Registry, update: Uint8Array): Promise<Registry> {
+    await flush();
+    forget(mine);
+    await mine.close();
+    const p = env({ settings: SPACE_SETTINGS, answers: { device_info: () => ({ deviceId: "dev-B", platform: "linux" }) } });
+    p.mem.seed(IX, update);
+    const r = await open();
+    await r.attachSpace(SP);
+    return r;
+  }
+
+  it("attachSpace merges the space index", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("P", "Q"));
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    seedPlan(e.mem, "P", "Pea");
+    seedPlan(e.mem, "Q", "Queue");
+    const r = await open();
+    expect(r.attachedSpace()).toBeNull();
+    expect(r.plans().map((p) => p.space)).toEqual([null, null]);
+    const ix = await r.attachSpace(SP);
+    expect(await r.attachSpace(SP)).toBe(ix);
+    expect(r.attachedSpace()).toBe(SP);
+    expect(loadsOf(0, IX)).toBe(1);
+    expect(r.plans().filter((p) => p.id === "P")).toEqual([{ id: "P", name: null, trashed: false, loaded: false, space: SP }]);
+    expect(planOf(r, "Q").space).toBeNull();
+    await closeAll();
+
+    const f = spaceEnv();
+    seedIndex(f.mem, "local", listing());
+    const fresh = await open();
+    const [a, b] = await Promise.all([fresh.attachSpace(SP), fresh.attachSpace(SP)]);
+    expect(a).toBe(b);
+    expect(loadsOf(0, IX)).toBe(1);
+  });
+
+  it("createPlan goes to the attached space", async () => {
+    spaceEnv();
+    const r = await open({ clock: fixedClock(TODAY) });
+    await r.attachSpace(SP);
+    await flush();
+    const from = tauri.calls.length;
+    const id = await r.createPlan("Alpha");
+    await flush();
+    const space = appendsTo(from, IX);
+    expect(space).toHaveLength(1);
+    expect(writesOf(space[0])).toEqual([ip(id, false)]);
+    expect(ipWrites(appendsTo(from, "local"), id)).toEqual([]);
+    expect(planOf(r, id).space).toBe(SP);
+  });
+
+  it("createPlanFrom goes to the attached space", async () => {
+    spaceEnv();
+    const r = await open({ clock: fixedClock(TODAY) });
+    await r.attachSpace(SP);
+    await flush();
+    const from = tauri.calls.length;
+    const id = await r.createPlanFrom(buildImport(VALID_WEBBOARD.bytes, "valid.webboard", r.device.deviceId, "s1", 1000));
+    await flush();
+    const space = appendsTo(from, IX);
+    expect(space).toHaveLength(1);
+    expect(writesOf(space[0])).toEqual([ip(id, false)]);
+    expect(ipWrites(appendsTo(from, "local"), id)).toEqual([]);
+    expect(planOf(r, id).space).toBe(SP);
+  });
+
+  it("trashing and restoring a space plan writes the space index", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("P"));
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    seedPlan(e.mem, "P", "Pea");
+    const r = await open();
+    await r.attachSpace(SP);
+    await flush();
+    const ixDoc = (await r.doc(IX)).ydoc;
+    const from = tauri.calls.length;
+    r.trashPlan("P");
+    await flush();
+    const trashed = appendsTo(from, IX);
+    expect(trashed).toHaveLength(1);
+    expect(writesOf(trashed[0])).toEqual([ip("P", true)]);
+    expect(appendsTo(from, "local")).toHaveLength(0);
+    expect(planOf(r, "P").trashed).toBe(true);
+    const seen = await peer(r, Y.encodeStateAsUpdate(ixDoc));
+    expect(planOf(seen, "P")).toMatchObject({ trashed: true, space: SP });
+    forget(seen);
+    await seen.close();
+
+    const back = spaceEnv();
+    seedIndex(back.mem, "local", listing("P"));
+    seedIndex(back.mem, IX, [ixAct("s1", [], [ip("P", false)]), ixAct("s2", ["s1"], [ip("P", true)], "dev-A", "Move plan to Trash")]);
+    seedPlan(back.mem, "P", "Pea");
+    const r2 = await open();
+    await r2.attachSpace(SP);
+    await flush();
+    const ixDoc2 = (await r2.doc(IX)).ydoc;
+    const from2 = tauri.calls.length;
+    r2.restorePlan("P");
+    await flush();
+    const restored = appendsTo(from2, IX);
+    expect(restored).toHaveLength(1);
+    expect(writesOf(restored[0])).toEqual([ip("P", false)]);
+    expect(appendsTo(from2, "local")).toHaveLength(0);
+    const seen2 = await peer(r2, Y.encodeStateAsUpdate(ixDoc2));
+    expect(planOf(seen2, "P")).toMatchObject({ trashed: false, space: SP });
+  });
+
+  it("a local-only plan still trashes in local", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("Q"));
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    const r = await open();
+    await r.attachSpace(SP);
+    await flush();
+    const from = tauri.calls.length;
+    r.trashPlan("Q");
+    await flush();
+    const local = appendsTo(from, "local");
+    expect(local).toHaveLength(1);
+    expect(writesOf(local[0])).toEqual([ip("Q", true)]);
+    expect(appendsTo(from, IX)).toHaveLength(0);
+  });
+
+  it("the space index names devices", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("P"));
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    const seeded = seedPlan(e.mem, "P", "Pea", { items: ["A"] });
+    const a = itemNamed(seeded, "A");
+    const r = await open({ clock: fixedClock(TODAY) });
+    await r.attachSpace(SP);
+    const s = await r.session("P");
+    const base = new Y.Doc();
+    Y.applyUpdate(base, Y.encodeStateAsUpdate(seeded));
+    s.apply({ t: "rename", item: a, name: "Local" });
+    const theirs = remote(base, () => ({ t: "rename", item: a, name: "Remote" }));
+    const planDoc = (await r.doc("P")).ydoc;
+    Y.applyUpdate(planDoc, Y.encodeStateAsUpdate(base, Y.encodeStateVector(planDoc)));
+    const sideOf = (): string | undefined => s.view().choices[0]?.sides.find((x) => x.actions.includes(theirs))?.label;
+    expect(s.history().find((h) => h.id === theirs)?.device).toBe("Device dev-");
+    expect(sideOf()).toBe("Device dev-");
+    const cb = vi.fn();
+    r.subscribe(cb);
+    const sessionCb = vi.fn();
+    s.subscribe(sessionCb);
+    const ixDoc = (await r.doc(IX)).ydoc;
+    remoteRaw(ixDoc, "dn-B", encodeAction(act("dn-B", headsOf(ixDoc), [own("dn:dev-B", "iPhone")], { dev: "dev-B", lbl: "Name device" })));
+    expect(r.devices().get("dev-B")).toBe("iPhone");
+    expect(r.devices().get("dev-A")).toBe("Mac");
+    expect(cb).toHaveBeenCalled();
+    expect(sessionCb).toHaveBeenCalled();
+    expect(s.history().find((h) => h.id === theirs)?.device).toBe("iPhone");
+    expect(sideOf()).toBe("iPhone");
+  });
+
+  it("the space index's name for a device wins", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", [...listing(), ixAct("l-B", ["ix-n"], [own("dn:dev-B", "Old phone")], "dev-B", "Name device")]);
+    seedIndex(e.mem, IX, [ixAct("s1", [], [own("dn:dev-B", "iPhone")], "dev-B", "Name device")]);
+    const r = await open();
+    expect(r.devices().get("dev-B")).toBe("Old phone");
+    await r.attachSpace(SP);
+    expect(r.devices().get("dev-B")).toBe("iPhone");
+  });
+
+  it("naming this device is checked", async () => {
+    spaceEnv();
+    const r = await open();
+    await r.attachSpace(SP);
+    await flush();
+    const from = tauri.calls.length;
+    expect(() => r.nameThisDevice("   ")).toThrow(new Refused("The name is empty. Type at least one character."));
+    await flush();
+    expect(appendsTo(from, "local")).toHaveLength(0);
+    expect(appendsTo(from, IX)).toHaveLength(0);
+    expect(r.device.name).toBe("Mac");
+    r.nameThisDevice("iPad\n2");
+    await flush();
+    const local = appendsTo(from, "local");
+    const space = appendsTo(from, IX);
+    expect(local).toHaveLength(1);
+    expect(space).toHaveLength(1);
+    expect(writesOf(local[0])).toEqual([own("dn:dev-A", "iPad 2")]);
+    expect(writesOf(space[0])).toEqual([own("dn:dev-A", "iPad 2")]);
+    expect(r.device.name).toBe("iPad 2");
+    const again = tauri.calls.length;
+    r.nameThisDevice("iPad 2");
+    await flush();
+    expect(appendsTo(again, "local")).toHaveLength(0);
+    expect(appendsTo(again, IX)).toHaveLength(0);
+  });
+
+  it("revoked plans go to the local index", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing());
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)]), ixAct("s2", ["s1"], [ip("P2", false)])]);
+    seedPlan(e.mem, "P", "Pea");
+    seedPlan(e.mem, "P2", "Pod");
+    const r = await open({ clock: fixedClock(TODAY) });
+    await r.attachSpace(SP);
+    const p = await r.session("P");
+    const pCb = vi.fn();
+    p.subscribe(pCb);
+    expect(r.spaceReadOnly()).toBe(false);
+    r.setSpaceReadOnly(true);
+    expect(r.spaceReadOnly()).toBe(true);
+    expect(p.readOnly).toBe(true);
+    expect(pCb).toHaveBeenCalledTimes(1);
+    r.setSpaceReadOnly(true);
+    expect(pCb).toHaveBeenCalledTimes(1);
+    await flush();
+    const from = tauri.calls.length;
+    const x = await r.createPlan("X");
+    await flush();
+    expect(ipWrites(appendsTo(from, "local"), x)).toEqual([ip(x, false)]);
+    expect(appendsTo(from, IX)).toHaveLength(0);
+    expect(planOf(r, x).space).toBeNull();
+    expect((await r.session(x)).readOnly).toBe(false);
+    const from2 = tauri.calls.length;
+    const imported = await r.createPlanFrom(buildImport(VALID_WEBBOARD.bytes, "valid.webboard", r.device.deviceId, "s1", 1000));
+    await flush();
+    expect(ipWrites(appendsTo(from2, "local"), imported)).toEqual([ip(imported, false)]);
+    expect(appendsTo(from2, IX)).toHaveLength(0);
+    expect((await r.session("P2")).readOnly).toBe(true);
+  });
+
+  it("a space plan open before the attach turns read-only when the space attaches read-only", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("L"));
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    seedPlan(e.mem, "P", "Pea");
+    seedPlan(e.mem, "L", "Lone");
+    const r = await open();
+    const p = await r.session("P");
+    const l = await r.session("L");
+    r.setSpaceReadOnly(true);
+    expect(p.readOnly).toBe(false);
+    await r.attachSpace(SP);
+    expect(p.readOnly).toBe(true);
+    expect(l.readOnly).toBe(false);
+  });
+
+  it("a moved plan stays listed while read-only", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", [
+      ...listing("P"),
+      ixAct("l-t", ["ix-0"], [ip("P", true)], "dev-A", "Move plan to Trash"),
+      ixAct("l-L", ["l-t"], [ip("L", false)]),
+    ]);
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    seedPlan(e.mem, "P", "Pea");
+    seedPlan(e.mem, "L", "Lone");
+    const r = await open();
+    await r.attachSpace(SP);
+    r.setSpaceReadOnly(true);
+    expect(r.plans().filter((p) => p.id === "P")).toEqual([{ id: "P", name: null, trashed: false, loaded: false, space: SP }]);
+    expect((await r.session("P")).readOnly).toBe(true);
+    await flush();
+    const from = tauri.calls.length;
+    expect(() => r.trashPlan("P")).toThrow(new Refused(READ_ONLY));
+    expect(() => r.restorePlan("P")).toThrow(new Refused(READ_ONLY));
+    await flush();
+    expect(callsOf(from, "store_append")).toHaveLength(0);
+    r.trashPlan("L");
+    await flush();
+    const local = appendsTo(from, "local");
+    expect(local).toHaveLength(1);
+    expect(writesOf(local[0])).toEqual([ip("L", true)]);
+  });
+
+  it("a failed space index is retried", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing());
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    e.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+    const r = await open();
+    const err = await rejection(r.attachSpace(SP));
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).message).toBe("Bad record in seg-0.log.");
+    expect(r.indexError()?.code).toBe("store.corrupt");
+    expect(r.attachedSpace()).toBeNull();
+    expect(r.plans().filter((p) => p.space !== null)).toEqual([]);
+    e.mem.recover("store_load", IX);
+    const cb = vi.fn();
+    r.subscribe(cb);
+    await r.retryIndex();
+    expect(r.indexError()).toBeNull();
+    expect(planOf(r, "P").space).toBe(SP);
+    expect(r.attachedSpace()).toBe(SP);
+    expect(cb).toHaveBeenCalled();
+  });
+
+  it("the space index's unreadable changes are listed", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("P"));
+    seedIndex(e.mem, IX, [ixAct("s0", [], [own("dn:dev-B", "iPhone")], "dev-B", "Name device"), ixAct("s1", ["s0"], [ip("P", false)])]);
+    const r = await open();
+    await r.attachSpace(SP);
+    const before = r.plans();
+    const cb = vi.fn();
+    r.subscribe(cb);
+    const ixDoc = (await r.doc(IX)).ydoc;
+    remoteRaw(ixDoc, "z1", encodeAction(act("z1", ["s1"], [own("zz:1", 1)], { dev: "dev-B" })));
+    const spaceLine = "A change to the plan list from iPhone could not be read: Unknown unit key “zz:1”. Update WebBoard on this device.";
+    expect(r.indexUnreadable()).toEqual([spaceLine]);
+    expect(cb).toHaveBeenCalled();
+    expect(r.plans()).toEqual(before);
+    const localDoc = (await r.doc("local")).ydoc;
+    remoteRaw(localDoc, "z2", encodeAction(act("z2", headsOf(localDoc), [own("zz:2", 1)], { dev: "dev-B" })));
+    expect(r.indexUnreadable()).toEqual([
+      "A change to the plan list from Device dev- could not be read: Unknown unit key “zz:2”. Update WebBoard on this device.",
+      spaceLine,
+    ]);
+  });
+
+  it("a malformed action in the space index is listed", async () => {
+    const line = "A change to the plan list from iPhone could not be read: Action x1 has a malformed lbl. Update WebBoard on this device.";
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing());
+    seedIndex(e.mem, IX, [ixAct("s0", [], [own("dn:dev-B", "iPhone")], "dev-B", "Name device")]);
+    const r = await open();
+    await r.attachSpace(SP);
+    const cb = vi.fn();
+    r.subscribe(cb);
+    const before = r.plans();
+    remoteRaw((await r.doc(IX)).ydoc, "x1", ["dev-B", "s1", 0, [], 42, []]);
+    expect(r.indexUnreadable()).toEqual([line]);
+    expect(cb).toHaveBeenCalled();
+    expect(r.plans()).toEqual(before);
+    await closeAll();
+
+    const f = spaceEnv();
+    seedIndex(f.mem, "local", listing());
+    seedIndex(f.mem, IX, [ixAct("s0", [], [own("dn:dev-B", "iPhone")], "dev-B", "Name device"), ["x1", ["dev-B", "s1", 0, [], 42, []]]]);
+    const r2 = await open();
+    expect(r2.indexUnreadable()).toEqual([]);
+    await r2.attachSpace(SP);
+    expect(r2.indexUnreadable()).toEqual([line]);
+  });
+
+  it("a repaired space index notifies once", async () => {
+    const e = spaceEnv();
+    tauri.answers.store_load = (args, o) => {
+      if (docOfArgs({ cmd: "store_load", args, options: o }) === IX) return encodeLoad({ torn: true, lastSeq: 0 });
+      return e.mem.answers.store_load(args, o);
+    };
+    const r = await open();
+    expect(r.takeIndexRepairNotice()).toBeNull();
+    await r.attachSpace(SP);
+    expect(r.takeIndexRepairNotice()).toBe("The last change to the plan list before WebBoard closed was not saved.");
+    expect(r.takeIndexRepairNotice()).toBeNull();
+  });
+
+  it("loading again from the server is refused while read-only", async () => {
+    const corrupt = { code: "store.corrupt", message: "Bad record in seg-0.log." };
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing());
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    seedPlan(e.mem, "P", "Pea");
+    e.mem.fail("store_load", "P", corrupt);
+    const r = await open();
+    await r.attachSpace(SP);
+    await rejection(r.doc("P"));
+    expect(r.failures().get("P")?.code).toBe("store.corrupt");
+    r.setSpaceReadOnly(true);
+    const from = tauri.calls.length;
+    const err = await rejection(r.reloadFromServer("P"));
+    expect(err).toBeInstanceOf(Refused);
+    expect((err as Refused).message).toBe(READ_ONLY);
+    expect(callsOf(from, "store_set_aside")).toHaveLength(0);
+    expect(r.failures().get("P")?.message).toBe("Bad record in seg-0.log.");
+    await closeAll();
+
+    const f = spaceEnv();
+    seedIndex(f.mem, "local", listing());
+    seedIndex(f.mem, IX, [ixAct("s1", [], [ip("P", false)])]);
+    f.mem.fail("store_load", IX, corrupt);
+    const r2 = await open();
+    await rejection(r2.attachSpace(SP));
+    expect(r2.indexError()?.code).toBe("store.corrupt");
+    expect(r2.indexErrorDoc()).toBe(IX);
+    r2.setSpaceReadOnly(true);
+    const from2 = tauri.calls.length;
+    const err2 = await rejection(r2.reloadFromServer(IX));
+    expect(err2).toBeInstanceOf(Refused);
+    expect((err2 as Refused).message).toBe(READ_ONLY);
+    expect(callsOf(from2, "store_set_aside")).toHaveLength(0);
+    expect(r2.indexError()?.message).toBe("Bad record in seg-0.log.");
+    expect(r2.indexErrorDoc()).toBe(IX);
+  });
+
+  it("opening a session notifies before it resolves", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("P"));
+    seedPlan(e.mem, "P", "Pea");
+    const r = await open();
+    const seen: number[] = [];
+    r.subscribe(() => seen.push(r.openSessions().length));
+    const opening = r.session("P");
+    expect(seen).toEqual([]);
+    await opening;
+    expect(seen).toContain(1);
+  });
+
+  it("synced heads are kept in settings", async () => {
+    const e = spaceEnv();
+    const r = await open();
+    expect(r.syncedHeads("P")).toBeNull();
+    const from = tauri.calls.length;
+    await r.setSyncedHeads("P", ["a1", "a2"]);
+    expect(r.syncedHeads("P")).toEqual(["a1", "a2"]);
+    expect(settingsWrites(from).map((s) => s.syncedHeads)).toEqual([{ P: ["a1", "a2"] }]);
+    e.state.writeFail = { code: "settings.io", message: "Could not save settings.json: disk full" };
+    const cb = vi.fn();
+    r.subscribe(cb);
+    await r.setSyncedHeads(IX, ["b1"]);
+    expect(r.settingsError()?.code).toBe("settings.io");
+    expect(cb).toHaveBeenCalled();
+    expect(r.syncedHeads(IX)).toEqual(["b1"]);
   });
 });

@@ -74,6 +74,7 @@ export function testRegistry(t: TestSession, over: Partial<Registry> = {}): Test
     indexUnreadable: () => [],
     localSpaces: () => [],
     spaceReadOnly: () => false,
+    attachedSpace: () => null,
     subscribe: (cb: () => void) => {
       listeners.add(cb);
       return () => {

@@ -142,6 +142,11 @@ export class Registry {
   private offLocal: (() => void) | null = null;
   private spaceIds: readonly string[] = [];
   private readonly spaces = new Map<string, IndexDoc>();
+  private attachedId: string | null = null;
+  private hookedSpace: IndexDoc | null = null;
+  private offSpace: (() => void) | null = null;
+  private readonly attaching = new Map<string, Promise<IndexDoc>>();
+  private readOnlySpace = false;
   private readonly memo = new Map<string, Promise<PersistedDoc>>();
   private readonly loaded = new Map<string, PersistedDoc>();
   private readonly docOffs = new Map<string, () => void>();
@@ -236,7 +241,7 @@ export class Registry {
   }
 
   private onIndexChange(): void {
-    const devices = this.local.devices();
+    const devices = this.devices();
     const changed = !sameDevices(devices, this.lastDevices);
     this.lastDevices = devices;
     notifyEach([...(changed ? this.deviceCbs : []), ...this.subscribers]);
@@ -386,14 +391,94 @@ export class Registry {
     return { deviceId: this.deviceId, name, platform: this.platform };
   }
 
+  private spaceIndex(): IndexDoc | null {
+    return this.attachedId === null ? null : (this.spaces.get(this.attachedId) ?? null);
+  }
+
+  private putSpace(id: string, ix: IndexDoc): void {
+    this.spaces.set(id, ix);
+    if (id === this.attachedId) this.hookSpace(ix);
+  }
+
+  private hookSpace(ix: IndexDoc): void {
+    if (this.hookedSpace === ix) return;
+    this.unhookSpace();
+    this.hookedSpace = ix;
+    this.offSpace = ix.subscribe(() => this.onIndexChange());
+    if (this.readOnlySpace) {
+      const listed = new Set(ix.plans().map((p) => p.id));
+      [...this.sessions].filter(([id, s]) => listed.has(id) && !s.readOnly).forEach(([, s]) => s.setReadOnly(true));
+    }
+    this.onIndexChange();
+  }
+
+  private unhookSpace(): void {
+    this.offSpace?.();
+    this.offSpace = null;
+    this.hookedSpace = null;
+  }
+
+  attachSpace(spaceId: string): Promise<IndexDoc> {
+    this.usable();
+    const id = SPACE_PREFIX + spaceId;
+    if (this.attachedId !== id) {
+      this.unhookSpace();
+      this.attachedId = id;
+    }
+    const open = this.spaces.get(id);
+    if (open !== undefined) {
+      this.hookSpace(open);
+      return Promise.resolve(open);
+    }
+    const pending = this.attaching.get(id);
+    if (pending !== undefined) return pending;
+    const p = this.openIndex(id).then(
+      (ix) => {
+        this.attaching.delete(id);
+        this.indexFailed.delete(id);
+        this.putSpace(id, ix);
+        return ix;
+      },
+      (e: unknown) => {
+        this.attaching.delete(id);
+        throw e;
+      },
+    );
+    this.attaching.set(id, p);
+    return p;
+  }
+
+  attachedSpace(): string | null {
+    return this.attachedId !== null && this.spaceIndex() !== null ? this.attachedId.slice(SPACE_PREFIX.length) : null;
+  }
+
+  private listingOf(id: PlanId, trashed: boolean, space: string | null): PlanListing {
+    return { id, name: this.settings.names[id] ?? null, trashed, loaded: this.trackers.get(id)?.projected ?? false, space };
+  }
+
   plans(): readonly PlanListing[] {
-    return this.local.plans().map((p) => ({
-      id: p.id,
-      name: this.settings.names[p.id] ?? null,
-      trashed: p.trashed,
-      loaded: this.trackers.get(p.id)?.projected ?? false,
-      space: null,
-    }));
+    const ix = this.spaceIndex();
+    const spaceId = this.attachedSpace();
+    const inSpace = new Map((ix?.plans() ?? []).map((p) => [p.id, p.trashed]));
+    const local = this.local.plans();
+    const localIds = new Set(local.map((p) => p.id));
+    return [
+      ...local.map((p) => {
+        const t = inSpace.get(p.id);
+        return t === undefined ? this.listingOf(p.id, p.trashed, null) : this.listingOf(p.id, t, spaceId);
+      }),
+      ...[...inSpace].filter(([id]) => !localIds.has(id)).map(([id, t]) => this.listingOf(id, t, spaceId)),
+    ];
+  }
+
+  private listsInSpace(id: PlanId): IndexDoc | null {
+    const ix = this.spaceIndex();
+    return ix !== null && ix.plans().some((p) => p.id === id) ? ix : null;
+  }
+
+  private addTarget(): IndexDoc {
+    const ix = this.spaceIndex();
+    return ix !== null && !this.readOnlySpace ? ix : this.local;
   }
 
   session(id: PlanId): Promise<PlanSession> {
@@ -409,6 +494,7 @@ export class Registry {
           if (this.sessionMemo.get(id) === p) this.sessionMemo.delete(id);
         };
         this.sessions.set(id, s);
+        this.emit();
         return s;
       },
       (e: unknown) => {
@@ -425,7 +511,9 @@ export class Registry {
     const tracker = this.trackers.get(id);
     if (tracker === undefined) throw new Error(`Plan ${id} is loaded without a name tracker`);
     if (!tracker.projected) throw new AppError("plan.incomplete", INCOMPLETE);
-    return PlanSession.open(id, this.deps());
+    const s = await PlanSession.open(id, this.deps());
+    if (this.readOnlySpace && this.listsInSpace(id) !== null) s.setReadOnly(true);
+    return s;
   }
 
   openSessions(): readonly PlanSession[] {
@@ -437,11 +525,21 @@ export class Registry {
   }
 
   devices(): ReadonlyMap<DeviceId, string> {
-    return this.local.devices();
+    const ix = this.spaceIndex();
+    return ix === null ? this.local.devices() : new Map([...this.local.devices(), ...ix.devices()]);
   }
 
   indexUnreadable(): readonly string[] {
-    return this.local.unreadable().map((u) => u.message);
+    const ix = this.spaceIndex();
+    return [...this.local.unreadable(), ...(ix?.unreadable() ?? [])].map((u) => u.message);
+  }
+
+  nameThisDevice(name: string): void {
+    this.usable();
+    const normal = normalizeName(name);
+    [this.local, this.spaceIndex()]
+      .filter((ix): ix is IndexDoc => ix !== null && ix.devices().get(this.deviceId) !== normal)
+      .forEach((ix) => ix.nameDevice(this.deviceId, normal));
   }
 
   async createPlan(name: string): Promise<PlanId> {
@@ -467,7 +565,7 @@ export class Registry {
     const id = newId();
     const doc = await this.load(id, false);
     new PlanDoc(doc.ydoc).append(action, []);
-    this.local.addPlan(id);
+    this.addTarget().addPlan(id);
     await this.session(id);
     if (this.cacheName(id, normalizeName(name))) this.emit();
     return id;
@@ -488,20 +586,27 @@ export class Registry {
       planDoc.append(action, r.newNotes);
       texts.forEach(([item, text]) => planDoc.note(item).insert(0, text));
     }, LOCAL);
-    this.local.addPlan(id);
+    this.addTarget().addPlan(id);
     const session = await this.session(id);
     if (this.cacheName(id, session.view().plan.name)) this.emit();
     return id;
   }
 
+  private planIndex(id: PlanId): IndexDoc {
+    const ix = this.listsInSpace(id);
+    if (ix === null) return this.local;
+    if (this.readOnlySpace) throw new Refused(READ_ONLY);
+    return ix;
+  }
+
   trashPlan(id: PlanId): void {
     this.usable();
-    this.local.trashPlan(id);
+    this.planIndex(id).trashPlan(id);
   }
 
   restorePlan(id: PlanId): void {
     this.usable();
-    this.local.restorePlan(id);
+    this.planIndex(id).restorePlan(id);
   }
 
   async setLastRegion(r: RegionRef): Promise<void> {
@@ -551,7 +656,8 @@ export class Registry {
   }
 
   private indexStates(): [string, AppError | null][] {
-    return [LOCAL_INDEX, ...this.spaceIds].map((id) => [id, this.indexFailed.get(id) ?? this.loaded.get(id)?.error() ?? null]);
+    const attached = this.attachedId === null || this.spaceIds.includes(this.attachedId) ? [] : [this.attachedId];
+    return [LOCAL_INDEX, ...this.spaceIds, ...attached].map((id) => [id, this.indexFailed.get(id) ?? this.loaded.get(id)?.error() ?? null]);
   }
 
   indexError(): AppError | null {
@@ -590,11 +696,35 @@ export class Registry {
       throw e;
     }
     this.indexFailed.delete(id);
-    this.spaces.set(id, ix);
+    this.putSpace(id, ix);
   }
 
   spaceReadOnly(): boolean {
-    return false;
+    return this.readOnlySpace;
+  }
+
+  setSpaceReadOnly(on: boolean): void {
+    this.usable();
+    if (this.readOnlySpace === on) return;
+    this.readOnlySpace = on;
+    [...this.sessions].filter(([id]) => this.listsInSpace(id) !== null).forEach(([, s]) => s.setReadOnly(on));
+    this.emit();
+  }
+
+  syncedHeads(doc: string): readonly ActionId[] | null {
+    return this.settings.syncedHeads?.[doc] ?? null;
+  }
+
+  async setSyncedHeads(doc: string, heads: readonly ActionId[]): Promise<void> {
+    this.usable();
+    this.settings = { ...this.settings, syncedHeads: { ...this.settings.syncedHeads, [doc]: [...heads] } };
+    try {
+      await this.writeSettings();
+    } catch (e) {
+      if (!(e instanceof AppError)) throw e;
+      this.settingsFailure = e;
+      this.emit();
+    }
   }
 
   async reloadFromServer(docId: string): Promise<void> {
@@ -613,7 +743,7 @@ export class Registry {
     );
     this.memo.set(docId, p);
     await p;
-    if (docId.startsWith(SPACE_PREFIX)) this.spaces.set(docId, await this.openIndex(docId));
+    if (docId.startsWith(SPACE_PREFIX)) this.putSpace(docId, await this.openIndex(docId));
     this.emit();
   }
 
@@ -641,6 +771,7 @@ export class Registry {
     this.unhook(id);
     if (ix !== undefined) {
       this.spaces.delete(id);
+      if (this.hookedSpace === ix) this.unhookSpace();
       if (d === undefined) throw new Error(`Index ${id} is open without a loaded document`);
     }
     if (d === undefined) return;
@@ -695,6 +826,7 @@ export class Registry {
     this.closed = true;
     this.offLocal?.();
     this.offLocal = null;
+    this.unhookSpace();
     const sessions = await Promise.allSettled([...this.sessions.values()].map(async (s) => s.close()));
     const indexes = [...(this.localIx === null ? [] : [this.localIx]), ...this.spaces.values()];
     const indexDocs = await Promise.allSettled(indexes.map(async (ix) => ix.close()));
