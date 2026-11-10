@@ -53,7 +53,9 @@ export const Scale = memo(function Scale(p: { geo: Geometry; zoom: Zoom; today: 
               style={{ left: geo.x(mo.day), width: geo.x(mo.next) - geo.x(mo.day) }}
               title={nodata ? nodataTitle(mo.y) : undefined}
             >
-              {MONTHS[mo.m - 1]} {mo.y}
+              <span className="tl-month-text">
+                {MONTHS[mo.m - 1]} {mo.y}
+              </span>
             </div>
           );
         })}

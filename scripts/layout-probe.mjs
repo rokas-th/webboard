@@ -62,6 +62,7 @@ const key = (k, code, modifiers) => ({ key: { key: k, code, modifiers } });
 const reveal = (selector, text) => ({ reveal: [selector, text] });
 const nubs = (reach) => ({ nubs: reach });
 const todayShown = () => ({ today: true });
+const edges = () => ({ edges: true });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -203,7 +204,7 @@ function states() {
   add("example/timeline", "example", {
     sizes: "timeline",
     place: { view: "timeline", zoom: "W" },
-    actions: [viewExpect("timeline"), todayShown(), exampleHead, expect(".tl-row .name", "Visual design"), count(".plan-head .chip-magenta", 0), count(".plan-head .chip-amber", 0)],
+    actions: [viewExpect("timeline"), todayShown(), edges(), exampleHead, expect(".tl-row .name", "Visual design"), count(".plan-head .chip-magenta", 0), count(".plan-head .chip-amber", 0)],
   });
   add("example/board", "example", {
     sizes: "standard",
@@ -943,6 +944,7 @@ const MEASURE = String.raw`
       var hits = document.elementsFromPoint(x, y);
       var front = hits.length > 0 ? hits[0] : null;
       if (front !== null && (front === el || el.contains(front))) continue;
+      if (front !== null && front.closest(".tl-corner") !== null && el.closest(".tl-scale") !== null) continue;
       var popup = front === null ? null : front.closest(POPUPS);
       if (popup !== null && !popup.contains(el)) continue;
       out.push({ path: path(el), at: one(x) + "," + one(y), on: front === null ? "nothing at all" : path(front),
@@ -1216,6 +1218,38 @@ window.__probeAct = function (a) {
     if (lr.left < from || lr.right > to) {
       return { fail: "today line at " + Math.round(lr.left) + ".." + Math.round(lr.right) + " is outside the visible chart " + Math.round(from) + ".." + Math.round(to) +
         " (scrollLeft " + Math.round(pane.scrollLeft) + ", pane " + pane.clientWidth + " px)" };
+    }
+    return { ok: true };
+  }
+  if (a.edges !== undefined) {
+    var sp = document.querySelector(".tl-scroll");
+    var gr = document.querySelector(".tl-grid");
+    var corner = document.querySelector(".tl-corner");
+    var pill = document.querySelector(".tl-today-label");
+    var monthBoxes = Array.prototype.slice.call(document.querySelectorAll(".tl-month"));
+    if (sp === null || gr === null || corner === null || pill === null || monthBoxes.length === 0) return { fail: "no .tl-scroll, .tl-grid, .tl-corner, .tl-today-label and .tl-month to check the edges with" };
+    var was = sp.scrollLeft;
+    var gw = gr.getBoundingClientRect().width;
+    var widest = monthBoxes.reduce(function (m, b) { return b.offsetWidth > m.offsetWidth ? b : m; });
+    sp.scrollLeft = widest.offsetLeft + 200;
+    var label = widest.querySelector(".tl-month-text");
+    if (label === null) { sp.scrollLeft = was; return { fail: "the month box has no .tl-month-text" }; }
+    var lr2 = label.getBoundingClientRect();
+    var want = gr.getBoundingClientRect().right + 8;
+    var fronts = document.elementFromPoint((lr2.left + lr2.right) / 2, (lr2.top + lr2.bottom) / 2);
+    var stuck = Math.abs(lr2.left - want) <= 2 && fronts !== null && (fronts === label || label.contains(fronts));
+    sp.scrollLeft = pill.offsetLeft + gw / 2;
+    var pr = pill.getBoundingClientRect();
+    pill.style.pointerEvents = "auto";
+    var over = document.elementFromPoint((pr.left + pr.right) / 2, (pr.top + pr.bottom) / 2);
+    pill.style.pointerEvents = "";
+    var under = over !== null && corner.contains(over);
+    var fade = getComputedStyle(gr, "::after");
+    sp.scrollLeft = was;
+    if (!stuck) return { fail: "the month label sits at " + Math.round(lr2.left) + " px, not " + Math.round(want) + " px, or is covered" };
+    if (!under) return { fail: "the TODAY pill paints over the pinned corner: " + (over === null ? "nothing" : over.tagName.toLowerCase() + "." + String(over.className)) + " is in front" };
+    if (fade.width !== "28px" || fade.pointerEvents !== "none" || fade.backgroundImage.indexOf("linear-gradient") === -1) {
+      return { fail: "the chart's left fade is " + fade.width + ", pointer-events " + fade.pointerEvents + ", " + fade.backgroundImage };
     }
     return { ok: true };
   }

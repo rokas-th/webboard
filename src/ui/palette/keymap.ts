@@ -51,5 +51,7 @@ export function keyToCommand(e: KeyInput, s: KeyState): string | null {
   if (e.key === "Delete" || e.key === "Backspace") return s.selected ? "trash" : null;
   if (e.key.toLowerCase() === "n") return "new-task";
   if (e.shiftKey) return null;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") return e.key === "ArrowDown" ? "select-next" : "select-prev";
+  if (e.key.toLowerCase() === "t") return "today";
   return VIEWS[e.key] ?? null;
 }

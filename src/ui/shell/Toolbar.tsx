@@ -21,7 +21,7 @@ interface ToolbarProps {
   compact: { onPlans(): void; onPlan(): void } | null;
 }
 
-function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState; setUi(patch: Partial<UiState>): void }) {
+function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState; setUi(patch: Partial<UiState>): void; onCommand(id: string): void }) {
   const view = usePlanView(p.session);
   const { undo, redo } = useRun(p.session);
   return (
@@ -55,6 +55,9 @@ function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState;
           </button>
         ))}
       </div>
+      <button type="button" title="Jump to today" onClick={() => p.onCommand("today")}>
+        Today
+      </button>
       <button type="button" disabled={p.readOnly || !p.session.canUndo()} onClick={() => undo()}>
         Undo
       </button>
@@ -77,7 +80,7 @@ export function Toolbar(p: ToolbarProps) {
       {p.session === null ? (
         <span className="toolbar-spacer" />
       ) : (
-        <PlanControls session={p.session} readOnly={p.readOnly} ui={p.ui} setUi={p.setUi} />
+        <PlanControls session={p.session} readOnly={p.readOnly} ui={p.ui} setUi={p.setUi} onCommand={p.onCommand} />
       )}
       <button type="button" className="kbd-button" title="Command palette" onClick={() => p.onCommand("palette")}>
         {p.mac ? "⌘K" : "Ctrl K"}

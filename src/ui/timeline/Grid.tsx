@@ -23,7 +23,7 @@ const dotOf = (view: PlanView, marks: Marks, id: ItemId): string => {
   return status === "done" ? "dot dot-done" : status === "doing" ? "dot dot-doing" : "dot";
 };
 
-function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Marks; ui: UiState; setUi: SetUi }) {
+function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Marks; ui: UiState; setUi: SetUi; tabStop: boolean }) {
   const { row, index } = p.placed;
   const item = p.view.plan.items.get(row.id);
   if (item === undefined) throw new Error(`Timeline row ${row.id} is not in the plan`);
@@ -32,8 +32,11 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
   const common = {
     "data-row": row.id,
     "data-index": index,
+    role: "option",
+    "aria-selected": selected,
+    tabIndex: p.tabStop ? 0 : -1,
     style: { top: index * ROW, paddingLeft: row.kind === "group" ? pad - 4 : pad },
-    onClick: () => p.setUi({ selected: row.id }),
+    onClick: () => p.setUi({ selected: row.id, reveal: row.id }),
   };
   if (row.kind === "ghost") {
     return (
@@ -56,6 +59,7 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
         <button
           type="button"
           className="caret"
+          aria-expanded={open}
           aria-label={`${open ? "Collapse" : "Expand"} ${item.name}`}
           onClick={(e) => {
             e.stopPropagation();
@@ -81,11 +85,12 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
 }
 
 export function Grid(p: { mounted: readonly Placed[]; count: number; view: PlanView; geo: Geometry; marks: Marks; ui: UiState; setUi: SetUi }) {
+  const stop = p.mounted.some((m) => m.row.id === p.ui.selected) ? p.ui.selected : p.mounted.length === 0 ? null : p.mounted[0].row.id;
   return (
     <div className="tl-grid">
-      <div className="tl-rows" style={{ height: p.count * ROW }}>
+      <div className="tl-rows" role="listbox" aria-label="Plan rows" style={{ height: p.count * ROW }}>
         {p.mounted.map((placed) => (
-          <GridRow key={placed.row.id} placed={placed} view={p.view} geo={p.geo} marks={p.marks} ui={p.ui} setUi={p.setUi} />
+          <GridRow key={placed.row.id} placed={placed} view={p.view} geo={p.geo} marks={p.marks} ui={p.ui} setUi={p.setUi} tabStop={placed.row.id === stop} />
         ))}
       </div>
     </div>

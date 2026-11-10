@@ -65,6 +65,18 @@ describe("keyToCommand on macOS", () => {
     expect(keyToCommand(k("Escape"), { ...MAC, typing: true })).toBeNull();
   });
 
+  it("moves the selection by ArrowUp and ArrowDown, with or without one, never while typing or in a dialog", () => {
+    expect([keyToCommand(k("ArrowDown"), MAC), keyToCommand(k("ArrowUp"), { ...MAC, selected: true })]).toEqual(["select-next", "select-prev"]);
+    expect([keyToCommand(k("ArrowDown"), { ...MAC, typing: true }), keyToCommand(k("ArrowUp"), { ...MAC, dialog: true })]).toEqual([null, null]);
+    expect([keyToCommand(k("ArrowDown", { shiftKey: true }), MAC), keyToCommand(k("ArrowUp", { altKey: true }), MAC)]).toEqual([null, null]);
+  });
+
+  it("jumps to today on T, never while typing or in a dialog", () => {
+    expect([keyToCommand(k("t"), MAC), keyToCommand(k("T"), { ...PC, selected: true })]).toEqual(["today", "today"]);
+    expect([keyToCommand(k("t"), { ...MAC, typing: true }), keyToCommand(k("t"), { ...MAC, dialog: true })]).toEqual([null, null]);
+    expect([keyToCommand(k("T", { shiftKey: true }), MAC), keyToCommand(k("t", { altKey: true }), MAC)]).toEqual([null, null]);
+  });
+
   it("leaves other keys alone", () => {
     expect(["4", "a", "Enter", "Tab", " "].map((key) => keyToCommand(k(key), { ...MAC, selected: true }))).toEqual([null, null, null, null, null]);
     expect(keyToCommand(k("1", { metaKey: true }), MAC)).toBeNull();

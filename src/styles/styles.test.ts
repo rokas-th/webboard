@@ -218,6 +218,7 @@ describe("the Cyberdeck look", () => {
       ".tl-tick": ".tl-scale",
       ".tl-today-label": ".tl-scale",
       ".tl-row": ".tl-rows",
+      ".tl-grid::after": ".tl-grid",
       ".tl-rowline": ".tl-chart",
       ".tl-off": ".tl-chart",
       ".tl-today": ".tl-chart",
@@ -235,7 +236,7 @@ describe("the Cyberdeck look", () => {
       ".gbar::after": ".gbar",
       ".ms::before": ".ms",
     };
-    const positioned = ["relative", "absolute"];
+    const positioned = ["relative", "absolute", "sticky"];
     const absolute = sheet.rules.filter((r) => r.decls["position"] === "absolute" && r.conditions.length === 0).map((r) => r.selector);
     expect(absolute.sort()).toEqual(Object.keys(anchors).sort());
     Object.values(anchors).forEach((anchor) => {
@@ -264,11 +265,20 @@ describe("the Cyberdeck look", () => {
     });
   });
 
-  it("keeps a card's group path and a month label on one line with an ellipsis", () => {
-    [".card-meta .card-group", ".tl-month"].forEach((sel) => {
-      const decls = Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
-      expect([sel, decls["overflow"], decls["text-overflow"], decls["white-space"]]).toEqual([sel, "hidden", "ellipsis", "nowrap"]);
-    });
+  it("keeps a card's group path and a month label on one line with an ellipsis, the month clipped so its label can stick", () => {
+    const plain = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect([".card-meta .card-group", ".tl-month"].map((sel) => [sel, plain(sel)["overflow"], plain(sel)["text-overflow"], plain(sel)["white-space"]])).toEqual([
+      [".card-meta .card-group", "hidden", "ellipsis", "nowrap"],
+      [".tl-month", "clip", "ellipsis", "nowrap"],
+    ]);
+    expect([plain(".tl-month-text")["position"], plain(".tl-month-text")["left"]]).toEqual(["sticky", "calc(var(--grid-w) + 8px)"]);
+  });
+
+  it("keeps the TODAY pill under the pinned corner and fades the chart in from the task column", () => {
+    const plain = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect(Number(plain(".tl-today-label")["z-index"])).toBeLessThan(Number(plain(".tl-corner")["z-index"]));
+    const fade = plain(".tl-grid::after");
+    expect([fade["left"], fade["width"], fade["background"], fade["pointer-events"]]).toEqual(["100%", "28px", "linear-gradient(to right, var(--void), transparent)", "none"]);
   });
 
   it("insets the toolbar for the traffic lights only on macOS", () => {
@@ -284,6 +294,8 @@ describe("the Cyberdeck look", () => {
     expect(narrow(".toolbar")["gap"]).toBe("6px");
     expect(narrow(".toolbar > button")["padding"]).toBe("7px 10px");
     expect(narrow(".seg-modes button")["padding"]).toBe("4px 8px");
+    const narrower = sheet.rules.filter((r) => r.selector === ".wordmark" && r.conditions.length === 1 && r.conditions[0] === "@media (max-width: 1100px)");
+    expect(narrower.map((r) => r.decls["display"])).toEqual(["none"]);
   });
 
   it("fills each link arrowhead from the token its path is stroked with", () => {

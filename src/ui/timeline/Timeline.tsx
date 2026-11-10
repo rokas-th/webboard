@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Refused, type Intent } from "../../actions/intents";
 import { toDay, type Day } from "../../domain/dates";
-import type { ItemId, LinkType } from "../../domain/model";
+import type { ItemId, LinkType, PlanId } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { EMPTY_PLAN } from "../copy";
 import { useRun } from "../run";
 import { useUiValue } from "../state";
-import { Chart, itemOf, type DropGhost, type Point, type TempLink, type TouchHost } from "./Chart";
+import { Chart, itemOf, rowAt, type DropGhost, type Point, type TempLink, type TouchHost } from "./Chart";
 import { geometry, leadFor, ROW, type Geometry } from "./geometry";
 import { gestureIntent, isClick, startIntent } from "./gesture";
 import { Grid, type Marks, type Placed } from "./Grid";
@@ -42,11 +42,34 @@ const marksOf = (view: PlanView): Marks => {
   return { early, badLinks, dayoff };
 };
 
-const leadIn = (scroller: HTMLElement): number => {
+const chartWidth = (scroller: HTMLElement): number => {
   const grid = scroller.querySelector(".tl-grid");
   if (!(grid instanceof HTMLElement)) throw new Error("Timeline: no task column to lead past");
-  return leadFor(scroller.clientWidth - grid.offsetWidth);
+  return scroller.clientWidth - grid.offsetWidth;
 };
+
+const leadIn = (scroller: HTMLElement): number => leadFor(chartWidth(scroller));
+
+const headHeight = (scroller: HTMLElement): number => {
+  const head = scroller.querySelector(".tl-head");
+  if (!(head instanceof HTMLElement)) throw new Error("Timeline: no header to reveal under");
+  return head.offsetHeight;
+};
+
+const openingDay = (view: PlanView, today: Day): Day => {
+  const starts = [...view.derived.start.values()];
+  const ends = [...view.derived.end.values()];
+  if (starts.length === 0 || ends.length === 0) return today;
+  const first = Math.min(...starts);
+  return today < first || today > Math.max(...ends) ? first : today;
+};
+
+interface Place {
+  plan: PlanId;
+  origin: Day;
+  ppd: number;
+  left: number;
+}
 
 const isEmptyPlan = (view: PlanView, rows: number): boolean => rows === 0 && [...view.plan.items.values()].every((i) => i.trashed);
 
@@ -82,7 +105,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   const marks = useMemo(() => marksOf(view), [view]);
   const scroller = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
-  const scrolledFor = useRef<string | null>(null);
+  const place = useRef<Place | null>(null);
   const previewed = useRef<{ key: string; view: PlanView; label: string } | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(0);
@@ -101,14 +124,30 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   }, []);
 
   const today = toDay(view.today);
-  const scrollKey = `${view.plan.id}:${ui.zoom}`;
+  const planId = view.plan.id;
+  const opening = useMemo(() => openingDay(view, today), [view, today]);
+
+  const scrollTo = (el: HTMLElement, left: number): void => {
+    el.scrollLeft = Math.max(0, left);
+    const at = place.current;
+    if (at !== null) place.current = { ...at, left: el.scrollLeft };
+  };
+
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el === null) throw new Error("Timeline: no scroller");
-    if (empty || scrolledFor.current === scrollKey) return;
-    scrolledFor.current = scrollKey;
-    el.scrollLeft = Math.max(0, geo.x(today) - leadIn(el));
-  }, [scrollKey, empty, geo, today]);
+    if (empty) return;
+    const prev = place.current;
+    const lead = leadIn(el);
+    if (prev === null || prev.plan !== planId) el.scrollLeft = Math.max(0, geo.x(opening) - lead);
+    else if (prev.origin !== geo.origin || prev.ppd !== geo.ppd) {
+      const day = prev.origin + (prev.left + lead) / prev.ppd;
+      el.scrollLeft = Math.max(0, Math.round((day - geo.origin) * geo.ppd - lead));
+    }
+    place.current = { plan: planId, origin: geo.origin, ppd: geo.ppd, left: el.scrollLeft };
+  }, [planId, empty, geo, opening]);
+
+  const index = useMemo(() => new Map(rows.map((r, i) => [r.id, i] as const)), [rows]);
 
   const reveal = ui.reveal;
   useLayoutEffect(() => {
@@ -116,17 +155,25 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     const el = scroller.current;
     if (el === null) throw new Error("Timeline: no scroller");
     if (reveal === "today") {
-      if (!empty) el.scrollLeft = Math.max(0, geo.x(today) - leadIn(el));
+      if (!empty) scrollTo(el, geo.x(today) - leadIn(el));
       setUi({ reveal: null });
       return;
     }
-    const index = rows.findIndex((r) => r.id === reveal);
-    if (index < 0) throw new Error(`Timeline: no row for ${reveal} to reveal`);
-    el.scrollTop = index * ROW;
+    const at = index.get(reveal);
+    if (at === undefined) throw new Error(`Timeline: no row for ${reveal} to reveal`);
+    const top = at * ROW;
+    const shown = el.clientHeight - headHeight(el);
+    if (top < el.scrollTop) el.scrollTop = top;
+    else if (top + ROW > el.scrollTop + shown) el.scrollTop = Math.min(top, top + ROW - shown);
+    setScrollTop(el.scrollTop);
     const span = geo.span(reveal);
-    if (span !== null) el.scrollLeft = Math.max(0, geo.x(span.start) - leadIn(el));
+    if (span !== null) {
+      const x0 = geo.x(span.start);
+      const x1 = geo.x(span.end) + geo.ppd;
+      if (x1 <= el.scrollLeft || x0 >= el.scrollLeft + chartWidth(el)) scrollTo(el, x0 - leadIn(el));
+    }
     setUi({ reveal: null });
-  }, [reveal, rows, geo, today, empty, setUi]);
+  }, [reveal, index, geo, today, empty, setUi]);
 
   const cancel = (): void => {
     drag.current = null;
@@ -148,7 +195,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
 
   const [first, last] = visibleRange(scrollTop, height, rows.length);
   const mounted: Placed[] = rows.slice(first, last).map((row, i) => ({ row, index: first + i }));
-  const indexOf = (id: ItemId): number => rows.findIndex((r) => r.id === id);
+  const indexOf = (id: ItemId): number => index.get(id) ?? -1;
 
   const chartPoint = (e: ReactPointerEvent): { x: number; y: number } => {
     const chart = e.currentTarget.querySelector(".tl-chart");
@@ -250,7 +297,8 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     if (d.mode === "link") {
       const hit = document.elementFromPoint(up.x, up.y);
       const target = hit === null ? null : hit.closest("[data-bar],[data-row]");
-      const to = target instanceof HTMLElement ? (target.dataset.bar ?? target.dataset.row) : undefined;
+      const under = hit === null || hit.closest(".tl-chart") === null ? null : rowAt(mounted, chartPoint(e).y);
+      const to = target instanceof HTMLElement ? (target.dataset.bar ?? target.dataset.row) : under === null ? undefined : under.row.id;
       const intent = gestureIntent(geo, { kind: "link", item: d.item, dxPx: up.x - d.down.x, target: to });
       if (intent !== null) run(intent);
       else if (click) setUi({ selected: d.item });
@@ -268,7 +316,12 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     <div
       className="tl-scroll"
       ref={scroller}
-      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        setScrollTop(el.scrollTop);
+        const at = place.current;
+        if (at !== null) place.current = { ...at, left: el.scrollLeft };
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -290,6 +343,8 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
               ui={ui}
               setUi={setUi}
               mounted={mounted}
+              index={index}
+              window={[first, last]}
               count={rows.length}
               marks={marks}
               readOnly={readOnly}

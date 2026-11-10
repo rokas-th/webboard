@@ -11,6 +11,7 @@ import { countedConflicts, goToFirstPatch } from "../choices/HeadCounts";
 import { baselineDefault } from "../panel/Baselines";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { UiState, ViewKind, Zoom } from "../state";
+import { timelineRows } from "../timeline/rows";
 
 export interface Command {
   id: string;
@@ -188,12 +189,28 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
         },
       }),
   );
+  const step = (id: string, label: string, keys: string, by: 1 | -1): Command => ({
+    id,
+    group: "Edit",
+    label,
+    keys,
+    run: () => {
+      const rows = timelineRows(session.view(), ctx.ui.collapsed);
+      if (rows.length === 0) return;
+      const at = rows.findIndex((r) => r.id === ctx.ui.selected);
+      const next = at < 0 ? (by > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + by));
+      const target = rows[next].id;
+      ctx.setUi({ selected: target, reveal: target });
+    },
+  });
+  const steps = ctx.ui.view === "timeline" ? [step("select-next", "Select the next row", "↓", 1), step("select-prev", "Select the previous row", "↑", -1)] : [];
   return [
     create("task", "N"),
     create("milestone"),
     create("group"),
     ...views,
-    { id: "today", group: "View", label: "Jump to today", run: () => ctx.reveal("today") },
+    { id: "today", group: "View", label: "Jump to today", keys: "T", run: () => ctx.reveal("today") },
+    ...steps,
     ...baselines,
     ...zooms,
     { id: "calendar", group: "Plan", label: "Change calendar: region, working days, closures", run: () => ctx.setUi({ dialog: { t: "calendar" } }) },

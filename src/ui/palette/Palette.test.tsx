@@ -253,7 +253,7 @@ describe("the palette list", () => {
     await shown(t);
     press("k", { metaKey: true });
     type("view");
-    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to today", "Go toTracking: review results"]);
+    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "Go toTracking: review results"]);
     expect(highlighted()).toBe("ViewTimeline1");
     press("ArrowUp", {}, query());
     expect(highlighted()).toBe("ViewTimeline1");

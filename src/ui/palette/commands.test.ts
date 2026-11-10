@@ -116,8 +116,8 @@ describe("commands()", () => {
     const baseline = [...t.session.view().plan.baselines.keys()][0];
     const h = harness(t, { selected: "a" }, ["p2"]);
     const all = ids(h.ctx);
-    const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash"];
-    const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", "today", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "about"];
+    const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash", "today", "select-next", "select-prev"];
+    const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "about"];
     const goTo = ["g1", "a", "b", "one", "m", "u"].map((x) => `goto:${x}`);
     expect([...keyed, ...more, ...goTo].filter((x) => !all.includes(x))).toEqual([]);
     expect(all.filter((x) => x === "close-dialog" || x === "deselect")).toEqual([]);
@@ -240,6 +240,48 @@ describe("commands()", () => {
     find(h.ctx, "today").run();
     expect(h.setUi.mock.calls).toEqual([[{ view: "board" }], [{ view: "list" }], [{ view: "timeline" }], [{ view: "timeline", zoom: "Q" }]]);
     expect(h.reveal.mock.calls).toEqual([["today"]]);
+  });
+
+  it("gives Jump to today the key T", async () => {
+    const t = await made(SMALL);
+    expect(find(harness(t).ctx, "today").keys).toBe("T");
+  });
+
+  it("steps the selection through the timeline's visible rows and reveals it", async () => {
+    const t = await made(SMALL);
+    const step = (ui: Partial<UiState>, id: string): unknown[] => {
+      const h = harness(t, ui);
+      find(h.ctx, id).run();
+      return h.setUi.mock.calls;
+    };
+    expect([
+      step({}, "select-next"),
+      step({}, "select-prev"),
+      step({ selected: "g1" }, "select-next"),
+      step({ selected: "b" }, "select-next"),
+      step({ selected: "one" }, "select-prev"),
+      step({ selected: "g1" }, "select-prev"),
+      step({ selected: "m" }, "select-next"),
+      step({ selected: "g1", collapsed: new Set(["g1"]) }, "select-next"),
+      step({ selected: "u" }, "select-next"),
+    ]).toEqual([
+      [[{ selected: "g1", reveal: "g1" }]],
+      [[{ selected: "m", reveal: "m" }]],
+      [[{ selected: "a", reveal: "a" }]],
+      [[{ selected: "one", reveal: "one" }]],
+      [[{ selected: "b", reveal: "b" }]],
+      [[{ selected: "g1", reveal: "g1" }]],
+      [[{ selected: "m", reveal: "m" }]],
+      [[{ selected: "one", reveal: "one" }]],
+      [[{ selected: "g1", reveal: "g1" }]],
+    ]);
+    expect([find(harness(t).ctx, "select-next").keys, find(harness(t).ctx, "select-prev").keys]).toEqual(["↓", "↑"]);
+  });
+
+  it("offers the row steps only on the timeline", async () => {
+    const t = await made(SMALL);
+    const steps = (view: UiState["view"]): string[] => ids(harness(t, { view }).ctx).filter((x) => x.startsWith("select-"));
+    expect([steps("board"), steps("list"), steps("timeline")]).toEqual([[], [], ["select-next", "select-prev"]]);
   });
 
   it("selects and reveals on Go to, for an item and for a group", async () => {

@@ -415,20 +415,108 @@ describe("today and baselines", () => {
     expect(one(".tl-today").style.left).toBe(`${g.x(toDay("2026-11-10")) + 20}px`);
   });
 
-  it("scrolls to today on open and on a zoom change", async () => {
-    const t = await shown([{ name: "A", start: "2026-12-10", dur: 3 }], { today: "2026-12-07" });
+  it("scrolls to today on open and keeps the day at the lead-in on a zoom change", async () => {
+    const t = await shown([{ name: "A", start: "2026-12-01", dur: 10 }], { today: "2026-12-07" });
     const scroll = one(".tl-scroll");
-    expect(scroll.scrollLeft).toBe(geometry(t.session.view(), "W").x(toDay("2026-12-07")) - 160);
+    const w = geometry(t.session.view(), "W");
+    expect(scroll.scrollLeft).toBe(w.x(toDay("2026-12-07")) - 160);
+    act(() => {
+      scroll.scrollLeft = 1000;
+      fireEvent.scroll(scroll);
+    });
+    const day = w.origin + (1000 + 160) / w.ppd;
     act(() => {
       fireEvent.click(within(one(".seg-zoom")).getByRole("button", { name: "M" }));
     });
-    expect(scroll.scrollLeft).toBe(Math.max(0, geometry(t.session.view(), "M").x(toDay("2026-12-07")) - 160));
+    const m = geometry(t.session.view(), "M");
+    expect(scroll.scrollLeft).toBe(Math.round((day - m.origin) * m.ppd - 160));
+    act(() => {
+      fireEvent.click(within(one(".seg-zoom")).getByRole("button", { name: "W" }));
+    });
+    expect(scroll.scrollLeft).toBe(1000);
+  });
+
+  it("keeps the day at the lead-in when an earlier start moves the chart's origin", async () => {
+    const t = await shown([
+      { id: "a", name: "A", start: "2026-11-09", dur: 2 },
+      { id: "b", name: "B", start: "2026-11-16", dur: 3 },
+    ]);
+    const scroll = one(".tl-scroll");
+    const before = geometry(t.session.view(), "W");
+    act(() => {
+      scroll.scrollLeft = 400;
+      fireEvent.scroll(scroll);
+    });
+    act(() => {
+      t.session.apply({ t: "move", items: ["a"], days: -3 });
+    });
+    const after = geometry(t.session.view(), "W");
+    expect(before.origin - after.origin).toBe(7);
+    expect(scroll.scrollLeft).toBe(400 + 7 * 40);
+    act(() => {
+      t.session.undo();
+    });
+    expect(scroll.scrollLeft).toBe(400);
+  });
+
+  it("opens a plan that lies wholly after today at its first start, and still jumps to today by the toolbar and by T", async () => {
+    const t = await shown([{ name: "A", start: "2026-12-10", dur: 3 }], { today: "2026-12-07" });
+    const scroll = one(".tl-scroll");
+    const g = geometry(t.session.view(), "W");
+    expect(scroll.scrollLeft).toBe(g.x(toDay("2026-12-10")) - 160);
+    const today = within(one(".toolbar")).getByRole("button", { name: "Today" });
+    expect(today.title).toBe("Jump to today");
+    expect(today.previousElementSibling?.classList.contains("seg-zoom")).toBe(true);
+    act(() => {
+      fireEvent.click(today);
+    });
+    expect(scroll.scrollLeft).toBe(g.x(toDay("2026-12-07")) - 160);
+    act(() => {
+      scroll.scrollLeft = 0;
+      fireEvent.scroll(scroll);
+    });
+    act(() => {
+      fireEvent.keyDown(window, { key: "t" });
+    });
+    expect(scroll.scrollLeft).toBe(g.x(toDay("2026-12-07")) - 160);
+  });
+
+  it("opens a plan that ended before today at its first start", async () => {
+    const t = await shown([{ name: "A", start: "2026-10-01", dur: 3 }], { today: "2026-12-07" });
+    expect(one(".tl-scroll").scrollLeft).toBe(geometry(t.session.view(), "W").x(toDay("2026-10-01")) - 160);
+  });
+
+  it("scrolls a clicked row's bar into view only when it is off screen", async () => {
+    const t = await shown([
+      { id: "a", name: "A", start: "2026-11-09", dur: 2 },
+      { id: "z", name: "Z", start: "2027-03-01", dur: 2 },
+    ]);
+    const scroll = one(".tl-scroll");
+    const g = geometry(t.session.view(), "W");
+    const row = (id: string): HTMLElement => one(`.tl-row[data-row="${id}"]`);
+    expect(scroll.scrollLeft).toBe(g.x(toDay("2026-11-09")) - 160);
+    act(() => {
+      fireEvent.click(row("z"));
+    });
+    expect([uiNow()[0].selected, uiNow()[0].reveal, scroll.scrollLeft, scroll.scrollTop]).toEqual(["z", null, g.x(toDay("2027-03-01")) - 160, 0]);
+    act(() => {
+      scroll.scrollLeft = g.x(toDay("2027-03-01")) - 600;
+      fireEvent.scroll(scroll);
+    });
+    act(() => {
+      fireEvent.click(row("z"));
+    });
+    expect(scroll.scrollLeft).toBe(g.x(toDay("2027-03-01")) - 600);
+    act(() => {
+      fireEvent.click(row("a"));
+    });
+    expect(scroll.scrollLeft).toBe(g.x(toDay("2026-11-09")) - 160);
   });
 
   it("opens a narrow chart with today a third of the way into the visible chart", async () => {
     widths.scroll = 390;
     widths.grid = 252;
-    const t = await shown([{ name: "A", start: "2026-12-10", dur: 3 }], { today: "2026-12-07" });
+    const t = await shown([{ name: "A", start: "2026-12-01", dur: 10 }], { today: "2026-12-07" });
     const at = geometry(t.session.view(), "W").x(toDay("2026-12-07"));
     expect(leadFor(390 - 252)).toBe(46);
     expect(one(".tl-scroll").scrollLeft).toBe(at - 46);
@@ -437,13 +525,13 @@ describe("today and baselines", () => {
   it("opens a chart with no visible width on today itself", async () => {
     widths.scroll = 0;
     widths.grid = 0;
-    const t = await shown([{ name: "A", start: "2026-12-10", dur: 3 }], { today: "2026-12-07" });
+    const t = await shown([{ name: "A", start: "2026-12-01", dur: 10 }], { today: "2026-12-07" });
     expect(one(".tl-scroll").scrollLeft).toBe(geometry(t.session.view(), "W").x(toDay("2026-12-07")));
   });
 
   it("scrolls to today when the plan changes", async () => {
-    const one1 = await made([{ name: "A", start: "2026-11-10", dur: 3 }], { today: "2026-12-07" });
-    const two = await made([{ name: "B", start: "2026-10-01", dur: 3 }], { today: "2026-12-07", plan: "plan0000002" });
+    const one1 = await made([{ name: "A", start: "2026-12-01", dur: 10 }], { today: "2026-12-07" });
+    const two = await made([{ name: "B", start: "2026-10-01", dur: 60 }], { today: "2026-12-07", plan: "plan0000002" });
     const { rerender } = render(<Bare session={one1.session} />);
     await settle();
     const scroll = one(".tl-scroll");
@@ -682,6 +770,22 @@ describe("gestures", () => {
     expect(apply).toHaveBeenCalledTimes(1);
   });
 
+  it("links to the row under the pointer when a mouse drop misses the bar, and to nothing outside the chart", async () => {
+    const t = await shown(SEED);
+    const apply = vi.spyOn(t.session, "apply");
+    const chart = one(".tl-chart");
+    vi.spyOn(chart, "getBoundingClientRect").mockReturnValue(rect(0));
+    const target = vi.spyOn(document, "elementFromPoint").mockReturnValue(one(".tl-rowline", chart));
+    const nub = one(".nub", barOf("a"));
+    pointer(nub, "down", 100, { y: 17 });
+    pointer(nub, "up", 900, { y: 2 * 34 + 4 });
+    expect(apply.mock.calls).toEqual([[{ t: "link", from: "a", to: "c", type: "FS", lag: 0 }]]);
+    target.mockReturnValue(document.body);
+    pointer(nub, "down", 100, { y: 17 });
+    pointer(nub, "up", 900, { y: 2 * 34 + 4 });
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+
   it("toasts a refused link with its message", async () => {
     const t = await shown(SEED);
     const apply = vi.spyOn(t.session, "apply");
@@ -823,6 +927,69 @@ describe("tray", () => {
   });
 });
 
+describe("keyboard rows", () => {
+  const SEED: SeedItem[] = [
+    { id: "g", name: "G", kind: "group" },
+    ...Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, name: `T${i}`, parent: "g", start: "2026-11-10", dur: 1 })),
+  ];
+  const key = (k: string, el: Element | Window = window): void => {
+    act(() => {
+      fireEvent.keyDown(el, { key: k });
+    });
+  };
+
+  it("gives the rows listbox semantics with the selection and the caret's state", async () => {
+    await shown(SEED);
+    const list = one(".tl-rows");
+    expect([list.getAttribute("role"), list.getAttribute("aria-label")]).toEqual(["listbox", "Plan rows"]);
+    expect(all(".tl-row").every((r) => r.getAttribute("role") === "option" && r.getAttribute("aria-selected") === "false")).toBe(true);
+    expect(all(".tl-row").map((r) => r.tabIndex).slice(0, 3)).toEqual([0, -1, -1]);
+    const caret = screen.getByRole("button", { name: "Collapse G" });
+    expect(caret.getAttribute("aria-expanded")).toBe("true");
+    key("ArrowDown");
+    key("ArrowDown");
+    expect(uiNow()[0].selected).toBe("t0");
+    expect(one('.tl-row[data-row="t0"]').getAttribute("aria-selected")).toBe("true");
+    expect(all(".tl-row").map((r) => r.tabIndex).slice(0, 3)).toEqual([-1, 0, -1]);
+    act(() => {
+      fireEvent.click(caret);
+    });
+    expect(screen.getByRole("button", { name: "Expand G" }).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("steps by ArrowUp and ArrowDown, scrolling only to keep the selected row in view", async () => {
+    await shown(SEED);
+    const scroll = one(".tl-scroll");
+    act(() => uiNow()[1]({ selected: "t16" }));
+    key("ArrowDown");
+    expect([uiNow()[0].selected, scroll.scrollTop]).toEqual(["t17", 0]);
+    key("ArrowDown");
+    expect([uiNow()[0].selected, scroll.scrollTop]).toEqual(["t18", 0]);
+    key("ArrowDown");
+    expect([uiNow()[0].selected, scroll.scrollTop]).toEqual(["t19", 21 * 34 - 700]);
+    key("ArrowUp");
+    expect([uiNow()[0].selected, scroll.scrollTop]).toEqual(["t18", 21 * 34 - 700]);
+    act(() => {
+      scroll.scrollTop = 20 * 34;
+      fireEvent.scroll(scroll);
+    });
+    key("ArrowUp");
+    expect([uiNow()[0].selected, scroll.scrollTop]).toEqual(["t17", 18 * 34]);
+    act(() => uiNow()[1]({ selected: "t5" }));
+    key("ArrowUp");
+    expect([uiNow()[0].selected, scroll.scrollTop]).toEqual(["t4", 5 * 34]);
+  });
+
+  it("does nothing while a field has focus", async () => {
+    await shown(SEED);
+    act(() => uiNow()[1]({ selected: "t3" }));
+    const name = screen.getByLabelText("Name");
+    key("ArrowDown", name);
+    key("t", name);
+    expect(uiNow()[0].selected).toBe("t3");
+  });
+});
+
 describe("the render path", () => {
   const quiet = (): void => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -870,9 +1037,31 @@ describe("the render path", () => {
     expect(all(".tl-row").map((e) => e.dataset.row).slice(0, 3)).toEqual(["g", "h", late.id]);
     expect(all(".gbar")).toHaveLength(1);
     expect(document.querySelector('[data-row="t39"]')).toBeNull();
-    expect(paths(".tl-links > path")).toHaveLength(0);
+    expect(paths(".tl-links > path")).toHaveLength(1);
     expect(barOf(late.id).classList.contains("bar")).toBe(true);
     expect(all(".ghost")).toHaveLength(all(".bar").length - 1);
+  });
+
+  it("draws a link with one end mounted or crossing the window, and skips one wholly outside it", async () => {
+    await shown([
+      { id: "g", name: "G", kind: "group" },
+      ...Array.from({ length: 60 }, (_, i) => ({
+        id: `t${i}`,
+        name: `T${i}`,
+        start: "2026-11-10",
+        dur: 1,
+        deps: i === 59 ? [fs("t0")] : i === 3 ? [fs("t1")] : i === 30 ? [fs("t2")] : [],
+      })),
+    ]);
+    const scroll = one(".tl-scroll");
+    act(() => {
+      scroll.scrollTop = 26 * 34;
+      fireEvent.scroll(scroll);
+    });
+    expect([document.querySelector('[data-row="t0"]'), document.querySelector('[data-row="t59"]'), document.querySelector('[data-row="t3"]')]).toEqual([null, null, null]);
+    expect(document.querySelector('[data-row="t30"]')).not.toBeNull();
+    const ys = paths(".tl-links > path").map((p) => (p.getAttribute("d") ?? "").match(/-?\d+(\.\d+)?/g)?.map(Number)[1]);
+    expect(ys.sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([1 * 34 + 17, 3 * 34 + 17]);
   });
 
   it("has no elementFromPoint unless the test stubs it", () => {

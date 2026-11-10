@@ -746,6 +746,12 @@ button.chip {
   }
 }
 
+@media (max-width: 1100px) {
+  .wordmark {
+    display: none;
+  }
+}
+
 .plan-menu {
   position: relative;
   flex-shrink: 0;

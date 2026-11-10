@@ -78,6 +78,8 @@ interface ChartProps {
   ui: UiState;
   setUi: SetUi;
   mounted: readonly Placed[];
+  index: ReadonlyMap<ItemId, number>;
+  window: readonly [number, number];
   count: number;
   marks: Marks;
   readOnly: boolean;
@@ -87,7 +89,7 @@ interface ChartProps {
   touch: TouchHost;
 }
 
-const rowAt = (mounted: readonly Placed[], y: number): Placed | null => {
+export const rowAt = (mounted: readonly Placed[], y: number): Placed | null => {
   const index = Math.floor(y / ROW);
   const m = mounted.find((r) => r.index === index);
   return m === undefined || (m.row.kind !== "task" && m.row.kind !== "milestone") ? null : m;
@@ -292,16 +294,18 @@ const Shading = memo(function Shading(p: { geo: Geometry; zoom: Zoom }) {
 
 function Links(p: ChartProps & { height: number }) {
   const { geo, view } = p;
-  const at = new Map(p.mounted.map((m) => [m.row.id, m.index] as const));
-  const ends = (id: ItemId): End | null => {
-    const index = at.get(id);
-    const item = itemOf(view, id);
-    return index === undefined ? null : endOf(geo, item, index * ROW + ROW / 2);
+  const [first, last] = p.window;
+  const rowOf = (id: ItemId): number | null => {
+    const index = p.index.get(id);
+    return index === undefined || geo.span(id) === null ? null : index;
   };
+  const endAt = (id: ItemId, index: number): End => endOf(geo, itemOf(view, id), index * ROW + ROW / 2);
   const paths = liveLinks(view.plan).flatMap((l) => {
-    const pred = ends(l.from);
-    const succ = ends(l.to);
-    if (pred === null || succ === null) return [];
+    const from = rowOf(l.from);
+    const to = rowOf(l.to);
+    if (from === null || to === null || Math.max(from, to) < first || Math.min(from, to) >= last) return [];
+    const pred = endAt(l.from, from);
+    const succ = endAt(l.to, to);
     const key = linkKey(l.from, l.to);
     const bad = p.marks.badLinks.has(key);
     const hot = p.ui.selected === l.from || p.ui.selected === l.to;
