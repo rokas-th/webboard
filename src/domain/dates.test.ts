@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtShort, isCalendarDate, localToday, toDay, toIso, weekday, yearOf } from "./dates";
+import { FIRST_PLAN_DATE, fmtNear, fmtShort, inPlanWindow, isCalendarDate, LAST_PLAN_DATE, localToday, toDay, toIso, weekday, yearOf } from "./dates";
 
 describe("dates", () => {
   it("toDay counts whole days since 1970-01-01", () => {
@@ -62,5 +62,19 @@ describe("dates", () => {
     expect(fmtShort("2026-11-25")).toBe("25 Nov");
     expect(fmtShort("2026-01-05")).toBe("5 Jan");
     expect(() => fmtShort("2026-02-30")).toThrow(new RangeError('not a calendar date: "2026-02-30"'));
+  });
+});
+
+describe("the plan window", () => {
+  it("runs from 1900-01-01 to 2199-12-31", () => {
+    expect([FIRST_PLAN_DATE, LAST_PLAN_DATE]).toEqual(["1900-01-01", "2199-12-31"]);
+    expect(["1900-01-01", "2026-11-16", "2199-12-31"].map(inPlanWindow)).toEqual([true, true, true]);
+    expect(["1899-12-31", "2200-01-01", "0026-11-16", "9999-12-31", "2026-02-30", "26-11-16"].map(inPlanWindow)).toEqual([false, false, false, false, false, false]);
+  });
+
+  it("names the year only when it is not this year", () => {
+    expect(fmtNear("2026-11-16", "2026-01-05")).toBe("16 Nov");
+    expect(fmtNear("2027-01-04", "2026-12-30")).toBe("4 Jan 2027");
+    expect(fmtNear("0026-11-16", "2026-11-10")).toBe("16 Nov 0026");
   });
 });

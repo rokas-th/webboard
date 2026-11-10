@@ -1,6 +1,6 @@
 import type { HolidayDay, HolidayKind, HolidayYear, RegionRef, Tuning } from "../domain/calendar";
-import { toDay, type IsoDate, type Weekday } from "../domain/dates";
-import type { BaselineId, Horizon, ItemId, ItemKind, LinkType, PlanState, Place, Schedule, Status } from "../domain/model";
+import { FIRST_PLAN_DATE, inPlanWindow, LAST_PLAN_DATE, toDay, type IsoDate, type Weekday } from "../domain/dates";
+import { MAX_LAG, MAX_TASK_DUR, type BaselineId, type Horizon, type ItemId, type ItemKind, type LinkType, type PlanState, type Place, type Schedule, type Status } from "../domain/model";
 import type { ActionId, Cause, UnitKey, Write } from "../log/types";
 
 export type UnitKind = "pn" | "cr" | "cw" | "e" | "n" | "s" | "p" | "r" | "l" | "cc" | "ct" | "ch" | "b" | "a";
@@ -114,6 +114,12 @@ const date = (unit: string, field: string, v: unknown): IsoDate => {
   return d;
 };
 
+const planDate = (unit: string, field: string, v: unknown): IsoDate => {
+  const d = date(unit, field, v);
+  if (!inPlanWindow(d)) throw fail(unit, `${field} is not a date from ${FIRST_PLAN_DATE} to ${LAST_PLAN_DATE}: ${show(v)}`);
+  return d;
+};
+
 const isDate = (d: string): boolean => {
   try {
     toDay(d);
@@ -186,8 +192,8 @@ const schedSpec: Spec<Schedule> = {
   dec: (v, unit) => {
     const [start, dur, status, progress, horizon] = tuple(unit, v, 5);
     const s: Schedule = {
-      start: start === null ? null : date(unit, "start", start),
-      dur: int(unit, "dur", dur, 0),
+      start: start === null ? null : planDate(unit, "start", start),
+      dur: int(unit, "dur", dur, 0, MAX_TASK_DUR),
       status: oneOf(unit, "status", status, STATUSES),
       progress: int(unit, "progress", progress, 0, 100),
       horizon: oneOf(unit, "horizon", horizon, HORIZONS),
@@ -219,7 +225,7 @@ const linkSpec: Spec<LinkValue> = {
   enc: (x) => [x.type, x.lag],
   dec: (v, unit) => {
     const [type, lag] = tuple(unit, v, 2);
-    return { type: oneOf(unit, "type", type, LINK_TYPES), lag: int(unit, "lag", lag) };
+    return { type: oneOf(unit, "type", type, LINK_TYPES), lag: int(unit, "lag", lag, -MAX_LAG, MAX_LAG) };
   },
 };
 
@@ -259,7 +265,7 @@ const closureSpec: Spec<ClosureValue> = {
   enc: (x) => [x.from, x.to, x.name],
   dec: (v, unit) => {
     const [from, to, name] = tuple(unit, v, 3);
-    const c: ClosureValue = { from: date(unit, "from", from), to: date(unit, "to", to), name: nameRule(unit, "name", name) };
+    const c: ClosureValue = { from: planDate(unit, "from", from), to: planDate(unit, "to", to), name: nameRule(unit, "name", name) };
     if (toDay(c.from) > toDay(c.to)) throw fail(unit, "closure ends before it starts");
     return c;
   },
@@ -315,7 +321,7 @@ const baselineSpec: Spec<BaselineValue> = {
         const field = `dates.${item}`;
         id(unit, `${field} key`, item);
         const e = record(unit, field, d, ["start", "dur"]);
-        return [item, { start: date(unit, `${field}.start`, e.start), dur: int(unit, `${field}.dur`, e.dur, 0) }];
+        return [item, { start: planDate(unit, `${field}.start`, e.start), dur: int(unit, `${field}.dur`, e.dur, 0, MAX_TASK_DUR) }];
       }),
     );
     return { name: nameRule(unit, "name", r.name), at: date(unit, "at", r.at), dates };

@@ -19,7 +19,7 @@ import { bindTextarea } from "../panel/noteBinding";
 import { TextField } from "../panel/TextField";
 import { OpenChoice, useRun, type Run } from "../run";
 import { derivedStatus } from "../status";
-import { dayLabel } from "../timeline/dayText";
+import { dayLabelNear } from "../timeline/dayText";
 import { useReadOnly } from "./readOnly";
 
 const STATUSES: readonly { v: Status; label: string }[] = [
@@ -132,7 +132,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
       {sc.start !== null ? (
         <Stepper
           label="Start"
-          value={dayLabel(start ?? toDay(sc.start))}
+          value={dayLabelNear(start ?? toDay(sc.start), p.view.today)}
           valueClass="val isheet-start"
           readOnly={p.readOnly}
           less={() => p.run.run({ t: "move", items: [it.id], days: -1 })}

@@ -180,6 +180,20 @@ describe("ItemPanel fields", () => {
     expect(panel().textContent).toContain("End19 Nov");
   });
 
+  it("bounds the Start field to the plan window and names a year that is not this year", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("X");
+    expect([input("Start").min, input("Start").max]).toEqual(["1900-01-01", "2199-12-31"]);
+    edit(input("Start"), "0026-11-16", "blur");
+    expect(toastTexts()).toEqual(["Dates run from 1 Jan 1900 to 31 Dec 2199."]);
+    expect(input("Start").value).toBe("2026-11-16");
+    clearToasts();
+    edit(input("Start"), "2027-11-16", "blur");
+    expect(toastTexts()).toEqual(["Scheduled “X” from 16 Nov 2027; 1 dependent item moved."]);
+    expect(panel().textContent).toContain("End18 Nov 2027");
+  });
+
   it("never unschedules from the Start or Date field: an empty or malformed value puts the stored date back", async () => {
     const t = await made(ITEM_SEED);
     await shown(t);

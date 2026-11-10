@@ -1,8 +1,8 @@
-import { generateKeyBetween } from "fractional-indexing";
+import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing";
 import { closureTooLong, regionKey, workCalendar, type Calendar, type Closure, type Tuning, type WorkCalendar } from "../domain/calendar";
-import { toDay, toIso, type Day, type IsoDate } from "../domain/dates";
+import { fmtNear, inPlanWindow, isCalendarDate, toDay, toIso, type Day, type IsoDate } from "../domain/dates";
 import { derive, lockOf, schedView, type Derived } from "../domain/derive";
-import { linkKey, type Item, type ItemId, type Link, type PlanState, type Schedule } from "../domain/model";
+import { linkKey, MAX_LAG, MAX_TASK_DUR, type Item, type ItemId, type Link, type PlanState, type Schedule } from "../domain/model";
 import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type PushResult, type RecalResult, type Sched, type SchedView, type Stop } from "../domain/schedule";
 import { newId } from "../log/ids";
 import type { Action, DeviceId, SessionId, UnitKey, Write } from "../log/types";
@@ -11,7 +11,7 @@ import { applySchedules, applyWrites, childrenOf, liveLinks } from "../plan/proj
 import { planRules } from "../plan/rules";
 import * as codec from "../plan/units";
 import { key, validateWrite } from "../plan/units";
-import { fmtShort, items, label, pushSuffix, q, refusal, sentence, toastOf } from "./copy";
+import { items, label, pushSuffix, q, refusal, sentence, toastOf } from "./copy";
 import { HeldRefused, Refused, type Built, type Ctx, type Intent, type Preview } from "./intents";
 import { isCalendarWrite, settleText, unique } from "./settle";
 
@@ -81,10 +81,26 @@ const checkDur = (it: Item, dur: number): void => {
     if (dur !== 0) throw new Refused(refusal.milestoneDur);
     return;
   }
-  if (!Number.isInteger(dur) || dur < 1) throw new Refused(refusal.taskDur);
+  if (!validTaskDur(dur)) throw new Refused(refusal.taskDur);
 };
 
-const schedWrite = (id: ItemId, s: Schedule): Write => own(key.s(id), codec.sched.enc(s));
+const validTaskDur = (dur: number): boolean => Number.isInteger(dur) && dur >= 1 && dur <= MAX_TASK_DUR;
+
+const checkStart = (start: IsoDate | null | undefined): void => {
+  if (start !== null && start !== undefined && isCalendarDate(start) && !inPlanWindow(start)) throw new Refused(refusal.dateRange);
+};
+
+const checkLag = (lag: number): void => {
+  if (Math.abs(lag) > MAX_LAG) throw new Refused(refusal.lagRange);
+};
+
+const bounded = (s: Schedule): Schedule => {
+  checkStart(s.start);
+  if (s.dur > MAX_TASK_DUR) throw new Refused(refusal.taskDur);
+  return s;
+};
+
+const schedWrite = (id: ItemId, s: Schedule): Write => own(key.s(id), codec.sched.enc(bounded(s)));
 
 const hasPredecessor = (plan: PlanState, id: ItemId): boolean => liveLinks(plan).some((l) => l.to === id);
 
@@ -96,12 +112,29 @@ const untrashedDescendants = (plan: PlanState, group: ItemId): Item[] =>
 const isInside = (plan: PlanState, at: ItemId | null, ancestor: ItemId): boolean =>
   at !== null && (at === ancestor || isInside(plan, itemOf(plan, at).place.parent, ancestor));
 
-const orderAfter = (plan: PlanState, parent: ItemId | null, after: ItemId | null, self: ItemId | null): string => {
+interface Ordered {
+  order: string;
+  rekeyed: readonly Write[];
+}
+
+const orderAfter = (plan: PlanState, parent: ItemId | null, after: ItemId | null, self: ItemId | null): Ordered => {
   const sibs = childrenOf(plan, parent).filter((s) => s.id !== self);
   const a = after === null ? null : sibs.find((s) => s.id === after);
   if (a === undefined) throw new Error(`Item ${after} is not a child of ${parent ?? "the top level"}`);
-  const next = a === null ? sibs[0] : sibs.find((s) => s.place.order > a.place.order);
-  return generateKeyBetween(a?.place.order ?? null, next?.place.order ?? null);
+  const at = a === null ? 0 : sibs.indexOf(a) + 1;
+  const next = at < sibs.length ? sibs[at] : null;
+  if (a === null || next === null || next.place.order !== a.place.order) {
+    return { order: generateKeyBetween(a?.place.order ?? null, next?.place.order ?? null), rekeyed: [] };
+  }
+  const first = sibs.findIndex((s) => s.place.order === a.place.order);
+  const run = sibs.filter((s) => s.place.order === a.place.order);
+  const last = first + run.length;
+  const keys = generateNKeysBetween(first > 0 ? sibs[first - 1].place.order : null, last < sibs.length ? sibs[last].place.order : null, run.length + 1);
+  const slot = at - first;
+  return {
+    order: keys[slot],
+    rekeyed: run.map((s, k) => own(key.p(s.id), codec.place.enc({ parent, order: keys[k < slot ? k : k + 1] }))),
+  };
 };
 
 const sameAsCurrent = (ctx: Ctx, w: Write): boolean => {
@@ -129,7 +162,7 @@ const storedStart = (d: Derivation, id: ItemId): IsoDate | null => {
 const resnapped = (x: Write, cal: WorkCalendar): Write => {
   const sc = codec.decodeAs("sched", x.u, x.v);
   if (sc.start === null) throw new Error(`Own start ${x.u} has no start to snap`);
-  return { ...x, v: codec.sched.enc({ ...sc, start: toIso(cal.snapF(toDay(sc.start))) }) };
+  return { ...x, v: codec.sched.enc(bounded({ ...sc, start: toIso(cal.snapF(toDay(sc.start))) })) };
 };
 
 const linkEnd = (view: SchedView, l: Link, id: ItemId): Sched => {
@@ -163,6 +196,7 @@ const checkedCalendar = (cal: Calendar): Calendar => {
     [...cal.closures].map(([id, c]): [string, Closure] => {
       if (c.name.trim() === "" || c.from === "") throw new Refused(refusal.closure);
       if (toDay(c.to) < toDay(c.from)) throw new Refused(refusal.closureOrder);
+      if (!inPlanWindow(c.from) || !inPlanWindow(c.to)) throw new Refused(refusal.dateRange);
       return [id, { ...c, name: normalizeName(c.name) }];
     }),
   );
@@ -196,7 +230,7 @@ const snapDraft = (ctx: Ctx, it: Item): Draft => {
     own: [schedWrite(it.id, { ...scheduleOf(it), start })],
     roots: [it.id],
     newNotes: [],
-    ...withPush(ctx, label.snapped(it.name, fmtShort(start))),
+    ...withPush(ctx, label.snapped(it.name, fmtNear(start, ctx.view.today))),
   };
 };
 
@@ -228,11 +262,12 @@ const fixDraft = (ctx: Ctx, conflict: Conflict, how: "push" | "shorten" | "remov
       own: [schedWrite(succ.id, { ...scheduleOf(succ), start })],
       roots: [succ.id],
       newNotes: [],
-      ...withPush(ctx, label.earliest(succ.name, fmtShort(start))),
+      ...withPush(ctx, label.earliest(succ.name, fmtNear(start, ctx.view.today))),
     };
   }
   const view = schedView(plan, ctx.view.held);
   const lag = lagThatHolds(linkEnd(view, l, l.to), l, linkEnd(view, l, l.from), view.cal);
+  checkLag(lag);
   return {
     own: [own(key.l(l.from, l.to), codec.link.enc({ type: l.type, lag }))],
     roots: [],
@@ -246,6 +281,7 @@ const scheduleDraft = (ctx: Ctx, id: ItemId, set: Partial<Schedule>): Draft => {
   const it = live(plan, id);
   const sc = scheduleOf(it);
   if (set.dur !== undefined) checkDur(it, set.dur);
+  checkStart(set.start);
   if (set.progress !== undefined && (!Number.isInteger(set.progress) || set.progress < 0 || set.progress > 100)) {
     throw new Refused(refusal.progress);
   }
@@ -268,7 +304,7 @@ const scheduleDraft = (ctx: Ctx, id: ItemId, set: Partial<Schedule>): Draft => {
     switch (fields[0]) {
       case "start": {
         const stored = storedStart(d, it.id);
-        return stored === null ? label.unscheduled(it.name) : label.scheduled(it.name, fmtShort(stored));
+        return stored === null ? label.unscheduled(it.name) : label.scheduled(it.name, fmtNear(stored, ctx.view.today));
       }
       case "dur":
         return label.resized(it.name, next.dur);
@@ -299,8 +335,9 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
       const name = normalizeName(intent.name);
       if (intent.parent !== null && live(plan, intent.parent).kind !== "group") throw new Error(`Item ${intent.parent} is not a group`);
       const id = newId();
-      const placed = own(key.p(id), codec.place.enc({ parent: intent.parent, order: orderAfter(plan, intent.parent, intent.after, null) }));
-      const base = [own(key.e(id), codec.existence.enc({ k: intent.kind, t: false })), own(key.n(id), codec.name.enc(name)), placed];
+      const ordered = orderAfter(plan, intent.parent, intent.after, null);
+      const placed = own(key.p(id), codec.place.enc({ parent: intent.parent, order: ordered.order }));
+      const base = [own(key.e(id), codec.existence.enc({ k: intent.kind, t: false })), own(key.n(id), codec.name.enc(name)), placed, ...ordered.rekeyed];
       const text = label.added(intent.kind, name);
       if (intent.kind === "group") {
         if (intent.start !== null || intent.dur !== undefined) throw new Error("A group has no start or duration");
@@ -308,7 +345,8 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
       }
       const dur = intent.kind === "milestone" ? (intent.dur ?? 0) : (intent.dur ?? 3);
       if (intent.kind === "milestone" && dur !== 0) throw new Refused(refusal.milestoneDur);
-      if (intent.kind === "task" && (!Number.isInteger(dur) || dur < 1)) throw new Refused(refusal.taskDur);
+      if (intent.kind === "task" && !validTaskDur(dur)) throw new Refused(refusal.taskDur);
+      checkStart(intent.start);
       const cal = workCalendar(plan.calendar);
       const start = intent.start === null ? null : toIso(cal.snapF(toDay(intent.start)));
       return {
@@ -379,14 +417,14 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
       const at = sibs.findIndex((s) => s.id === it.id);
       const prev = at > 0 ? sibs[at - 1].id : null;
       const stays = intent.parent === it.place.parent && prev === intent.after;
-      const order = stays ? it.place.order : orderAfter(plan, intent.parent, intent.after, it.id);
+      const ordered: Ordered = stays ? { order: it.place.order, rekeyed: [] } : orderAfter(plan, intent.parent, intent.after, it.id);
       const text =
         intent.parent === it.place.parent
           ? label.reordered(it.name)
           : intent.parent === null
             ? label.top(it.name)
             : label.into(it.name, itemOf(plan, intent.parent).name);
-      return { own: [own(key.p(it.id), codec.place.enc({ parent: intent.parent, order }))], ...none, ...plain(text) };
+      return { own: [own(key.p(it.id), codec.place.enc({ parent: intent.parent, order: ordered.order })), ...ordered.rekeyed], ...none, ...plain(text) };
     }
     case "trash":
     case "restore": {
@@ -411,6 +449,7 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
       live(plan, f.id);
       live(plan, t.id);
       if (!Number.isInteger(intent.lag)) throw new Error(`A lag is in whole working days, not ${intent.lag}`);
+      checkLag(intent.lag);
       const candidate: Link = { from: f.id, to: t.id, type: intent.type, lag: intent.lag };
       const loop = wouldLoop(liveLinks(plan), candidate);
       if (loop !== null) throw new Refused(refusal.loop(loop.map((id) => nameOf(ctx, id))));
@@ -551,7 +590,7 @@ export function withDerived(ctx: Ctx, ownWrites: readonly Write[], roots: readon
     if (sc.start === null) {
       throw new Error(ownUnits.has(u) ? `Derived write to ${u}, which this action unschedules` : `Derived write to unscheduled ${id}`);
     }
-    return { u, v: codec.sched.enc({ ...sc, start: start === undefined ? sc.start : toIso(start), dur: dur ?? sc.dur }), c };
+    return { u, v: codec.sched.enc(bounded({ ...sc, start: start === undefined ? sc.start : toIso(start), dur: dur ?? sc.dur })), c };
   };
   const recalWrites: Write[] =
     recal === null

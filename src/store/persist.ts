@@ -224,11 +224,13 @@ export async function openPersisted(id: string): Promise<PersistedDoc> {
     close() {
       if (closed) return settled();
       closed = true;
+      failure = null;
       if (dirty) {
         enqueueCompact();
-      } else if (timer !== null) {
-        clearTimeout(timer);
+      } else {
+        if (timer !== null) clearTimeout(timer);
         timer = null;
+        start();
       }
       return settled();
     },

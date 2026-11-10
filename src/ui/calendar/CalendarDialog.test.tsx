@@ -624,6 +624,19 @@ describe("weekdays, days off and closures", () => {
     expect(t.session.view().plan.calendar.workdays).toEqual([3]);
   });
 
+  it("bounds the day-off dates to the plan window", async () => {
+    const t = await made([]);
+    await shown(t);
+    await openDialog();
+    expect([field("First day").min, field("First day").max]).toEqual(["1900-01-01", "2199-12-31"]);
+    expect(field("Last day").min).toBe("1900-01-01");
+    expect(field("Last day").max).toBe("2199-12-31");
+    type("First day", "2199-12-01");
+    expect(field("Last day").max).toBe("2199-12-31");
+    type("First day", "2026-11-17");
+    expect(field("Last day").max).toBe("2027-11-17");
+  });
+
   it("adds one date as an added day off and a range as a closure that × removes", async () => {
     const t = await made([]);
     await shown(t);
@@ -672,7 +685,7 @@ describe("weekdays, days off and closures", () => {
     const t = await made([]);
     await shown(t);
     await openDialog();
-    expect(field("Last day").max).toBe("");
+    expect(field("Last day").max).toBe("2199-12-31");
     type("First day", "2026-12-24");
     expect(field("Last day").max).toBe("2027-12-24");
     type("First day", "2028-01-01");

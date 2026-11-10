@@ -1,9 +1,9 @@
 import { generateNKeysBetween } from "fractional-indexing";
 import * as Y from "yjs";
 import type { Calendar } from "../domain/calendar";
-import { toDay, toIso, type IsoDate, type Weekday } from "../domain/dates";
+import { FIRST_PLAN_DATE, inPlanWindow, LAST_PLAN_DATE, toDay, toIso, type IsoDate, type Weekday } from "../domain/dates";
 import { derive } from "../domain/derive";
-import { linkKey, type Baseline, type Item, type ItemId, type Link, type LinkKey, type LinkType, type PlanState, type Status } from "../domain/model";
+import { linkKey, MAX_LAG, MAX_TASK_DUR, type Baseline, type Item, type ItemId, type Link, type LinkKey, type LinkType, type PlanState, type Status } from "../domain/model";
 import type { Conflict } from "../domain/schedule";
 import { newId } from "../log/ids";
 import { LogState } from "../log/state";
@@ -279,6 +279,7 @@ const stampOf = (fileName: string): IsoDate | null => {
     if (e instanceof RangeError) throw fail("file name", `its date stamp ${m[1]}${m[2]}${m[3]} is not a calendar date`);
     throw e;
   }
+  if (!inPlanWindow(d)) throw fail("file name", `its date stamp ${m[1]}${m[2]}${m[3]} is not a date from ${FIRST_PLAN_DATE} to ${LAST_PLAN_DATE}`);
   return d;
 };
 
@@ -296,6 +297,7 @@ const parsePreds = (where: string, v: unknown): Pred[] => {
     if (!LAG_UNITS.includes(unit)) throw fail(where, `Predecessor entry ${show(entry)} has lag unit ${show(unit)}, not day or days`);
     if (!/^\d+$/.test(amount)) throw fail(where, `Predecessor entry ${show(entry)} has lag ${show(amount)}, not a whole number of days`);
     const n = Number(amount);
+    if (n > MAX_LAG) throw fail(where, `Predecessor entry ${show(entry)} has a lag beyond ${MAX_LAG} working days either way`);
     return { id: Number(id), type, lag: sign === "-" ? -n : n };
   });
 };
@@ -318,10 +320,12 @@ const noteOf = (where: string, info: unknown, resources: readonly Resource[]): s
 
 const parseLeaf = (where: string, t: Raw, tz: string): Leaf => {
   if (t.DurationUnit !== "day") throw fail(where, `DurationUnit is ${show(t.DurationUnit)}, not "day"`);
-  const dur = wholeNumber(where, "Duration", t.Duration, 0);
+  const dur = wholeNumber(where, "Duration", t.Duration, 0, MAX_TASK_DUR);
+  const start = localDate(t.StartDate, tz, `${where}: StartDate`);
+  if (!inPlanWindow(start)) throw fail(where, `StartDate ${start} is not a date from ${FIRST_PLAN_DATE} to ${LAST_PLAN_DATE}`);
   return {
     kind: dur === 0 ? "milestone" : "task",
-    start: localDate(t.StartDate, tz, `${where}: StartDate`),
+    start,
     end: localDate(t.EndDate, tz, `${where}: EndDate`),
     dur,
     progress: wholeNumber(where, "Progress", t.Progress, 0, 100),

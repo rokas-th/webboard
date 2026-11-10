@@ -13,8 +13,10 @@ function commandError(e: unknown): e is { code: string; message: string } {
   return (
     typeof e === "object" &&
     e !== null &&
-    typeof (e as { code?: unknown }).code === "string" &&
-    typeof (e as { message?: unknown }).message === "string"
+    "code" in e &&
+    typeof e.code === "string" &&
+    "message" in e &&
+    typeof e.message === "string"
   );
 }
 

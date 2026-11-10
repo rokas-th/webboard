@@ -1516,7 +1516,7 @@ describe("Registry: lifecycle and failures", () => {
     expect(cb).toHaveBeenCalled();
     const held = r.indexError();
     forget(r);
-    expect(await rejection(r.close())).toBe(held);
+    expect(await rejection(r.close())).toMatchObject({ code: held?.code, message: held?.message });
   });
 
   it("setLastRegion rolls back when its write fails", async () => {
@@ -2201,7 +2201,7 @@ describe("Registry: the example plan", () => {
       expect(err).toHaveProperty("cause", expect.any(AppError));
       expect(err).toHaveProperty("cause.code", "store.io");
       expect(err).toHaveProperty("cause.message", `Disk full: ${what}.`);
-      expect(callsOf(0, "store_append").filter(fails), what).toHaveLength(1);
+      expect(callsOf(0, "store_append").filter(fails), what).toHaveLength(2);
       expect(flagWrites(0), what).toBe(0);
       expect(e.state.settings, what).not.toMatchObject({ exampleOffered: true });
     }

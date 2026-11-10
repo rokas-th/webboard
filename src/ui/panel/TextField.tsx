@@ -1,3 +1,4 @@
+import { FIRST_PLAN_DATE, LAST_PLAN_DATE } from "../../domain/dates";
 import { useEffect, useRef, useState } from "react";
 
 export function TextField(p: {
@@ -41,6 +42,8 @@ export function TextField(p: {
     <input
       ref={input}
       type={p.type ?? "text"}
+      min={p.type === "date" ? FIRST_PLAN_DATE : undefined}
+      max={p.type === "date" ? LAST_PLAN_DATE : undefined}
       className={p.className}
       aria-label={p.label}
       value={draft}

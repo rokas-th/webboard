@@ -34,6 +34,11 @@ export function toDay(d: IsoDate): Day {
 
 export const isCalendarDate = (d: string): boolean => parseDay(d) !== null;
 
+export const FIRST_PLAN_DATE: IsoDate = "1900-01-01";
+export const LAST_PLAN_DATE: IsoDate = "2199-12-31";
+
+export const inPlanWindow = (d: string): boolean => isCalendarDate(d) && d >= FIRST_PLAN_DATE && d <= LAST_PLAN_DATE;
+
 export function weekday(d: Day): Weekday {
   return ((((checkDay(d) + 3) % 7) + 7) % 7 + 1) as Weekday;
 }
@@ -50,4 +55,8 @@ export function localToday(now: Date = new Date()): IsoDate {
 export function fmtShort(d: IsoDate): string {
   toDay(d);
   return `${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1]}`;
+}
+
+export function fmtNear(d: IsoDate, today: IsoDate): string {
+  return d.slice(0, 4) === today.slice(0, 4) ? fmtShort(d) : `${fmtShort(d)} ${d.slice(0, 4)}`;
 }

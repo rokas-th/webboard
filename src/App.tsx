@@ -13,6 +13,9 @@ import { UpdatesContext } from "./ui/shell/UpdateLine";
 export const RESET_SETTINGS_LINE = "Plan names and the last region are rebuilt; the old file is kept.";
 export const REBUILD_LIST_LINE = "Plans on this device are listed again; trashed plans come back; the old list is kept.";
 
+export const foreignFolderLine = (path: string): string =>
+  `A folder in WebBoard's data that WebBoard did not make: ${path}. Move it away and start again.`;
+
 export const closeFailedLine = (message: string): string =>
   `WebBoard could not save everything before closing: ${message} Close the window again to quit.`;
 
@@ -21,6 +24,9 @@ type Recovery = "reset" | "rebuild" | null;
 type Start = { k: "opening" } | { k: "open"; registry: Registry } | { k: "failed"; message: string; recovery: Recovery };
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+const startMessageOf = (e: unknown): string =>
+  e instanceof AppError && e.code === "store.foreign" ? foreignFolderLine(e.message) : messageOf(e);
 
 const recoveryOf = (e: unknown): Recovery => {
   if (!(e instanceof AppError)) return null;
@@ -77,7 +83,7 @@ export default function App() {
       },
       (e: unknown) => {
         console.error(e);
-        setStart({ k: "failed", message: messageOf(e), recovery: recoveryOf(e) });
+        setStart({ k: "failed", message: startMessageOf(e), recovery: recoveryOf(e) });
       },
     );
   };

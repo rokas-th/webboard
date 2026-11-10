@@ -849,7 +849,7 @@ export class Registry {
     try {
       await (ix === undefined ? d.close() : ix.close());
     } catch (e) {
-      if (before === null || e !== before) throw e;
+      if (before === null || !(e instanceof AppError) || e.code !== before.code || e.message !== before.message) throw e;
     }
   }
 

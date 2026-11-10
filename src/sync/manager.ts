@@ -323,7 +323,8 @@ export class SyncManager {
     if (gen !== this.gen) return;
     const space = status.space;
     if (space === null) {
-      this.emit();
+      await this.attachTheOnlyOne();
+      if (gen === this.gen) this.emit();
       return;
     }
     this.space = space;
@@ -417,6 +418,20 @@ export class SyncManager {
     const spaces = this.registry.localSpaces();
     if (spaces.length !== 1) return;
     await this.attachRecorded(spaces[0]);
+  }
+
+  private async attachTheOnlyOne(): Promise<void> {
+    const spaces = this.registry.localSpaces();
+    if (spaces.length > 1) {
+      this.global = this.fault(
+        "failed",
+        null,
+        `This device holds the plan lists of ${spaces.length} spaces (${spaces.join(", ")}) and has joined none, so their plans are not listed. Join one of them with a code.`,
+        null,
+      );
+      return;
+    }
+    await this.attachTheOneOnDisk();
   }
 
   private async attachRecorded(spaceId: string): Promise<void> {

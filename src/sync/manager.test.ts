@@ -366,6 +366,36 @@ describe("SyncManager: connecting", () => {
     expect(chipText({ kind: "off" }, () => null)).toBe("Local only");
   });
 
+  it("with no space joined, the one space index on disk stays listed and openable", async () => {
+    const f = fakeFactory();
+    const { r, m } = await started({ f, before: (w) => (w.status = () => ({ space: null, revoked: false })) });
+    expect(r.plans().filter((p) => p.space === SP).map((p) => p.id).sort()).toEqual(["P", "P2"]);
+    const session = await r.session("P");
+    expect(session.view().plan.name).toBe("Launch");
+    expect(m.state()).toEqual({ kind: "off" });
+    expect(f.all).toHaveLength(0);
+  });
+
+  it("with no space joined and two space indexes on disk, nothing is attached and the error names both", async () => {
+    const f = fakeFactory();
+    const other = "sp111111111";
+    const { r, m } = await started({
+      f,
+      before: (w) => {
+        w.status = () => ({ space: null, revoked: false });
+        seedIndex(w.mem, "ix-" + other, [ixAct("t-Q", [], [ip("Q", false)])]);
+        seedPlan(w.mem, "Q", "Quay");
+      },
+    });
+    expect(r.plans().some((p) => p.space !== null)).toBe(false);
+    expect(errorOf(m.state())).toMatchObject({
+      code: "failed",
+      doc: null,
+      message: `This device holds the plan lists of 2 spaces (${SP}, ${other}) and has joined none, so their plans are not listed. Join one of them with a code.`,
+    });
+    expect(f.all).toHaveLength(0);
+  });
+
   it("a plan added to the space index on another device appears", async () => {
     const { r, f } = await started();
     syncAll(f);

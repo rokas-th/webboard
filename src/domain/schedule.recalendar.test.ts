@@ -43,15 +43,32 @@ describe("recalendar", () => {
     expectYearEnd(view(YEAR_END_ITEMS, [ln("R", "S")]));
   });
 
-  it("an unchanged calendar changes nothing", () => {
+  it("a locked item with its own predecessor still pushes its successors", () => {
+    const closed = workCalendar({ ...CH_ZH, closures: new Map([["c1", closure("c1", "2026-11-19", "2026-11-20", "Offsite")]]) });
+    (["done", "doing"] as const).forEach((lock) => {
+      const r = recalendar(
+        view(
+          [task("X", "2026-11-12", 2, "done"), task("P", "2026-11-16", 3, lock), task("S", "2026-11-23", 2)],
+          [ln("X", "P"), ln("P", "S", "FS", 2)],
+        ),
+        closed,
+      );
+      expect(r.starts, lock).toEqual(new Map());
+      expect(r.pushed.moves, lock).toEqual(days({ S: "2026-11-25" }));
+      expect(r.pushed.stopped, lock).toEqual([]);
+      expect(r.movedLater, lock).toBe(1);
+    });
+  });
+
+  it("an unchanged calendar moves only what a lock left early", () => {
     const after = applyMoves(PUSH_PLAN, push(PUSH_PLAN, ["A"]).moves);
     const r = recalendar(after, after.cal);
     expect(r.starts).toEqual(new Map());
     expect(r.durs).toEqual(new Map());
-    expect(r.pushed.moves).toEqual(new Map());
+    expect(r.pushed.moves).toEqual(days({ K: "2026-11-17" }));
     expect(r.pushed.stopped).toEqual([{ id: "H", reason: "held" }]);
-    expect(r.endsChanged).toBe(0);
-    expect(r.movedLater).toBe(0);
+    expect(r.endsChanged).toBe(1);
+    expect(r.movedLater).toBe(1);
   });
 
   it("loops are tolerated", () => {

@@ -95,6 +95,12 @@ describe("ItemSheet", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("names the start's year when it is not this year", async () => {
+    const t = await made([{ ...REVIEW, start: "2027-11-12" }]);
+    shown(t, "Review");
+    expect(startText()).toBe("Fri 12 Nov 2027");
+  });
+
   it("steps the start by working days and the duration", async () => {
     const t = await made([REVIEW]);
     const { apply } = shown(t, "Review");

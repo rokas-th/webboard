@@ -1,5 +1,5 @@
 import { useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { fmtShort, isCalendarDate, toIso, type Day } from "../../domain/dates";
+import { fmtNear, isCalendarDate, toIso, type Day, type IsoDate } from "../../domain/dates";
 import type { Item, ItemId, PlanState, Schedule, Status } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
@@ -45,10 +45,10 @@ export function groupOptions(plan: PlanState, item: ItemId): { id: ItemId | null
   return [{ id: null, label: TOP_LEVEL }, ...walk(null)];
 }
 
-const dayText = (m: ReadonlyMap<ItemId, Day>, it: Item, what: string): string => {
+const dayText = (m: ReadonlyMap<ItemId, Day>, it: Item, what: string, today: IsoDate): string => {
   const d = m.get(it.id);
   if (d === undefined) throw new Error(`ItemPanel: scheduled item ${it.id} has no derived ${what}`);
-  return fmtShort(toIso(d));
+  return fmtNear(toIso(d), today);
 };
 
 const scheduleOf = (it: Item): Schedule => {
@@ -95,7 +95,7 @@ function GroupFields(p: { view: PlanView; item: Item }) {
     <>
       <div className="fields">
         <label>Span</label>
-        <span className="val">{start === undefined || end === undefined ? "—" : `${fmtShort(toIso(start))} – ${fmtShort(toIso(end))}`}</span>
+        <span className="val">{start === undefined || end === undefined ? "—" : `${fmtNear(toIso(start), p.view.today)} – ${fmtNear(toIso(end), p.view.today)}`}</span>
         <label>Items</label>
         <span className="val">{kids}</span>
       </div>
@@ -152,7 +152,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
             )}
           </span>
           <label>End</label>
-          <span className="val">{dated ? dayText(p.view.derived.end, it, "end") : "—"}</span>
+          <span className="val">{dated ? dayText(p.view.derived.end, it, "end", p.view.today) : "—"}</span>
         </>
       )}
       <label htmlFor={statusId}>Status</label>

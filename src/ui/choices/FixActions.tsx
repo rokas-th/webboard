@@ -1,4 +1,4 @@
-import { useContext } from "react";
+import { useContext, useMemo } from "react";
 import { q } from "../../actions/copy";
 import { schedView } from "../../domain/derive";
 import type { ItemId } from "../../domain/model";
@@ -6,7 +6,7 @@ import { lagThatHolds, type Conflict, type SchedView } from "../../domain/schedu
 import { choiceHolding } from "../../plan/choices";
 import type { PlanView } from "../../store/doc";
 import { OpenChoice, type Run } from "../run";
-import { dayLabel } from "../timeline/dayText";
+import { dayLabel, dayLabelNear } from "../timeline/dayText";
 import { EARLY } from "../timeline/earlyText";
 
 type Early = Extract<Conflict, { kind: "early" }>;
@@ -46,6 +46,9 @@ function Fix(p: { view: PlanView; conflict: Conflict; sv: SchedView | null; read
   const open = useContext(OpenChoice);
   if (open === null) throw new Error("FixActions needs an OpenChoice provider");
   const c = p.conflict;
+  const view = p.view;
+  const sv = p.sv;
+  const lag = useMemo(() => (c.kind === "early" && isLocked(c) && sv !== null ? holdingLag(view, sv, c) : null), [view, sv, c]);
   const fix = (how: "push" | "shorten" | "remove"): void => {
     p.run.run({ t: "fix", conflict: c, how });
   };
@@ -74,21 +77,23 @@ function Fix(p: { view: PlanView; conflict: Conflict; sv: SchedView | null; read
   }
   const pred = q(nameOf(p.view, c.pred));
   if (isLocked(c)) {
-    if (p.sv === null) throw new Error(`Conflict on ${c.link} has no schedule view`);
+    if (lag === null) throw new Error(`Conflict on ${c.link} has no schedule view`);
     return line(EARLY[linkOf(p.view, c.link).type](pred), "conflict-text", [
-      [`Shorten the lag to ${signed(holdingLag(p.view, p.sv, c))}`, () => fix("shorten")],
+      [`Shorten the lag to ${signed(lag)}`, () => fix("shorten")],
       ["Remove the link", () => fix("remove")],
     ]);
   }
   const text = `Starts earlier than the link from ${pred} allows.`;
   if (c.succLock === "held") return line(text, "conflict-text", [], [["Open the choice", () => open(choiceHolding(p.view.choices, p.view.plan, c.succ))]]);
-  return line(text, "conflict-text", [[`Push ${q(nameOf(p.view, c.succ))} to ${dayLabel(c.need)}`, () => fix("push")]]);
+  return line(text, "conflict-text", [[`Push ${q(nameOf(p.view, c.succ))} to ${dayLabelNear(c.need, p.view.today)}`, () => fix("push")]]);
 }
 
 export function FixActions(p: { view: PlanView; item: ItemId; readOnly: boolean; run: Run }) {
   const found = p.view.derived.conflicts.filter((c) => mine(p.view, p.item, c));
+  const needsSv = found.some((c) => c.kind === "early" && isLocked(c));
+  const { plan, held } = p.view;
+  const sv = useMemo(() => (needsSv ? schedView(plan, held) : null), [needsSv, plan, held]);
   if (found.length === 0) return null;
-  const sv = found.some((c) => c.kind === "early" && isLocked(c)) ? schedView(p.view.plan, p.view.held) : null;
   return (
     <div className="conflicts">
       {found.map((c) => (

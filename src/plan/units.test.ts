@@ -181,6 +181,26 @@ describe("codecs", () => {
     expect(() => activity.dec(1)).toThrow("a:");
   });
 
+  it("bounds plan dates to 1900..2199, durations to 3650 and lags to 1000", () => {
+    const WINDOW = "is not a date from 1900-01-01 to 2199-12-31";
+    expect(() => sched.dec(["0026-11-16", 3, "todo", 0, "later"])).toThrow(`s: start ${WINDOW}: "0026-11-16"`);
+    expect(() => sched.dec(["1899-12-31", 3, "todo", 0, "later"])).toThrow(`s: start ${WINDOW}`);
+    expect(() => sched.dec(["2200-01-01", 3, "todo", 0, "later"])).toThrow(`s: start ${WINDOW}`);
+    expect(sched.dec(["1900-01-01", 3650, "todo", 0, "later"])).toMatchObject({ start: "1900-01-01", dur: 3650 });
+    expect(sched.dec(["2199-12-31", 0, "todo", 0, "later"])).toMatchObject({ start: "2199-12-31", dur: 0 });
+    expect(() => sched.dec(["2026-11-16", 3651, "todo", 0, "later"])).toThrow("s: dur is not a whole number from 0 to 3650: 3651");
+    expect(() => sched.dec(["2026-11-16", 200_000_000, "todo", 0, "later"])).toThrow("s: dur is not a whole number from 0 to 3650");
+    expect(() => sched.enc({ start: "9999-12-31", dur: 3, status: "todo", progress: 0, horizon: "later" })).toThrow(`s: start ${WINDOW}`);
+    expect(link.dec(["FS", -1000])).toEqual({ type: "FS", lag: -1000 });
+    expect(link.dec(["SS", 1000])).toEqual({ type: "SS", lag: 1000 });
+    expect(() => link.dec(["FS", 1001])).toThrow("l: lag is not a whole number from -1000 to 1000: 1001");
+    expect(() => link.dec(["FS", -5_000_000])).toThrow("l: lag is not a whole number from -1000 to 1000");
+    expect(() => closure.dec(["2199-12-31", "2200-01-02", "X"])).toThrow(`cc: to ${WINDOW}`);
+    expect(() => closure.dec(["1899-12-30", "1900-01-02", "X"])).toThrow(`cc: from ${WINDOW}`);
+    expect(() => baseline.dec({ name: "B", at: "2026-11-08", dates: { A: { start: "3026-11-16", dur: 2 } } })).toThrow(`b: dates.A.start ${WINDOW}`);
+    expect(() => baseline.dec({ name: "B", at: "2026-11-08", dates: { A: { start: "2026-11-16", dur: 3651 } } })).toThrow("b: dates.A.dur is not a whole number from 0 to 3650");
+  });
+
   it("refuses a closure that ends before it starts", () => {
     expect(() => closure.dec(["2026-12-31", "2026-12-24", "X"])).toThrow("cc: closure ends before it starts");
     expect(() => validateWrite({ u: "cc:Z", v: ["2026-12-31", "2026-12-24", "X"], c: "own" })).toThrow("cc:Z: closure ends before it starts");

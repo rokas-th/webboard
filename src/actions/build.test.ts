@@ -11,6 +11,8 @@ import { act } from "../test/act";
 import { ctxOf, FIXTURE_DEVICES } from "../test/planCtx";
 import { buildAction, initialAction, normalizeName, planAfter, withDerived } from "./build";
 import { HeldRefused, Refused, type Built, type Ctx, type Intent } from "./intents";
+import { buildUndo } from "./undo";
+import { childrenOf } from "../plan/project";
 
 const TODAY = "2026-11-09";
 
@@ -376,13 +378,13 @@ describe("buildAction: refusals", () => {
     refusedWith(ctx, { t: "calendar", next: closure("", "2026-11-20", "Offsite") }, "A closure needs a name and a first day.");
     refusedWith(ctx, { t: "calendar", next: closure("2026-11-20", "2026-11-18", "Offsite") }, "The last day is before the first day.");
     refusedWith(ctx, { t: "calendar", next: closure("2026-12-24", "2027-12-25", "Offsite") }, "A closure can last at most 366 days.");
-    refusedWith(ctx, { t: "calendar", next: closure("2026-12-24", "9999-12-31", "Offsite") }, "A closure can last at most 366 days.");
+    refusedWith(ctx, { t: "calendar", next: closure("2026-12-24", "9999-12-31", "Offsite") }, "Dates run from 1 Jan 1900 to 31 Dec 2199.");
     expect(buildAction(ctx, { t: "calendar", next: closure("2026-12-24", "2027-12-24", "Offsite") }).action.w).toContainEqual({
       u: "cc:c1",
       v: ["2026-12-24", "2027-12-24", "Offsite"],
       c: "own",
     });
-    refusedWith(ctx, { t: "resize", item: "Admin", dur: 0 }, "A task lasts at least 1 working day.");
+    refusedWith(ctx, { t: "resize", item: "Admin", dur: 0 }, "A task lasts 1 to 3650 working days.");
     refusedWith(ctx, { t: "resize", item: "Launch", dur: 2 }, "Milestones have no duration.");
     refusedWith(ctx, { t: "schedule", item: "Admin", set: { progress: 101 } }, "Progress is a whole number from 0 to 100.");
     refusedWith(ctx, { t: "schedule", item: "Admin", set: { progress: 4.5 } }, "Progress is a whole number from 0 to 100.");
@@ -527,7 +529,7 @@ describe("buildAction: calendar (refinement 34)", () => {
     const b = buildAction(ctx, { t: "schedule", item: "Ship", set: { start: "2031-01-01" } });
     expect(writeOf(b, "ch:2031").v).toEqual(neujahr);
     expect(writeOf(b, "s:Ship")).toEqual(w("s:Ship", sched("2031-01-02", 1)));
-    expect(b.action.lbl).toBe("Scheduled “Ship” from 2 Jan; 1 dependent item moved");
+    expect(b.action.lbl).toBe("Scheduled “Ship” from 2 Jan 2031; 1 dependent item moved");
     const after = applied(ctx, b, { cachedHolidays: ctx.cachedHolidays });
     expect(after.view.derived.conflicts.filter((c) => c.kind === "dayoff")).toEqual([]);
   });
@@ -851,5 +853,78 @@ describe("initialAction", () => {
     expect(plan.name).toBe("Launch plan");
     expect(plan.calendar).toEqual(calendar);
     expect(derive(plan, new Set(), TODAY).conflicts).toEqual([]);
+  });
+});
+
+describe("buildAction: tied order keys (schedule-2)", () => {
+  const TIED: Write[] = [
+    ...ROOT,
+    ...item("A", "task", "A", null, "a1", sched("2026-11-16", 1)),
+    ...item("M", "task", "M", null, "a2", sched("2026-11-16", 1)),
+    ...item("P", "task", "P", null, "a2", sched("2026-11-16", 1)),
+    ...item("Z", "task", "Z", null, "a3", sched("2026-11-16", 1)),
+  ];
+  const names = (ctx: Ctx): string[] => childrenOf(ctx.view.plan, null).map((i) => i.name);
+  const orders = (ctx: Ctx): string[] => childrenOf(ctx.view.plan, null).map((i) => i.place.order);
+
+  it("a new row after the first of a tied pair lands between them, and one undo restores every key", () => {
+    const ctx = ctxFrom(TIED);
+    expect(names(ctx)).toEqual(["A", "M", "P", "Z"]);
+    const b = buildAction(ctx, { t: "create", kind: "task", name: "X", parent: null, after: "M", start: null });
+    const after = applied(ctx, b);
+    expect(names(after)).toEqual(["A", "M", "X", "P", "Z"]);
+    expect(new Set(orders(after)).size).toBe(5);
+    expect(units(b).filter((u) => u.startsWith("p:")).sort()).toEqual(["p:M", "p:P", `p:${b.newNotes[0]}`].sort());
+    const undone = applied(after, buildUndo(after, b.action.id));
+    expect(names(undone)).toEqual(["A", "M", "P", "Z"]);
+    expect(orders(undone)).toEqual(["a1", "a2", "a2", "a3"]);
+  });
+
+  it("placing a row after the first of a tied pair puts it between them", () => {
+    const ctx = ctxFrom(TIED);
+    const b = buildAction(ctx, { t: "place", item: "A", parent: null, after: "M" });
+    const after = applied(ctx, b);
+    expect(names(after)).toEqual(["M", "A", "P", "Z"]);
+    expect(new Set(orders(after)).size).toBe(4);
+  });
+
+  it("an untied neighbour writes only the moved row", () => {
+    const ctx = ctxFrom(TIED);
+    const b = buildAction(ctx, { t: "create", kind: "task", name: "X", parent: null, after: "A", start: null });
+    expect(units(b).filter((u) => u.startsWith("p:"))).toHaveLength(1);
+    expect(names(applied(ctx, b))).toEqual(["A", "X", "M", "P", "Z"]);
+  });
+});
+
+describe("buildAction: the plan's limits (schedule-1)", () => {
+  const RANGE = "Dates run from 1 Jan 1900 to 31 Dec 2199.";
+  const DUR = "A task lasts 1 to 3650 working days.";
+  const LAG = "A lag is at most 1000 working days either way.";
+
+  it("refuses a start, a duration or a lag outside the limits, naming the limit", () => {
+    const ctx = chain();
+    refusedWith(ctx, { t: "schedule", item: "Admin", set: { start: "0026-11-16" } }, RANGE);
+    refusedWith(ctx, { t: "schedule", item: "Admin", set: { start: "2200-01-05" } }, RANGE);
+    refusedWith(ctx, { t: "create", kind: "task", name: "Far", parent: null, after: null, start: "1899-12-29" }, RANGE);
+    refusedWith(ctx, { t: "create", kind: "task", name: "Long", parent: null, after: null, start: "2026-11-16", dur: 3651 }, DUR);
+    refusedWith(ctx, { t: "resize", item: "Admin", dur: 1_000_000 }, DUR);
+    refusedWith(ctx, { t: "schedule", item: "Admin", set: { dur: 3651 } }, DUR);
+    refusedWith(ctx, { t: "link", from: "Admin", to: "Ship", type: "FS", lag: 1001 }, LAG);
+    refusedWith(ctx, { t: "link", from: "Admin", to: "Ship", type: "SS", lag: -5_000_000 }, LAG);
+    refusedWith(ctx, { t: "move", items: ["Launch"], days: 60_000 }, RANGE);
+    refusedWith(ctx, { t: "schedule", item: "PFF", set: { start: "2199-12-16" } }, RANGE);
+  });
+
+  it("accepts the edges of the limits", () => {
+    const ctx = chain();
+    expect(units(buildAction(ctx, { t: "resize", item: "Admin", dur: 3650 }))).toContain("s:Admin");
+    expect(units(buildAction(ctx, { t: "link", from: "Admin", to: "Launch", type: "SS", lag: -1000 }))).toContain("l:Admin>Launch");
+    expect(units(buildAction(ctx, { t: "schedule", item: "Admin", set: { start: "2199-12-30" } }))).toContain("s:Admin");
+  });
+
+  it("names the year in a date toast when it is not this year", () => {
+    const ctx = chain();
+    expect(buildAction(ctx, { t: "schedule", item: "Admin", set: { start: "2026-11-30" } }).toast).toBe("Scheduled “Admin” from 30 Nov.");
+    expect(buildAction(ctx, { t: "schedule", item: "Admin", set: { start: "2062-11-16" } }).toast).toBe("Scheduled “Admin” from 16 Nov 2062.");
   });
 });

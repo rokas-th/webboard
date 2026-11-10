@@ -211,9 +211,21 @@ export function conflicts(view: SchedView, storedStarts: ReadonlyMap<ItemId, Day
 
 export function lagThatHolds(succ: Sched, link: Link, pred: Sched, cal: WorkCalendar): number {
   const start = startOf(succ, cal);
-  let lag = link.lag;
-  while (start < earliest(succ, { ...link, lag }, pred, cal)) lag -= 1;
-  return lag;
+  const holds = (lag: number): boolean => earliest(succ, { ...link, lag }, pred, cal) <= start;
+  if (holds(link.lag)) return link.lag;
+  let fails = link.lag;
+  let step = 1;
+  while (!holds(link.lag - step)) {
+    fails = link.lag - step;
+    step *= 2;
+  }
+  let ok = link.lag - step;
+  while (fails - ok > 1) {
+    const mid = Math.floor((ok + fails) / 2);
+    if (holds(mid)) ok = mid;
+    else fails = mid;
+  }
+  return ok;
 }
 
 export interface RecalResult {
@@ -246,21 +258,35 @@ export function recalendar(view: SchedView, next: WorkCalendar): RecalResult {
     cal: next,
   };
   const loops = loopLinks(view.links);
-  const led = new Set(
-    view.links
-      .filter((l) => !loops.has(linkKey(l.from, l.to)) && view.items.has(l.from) && view.items.has(l.to))
-      .map((l) => l.to),
-  );
+  const live = view.links.filter((l) => !loops.has(linkKey(l.from, l.to)) && view.items.has(l.from) && view.items.has(l.to));
+  const led = new Set(live.map((l) => l.to));
+  const preds = groupBy(live, (l) => l.to);
   const endMoved = (s: Sched, moves: ReadonlyMap<ItemId, Day>): boolean => {
     const r = recal.items.get(s.id) as Sched;
     const m = moves.get(s.id);
     return endOf(m === undefined ? r : { ...r, start: m }, next) !== endOf(s, view.cal);
   };
   const roots = items
-    .filter((s) => !led.has(s.id) || (s.lock !== null && endMoved(s, new Map())))
+    .filter((s) => !led.has(s.id) || s.lock !== null)
     .map((s) => s.id)
     .sort(byId);
-  const pushed = push(recal, roots);
+  const pushedFromRoots = push(recal, roots);
+  const at = (id: ItemId): Sched => {
+    const r = recal.items.get(id);
+    if (r === undefined) throw new Error(`recalendar: no item ${id}`);
+    const m = pushedFromRoots.moves.get(id);
+    return m === undefined ? r : { ...r, start: m };
+  };
+  const lockStops = items
+    .filter((s) => led.has(s.id))
+    .sort((a, b) => byId(a.id, b.id))
+    .flatMap((s): Stop[] => {
+      if (s.lock === null) return [];
+      const now = at(s.id);
+      const early = (preds.get(s.id) ?? []).some((l) => startOf(now, next) < earliest(now, l, at(l.from), next));
+      return early ? [{ id: s.id, reason: s.lock }] : [];
+    });
+  const pushed: PushResult = { moves: pushedFromRoots.moves, stopped: [...pushedFromRoots.stopped, ...lockStops] };
   const endsChanged = items.filter((s) => endMoved(s, pushed.moves)).length;
   return { starts, durs, pushed, endsChanged, movedLater: pushed.moves.size };
 }

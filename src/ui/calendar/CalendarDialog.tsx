@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { Refused, type Built, type Intent } from "../../actions/intents";
 import { CLOSURE_TOO_LONG, closureTooLong, MAX_CLOSURE_DAYS, regionKey, type Calendar, type HolidayYear, type RegionRef, type Tuning } from "../../domain/calendar";
-import { isCalendarDate, toDay, toIso, yearOf, type Day, type IsoDate, type Weekday } from "../../domain/dates";
+import { FIRST_PLAN_DATE, isCalendarDate, LAST_PLAN_DATE, toDay, toIso, yearOf, type Day, type IsoDate, type Weekday } from "../../domain/dates";
 import { planRules } from "../../plan/rules";
 import { key } from "../../plan/units";
 import type { Clock } from "../../services/clock";
@@ -53,6 +53,12 @@ function spanOf(view: PlanView): { from: Day; to: Day } {
   if (starts.length === 0) return { from: today, to: today + 365 };
   return { from: Math.min(today, ...starts), to: Math.max(today, ...view.derived.end.values()) };
 }
+
+const lastDayMax = (from: string): IsoDate => {
+  if (!isCalendarDate(from)) return LAST_PLAN_DATE;
+  const longest = toIso(toDay(from) + MAX_CLOSURE_DAYS - 1);
+  return longest < LAST_PLAN_DATE ? longest : LAST_PLAN_DATE;
+};
 
 const yearsOf = (from: Day, to: Day): number[] => Array.from({ length: yearOf(to) - yearOf(from) + 1 }, (_, i) => yearOf(from) + i);
 
@@ -312,8 +318,8 @@ export function CalendarBody(p: CalendarProps) {
           </div>
           <div className="closure-add">
             <input type="text" aria-label="Day off name" placeholder="Name, e.g. Team offsite" value={dayName} onChange={(e) => setDayName(e.target.value)} />
-            <input type="date" aria-label="First day" value={dayFrom} onChange={(e) => setDayFrom(e.target.value)} />
-            <input type="date" aria-label="Last day" value={dayTo} max={isCalendarDate(dayFrom) ? toIso(toDay(dayFrom) + MAX_CLOSURE_DAYS - 1) : undefined} onChange={(e) => setDayTo(e.target.value)} />
+            <input type="date" aria-label="First day" value={dayFrom} min={FIRST_PLAN_DATE} max={LAST_PLAN_DATE} onChange={(e) => setDayFrom(e.target.value)} />
+            <input type="date" aria-label="Last day" value={dayTo} min={FIRST_PLAN_DATE} max={lastDayMax(dayFrom)} onChange={(e) => setDayTo(e.target.value)} />
             <button type="button" className="button-small" onClick={addDay}>
               Add a day off
             </button>

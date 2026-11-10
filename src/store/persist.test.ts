@@ -194,6 +194,56 @@ describe("openPersisted", () => {
     expect(writes().filter((c) => c.cmd === "store_append")).toHaveLength(2);
   });
 
+  it("close after a failed save tries the store once more and compacts last", async () => {
+    let failing = true;
+    resetTauri({
+      store_load: () => encodeLoad({ lastSeq: 7 }),
+      store_append: () => {
+        if (failing) throw { code: "store.io", message: "disk full" };
+        return null;
+      },
+      store_compact: () => null,
+    });
+    const p = await openPersisted("p1");
+    const seen: AppError[] = [];
+    p.onError((e) => seen.push(e));
+    p.ydoc.getMap("m").set("a", 1);
+    await settle();
+    p.ydoc.getMap("m").set("b", 2);
+    await settle();
+    expect(p.error()).toMatchObject({ code: "store.io", message: "disk full" });
+    failing = false;
+    await p.close();
+    expect(p.error()).toBeNull();
+    expect(writes().map((c) => [c.cmd, Number(headerOf(c, "x-seq"))])).toEqual([
+      ["store_append", 8],
+      ["store_append", 8],
+      ["store_append", 9],
+      ["store_compact", 9],
+    ]);
+    expect(tauri.calls[tauri.calls.length - 1].args).toEqual(Y.encodeStateAsUpdate(p.ydoc));
+    expect(seen).toHaveLength(1);
+  });
+
+  it("close after a failed save rejects with the store's new error when it fails again", async () => {
+    let message = "disk full";
+    resetTauri({
+      store_load: () => encodeLoad({ lastSeq: 7 }),
+      store_append: () => {
+        throw { code: "store.io", message };
+      },
+      store_compact: () => null,
+    });
+    const p = await openPersisted("p1");
+    p.ydoc.getMap("m").set("a", 1);
+    await settle();
+    expect(p.error()).toMatchObject({ message: "disk full" });
+    message = "volume gone";
+    await expect(p.close()).rejects.toMatchObject({ code: "store.io", message: "volume gone" });
+    expect(p.error()).toMatchObject({ code: "store.io", message: "volume gone" });
+    expect(writes().map((c) => c.cmd)).toEqual(["store_append", "store_append"]);
+  });
+
   it("a throwing onError listener does not stop the queue", async () => {
     let failing = true;
     resetTauri({

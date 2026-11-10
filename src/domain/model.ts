@@ -57,3 +57,6 @@ export interface PlanState {
 }
 
 export const linkKey = (from: ItemId, to: ItemId): LinkKey => `${from}>${to}`;
+
+export const MAX_TASK_DUR = 3650;
+export const MAX_LAG = 1000;

@@ -333,6 +333,13 @@ describe("convertGantt refuses what it cannot map", () => {
   it("an unreadable predecessor entry", () => refuses(source(mutate(3, { Predecessor: "FS2" })), /Task 3: Predecessor .*"FS2"/));
   it("a predecessor naming an unknown TaskID", () => refuses(source(mutate(3, { Predecessor: "99FS" })), /Task 3: Predecessor names unknown TaskID 99/));
   it("a predecessor naming itself", () => refuses(source(mutate(3, { Predecessor: "3FS" })), /Task 3: Predecessor names the task itself/));
+  it("a duration above 3650 days", () => refuses(source(mutate(3, { Duration: 3651 })), /Task 3: Duration is not a whole number from 0 to 3650: 3651/));
+  it("a lag above 1000 days", () => refuses(source(mutate(3, { Predecessor: "2FS+1001 days" })), /Task 3: Predecessor entry "2FS\+1001 days" has a lag beyond 1000 working days either way/));
+  it("a lead above 1000 days", () => refuses(source(mutate(3, { Predecessor: "2SS-1001 days" })), /Task 3: Predecessor entry "2SS-1001 days" has a lag beyond 1000 working days either way/));
+  it("a StartDate before 1900", () =>
+    refuses(source(mutate(3, { StartDate: "1899-12-29T06:00:00.000Z" })), /Task 3: StartDate 1899-12-29 is not a date from 1900-01-01 to 2199-12-31/));
+  it("a StartDate after 2199", () =>
+    refuses(source(mutate(3, { StartDate: "2200-01-05T06:00:00.000Z", EndDate: "2200-01-06T15:00:00.000Z" })), /Task 3: StartDate 2200-01-05 is not a date from 1900-01-01 to 2199-12-31/));
   it("the same predecessor twice", () => refuses(source(mutate(3, { Predecessor: "2FS,2SS" })), /Task 3: Predecessor names TaskID 2 twice/));
   it("a non-integer duration", () => refuses(source(mutate(3, { Duration: 2.5 })), /Task 3: Duration .*2\.5/));
   it("a negative duration", () => refuses(source(mutate(3, { Duration: -1 })), /Task 3: Duration .*-1/));
@@ -380,6 +387,8 @@ describe("convertGantt refuses what it cannot map", () => {
     refuses(src, /The \.gantt file: data is not a list: nothing/);
   });
   it("a file-name stamp that is not a real date", () => refuses(source(), /file name: its date stamp 20260230 is not a calendar date/, "Fixture Plan 20260230.gantt"));
+  it("a file-name stamp outside 1900 to 2199", () =>
+    refuses(source(), /file name: its date stamp 22000105 is not a date from 1900-01-01 to 2199-12-31/, "Fixture Plan 22000105.gantt"));
   it("a numeric entity outside Unicode", () => refuses(source(mutate(3, { info: "<p>&#x110000;</p>" })), /Task 3 info.*&#x110000;/));
   it("a tag outside the allow-list in info", () => refuses(source(mutate(3, { info: "<p><img src=x></p>" })), /Task 3 info.*<img src=x>/));
   it("a task that is not an object", () => refuses(source([5 as unknown as Task]), /data\[0\]: is not an object: 5/));

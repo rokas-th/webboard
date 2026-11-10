@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import App, { REBUILD_LIST_LINE, RESET_SETTINGS_LINE } from "./App";
+import App, { REBUILD_LIST_LINE, RESET_SETTINGS_LINE, foreignFolderLine } from "./App";
 import { AppError } from "./services/ipc";
 import { check as checkUpdate, restart, type FoundUpdate } from "./services/updates";
 import type { InstallProgress } from "./store/updates";
@@ -152,6 +152,28 @@ describe("start failure", () => {
     expect(setAside).toHaveBeenCalledTimes(1);
     expect(setAside.mock.invocationCallOrder[0]).toBeGreaterThan(open.mock.invocationCallOrder[0]);
     expect(setAside.mock.invocationCallOrder[0]).toBeLessThan(open.mock.invocationCallOrder[1]);
+    expect(toolbar()).not.toBeNull();
+  });
+
+  it("store.foreign names the stray folder and offers no rebuild", async () => {
+    await seededStore(["Alpha"]);
+    const failure = new AppError("store.foreign", "/data/plans/Old backup");
+    const log = logged();
+    const open = spyOpen().mockRejectedValueOnce(failure);
+    render(<App />);
+    await settle();
+    expect(log.mock.calls).toEqual([[failure]]);
+    expect(screen.getByText(foreignFolderLine("/data/plans/Old backup"))).toBeTruthy();
+    expect(foreignFolderLine("/data/plans/Old backup")).toBe(
+      "A folder in WebBoard's data that WebBoard did not make: /data/plans/Old backup. Move it away and start again.",
+    );
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Rebuild the plan list" })).toBeNull();
+    expect(screen.queryByText(REBUILD_LIST_LINE)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reset settings" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(open).toHaveBeenCalledTimes(2);
     expect(toolbar()).not.toBeNull();
   });
 });
