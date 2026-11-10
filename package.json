@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "version:check": "node scripts/version.mjs --check",
     "test:scripts": "node --test scripts/*.test.mjs && bash scripts/install-linux.test.sh",
-    "layout:probe": "node scripts/layout-probe.mjs"
+    "layout:probe": "node scripts/layout-probe.mjs",
+    "gantt:wbx": "vite-node scripts/gantt-to-wbx.mjs --"
   },
   "dependencies": {
     "@fontsource/chakra-petch": "^5.3.0",
