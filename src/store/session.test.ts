@@ -21,6 +21,7 @@ import { CH_ZH, CH_ZH_2026, CH_ZH_2027, FETCHED_AT, holidayDay } from "../test/f
 import { encodeLoad, memoryStore, type MemoryStore } from "../test/fixtures/store";
 import { ctxOf, PLAN_ID } from "../test/planCtx";
 import { commandsSince, commandsWith, hold, resetTauri, tauri, type Answer } from "../test/tauriMock";
+import { testSession, type TestSession } from "../test/session";
 import { encodeAction, PlanDoc, decodeAction } from "./doc";
 import { openPersisted, type PersistedDoc } from "./persist";
 import { PlanSession, usePlanView, type SessionDeps } from "./session";
@@ -1114,6 +1115,67 @@ describe("PlanSession", () => {
       s.apply({ t: "create", kind: "task", name: "C", parent: null, after: null, start: "2026-11-16", dur: 1 });
     });
     expect(screen.getByTestId("count").textContent).toBe("3");
+  });
+});
+
+describe("trashAuthorOf", () => {
+  const opened: PlanSession[] = [];
+  afterEach(async () => {
+    await Promise.all(opened.splice(0).map((s) => s.close()));
+  });
+  const two = async (): Promise<{ t: TestSession; p: { session: PlanSession; sync(): void } }> => {
+    const t = await testSession([{ name: "A", start: "2026-11-10", dur: 3 }]);
+    const p = await t.peer("iphone");
+    opened.push(t.session, p.session);
+    return { t, p };
+  };
+  const created = (b: Built): ItemId => {
+    const w = b.action.w.find((x) => x.u.startsWith("e:"));
+    if (w === undefined) throw new Error("create wrote no e: unit");
+    return w.u.slice(2);
+  };
+  const X = { t: "create", kind: "task", name: "X", parent: null, after: null, start: "2026-11-16", dur: 1 } as const;
+
+  it("names the peer whose undo orphaned an item this device changed since", async () => {
+    const { t, p } = await two();
+    const x = created(p.session.apply(X));
+    p.sync();
+    t.session.apply({ t: "rename", item: x, name: "X2" });
+    p.sync();
+    const undone = p.session.undo();
+    if (undone === null) throw new Error("nothing to undo");
+    expect(undone.toast).toContain("was changed since on the Mac — moved to the Trash.");
+    p.sync();
+    const view = t.session.view();
+    expect(view.plan.items.get(x)?.trashed).toBe(true);
+    expect(view.choices).toEqual([]);
+    expect(t.session.authorOf(key.e(x))).toBeNull();
+    expect(t.session.trashAuthorOf(x)).toEqual({ dev: "iphone", device: "iPhone" });
+    expect(p.session.trashAuthorOf(x)).toEqual({ dev: "iphone", device: "iPhone" });
+  });
+
+  it("names the device that trashed an item, remote or local", async () => {
+    const { t, p } = await two();
+    p.session.apply({ t: "trash", items: ["A"] });
+    p.sync();
+    expect(t.session.trashAuthorOf("A")).toEqual({ dev: "iphone", device: "iPhone" });
+    t.session.apply({ t: "restore", items: ["A"] });
+    t.session.apply({ t: "trash", items: ["A"] });
+    expect(t.session.trashAuthorOf("A")).toEqual({ dev: "mac", device: "Mac" });
+  });
+
+  it("names the live writer of an item that is not trashed", async () => {
+    const { t, p } = await two();
+    const x = created(p.session.apply(X));
+    p.sync();
+    expect(t.session.view().plan.items.get(x)?.trashed).toBe(false);
+    expect(t.session.trashAuthorOf(x)).toEqual({ dev: "iphone", device: "iPhone" });
+    expect(t.session.trashAuthorOf("A")).toEqual({ dev: "mac", device: "Mac" });
+  });
+
+  it("throws for an item with no existence writer", async () => {
+    const { t } = await two();
+    expect(() => t.session.trashAuthorOf("nope")).toThrow("Item nope has no existence writer");
   });
 });
 

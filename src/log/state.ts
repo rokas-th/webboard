@@ -116,6 +116,11 @@ export class LogState {
     return this.graph.order();
   }
 
+  before(a: ActionId, b: ActionId): boolean {
+    this.usable();
+    return this.graph.before(a, b);
+  }
+
   writers(u: UnitKey): readonly ActionId[] {
     this.usable();
     return [...(this.table.get(u)?.writers ?? [])];

@@ -14,7 +14,7 @@ import type { ActionId, DeviceId, SessionId, UnitKey } from "../log/types";
 import { choices, heldItems, type Choice } from "../plan/choices";
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
-import { validateWrite } from "../plan/units";
+import { key, validateWrite } from "../plan/units";
 import { notifyEach, type Clock } from "../services/clock";
 import type { HolidayHost, HolidayService } from "../services/holidays";
 import type { AppError } from "../services/ipc";
@@ -377,8 +377,25 @@ export class PlanSession implements HolidayHost {
   authorOf(u: UnitKey): { dev: DeviceId; device: string } | null {
     const unit = this.log.unit(u);
     if (unit === undefined) return null;
-    const a = this.log.get(unit.from);
-    if (a === undefined) throw new Error(`Action ${unit.from} wrote ${u} but is not ready`);
+    return this.authorNamed(unit.from, `Action ${unit.from} wrote ${u} but is not ready`);
+  }
+
+  trashAuthorOf(item: ItemId): { dev: DeviceId; device: string } {
+    const live = this.authorOf(key.e(item));
+    if (live !== null) return live;
+    const writers = this.log.writers(key.e(item));
+    if (writers.length === 0) throw new Error(`Item ${item} has no existence writer`);
+    const by = writers
+      .map((w) => this.log.unit(key.a(w)))
+      .flatMap((st) => (st !== undefined && st.value === false ? [st.from] : []))
+      .reduce<ActionId | null>((m, x) => (m === null || this.log.before(m, x) ? x : m), null);
+    if (by === null) throw new Error(`Item ${item} is trashed but no action trashed it`);
+    return this.authorNamed(by, `Action ${by} trashed ${item} but is not ready`);
+  }
+
+  private authorNamed(id: ActionId, notReady: string): { dev: DeviceId; device: string } {
+    const a = this.log.get(id);
+    if (a === undefined) throw new Error(notReady);
     return { dev: a.dev, device: deviceName(this.devices, a.dev) };
   }
 

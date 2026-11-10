@@ -1568,6 +1568,66 @@ describe("the panel slot", () => {
       expect(toastTexts()).toEqual(["“A” was moved to the Trash on iPhone. Restore it from the Trash."]);
     });
 
+    const NEW_X = { t: "create", kind: "task", name: "W", parent: null, after: "A", start: "2026-11-12", dur: 1 } as const;
+    const createdX = (t: TestSession): string => {
+      const x = [...t.session.view().plan.items.values()].find((it) => it.name === "W");
+      if (x === undefined) throw new Error("no item W");
+      return x.id;
+    };
+
+    it("lets go of an item another device's undo moved to the Trash, and names that device", async () => {
+      const t = await made(SEED);
+      await shown(t);
+      const p = await t.peer("iphone");
+      sessions.push(p.session);
+      act(() => {
+        p.session.apply(NEW_X);
+        p.sync();
+      });
+      const x = createdX(t);
+      select(x);
+      act(() => {
+        t.session.apply({ t: "rename", item: x, name: "X" });
+        p.sync();
+      });
+      clearToasts();
+      act(() => {
+        p.session.undo();
+        p.sync();
+      });
+      expect(t.session.view().plan.items.get(x)?.trashed).toBe(true);
+      expect(t.session.authorOf("e:" + x)).toBeNull();
+      expect(t.session.trashAuthorOf(x)).toEqual({ dev: "iphone", device: "iPhone" });
+      expect(uiNow()[0].selected).toBeNull();
+      expect(toastTexts()).toEqual(["“X” was moved to the Trash on iPhone. Restore it from the Trash."]);
+    });
+
+    it("lets go of an item its own undo moved to the Trash, with only the undo's toast", async () => {
+      const t = await made(SEED);
+      await shown(t);
+      act(() => {
+        t.session.apply(NEW_X);
+      });
+      const x = createdX(t);
+      const p = await t.peer("iphone");
+      sessions.push(p.session);
+      select(x);
+      act(() => {
+        p.session.apply({ t: "rename", item: x, name: "X" });
+        p.sync();
+      });
+      clearToasts();
+      const undo = vi.spyOn(t.session, "undo");
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+      const done = undo.mock.results[0];
+      if (done === undefined || done.type !== "return" || done.value === null) throw new Error("Undo did not apply");
+      expect(t.session.view().plan.items.get(x)?.trashed).toBe(true);
+      expect(t.session.trashAuthorOf(x)).toEqual({ dev: "mac", device: "Mac" });
+      expect(uiNow()[0].selected).toBeNull();
+      expect(done.value.toast).toContain("“X” was changed since on the iPhone — moved to the Trash.");
+      expect(toastTexts()).toEqual([done.value.toast]);
+    });
+
     it("names the group another device trashed when a selected item inside it goes", async () => {
       const t = await made([
         { name: "G", kind: "group" },
