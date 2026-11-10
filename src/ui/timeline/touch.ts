@@ -14,7 +14,7 @@ export interface Sample {
 }
 
 export type GestureEvent =
-  | { k: "tap"; item: ItemId }
+  | { k: "tap"; item: ItemId | null }
   | { k: "pickup"; item: ItemId; handle: Handle }
   | { k: "drag"; item: ItemId; handle: Handle; dx: number }
   | { k: "drop"; item: ItemId; handle: Handle; dx: number; target: ItemId | null }
@@ -72,7 +72,7 @@ export class TouchGesture {
     return [];
   }
 
-  move(s: Sample, _over: ItemId | null): GestureEvent[] {
+  move(s: Sample): GestureEvent[] {
     if (!this.at.has(s.pointer)) return [];
     this.at.set(s.pointer, s);
     const m = this.mode;
@@ -87,7 +87,7 @@ export class TouchGesture {
     if (m.k === "pinch" && !m.zoomed) {
       const a = this.at.get(m.a);
       const b = this.at.get(m.b);
-      if (a === undefined || b === undefined) return [];
+      if (a === undefined || b === undefined) throw new Error(`TouchGesture: pinch pointer ${m.a}/${m.b} is not tracked`);
       const ratio = distance(a, b) / m.base;
       if (ratio >= PINCH_RATIO) {
         m.zoomed = true;
@@ -105,8 +105,8 @@ export class TouchGesture {
     if (!this.at.has(s.pointer)) return [];
     const m = this.mode;
     const out: GestureEvent[] =
-      m.k === "pending" && m.hit !== null
-        ? [{ k: "tap", item: m.hit.item }]
+      m.k === "pending"
+        ? [{ k: "tap", item: m.hit === null ? null : m.hit.item }]
         : m.k === "held"
           ? [{ k: "drop", item: m.item, handle: m.handle, dx: s.x - m.from.x, target: over }]
           : [];

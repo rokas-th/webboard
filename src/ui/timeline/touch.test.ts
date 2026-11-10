@@ -50,8 +50,8 @@ describe("TouchGesture", () => {
     r.out.push(...r.g.down(at(1, 100, 0), BODY));
     expect(r.out).toEqual([]);
     r.fire();
-    r.out.push(...r.g.move(at(1, 140, 600), null));
-    r.out.push(...r.g.move(at(1, 180, 650), "Ship"));
+    r.out.push(...r.g.move(at(1, 140, 600)));
+    r.out.push(...r.g.move(at(1, 180, 650)));
     r.out.push(...r.g.up(at(1, 180, 700), "Ship"));
     expect(r.out).toEqual([
       { k: "pickup", item: "Review", handle: "body" },
@@ -64,9 +64,9 @@ describe("TouchGesture", () => {
   it("a move past the slop before the hold is a scroll: nothing, also on up", () => {
     const r = rig();
     r.out.push(...r.g.down(at(1, 100, 0), BODY));
-    r.out.push(...r.g.move(at(1, 115, 200), null));
+    r.out.push(...r.g.move(at(1, 115, 200)));
     expect(r.pending()).toBe(0);
-    r.out.push(...r.g.move(at(1, 200, 600), null));
+    r.out.push(...r.g.move(at(1, 200, 600)));
     r.out.push(...r.g.up(at(1, 200, 700), null));
     expect(r.out).toEqual([]);
   });
@@ -74,7 +74,7 @@ describe("TouchGesture", () => {
   it("a move within the slop keeps the hold", () => {
     const r = rig();
     r.out.push(...r.g.down(at(1, 100, 0), BODY));
-    r.out.push(...r.g.move(at(1, 106, 100, 6), null));
+    r.out.push(...r.g.move(at(1, 106, 100, 6)));
     expect(r.pending()).toBe(1);
     r.fire();
     expect(r.out).toEqual([{ k: "pickup", item: "Review", handle: "body" }]);
@@ -88,11 +88,24 @@ describe("TouchGesture", () => {
     expect(r.pending()).toBe(0);
   });
 
-  it("a lift on empty chart is nothing", () => {
+  it("a lift on empty chart is a tap on nothing, and a held one too", () => {
     const r = rig();
     r.out.push(...r.g.down(at(1, 100, 0), null));
     expect(r.pending()).toBe(0);
     r.out.push(...r.g.up(at(1, 100, 120), null));
+    r.out.push(...r.g.down(at(1, 100, 1000), null));
+    r.out.push(...r.g.up(at(1, 101, 1800), null));
+    expect(r.out).toEqual([
+      { k: "tap", item: null },
+      { k: "tap", item: null },
+    ]);
+  });
+
+  it("a swipe on empty chart is nothing", () => {
+    const r = rig();
+    r.out.push(...r.g.down(at(1, 100, 0), null));
+    r.out.push(...r.g.move(at(1, 140, 100)));
+    r.out.push(...r.g.up(at(1, 140, 200), null));
     expect(r.out).toEqual([]);
   });
 
@@ -100,9 +113,9 @@ describe("TouchGesture", () => {
     const r = rig();
     r.out.push(...r.g.down(at(1, 100, 0), BODY));
     r.fire();
-    r.out.push(...r.g.move(at(1, 120, 600), null));
+    r.out.push(...r.g.move(at(1, 120, 600)));
     r.out.push(...r.g.down(at(2, 300, 650), null));
-    r.out.push(...r.g.move(at(2, 400, 660), null));
+    r.out.push(...r.g.move(at(2, 400, 660)));
     r.out.push(...r.g.up(at(2, 400, 670), null));
     r.out.push(...r.g.up(at(1, 200, 700), "Ship"));
     expect(r.out).toEqual([
@@ -130,10 +143,10 @@ describe("TouchGesture", () => {
     r.out.push(...r.g.down(at(1, 0, 0), BODY));
     r.out.push(...r.g.down(at(2, 100, 10), null));
     expect(r.pending()).toBe(0);
-    r.out.push(...r.g.move(at(2, 160, 40), null));
-    r.out.push(...r.g.move(at(2, 300, 80), null));
-    r.out.push(...r.g.move(at(2, 100, 120), null));
-    r.out.push(...r.g.move(at(2, 40, 160), null));
+    r.out.push(...r.g.move(at(2, 160, 40)));
+    r.out.push(...r.g.move(at(2, 300, 80)));
+    r.out.push(...r.g.move(at(2, 100, 120)));
+    r.out.push(...r.g.move(at(2, 40, 160)));
     r.out.push(...r.g.up(at(2, 40, 200), null));
     r.out.push(...r.g.up(at(1, 0, 210), null));
     expect(r.out).toEqual([{ k: "zoom", step: 1 }]);
@@ -143,10 +156,10 @@ describe("TouchGesture", () => {
     const r = rig();
     r.out.push(...r.g.down(at(1, 0, 0), null));
     r.out.push(...r.g.down(at(2, 100, 10), null));
-    r.out.push(...r.g.move(at(2, 80, 40), null));
+    r.out.push(...r.g.move(at(2, 80, 40)));
     expect(r.out).toEqual([]);
-    r.out.push(...r.g.move(at(2, 60, 80), null));
-    r.out.push(...r.g.move(at(2, 10, 120), null));
+    r.out.push(...r.g.move(at(2, 60, 80)));
+    r.out.push(...r.g.move(at(2, 10, 120)));
     r.out.push(...r.g.cancel(2));
     r.out.push(...r.g.up(at(1, 0, 210), null));
     expect(r.out).toEqual([{ k: "zoom", step: -1 }]);
@@ -175,13 +188,13 @@ describe("TouchGesture", () => {
     const r = rig(false);
     r.out.push(...r.g.down(at(1, 0, 0), BODY));
     r.out.push(...r.g.down(at(2, 100, 10), null));
-    r.out.push(...r.g.move(at(2, 160, 40), null));
+    r.out.push(...r.g.move(at(2, 160, 40)));
     expect(r.out).toEqual([{ k: "zoom", step: 1 }]);
   });
 
   it("ignores pointers it does not track", () => {
     const r = rig();
-    expect(r.g.move(at(7, 10, 0), null)).toEqual([]);
+    expect(r.g.move(at(7, 10, 0))).toEqual([]);
     expect(r.g.up(at(7, 10, 0), null)).toEqual([]);
     expect(r.g.cancel(7)).toEqual([]);
   });

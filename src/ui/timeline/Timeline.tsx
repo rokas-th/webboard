@@ -5,7 +5,7 @@ import type { ItemId, LinkType } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { EMPTY_PLAN } from "../copy";
-import { useExec, useRun } from "../run";
+import { useRun } from "../run";
 import { useUiValue } from "../state";
 import { Chart, itemOf, type DropGhost, type Point, type TempLink, type TouchHost } from "./Chart";
 import { geometry, LEAD, ROW, type Geometry } from "./geometry";
@@ -71,7 +71,6 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   const view = usePlanView(p.session);
   const { ui, setUi } = useUiValue();
   const { run } = useRun(p.session);
-  const exec = useExec(p.session);
   const geo = useMemo(() => geometry(view, ui.zoom), [view, ui.zoom]);
   const rows = useMemo(() => timelineRows(view, ui.collapsed), [view, ui.collapsed]);
   const marks = useMemo(() => marksOf(view), [view]);
@@ -216,23 +215,15 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   };
 
   const touch: TouchHost = {
-    pick: (item) => {
-      if (indexOf(item) >= 0) setDragging(item);
+    has: (item) => indexOf(item) >= 0,
+    pick: (item, handle) => {
+      if (handle !== "link") setDragging(item);
     },
     drag: (item, handle, dx, from, at) => show(item, MODE[handle], dx, from, at, true),
     drop: (item, handle, dx, target) => {
       cancel();
-      if (indexOf(item) < 0) return;
-      if (handle === "link") {
-        const intent = gestureIntent(geo, { kind: "link", item, dxPx: dx, target: target ?? undefined });
-        if (intent !== null)
-          exec(() => {
-            p.session.preview(intent);
-            return p.session.apply(intent);
-          });
-        return;
-      }
-      const intent = intentOf(geo, MODE[handle], item, dx);
+      const intent =
+        handle === "link" ? gestureIntent(geo, { kind: "link", item, dxPx: dx, target: target ?? undefined }) : intentOf(geo, MODE[handle], item, dx);
       if (intent !== null) run(intent);
     },
     clear: cancel,

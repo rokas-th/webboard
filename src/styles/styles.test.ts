@@ -286,4 +286,9 @@ describe("the Cyberdeck look", () => {
     expect(narrow(".toolbar > button")["padding"]).toBe("7px 10px");
     expect(narrow(".seg-modes button")["padding"]).toBe("4px 8px");
   });
+
+  it("lets a swipe that starts on a tray chip scroll the tray", () => {
+    const chip = sheet.rules.filter((r) => r.selector === ".tray-chip" && r.decls["touch-action"] !== undefined).map((r) => [r.conditions.length, r.decls["touch-action"]]);
+    expect(chip).toEqual([[0, "pan-x pan-y"]]);
+  });
 });

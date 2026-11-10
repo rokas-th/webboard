@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { q, workingDays } from "../../actions/copy";
 import { fmtShort, toDay, toIso, type Day } from "../../domain/dates";
 import { linkKey, type Item, type ItemId } from "../../domain/model";
@@ -18,7 +18,8 @@ export interface Point {
 }
 
 export interface TouchHost {
-  pick(item: ItemId): void;
+  has(item: ItemId): boolean;
+  pick(item: ItemId, handle: Handle): void;
   drag(item: ItemId, handle: Handle, dx: number, from: Point, at: Point): void;
   drop(item: ItemId, handle: Handle, dx: number, target: ItemId | null): void;
   clear(): void;
@@ -97,6 +98,12 @@ function zoneOf(geo: Geometry, kind: "task" | "milestone", id: ItemId, x: number
   if (kind === "milestone") return Math.abs(x - (geo.x(span.start) + geo.ppd / 2)) < HIT_PX / 2 ? "body" : null;
   const x0 = geo.x(span.start);
   const x1 = geo.x(span.end) + geo.ppd;
+  if (x1 - x0 < HIT_PX) {
+    if (x >= x0 - HIT_PX / 2 && x < x0) return "start";
+    if (x >= x0 && x < x1) return "body";
+    if (x >= x1 && x < x1 + HIT_PX / 2) return "end";
+    return null;
+  }
   const inside = Math.min(HANDLE_INSIDE_PX, Math.floor((x1 - x0) / 4));
   const outside = HIT_PX - inside;
   if (x >= x0 - outside && x < x0 + inside) return "start";
@@ -106,7 +113,7 @@ function zoneOf(geo: Geometry, kind: "task" | "milestone", id: ItemId, x: number
 }
 
 function touchHit(mounted: readonly Placed[], geo: Geometry, target: EventTarget, at: Point): { item: ItemId; handle: Handle } | null {
-  if (!(target instanceof Element)) return null;
+  if (!(target instanceof Element)) throw new Error("Timeline: a touch target that is not an element");
   const nub = target.closest("[data-nub]");
   if (nub instanceof HTMLElement && nub.dataset.nub !== undefined) return { item: nub.dataset.nub, handle: "link" };
   const row = rowAt(mounted, at.y);
@@ -119,7 +126,11 @@ function touchHit(mounted: readonly Placed[], geo: Geometry, target: EventTarget
   return bar instanceof HTMLElement && bar.dataset.bar !== undefined ? { item: bar.dataset.bar, handle: "body" } : null;
 }
 
-const zoomed = (zoom: Zoom, step: 1 | -1): Zoom => ZOOM_ORDER[Math.min(ZOOM_ORDER.length - 1, Math.max(0, ZOOM_ORDER.indexOf(zoom) + step))];
+const zoomed = (zoom: Zoom, step: 1 | -1): Zoom => {
+  const at = ZOOM_ORDER.indexOf(zoom);
+  if (at < 0) throw new Error(`Timeline: unknown zoom ${zoom}`);
+  return ZOOM_ORDER[Math.min(ZOOM_ORDER.length - 1, Math.max(0, at + step))];
+};
 
 const timer = (ms: number, fn: () => void): (() => void) => {
   const id = setTimeout(fn, ms);
@@ -133,68 +144,103 @@ function useTouch(p: ChartProps): {
     onPointerMove(e: ReactPointerEvent<HTMLDivElement>): void;
     onPointerUp(e: ReactPointerEvent<HTMLDivElement>): void;
     onPointerCancel(e: ReactPointerEvent<HTMLDivElement>): void;
+    onLostPointerCapture(e: ReactPointerEvent<HTMLDivElement>): void;
   };
 } {
   const root = useRef<HTMLDivElement>(null);
-  const picked = useRef(false);
+  const picked = useRef<ItemId | null>(null);
   const downs = useRef(new Map<number, Point>());
   const last = useRef<{ from: Point; at: Point } | null>(null);
-  const handle = useRef<(events: readonly GestureEvent[]) => void>(() => undefined);
+  const gesture = useRef<TouchGesture | null>(null);
+  const handle = useRef<(events: readonly GestureEvent[]) => void>(() => {
+    throw new Error("Timeline: a touch gesture before the chart mounted");
+  });
+  const reset = useRef<(g: TouchGesture) => void>(() => {
+    throw new Error("Timeline: a touch reset before the chart mounted");
+  });
   const allowPickup = !p.readOnly;
-  const gesture = useMemo(() => new TouchGesture({ allowPickup, schedule: timer, emit: (events) => handle.current(events) }), [allowPickup]);
   const { setUi, zoom, touch } = p;
 
-  handle.current = (events) =>
-    events.forEach((ev) => {
-      if (ev.k === "tap") setUi({ selected: ev.item });
-      else if (ev.k === "pickup") {
-        picked.current = true;
-        touch.pick(ev.item);
-      } else if (ev.k === "drag") {
-        const l = last.current;
-        if (l === null) throw new Error("Timeline: a touch drag with no position");
-        touch.drag(ev.item, ev.handle, ev.dx, l.from, l.at);
-      } else if (ev.k === "drop") {
-        picked.current = false;
-        touch.drop(ev.item, ev.handle, ev.dx, ev.target);
-      } else if (ev.k === "cancel") {
-        picked.current = false;
-        touch.clear();
-      } else {
-        const next = zoomed(zoom, ev.step);
-        if (next !== zoom) setUi({ zoom: next });
-      }
-    });
+  const live = (): TouchGesture => {
+    const g = gesture.current;
+    if (g === null) throw new Error("Timeline: no touch recogniser");
+    return g;
+  };
+
+  useLayoutEffect(() => {
+    reset.current = (g) => {
+      [...downs.current.keys()].forEach((id) => g.cancel(id));
+      downs.current.clear();
+      last.current = null;
+      picked.current = null;
+      touch.clear();
+    };
+    handle.current = (events) =>
+      events.forEach((ev) => {
+        if (ev.k === "zoom") {
+          const next = zoomed(zoom, ev.step);
+          if (next !== zoom) setUi({ zoom: next });
+        } else if (ev.k === "cancel") {
+          picked.current = null;
+          touch.clear();
+        } else if (ev.k === "tap") {
+          if (ev.item === null) setUi({ selected: null });
+          else if (touch.has(ev.item)) setUi({ selected: ev.item });
+          else reset.current(live());
+        } else if (!touch.has(ev.item)) {
+          reset.current(live());
+        } else if (ev.k === "pickup") {
+          picked.current = ev.item;
+          touch.pick(ev.item, ev.handle);
+        } else if (ev.k === "drag") {
+          const l = last.current;
+          if (l === null) throw new Error("Timeline: a touch drag with no position");
+          touch.drag(ev.item, ev.handle, ev.dx, l.from, l.at);
+        } else {
+          picked.current = null;
+          touch.drop(ev.item, ev.handle, ev.dx, ev.target);
+        }
+      });
+  });
+
+  useLayoutEffect(() => {
+    const g = new TouchGesture({ allowPickup, schedule: timer, emit: (events) => handle.current(events) });
+    gesture.current = g;
+    return () => {
+      gesture.current = null;
+      reset.current(g);
+    };
+  }, [allowPickup]);
+
+  useLayoutEffect(() => {
+    const item = picked.current;
+    if (item !== null && !touch.has(item)) reset.current(live());
+  });
 
   useEffect(() => {
     const el = root.current;
     if (el === null) throw new Error("Timeline: no chart");
     const onTouchMove = (e: TouchEvent): void => {
-      if (picked.current) e.preventDefault();
+      if (picked.current !== null) e.preventDefault();
     };
     el.addEventListener("touchmove", onTouchMove, { passive: false });
     return () => el.removeEventListener("touchmove", onTouchMove);
   }, []);
-
-  useEffect(() => {
-    const live = downs.current;
-    return () => {
-      const events = [...live.keys()].flatMap((id) => gesture.cancel(id));
-      live.clear();
-      last.current = null;
-      handle.current(events);
-    };
-  }, [gesture]);
 
   const pointOf = (e: ReactPointerEvent<HTMLDivElement>): Point => {
     const r = e.currentTarget.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   const sample = (e: ReactPointerEvent<HTMLDivElement>, at: Point): Sample => ({ pointer: e.pointerId, x: at.x, y: at.y, t: e.timeStamp });
-  const overOf = (at: Point): ItemId | null => rowAt(p.mounted, at.y)?.row.id ?? null;
   const ended = (pointer: number): void => {
     downs.current.delete(pointer);
     if (downs.current.size === 0) last.current = null;
+  };
+  const lost = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (e.pointerType !== "touch") return;
+    const events = live().cancel(e.pointerId);
+    ended(e.pointerId);
+    handle.current(events);
   };
 
   return {
@@ -202,30 +248,28 @@ function useTouch(p: ChartProps): {
     handlers: {
       onPointerDown: (e) => {
         if (e.pointerType !== "touch") return;
+        const g = live();
+        if (e.isPrimary && downs.current.size > 0) reset.current(g);
         const at = pointOf(e);
         downs.current.set(e.pointerId, at);
-        handle.current(gesture.down(sample(e, at), touchHit(p.mounted, p.geo, e.target, at)));
+        handle.current(g.down(sample(e, at), touchHit(p.mounted, p.geo, e.target, at)));
       },
       onPointerMove: (e) => {
         const from = downs.current.get(e.pointerId);
         if (e.pointerType !== "touch" || from === undefined) return;
         const at = pointOf(e);
         last.current = { from, at };
-        handle.current(gesture.move(sample(e, at), overOf(at)));
+        handle.current(live().move(sample(e, at)));
       },
       onPointerUp: (e) => {
         if (e.pointerType !== "touch") return;
         const at = pointOf(e);
-        const events = gesture.up(sample(e, at), overOf(at));
+        const events = live().up(sample(e, at), rowAt(p.mounted, at.y)?.row.id ?? null);
         ended(e.pointerId);
         handle.current(events);
       },
-      onPointerCancel: (e) => {
-        if (e.pointerType !== "touch") return;
-        const events = gesture.cancel(e.pointerId);
-        ended(e.pointerId);
-        handle.current(events);
-      },
+      onPointerCancel: lost,
+      onLostPointerCapture: lost,
     },
   };
 }

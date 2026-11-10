@@ -54,6 +54,7 @@ const tap = (selector, text) => ({ tap: [selector, text] });
 const none = (selector, text) => ({ none: [selector, text] });
 const key = (k, code, modifiers) => ({ key: { key: k, code, modifiers } });
 const reveal = (selector, text) => ({ reveal: [selector, text] });
+const nubs = (reach) => ({ nubs: reach });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -202,6 +203,10 @@ function states() {
     sizes: "landscape",
     actions: [viewExpect("timeline"), expect(".sidebar"), expect(".slot-panel .panel h2", "Plan")],
   });
+  add("touch/nub", "mesa", {
+    sizes: "ipad-pro",
+    actions: [viewExpect("timeline"), click(".tl-row .name", PICKED), expect(".bar.selected .nub"), nubs(60), expect(".slot-panel .panel .kind", "TASK")],
+  });
   add("compact/shell", "mesa", {
     sizes: "portrait",
     actions: [
@@ -264,6 +269,7 @@ const SIZES = {
   phone: namesOf(PHONE),
   portrait: namesOf(PORTRAIT),
   landscape: namesOf(LANDSCAPE),
+  "ipad-pro": ["1366x1024"],
   narrow: namesOf(NARROW),
   "touch-wide": namesOf([...PORTRAIT, ...LANDSCAPE, ...NARROW]),
 };
@@ -980,6 +986,24 @@ window.__probeAct = function (a) {
   if (a.count !== undefined) {
     var n = document.querySelectorAll(a.count[0]).length;
     if (n !== a.count[1]) return { fail: a.count[0] + " matches " + n + " elements, not " + a.count[1] };
+    return { ok: true };
+  }
+  if (a.nubs !== undefined) {
+    if (!matchMedia("(pointer: coarse)").matches) return { fail: "(pointer: coarse) does not match here" };
+    var on = document.querySelector(".bar.selected .nub");
+    var off = document.querySelector(".bar:not(.selected) .nub");
+    if (on === null || off === null) return { fail: "no selected and unselected bar with a .nub" };
+    var offEvents = getComputedStyle(off).pointerEvents;
+    if (offEvents !== "none") return { fail: "an unselected bar's .nub has pointer-events: " + offEvents + ", not none" };
+    var onEvents = getComputedStyle(on).pointerEvents;
+    if (onEvents === "none") return { fail: "the selected bar's .nub has pointer-events: none" };
+    on.scrollIntoView({ block: "nearest", inline: "nearest" });
+    var nb = on.getBoundingClientRect();
+    var cx = Math.round((nb.left + nb.right) / 2);
+    var cy = (nb.top + nb.bottom) / 2;
+    var span = Array.from({ length: 2 * a.nubs + 1 }, function (_, i) { return cx - a.nubs + i; });
+    var wide = span.filter(function (x) { return document.elementFromPoint(x, cy) === on; }).length;
+    if (wide < 44) return { fail: "the selected bar's .nub takes touches across " + wide + " px at its centre line, under 44" };
     return { ok: true };
   }
   return { fail: "unknown action " + JSON.stringify(a) };
