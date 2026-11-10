@@ -36,7 +36,7 @@
   margin-bottom: 14px;
 }
 
-.phone-list > p.dim {
+.phone-bucket > p.dim {
   margin: 12px 4px;
   font-family: var(--prose);
   font-size: 12.5px;
@@ -153,4 +153,11 @@
 .isheet textarea {
   width: 100%;
   min-height: 96px;
+}
+
+.isheet-add > p.dim {
+  flex-basis: 100%;
+  margin: 0;
+  font-family: var(--prose);
+  font-size: 12.5px;
 }

@@ -46,9 +46,19 @@ const row = (name: string): HTMLElement => {
   return hit;
 };
 
-const dims = (): string[] => [...document.querySelectorAll(".phone-list > p.dim")].map((p) => p.textContent ?? "");
+const dims = (): string[] => [...document.querySelectorAll('.phone-list [role="tabpanel"] > p.dim')].map((p) => p.textContent ?? "");
 
 describe("PhoneList", () => {
+  it("each horizon tab controls the list panel, which the selected tab labels", async () => {
+    const t = await made(SPRINT, { clashes: CLASH });
+    render(<PhoneList session={t.session} onOpen={vi.fn()} />);
+    const panel = screen.getByRole("tabpanel", { name: "Now" });
+    expect(["All", "Now", "Next", "Later"].map((n) => tab(n).getAttribute("aria-controls"))).toEqual(["All", "Now", "Next", "Later"].map(() => panel.id));
+    expect(panel.querySelectorAll(".psec").length).toBeGreaterThan(0);
+    fireEvent.click(tab("Next"));
+    expect(screen.getByRole("tabpanel", { name: "Next" }).getAttribute("aria-labelledby")).toBe(tab("Next").id);
+  });
+
   it("starts on Now and shows each horizon in tree order", async () => {
     const t = await made(SPRINT, { clashes: CLASH });
     const onOpen = vi.fn();
@@ -145,6 +155,8 @@ describe("PhoneList", () => {
     ]);
     fireEvent.click(tab("All"));
     expect(row("Notes").classList.contains("ghost-row")).toBe(true);
+    expect(row("Notes").querySelector(".prow-start")).toBeNull();
+    expect(row("Test").querySelector(".prow-start")?.textContent).toBe("12 Nov");
     fireEvent.click(row("Notes"));
     expect(onOpen.mock.calls).toEqual([["Notes"]]);
   });

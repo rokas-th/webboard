@@ -274,9 +274,9 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         </div>
       );
     }
-    if (main.k === "failed" && main.id === sel) {
+    if ((main.k === "failed" || main.k === "error") && main.id === sel) {
       return (
-        <Banner message={main.error.message}>
+        <Banner message={main.k === "failed" ? main.error.message : main.message}>
           <button type="button" className="button-small" onClick={() => openPlan(sel)}>
             Try again
           </button>
@@ -337,6 +337,9 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   useEffect(() => {
     if (session === null && sheet === "plan") setSheet(null);
   }, [session, sheet]);
+  useEffect(() => {
+    if (!compact) setSheet(null);
+  }, [compact]);
   const sheets = compact && ui.dialog === null && (
     <>
       <Sheet open={sheet === "plans"} title="Plans" onClose={closeSheet}>

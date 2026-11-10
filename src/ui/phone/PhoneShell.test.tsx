@@ -7,6 +7,7 @@ import { phoneRegistry } from "../../test/phone";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { shellFor } from "../../test/shell";
+import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { OpenChoice } from "../run";
 import { useUi } from "../state";
@@ -125,6 +126,18 @@ describe('PhoneShell, data-form="phone"', () => {
     expect(apply).toHaveBeenCalledTimes(0);
   });
 
+  it("each view tab controls the tab panel, which the selected tab labels", async () => {
+    const t = await made();
+    await shown(t);
+    const panel = (): HTMLElement => screen.getByRole("tabpanel", { name: within(views()).getByRole("tab", { selected: true }).textContent ?? "" });
+    const tabs = within(views()).getAllByRole("tab");
+    expect(tabs.map((tb) => tb.getAttribute("aria-controls"))).toEqual(tabs.map(() => panel().id));
+    expect(panel().querySelector(".phone-list")).not.toBeNull();
+    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    expect(panel().getAttribute("aria-labelledby")).toBe(within(views()).getByRole("tab", { name: "Timeline" }).id);
+    expect(panel().querySelector(".tl-scroll")).not.toBeNull();
+  });
+
   it("opens an item's sheet from the List and closes it", async () => {
     const t = await made();
     await shown(t);
@@ -148,10 +161,10 @@ describe('PhoneShell, data-form="phone"', () => {
     expect(lastUi().dialog).toEqual({ t: "choice", id: "c1", side: "a2" });
   });
 
-  it("Shell renders the phone shell under phone, with no update line and no sync provider", async () => {
+  it("Shell renders the phone shell under phone, with no update line", async () => {
     const t = await made();
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(document.documentElement.dataset.form).toBe("phone");
     expect(document.querySelector(".phone-list")).not.toBeNull();

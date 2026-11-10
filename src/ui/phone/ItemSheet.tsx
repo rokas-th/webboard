@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { toDay } from "../../domain/dates";
 import type { Item, ItemId, Link, LinkType, Status } from "../../domain/model";
 import { linkKey } from "../../domain/model";
 import { wouldLoop } from "../../domain/schedule";
@@ -7,6 +8,7 @@ import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { FixActions } from "../choices/FixActions";
 import { Sheet } from "../common/Sheet";
+import { toast } from "../common/Toast";
 import { lagText } from "../panel/LinksEditor";
 import { bindTextarea } from "../panel/noteBinding";
 import { useRun, type Run } from "../run";
@@ -20,6 +22,10 @@ const STATUSES: readonly { v: Status; label: string }[] = [
 ];
 
 const TYPES: readonly LinkType[] = ["FS", "SS", "FF", "SF"];
+
+const WHOLE = /^-?\d+$/;
+
+const LAG_NOT_WHOLE = "Lag must be a whole number of working days.";
 
 const typeOf = (v: string): LinkType => {
   const found = TYPES.find((t) => t === v);
@@ -69,17 +75,17 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
   const start = p.view.derived.start.get(it.id);
   const milestone = it.kind === "milestone";
   const hasPreds = liveLinks(p.view.plan).some((l) => l.to === it.id);
-  const dated = sc.start !== null && start !== undefined;
+  if (sc.start !== null && !it.trashed && start === undefined) throw new Error(`ItemSheet: scheduled item ${it.id} has no derived start`);
   const setStatus = (next: Status): void => {
     if (next !== sc.status) p.run.run({ t: "schedule", item: it.id, set: { status: next } });
   };
   return (
     <div className="fields">
       <label>{milestone ? "Date" : "Start"}</label>
-      {dated ? (
+      {sc.start !== null ? (
         <Stepper
           label="Start"
-          value={dayLabel(start)}
+          value={dayLabel(start ?? toDay(sc.start))}
           valueClass="val isheet-start"
           readOnly={p.readOnly}
           less={() => p.run.run({ t: "move", items: [it.id], days: -1 })}
@@ -185,14 +191,38 @@ function AddDependency(p: { view: PlanView; item: Item; run: Run }) {
   const candidates = tree(null).filter(
     (o) => o.id !== id && o.kind !== "group" && !o.trashed && !linked.has(o.id) && wouldLoop(live, { from: o.id, to: id, type: "FS", lag: 0 }) === null,
   );
-  const [from, setFrom] = useState<ItemId | null>(null);
+  const [from, setFrom] = useState<{ id: ItemId; name: string } | null>(null);
+  const [lost, setLost] = useState<string | null>(null);
   const [type, setType] = useState<LinkType>("FS");
-  const [lag, setLag] = useState(0);
-  if (candidates.length === 0) return null;
-  const picked = candidates.find((c) => c.id === from) ?? candidates[0];
+  const [lag, setLag] = useState("0");
+  if (from !== null && !candidates.some((c) => c.id === from.id)) {
+    setFrom(null);
+    setLost(from.name);
+  }
+  if (candidates.length === 0 && lost === null) return null;
+  const pick = (value: string): void => {
+    const found = candidates.find((c) => c.id === value);
+    if (found === undefined) throw new Error(`ItemSheet: ${value} is not a predecessor candidate`);
+    setFrom({ id: found.id, name: found.name });
+    setLost(null);
+  };
+  const add = (chosen: ItemId): void => {
+    if (!WHOLE.test(lag.trim())) {
+      toast(LAG_NOT_WHOLE, "bad");
+      return;
+    }
+    if (p.run.run({ t: "link", from: chosen, to: id, type, lag: Number(lag.trim()) }) === null) return;
+    setFrom(null);
+    setType("FS");
+    setLag("0");
+  };
   return (
     <div className="isheet-add">
-      <select aria-label="Predecessor" value={picked.id} onChange={(e) => setFrom(e.target.value)}>
+      {lost !== null && <p className="dim">{`“${lost}” can no longer be added.`}</p>}
+      <select aria-label="Predecessor" value={from === null ? "" : from.id} onChange={(e) => pick(e.target.value)}>
+        <option value="" disabled>
+          Choose a predecessor
+        </option>
         {candidates.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}
@@ -206,17 +236,8 @@ function AddDependency(p: { view: PlanView; item: Item; run: Run }) {
           </option>
         ))}
       </select>
-      <input type="number" aria-label="Lag" step={1} value={lag} onChange={(e) => setLag(Math.trunc(Number(e.target.value)))} />
-      <button
-        type="button"
-        className="button-small"
-        onClick={() => {
-          if (p.run.run({ t: "link", from: picked.id, to: id, type, lag }) === null) return;
-          setFrom(null);
-          setType("FS");
-          setLag(0);
-        }}
-      >
+      <input type="number" aria-label="Lag" step={1} value={lag} onChange={(e) => setLag(e.target.value)} />
+      <button type="button" className="button-small" disabled={from === null} onClick={from === null ? undefined : () => add(from.id)}>
         Add a dependency
       </button>
     </div>

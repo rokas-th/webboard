@@ -1,19 +1,19 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 
 const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])';
 
 const focusables = (root: HTMLElement): HTMLElement[] => [...root.querySelectorAll<HTMLElement>(FOCUSABLE)];
 
 export function useModalFocus(ref: RefObject<HTMLElement | null>, what: string): void {
+  const [opener] = useState(() => document.activeElement);
   useEffect(() => {
-    const before = document.activeElement;
     const root = ref.current;
     if (root === null) throw new Error(`${what} rendered without its element`);
-    (focusables(root)[0] ?? root).focus();
+    if (!root.contains(document.activeElement)) (focusables(root)[0] ?? root).focus();
     return () => {
-      if (before instanceof HTMLElement && before.isConnected) before.focus();
+      if (opener instanceof HTMLElement && opener.isConnected && !root.contains(opener)) opener.focus();
     };
-  }, [ref, what]);
+  }, [ref, what, opener]);
 }
 
 export function modalKeyDown(e: KeyboardEvent<HTMLElement>, onClose: () => void): void {

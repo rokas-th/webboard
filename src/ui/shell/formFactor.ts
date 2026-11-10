@@ -21,9 +21,8 @@ export function useFormFactor(): FormFactor {
     const update = (): void => setForm(measure());
     update();
     window.addEventListener("resize", update);
-    const root = document.getElementById("root");
     const observer = new ResizeObserver(update);
-    if (root !== null) observer.observe(root);
+    observer.observe(document.documentElement);
     return () => {
       window.removeEventListener("resize", update);
       observer.disconnect();

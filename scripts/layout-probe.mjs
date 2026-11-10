@@ -30,7 +30,6 @@ const PHONE = [touch(390, 844, "phone")];
 const PORTRAIT = [touch(820, 1180, "compact")];
 const LANDSCAPE = [touch(1180, 820, "full"), touch(1366, 1024, "full")];
 const NARROW = [{ size: [500, 820], screen: [820, 1180], touch: true, form: "compact" }];
-const SMALLEST = [desk(1024, 700)];
 const VIEWPORTS = [...DESKTOP, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
 
 const nameOf = (v) => `${v.size[0]}x${v.size[1]}`;
@@ -249,23 +248,24 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.none === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
   return out;
 }
 
+const namesOf = (vs) => vs.map(nameOf);
 const SIZES = {
-  desktop: DESKTOP,
-  dialog: [LANDSCAPE[0], ...PORTRAIT],
-  both: [...DESKTOP, LANDSCAPE[0]],
-  smallest: SMALLEST,
-  phone: PHONE,
-  portrait: PORTRAIT,
-  landscape: LANDSCAPE,
-  narrow: NARROW,
-  "touch-wide": [...PORTRAIT, ...LANDSCAPE, ...NARROW],
+  desktop: namesOf(DESKTOP),
+  dialog: namesOf([LANDSCAPE[0], ...PORTRAIT]),
+  both: namesOf([...DESKTOP, LANDSCAPE[0]]),
+  smallest: ["1024x700"],
+  phone: namesOf(PHONE),
+  portrait: namesOf(PORTRAIT),
+  landscape: namesOf(LANDSCAPE),
+  narrow: namesOf(NARROW),
+  "touch-wide": namesOf([...PORTRAIT, ...LANDSCAPE, ...NARROW]),
 };
 
 const sizesOf = (s) => {
@@ -1402,7 +1402,7 @@ async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffi
       sessionId,
     );
     await cdp.send("Emulation.setTouchEmulationEnabled", size.touch ? { enabled: true, maxTouchPoints: 5 } : { enabled: false }, sessionId);
-    for (const state of picked.filter((s) => sizesOf(s).includes(size))) {
+    for (const state of picked.filter((s) => sizesOf(s).includes(nameOf(size)))) {
       const viewport = nameOf(size);
       const run = await runState(cdp, sessionId, origin, state, errors, traffic);
       if (run.unreached !== undefined) {
@@ -1460,6 +1460,11 @@ async function main() {
   if (!template.includes("<head>")) throw new Error("layout-probe: dist/index.html has no <head> to put the shim in");
   const picked = states().filter((s) => only === null || s.name.includes(only));
   if (picked.length === 0) throw new NotMeasured(`--only ${only} matched no state`);
+  const homeless = picked.filter((s) => !VIEWPORTS.some((v) => sizesOf(s).includes(nameOf(v))));
+  if (homeless.length > 0) {
+    homeless.forEach((s) => process.stdout.write(`layout-probe: FAILED, state ${s.name} has no viewport: its sizes "${s.sizes}" name ${sizesOf(s).join(", ")}, none of them a probe viewport\n`));
+    return 1;
+  }
   if (shotDir !== null) await mkdir(shotDir, { recursive: true });
   const built = buildFixtures();
   const fixtures = new Map(
@@ -1529,6 +1534,7 @@ async function main() {
     return measured;
   }, cleanup);
 
+  if (rows.length === 0) throw new NotMeasured(`no picked state runs at --viewport ${oneSize}`);
   printTable(rows);
   if (jsonOut !== null) {
     await writeFile(jsonOut, JSON.stringify(rows, null, 1));

@@ -13,7 +13,8 @@ export type PlanMain =
   | { k: "opening"; id: PlanId }
   | { k: "open"; id: PlanId; session: PlanSession }
   | { k: "incomplete"; id: PlanId; message: string }
-  | { k: "failed"; id: PlanId; error: AppError };
+  | { k: "failed"; id: PlanId; error: AppError; recorded: boolean }
+  | { k: "error"; id: PlanId; message: string };
 
 export interface PlanSelection {
   main: PlanMain;
@@ -43,7 +44,6 @@ export function usePlanSelection(registry: Registry): PlanSelection {
   const [main, setMainState] = useState<PlanMain>({ k: "empty" });
   const selected = useRef(ui.plan);
   const mainRef = useRef<PlanMain>(main);
-  const unrecorded = useRef(false);
   const ownTrash = useRef(new Set<PlanId>());
   const lastTrashed = useRef(new Map<PlanId, boolean>());
 
@@ -75,22 +75,14 @@ export function usePlanSelection(registry: Registry): PlanSelection {
           takeRepair(s);
         },
         (e: unknown) => {
-          const recorded = e instanceof AppError && registry.failures().get(id) === e;
-          const incomplete = e instanceof AppError && e.code === "plan.incomplete";
-          if (!recorded && !incomplete) {
-            if (selected.current === id) {
-              unrecorded.current = true;
-              setMain({ k: "failed", id, error: e instanceof AppError ? e : new AppError("plan.open", messageOf(e)) });
-            }
+          if (!(e instanceof AppError)) {
+            if (selected.current === id) setMain({ k: "error", id, message: messageOf(e) });
             throw e;
           }
-          if (selected.current !== id) return;
-          if (incomplete) {
-            setMain({ k: "incomplete", id, message: e.message });
-            return;
-          }
-          unrecorded.current = false;
-          setMain({ k: "failed", id, error: e });
+          const incomplete = e.code === "plan.incomplete";
+          const recorded = registry.failures().get(id) === e;
+          if (selected.current === id) setMain(incomplete ? { k: "incomplete", id, message: e.message } : { k: "failed", id, error: e, recorded });
+          if (!recorded && !incomplete) throw e;
         },
       );
     },
@@ -123,7 +115,7 @@ export function usePlanSelection(registry: Registry): PlanSelection {
       if (!reselect(plans) && current !== null) {
         const m = mainRef.current;
         if (m.k === "incomplete" && m.id === current) load(current);
-        if (m.k === "failed" && m.id === current && !unrecorded.current && !registry.failures().has(current)) load(current);
+        if (m.k === "failed" && m.id === current && m.recorded && !registry.failures().has(current)) load(current);
       }
       takeIndexRepair();
     };
@@ -159,7 +151,7 @@ export function usePlanSelection(registry: Registry): PlanSelection {
       }
       setUi({ plan: id });
       const m = mainRef.current;
-      if (m.k === "failed" && m.id === id) load(id);
+      if ((m.k === "failed" || m.k === "error") && m.id === id) load(id);
     },
     [select, load, setUi],
   );

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
@@ -21,15 +21,27 @@ const VIEWS: readonly (readonly [PhoneView, string])[] = [
 function OpenPlan(p: { session: PlanSession }) {
   const { ui, setUi } = useUiValue();
   const [view, setView] = useState<PhoneView>("list");
+  const base = useId();
+  const tabId = (v: PhoneView): string => `${base}-tab-${v}`;
+  const panelId = `${base}-panel`;
   const selected = ui.selected !== null && p.session.view().plan.items.has(ui.selected) ? ui.selected : null;
   return (
     <>
-      <div className="phone-main">
+      <div id={panelId} className="phone-main" role="tabpanel" aria-labelledby={tabId(view)}>
         {view === "list" ? <PhoneList session={p.session} onOpen={(id) => setUi({ selected: id })} /> : <Timeline session={p.session} readOnly />}
       </div>
       <div className="seg phone-views" role="tablist" aria-label="Views">
         {VIEWS.map(([v, label]) => (
-          <button key={v} type="button" role="tab" aria-selected={view === v} className={view === v ? "active" : undefined} onClick={() => setView(v)}>
+          <button
+            key={v}
+            id={tabId(v)}
+            type="button"
+            role="tab"
+            aria-selected={view === v}
+            aria-controls={panelId}
+            className={view === v ? "active" : undefined}
+            onClick={() => setView(v)}
+          >
             {label}
           </button>
         ))}
@@ -56,11 +68,11 @@ function Main(p: { registry: Registry; main: PlanMain; open(id: string): void })
   }
   if (m.k === "opening") return null;
   if (m.k === "incomplete") return <p className="main-note">{m.message}</p>;
-  if (m.k === "failed") {
-    const recorded = p.registry.failures().get(m.id) === m.error;
+  if (m.k === "failed" || m.k === "error") {
+    const recorded = m.k === "failed" && m.recorded;
     return (
       <div className="banner bad">
-        <span className="banner-text">{m.error.message}</span>
+        <span className="banner-text">{m.k === "failed" ? m.error.message : m.message}</span>
         <button type="button" className="button-small" onClick={() => (recorded ? void p.registry.retryPlan(m.id) : p.open(m.id))}>
           Try again
         </button>

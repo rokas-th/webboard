@@ -114,6 +114,59 @@ describe('compact shell, data-form="compact"', () => {
     expect(document.activeElement).toBe(row);
   });
 
+  it("+ Task names the new item in its sheet, and Esc returns focus to + Task", async () => {
+    const t = await made();
+    await shown(t);
+    const add = within(toolbar()).getByRole("button", { name: "New task" });
+    add.focus();
+    fireEvent.click(add);
+    await settle();
+    const sheet = screen.getByRole("dialog");
+    const input = sheet.querySelector(".title-input");
+    if (!(input instanceof HTMLInputElement)) throw new Error("no title input in the sheet");
+    expect(document.activeElement).toBe(input);
+    expect(input.value.length).toBeGreaterThan(0);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, input.value.length]);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(add);
+  });
+
+  it("drops an open sheet when the window leaves compact", async () => {
+    const t = await made();
+    await shown(t);
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Plan" }));
+    expect(planSheet()).toBeTruthy();
+    act(() => setScreen(1440, 900));
+    expect(document.documentElement.dataset.form).toBe("full");
+    act(() => setScreen(820, 1180));
+    expect(document.documentElement.dataset.form).toBe("compact");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("switches the form factor live", async () => {
+    const t = await made();
+    setScreen(1440, 900);
+    await shown(t);
+    expect(document.documentElement.dataset.form).toBe("full");
+    expect(plans()).not.toBeNull();
+    act(() => setScreen(820, 1180));
+    expect(document.documentElement.dataset.form).toBe("compact");
+    expect(plans()).toBeNull();
+    expect(within(toolbar()).getByRole("button", { name: "Plans" })).toBeTruthy();
+    act(() => setScreen(390, 844));
+    await settle();
+    expect(document.documentElement.dataset.form).toBe("phone");
+    expect(document.querySelector(".app.phone")).not.toBeNull();
+    expect(document.querySelector("header.toolbar")).toBeNull();
+    act(() => setScreen(1440, 900));
+    await settle();
+    expect(document.documentElement.dataset.form).toBe("full");
+    expect(document.querySelector(".app.phone")).toBeNull();
+    expect(plans()).not.toBeNull();
+    expect(within(toolbar()).queryByRole("button", { name: "Plans" })).toBeNull();
+  });
+
   it("opens the palette from the toolbar's ⌘K with its input focused", async () => {
     const t = await made();
     await shown(t);
@@ -229,7 +282,14 @@ describe('compact shell, data-form="compact"', () => {
   it("shows the update line in the Plans sheet only with an update store", async () => {
     const t = await made();
     const state: UpdateState = { k: "current", at: 0 };
-    const updates = { state: () => state, subscribe: () => () => undefined, start: () => undefined, stop: () => undefined, check: async () => undefined, install: async () => undefined } as unknown as Updates;
+    const updates: Updates = {
+      state: () => state,
+      subscribe: () => () => undefined,
+      start: () => undefined,
+      stop: () => undefined,
+      check: () => Promise.reject(new Error("compact stub: check not used")),
+      install: () => Promise.reject(new Error("compact stub: install not used")),
+    };
     render(<UpdatesContext.Provider value={updates}>{withSync(shellFor(t).ui)}</UpdatesContext.Provider>);
     await settle();
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Plans" }));

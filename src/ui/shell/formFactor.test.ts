@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { formFactor, type FormFactor } from "./formFactor";
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { formFactor, useFormFactor, type FormFactor } from "./formFactor";
 
 describe("formFactor", () => {
   const cases: readonly (readonly [number, number, FormFactor])[] = [
@@ -15,5 +16,35 @@ describe("formFactor", () => {
 
   it.each(cases)("width %i, short screen side %i → %s", (width, screenShort, want) => {
     expect(formFactor({ width, screenShort })).toBe(want);
+  });
+});
+
+describe("useFormFactor", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("observes the document element and re-measures when it resizes", () => {
+    const observed: Element[] = [];
+    const callbacks: (() => void)[] = [];
+    class Watch {
+      constructor(cb: () => void) {
+        callbacks.push(cb);
+      }
+      observe(el: Element): void {
+        observed.push(el);
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal("ResizeObserver", Watch);
+    expect(document.getElementById("root")).toBeNull();
+    const { result } = renderHook(() => useFormFactor());
+    expect(result.current).toBe("full");
+    expect(observed).toEqual([document.documentElement]);
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 820 });
+    act(() => callbacks.forEach((cb) => cb()));
+    expect(result.current).toBe("compact");
+    expect(document.documentElement.dataset.form).toBe("compact");
   });
 });

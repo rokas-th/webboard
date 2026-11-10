@@ -143,12 +143,70 @@ describe("ItemSheet", () => {
     const t = await made([REVIEW, { name: "Ship", start: "2026-11-18", dur: 1, deps: [fs("Review")] }, { name: "Notes", start: "2026-11-09", dur: 1 }]);
     const { apply } = shown(t, "Review");
     const pred = within(sheet()).getByRole("combobox", { name: "Predecessor" });
-    expect(within(pred).getAllByRole("option").map((o) => o.textContent)).toEqual(["Notes"]);
+    expect(within(pred).getAllByRole("option").map((o) => [o.textContent, o instanceof HTMLOptionElement && o.disabled])).toEqual([
+      ["Choose a predecessor", true],
+      ["Notes", false],
+    ]);
+    expect(button("Add a dependency").hasAttribute("disabled")).toBe(true);
     fireEvent.change(pred, { target: { value: "Notes" } });
     fireEvent.change(within(sheet()).getByRole("combobox", { name: "Type" }), { target: { value: "SS" } });
     fireEvent.change(within(sheet()).getByRole("spinbutton", { name: "Lag" }), { target: { value: "2" } });
     fireEvent.click(button("Add a dependency"));
     expect(intents(apply)).toEqual([{ t: "link", from: "Notes", to: "Review", type: "SS", lag: 2 }]);
+  });
+
+  it("adds a dependency only with a whole-number lag", async () => {
+    const t = await made([REVIEW, { name: "Notes", start: "2026-11-09", dur: 1 }]);
+    const { apply } = shown(t, "Review");
+    const lag = (): HTMLElement => within(sheet()).getByRole("spinbutton", { name: "Lag" });
+    fireEvent.change(within(sheet()).getByRole("combobox", { name: "Predecessor" }), { target: { value: "Notes" } });
+    ["", "2.7"].forEach((v) => {
+      fireEvent.change(lag(), { target: { value: v } });
+      fireEvent.click(button("Add a dependency"));
+      expect([v, screen.queryAllByRole("status").map((e) => [e.textContent, e.className])]).toEqual([v, [["Lag must be a whole number of working days.", "toast bad"]]]);
+      clearToasts();
+    });
+    expect(apply).toHaveBeenCalledTimes(0);
+    fireEvent.change(lag(), { target: { value: "-2" } });
+    fireEvent.click(button("Add a dependency"));
+    expect(intents(apply)).toEqual([{ t: "link", from: "Notes", to: "Review", type: "FS", lag: -2 }]);
+  });
+
+  it("drops a chosen predecessor that can no longer be added", async () => {
+    const t = await made([REVIEW, { name: "Ship", start: "2026-11-18", dur: 1, deps: [fs("Review")] }, { name: "Notes", start: "2026-11-09", dur: 1 }]);
+    const peer = await t.peer("iphone");
+    sessions.push(peer.session);
+    const { apply } = shown(t, "Review");
+    const pred = (): HTMLSelectElement => {
+      const el = within(sheet()).getByRole("combobox", { name: "Predecessor" });
+      if (!(el instanceof HTMLSelectElement)) throw new Error("no predecessor select");
+      return el;
+    };
+    fireEvent.change(pred(), { target: { value: "Notes" } });
+    expect(button("Add a dependency").hasAttribute("disabled")).toBe(false);
+    peer.session.apply({ t: "link", from: "Review", to: "Notes", type: "FS", lag: 0 });
+    act(() => peer.sync());
+    expect(within(sheet()).getByText("“Notes” can no longer be added.").classList.contains("dim")).toBe(true);
+    expect(pred().value).toBe("");
+    expect(button("Add a dependency").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(button("Add a dependency"));
+    expect(apply).toHaveBeenCalledTimes(0);
+  });
+
+  it("throws for a live scheduled item with no derived start", async () => {
+    const t = await made([REVIEW]);
+    const v = t.session.view();
+    const start = new Map(v.derived.start);
+    start.delete("Review");
+    vi.spyOn(t.session, "view").mockReturnValue({ ...v, derived: { ...v.derived, start } });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() =>
+      render(
+        <OpenChoice.Provider value={vi.fn()}>
+          <ItemSheet session={t.session} item="Review" onClose={vi.fn()} />
+        </OpenChoice.Provider>,
+      ),
+    ).toThrow(new Error("ItemSheet: scheduled item Review has no derived start"));
   });
 
   it("schedules an unscheduled item from today", async () => {

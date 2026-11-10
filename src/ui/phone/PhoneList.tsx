@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { fmtShort, toIso } from "../../domain/dates";
 import type { Horizon, Item, ItemId } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
@@ -54,6 +54,7 @@ const countText = (n: number, bucket: Bucket): string => `${n} ${n === 1 ? "item
 export function PhoneList(p: { session: PlanSession; onOpen: (item: ItemId) => void }) {
   const view = usePlanView(p.session);
   const [bucket, setBucket] = useState<Bucket>("now");
+  const base = useId();
   const ghosts = ghostIds(view);
   const all = listGroups(view);
   const inBucket = (b: Bucket, id: ItemId): boolean => b === "all" || horizonOf(view, ghosts, id) === b;
@@ -74,17 +75,24 @@ export function PhoneList(p: { session: PlanSession; onOpen: (item: ItemId) => v
     return `Nothing in ${titleOf(bucket)}. ${countText(countOf(next), next)}`;
   };
 
+  const startOf = (it: Item, ghost: boolean): string | null => {
+    if (ghost || it.schedule === null || it.schedule.start === null) return null;
+    const d = view.derived.start.get(it.id);
+    if (d === undefined) throw new Error(`PhoneList: scheduled item ${it.id} has no start`);
+    return fmtShort(toIso(d));
+  };
+
   const row = (id: ItemId) => {
     const it = itemOf(view, id);
     const ghost = ghosts.has(id);
-    const start = view.derived.start.get(id);
+    const start = startOf(it, ghost);
     const label = statusLabel(view, id);
     const classes = ["prow", ghost ? "ghost-row" : "", dayoff.has(id) ? "dayoff" : ""].filter((c) => c !== "").join(" ");
     return (
       <li key={id}>
         <button type="button" className={classes} onClick={() => p.onOpen(id)}>
           <span className="prow-name">{it.name}</span>
-          {!ghost && start !== undefined && <span className="prow-start">{fmtShort(toIso(start))}</span>}
+          {start !== null && <span className="prow-start">{start}</span>}
           <span className={STATUS_CLASS[label]}>{label}</span>
         </button>
       </li>
@@ -92,31 +100,44 @@ export function PhoneList(p: { session: PlanSession; onOpen: (item: ItemId) => v
   };
 
   const line = emptyLine();
+  const tabId = (b: Bucket): string => `${base}-tab-${b}`;
+  const panelId = `${base}-panel`;
   return (
     <div className="phone-list">
       <div className="seg phone-buckets" role="tablist" aria-label="Horizon">
         {BUCKETS.map(([b, title]) => (
-          <button key={b} type="button" role="tab" aria-selected={bucket === b} className={bucket === b ? "active" : undefined} onClick={() => setBucket(b)}>
+          <button
+            key={b}
+            id={tabId(b)}
+            type="button"
+            role="tab"
+            aria-selected={bucket === b}
+            aria-controls={panelId}
+            className={bucket === b ? "active" : undefined}
+            onClick={() => setBucket(b)}
+          >
             {title}
           </button>
         ))}
       </div>
-      {line !== null && <p className="dim">{line}</p>}
-      {sections.map((s) => {
-        const group = s.group;
-        return (
-          <section key={group ?? ""} className="psec">
-            {group === null ? (
-              <h2 className="psec-title">{s.name}</h2>
-            ) : (
-              <button type="button" className="psec-title" onClick={() => p.onOpen(group)}>
-                {s.name}
-              </button>
-            )}
-            {s.items.length > 0 && <ul className="prows">{s.items.map(row)}</ul>}
-          </section>
-        );
-      })}
+      <div id={panelId} className="phone-bucket" role="tabpanel" aria-labelledby={tabId(bucket)}>
+        {line !== null && <p className="dim">{line}</p>}
+        {sections.map((s) => {
+          const group = s.group;
+          return (
+            <section key={group ?? ""} className="psec">
+              {group === null ? (
+                <h2 className="psec-title">{s.name}</h2>
+              ) : (
+                <button type="button" className="psec-title" onClick={() => p.onOpen(group)}>
+                  {s.name}
+                </button>
+              )}
+              {s.items.length > 0 && <ul className="prows">{s.items.map(row)}</ul>}
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }
