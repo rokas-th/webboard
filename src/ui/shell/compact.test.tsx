@@ -65,7 +65,7 @@ const toolbar = (): HTMLElement => {
   return bar;
 };
 
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 
 const plans = (): HTMLElement | null => screen.queryByRole("navigation", { name: "Plans" });
 

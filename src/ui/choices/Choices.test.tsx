@@ -94,7 +94,7 @@ const all = (sel: string, root: ParentNode = document): HTMLElement[] =>
 const head = (): HTMLElement => one(".plan-head");
 const panel = (): HTMLElement => one('[data-slot="panel"]');
 const dialog = (): HTMLElement => screen.getByRole("dialog");
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 const badToasts = (): (string | null)[] => all(".toast.bad").map((e) => e.textContent);
 
 const click = (el: HTMLElement): void => {

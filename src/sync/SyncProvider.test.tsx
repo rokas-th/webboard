@@ -123,7 +123,7 @@ const field = (rootEl: HTMLElement, label: string): HTMLInputElement => {
   return el;
 };
 const banner = (): HTMLElement | null => screen.queryByText(REMOVED)?.closest(".banner") ?? null;
-const toasts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toasts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 const prov = (doc: string): FakeProvider => {
   const p = f.providers.get(doc);
   if (p === undefined) throw new Error("no provider for " + doc);

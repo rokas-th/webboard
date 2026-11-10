@@ -81,7 +81,7 @@ const one = (sel: string, root: ParentNode = document): HTMLElement => {
 const barOf = (id: string): HTMLElement => one(`[data-bar="${id}"]`);
 const chart = (): HTMLElement => one(".tl-chart");
 const rowY = (id: string): number => parseFloat(barOf(id).style.top) + 9;
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 
 type Kind = "down" | "move" | "up" | "cancel" | "lost";
 
@@ -306,7 +306,7 @@ describe("touch on the timeline bars", () => {
     expect(apply.mock.calls).toEqual([[loop]]);
     expect(links(t)).toEqual(before);
     expect(toastTexts()).toEqual([message]);
-    expect(one('[role="status"]').className).toBe("toast bad");
+    expect(one('[role="alert"]').className).toBe("toast bad");
   });
 
   it("drops nothing on pointercancel after pickup and leaves the bar where it was", async () => {

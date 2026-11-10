@@ -40,7 +40,7 @@ export const Scale = memo(function Scale(p: { geo: Geometry; today: Day; missing
     <div className="tl-head">
       <div className="tl-corner">
         <span>Task</span>
-        <span>Days</span>
+        <span className="days">Days</span>
       </div>
       <div className="tl-scale" style={{ width: geo.width }}>
         {months.map((mo) => {

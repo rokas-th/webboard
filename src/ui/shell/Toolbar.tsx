@@ -10,10 +10,10 @@ const TABS: readonly (readonly [ViewKind, string])[] = [
   ["list", "List"],
 ];
 
-const ZOOMS: readonly (readonly [Zoom, string | undefined])[] = [
-  ["W", undefined],
-  ["M", undefined],
-  ["Q", undefined],
+const ZOOMS: readonly (readonly [Zoom, string])[] = [
+  ["W", "Week"],
+  ["M", "Month"],
+  ["Q", "Quarter"],
   ["F", "Fit the whole plan"],
 ];
 
@@ -48,20 +48,22 @@ function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState;
         ))}
       </div>
       <span className="toolbar-spacer" />
-      <div className="seg seg-zoom" aria-label="Zoom">
-        {ZOOMS.map(([z, title]) => (
-          <button
-            key={z}
-            type="button"
-            title={title}
-            aria-pressed={p.ui.zoom === z}
-            className={p.ui.zoom === z ? "active" : undefined}
-            onClick={() => p.setUi({ zoom: z })}
-          >
-            {z}
-          </button>
-        ))}
-      </div>
+      {p.ui.view === "timeline" && (
+        <div className="seg seg-zoom" aria-label="Zoom">
+          {ZOOMS.map(([z, title]) => (
+            <button
+              key={z}
+              type="button"
+              title={title}
+              aria-pressed={p.ui.zoom === z}
+              className={p.ui.zoom === z ? "active" : undefined}
+              onClick={() => p.setUi({ zoom: z })}
+            >
+              {z}
+            </button>
+          ))}
+        </div>
+      )}
       <button type="button" title="Jump to today" onClick={() => p.onCommand("today")}>
         Today
       </button>

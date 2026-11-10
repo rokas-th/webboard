@@ -118,8 +118,8 @@ const type = (el: HTMLInputElement, value: string): void => {
     fireEvent.change(el, { target: { value } });
   });
 };
-const toasts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
-const badToasts = (): (string | null)[] => screen.queryAllByRole("status").filter((e) => e.classList.contains("bad")).map((e) => e.textContent);
+const toasts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
+const badToasts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).filter((e) => e.classList.contains("bad")).map((e) => e.textContent);
 const errorText = (root: HTMLElement): (string | null)[] => [...root.querySelectorAll(".sync-error.bad")].map((e) => e.textContent);
 const messageText = (): (string | null)[] => [...dialog().querySelectorAll(".sync-message.bad")].map((e) => e.textContent);
 const buttonNames = (root: HTMLElement, names: readonly string[]): string[] =>

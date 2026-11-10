@@ -119,7 +119,7 @@ const choose = (el: HTMLSelectElement, value: string): void => {
   });
 };
 
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 
 const pointer = (el: Element, kind: "down" | "up", x: number): void => {
   const init = { clientX: x, clientY: 0, button: 0, pointerId: 1, pointerType: "mouse" };
@@ -889,10 +889,10 @@ describe("History", () => {
     expect(rows().map((li) => li.dataset.action)).toEqual(h.map((e) => e.id));
     expect(rows().map(rowText)).toEqual(h.map((e) => `${historyTime(e.at, "2026-11-09")} · Mac · ${e.label}`));
     expect(rows().map((li) => li.classList.contains("inactive"))).toEqual(h.map((e) => !e.active));
-    expect(rows().map((li) => all("button", li).map((b) => b.textContent))).toEqual([
-      ["Revert this action"],
-      ["Bring this action back"],
-      ["Revert this action"],
+    expect(rows().map((li) => all("button", li).map((b) => [b.textContent, b.getAttribute("aria-label")]))).toEqual([
+      [["Revert", "Revert this action"]],
+      [["Bring back", "Bring this action back"]],
+      [["Revert", "Revert this action"]],
       [],
     ]);
     expect(h[h.length - 1].root).toBe(true);

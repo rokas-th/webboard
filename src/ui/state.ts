@@ -84,6 +84,14 @@ const savePlace = (s: UiState): void => {
   window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: s.plan, view: s.view, zoom: s.zoom, collapsed: [...s.collapsed] }));
 };
 
+export function forgetLastPlan(): void {
+  const raw = window.localStorage.getItem(PLACE_KEY);
+  if (raw === null) return;
+  const place = parsePlace(raw);
+  if (place === null) return;
+  savePlace({ ...DEFAULTS, ...place, plan: null });
+}
+
 const placeChanged = (a: UiState, b: UiState): boolean =>
   a.plan !== b.plan || a.view !== b.view || a.zoom !== b.zoom || a.collapsed !== b.collapsed;
 

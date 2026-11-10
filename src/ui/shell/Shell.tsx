@@ -420,16 +420,18 @@ function WideShell(p: ShellProps & { compact: boolean }) {
   );
 }
 
+const detailsOf = (e: unknown): string => (e instanceof Error && e.stack !== undefined ? e.stack : messageOf(e));
+
 export function Shell(p: ShellProps) {
   const form = useFormFactor();
   useEffect(() => {
     const onError = (e: ErrorEvent): void => {
       const error: unknown = e.error;
       if (error === null || error === undefined) return;
-      toast(messageOf(error), "bad");
+      toast(messageOf(error), "bad", detailsOf(error));
     };
     const onRejection = (e: PromiseRejectionEvent): void => {
-      toast(messageOf(e.reason), "bad");
+      toast(messageOf(e.reason), "bad", detailsOf(e.reason));
     };
     window.addEventListener("error", onError);
     window.addEventListener("unhandledrejection", onRejection);

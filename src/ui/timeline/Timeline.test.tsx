@@ -108,7 +108,7 @@ const paths = (sel: string): Element[] => [...document.querySelectorAll(sel)];
 
 const barOf = (id: string): HTMLElement => one(`[data-bar="${id}"]`);
 
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 
 const rect = (left: number): DOMRect => ({ left, top: 0, right: left + 4000, bottom: 700, width: 4000, height: 700, x: left, y: 0, toJSON: () => ({}) });
 
@@ -460,6 +460,31 @@ describe("today and baselines", () => {
     expect(scroll.scrollLeft).toBe(400);
   });
 
+  it("shows the zoom switch only on the timeline, each button titled", async () => {
+    await shown([{ name: "A", start: "2026-11-10", dur: 3 }]);
+    const zoom = one(".seg-zoom");
+    expect(within(zoom).getAllByRole("button").map((b) => [b.textContent, b.title])).toEqual([
+      ["W", "Week"],
+      ["M", "Month"],
+      ["Q", "Quarter"],
+      ["F", "Fit the whole plan"],
+    ]);
+    const bar = one(".toolbar");
+    act(() => {
+      fireEvent.click(within(bar).getByRole("tab", { name: "Now · Next · Later" }));
+    });
+    expect(document.querySelectorAll(".seg-zoom").length).toBe(0);
+    expect(within(bar).getByRole("button", { name: "Today" })).toBeTruthy();
+    act(() => {
+      fireEvent.click(within(bar).getByRole("tab", { name: "List" }));
+    });
+    expect(document.querySelectorAll(".seg-zoom").length).toBe(0);
+    act(() => {
+      fireEvent.click(within(bar).getByRole("tab", { name: "Timeline" }));
+    });
+    expect(document.querySelectorAll(".seg-zoom").length).toBe(1);
+  });
+
   it("opens a plan that lies wholly after today at its first start, and still jumps to today by the toolbar and by T", async () => {
     const t = await shown([{ name: "A", start: "2026-12-10", dur: 3 }], { today: "2026-12-07" });
     const scroll = one(".tl-scroll");
@@ -798,7 +823,7 @@ describe("gestures", () => {
     const result = apply.mock.results[0];
     if (result.type !== "throw" || !(result.value instanceof Error)) throw new Error("expected a Refused");
     expect(toastTexts()).toEqual([result.value.message]);
-    expect(one('[role="status"]').className).toBe("toast bad");
+    expect(one('[role="alert"]').className).toBe("toast bad");
   });
 
   it("offers no gesture when read-only, and a click still selects", async () => {

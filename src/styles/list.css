@@ -38,6 +38,7 @@ table.list td {
 
 table.list td.item {
   width: 36%;
+  min-width: 180px;
   max-width: 0;
 }
 

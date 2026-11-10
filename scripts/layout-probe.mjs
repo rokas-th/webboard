@@ -44,6 +44,7 @@ const FONTS = [
   ["Chakra Petch", '600 12px "Chakra Petch"'],
 ];
 
+const PHONE_NAME_MIN = 90;
 const EMPTY_PLAN = "No items yet. Add one with + New.";
 const EXAMPLE_PLAN = "Example: Website relaunch";
 const CALENDAR_BANNER = "The calendar was changed on two devices. Nothing moves until you choose.";
@@ -63,6 +64,9 @@ const reveal = (selector, text) => ({ reveal: [selector, text] });
 const nubs = (reach) => ({ nubs: reach });
 const todayShown = () => ({ today: true });
 const edges = () => ({ edges: true });
+const shown = (selector, n) => ({ shown: [selector, n] });
+const width = (selector, min, max) => ({ width: [selector, min, max] });
+const style = (selector, prop, value) => ({ style: [selector, prop, value] });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -104,7 +108,15 @@ function states() {
   });
   add("blank-plan", "blank-plan", { actions: [expect(".tl-empty", EMPTY_PLAN)] });
   VIEWS.forEach(([slug, place, names]) => {
-    add(`mesa/${slug}/plan`, "mesa", { place, actions: [viewExpect(place.view), expect(".slot-panel .panel h2", "Plan")] });
+    add(`mesa/${slug}/plan`, "mesa", {
+      place,
+      actions: [
+        viewExpect(place.view),
+        count(".toolbar .seg-zoom", place.view === "timeline" ? 1 : 0),
+        ...(place.view === "list" ? [width("table.list tbody tr:not(.grp) td.item", 180, 100000)] : []),
+        expect(".slot-panel .panel h2", "Plan"),
+      ],
+    });
     add(`mesa/${slug}/item`, "mesa", {
       place,
       actions: [viewExpect(place.view), tap(names, PICKED), expect(".slot-panel .panel .kind", "TASK")],
@@ -112,7 +124,17 @@ function states() {
   });
   add("scale", "scale", { actions: [expect(".tl-row .name", "WS01 task 01"), expect(".plan-head h1", "Scale: 1,000 items")] });
   VIEWS.forEach(([slug, place]) =>
-    add(`long-names/${slug}`, "long-names", { place, clip: true, actions: [viewExpect(place.view), count(".sidebar .entry", 2)] }),
+    add(`long-names/${slug}`, "long-names", {
+      place,
+      clip: true,
+      actions: [
+        viewExpect(place.view),
+        ...(place.view === "list" ? [width("table.list tbody tr:not(.grp) td.item", 180, 100000)] : []),
+        ...(place.view === "board" ? [style(".card .card-name", "-webkit-line-clamp", "2")] : []),
+        shown(".sidebar .entry-more", 1),
+        count(".sidebar .entry", 2),
+      ],
+    }),
   );
   add("choices", "choices", {
     dialog: true,
@@ -143,7 +165,12 @@ function states() {
   add("calendar-dialog", "mesa", {
     sizes: "both",
     dialog: true,
-    actions: [click(".slot-panel button", "Change calendar…"), expect('.modal-wide[role="dialog"] h3', "Calendar · MESA 1.0"), expect(".cal-grid select")],
+    actions: [
+      click(".slot-panel button", "Change calendar…"),
+      expect('.modal-wide[role="dialog"] h3', "Calendar · MESA 1.0"),
+      width('.closure-add input[type="text"]', 300, 100000),
+      expect(".cal-grid select"),
+    ],
   });
   const calendarFromSheet = [
     click(".toolbar button", "Plan"),
@@ -224,6 +251,11 @@ function states() {
       expect('.phone-views [role="tab"][aria-selected="true"]', "Timeline"),
       expect(".tl-canvas"),
       todayShown(),
+      width(".tl-corner", 132, 132),
+      shown(".tl-corner .days", 0),
+      shown(".tl-row .days", 0),
+      width(".phone-head .phone-glyph", 36, 40),
+      width(".phone-head .phone-plan-name", PHONE_NAME_MIN, 390),
       expect(".tl-row .name", "Visual design"),
     ],
   });
@@ -388,10 +420,12 @@ function states() {
     ],
   });
   add("long-names/phone", "long-names", { sizes: "phone", clip: true, actions: [expect(".phone-list .prow .prow-name")] });
-  add("history", "mesa", { actions: [reveal(".slot-panel .panel h2", "History"), count(".slot-panel .history li", 40)] });
+  add("history", "mesa", {
+    actions: [reveal(".slot-panel .panel h2", "History"), width(".slot-panel .history li button", 1, 90), count(".slot-panel .history li", 40)],
+  });
   add("revert-preview", "mesa", {
     dialog: true,
-    actions: [click(".slot-panel .history button", "Revert this action"), expect('[role="dialog"] h3', "Revert this action"), expect(".revert-text p")],
+    actions: [click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), expect(".revert-text p")],
   });
 
   const names = new Set();
@@ -399,7 +433,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -964,6 +998,18 @@ const MEASURE = String.raw`
     });
     return tops.length;
   }
+  function linesShown(el) {
+    var bottom = el.getBoundingClientRect().bottom;
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    var tops = [];
+    Array.prototype.forEach.call(range.getClientRects(), function (r) {
+      if (r.width < 1 || r.bottom > bottom + 2) return;
+      var top = Math.round(r.top);
+      if (tops.every(function (t) { return Math.abs(t - top) > 2; })) tops.push(top);
+    });
+    return tops.length;
+  }
   function ownText(el) {
     return Array.prototype.filter.call(el.childNodes, function (n) { return n.nodeType === 3; })
       .map(function (n) { return n.textContent; }).join("").trim();
@@ -986,6 +1032,14 @@ const MEASURE = String.raw`
     var faults = [];
     hits.forEach(function (el) {
       var n = lines(el);
+      var es = getComputedStyle(el);
+      var clamp = parseInt(es.webkitLineClamp, 10);
+      if (clamp > 0) {
+        var shown = linesShown(el);
+        if (es.overflowY !== "hidden") faults.push(path(el) + " clamps to " + clamp + " lines but does not hide the rest");
+        else if (shown > clamp) faults.push(path(el) + " shows " + shown + " lines of the name, over its clamp of " + clamp);
+        return;
+      }
       if (n > 1) {
         faults.push(path(el) + " wraps the name onto " + n + " lines");
         return;
@@ -1190,6 +1244,29 @@ window.__probeAct = function (a) {
   if (a.count !== undefined) {
     var n = document.querySelectorAll(a.count[0]).length;
     if (n !== a.count[1]) return { fail: a.count[0] + " matches " + n + " elements, not " + a.count[1] };
+    return { ok: true };
+  }
+  function onScreen(el) {
+    var r = el.getBoundingClientRect();
+    return (r.width > 0 || r.height > 0) && getComputedStyle(el).visibility !== "hidden";
+  }
+  if (a.shown !== undefined) {
+    var seen = Array.prototype.slice.call(document.querySelectorAll(a.shown[0])).filter(onScreen).length;
+    if (seen !== a.shown[1]) return { fail: a.shown[0] + " shows " + seen + " elements on screen, not " + a.shown[1] };
+    return { ok: true };
+  }
+  if (a.width !== undefined) {
+    var wide = Array.prototype.slice.call(document.querySelectorAll(a.width[0])).filter(onScreen)[0];
+    if (wide === undefined) return { fail: "no " + a.width[0] + " on screen to measure" };
+    var ww = wide.getBoundingClientRect().width;
+    if (ww < a.width[1] - 0.5 || ww > a.width[2] + 0.5) return { fail: a.width[0] + " is " + Math.round(ww * 10) / 10 + " px wide, not " + a.width[1] + ".." + a.width[2] };
+    return { ok: true };
+  }
+  if (a.style !== undefined) {
+    var styled = document.querySelector(a.style[0]);
+    if (styled === null) return { fail: "no " + a.style[0] + " to read " + a.style[1] + " from" };
+    var got = getComputedStyle(styled).getPropertyValue(a.style[1]);
+    if (got !== a.style[2]) return { fail: a.style[0] + " has " + a.style[1] + ": " + JSON.stringify(got) + ", not " + JSON.stringify(a.style[2]) };
     return { ok: true };
   }
   if (a.loaded !== undefined) {

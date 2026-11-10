@@ -92,7 +92,7 @@ html[data-form="compact"] .cal-grid > label {
 
 .closure-add {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 132px 132px auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: 6px;
   margin-top: 6px;
 }
@@ -101,11 +101,7 @@ html[data-form="compact"] .cal-grid > label {
   width: 100%;
 }
 
-html[data-form="compact"] .closure-add {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-}
-
-html[data-form="compact"] .closure-add input[type="text"] {
+.closure-add input[type="text"] {
   grid-column: 1 / -1;
 }
 

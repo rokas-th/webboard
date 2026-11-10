@@ -249,7 +249,7 @@ it("toasts a warm rejection", async () => {
   spyOpen();
   render(<App />);
   await settle();
-  expect(screen.getAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([["warm broke", "toast bad"]]);
+  expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => [e.textContent, e.className])).toEqual([["warm broke", "toast bad"]]);
   expect(log.mock.calls).toEqual([[failure]]);
 });
 
@@ -299,7 +299,7 @@ describe("closing the window", () => {
     expect(toolbar()).toBeNull();
     expect(screen.queryByRole("button", { name: "Reset settings" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Rebuild the plan list" })).toBeNull();
-    expect(screen.getAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([["Could not save “Alpha”: disk full.", "toast bad"]]);
+    expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => [e.textContent, e.className])).toEqual([["Could not save “Alpha”: disk full.", "toast bad"]]);
     expect(log.mock.calls).toEqual([[failure]]);
     await requestClose();
     expect(windowState.destroyed).toBe(1);
@@ -500,7 +500,7 @@ describe("updates", () => {
     const line = "WebBoard 0.2.0 is installed and everything is saved, but WebBoard could not restart: could not relaunch Quit WebBoard and start it again.";
     expect(screen.getByText(line).className).toBe("start-bad");
     expect(toolbar()).toBeNull();
-    expect(screen.queryAllByRole("status")).toEqual([]);
+    expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast"))).toEqual([]);
     expect(log.mock.calls).toEqual([[failure]]);
     expect(log.mock.calls[0]?.[0]).toBe(failure);
     expect(close).toHaveBeenCalledTimes(1);

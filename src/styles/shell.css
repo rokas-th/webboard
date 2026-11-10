@@ -230,6 +230,18 @@
   flex-wrap: wrap;
 }
 
+@media not all and (hover: hover) {
+  .sidebar .entry:not(.active):not(:focus-within) .entry-more {
+    display: none;
+  }
+}
+
+@media (hover: hover) {
+  .sidebar .entry:not(.active):not(:focus-within):not(:hover) .entry-more {
+    display: none;
+  }
+}
+
 .update-line {
   margin-top: auto;
   display: flex;
@@ -688,6 +700,37 @@ button.chip {
 
 .toast.bad {
   border-color: var(--magenta);
+}
+
+.toast-bad {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 640px;
+  padding: 9px 10px 9px 16px;
+  border: 1px solid var(--magenta);
+  border-radius: 6px;
+  background: var(--panel-2);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+
+.toast-bad .toast {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.toast-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .toast.ok {

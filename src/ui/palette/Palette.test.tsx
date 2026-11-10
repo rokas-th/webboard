@@ -70,7 +70,7 @@ const press = (key: string, o: Partial<KeyboardEventInit> = {}, target: Element 
   });
 };
 
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 
 const palette = (): HTMLElement => screen.getByRole("dialog", { name: "Command palette" });
 const query = (): HTMLInputElement => {

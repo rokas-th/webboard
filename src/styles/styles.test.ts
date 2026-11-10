@@ -246,10 +246,15 @@ describe("the Cyberdeck look", () => {
   });
 
   it("clips every name to one line", () => {
-    [".entry-name", ".plan-head h1", ".toolbar-plan", ".choice-row", ".tl-row .name", ".card-name", ".list-name", ".palette-label"].forEach((sel) => {
+    [".entry-name", ".plan-head h1", ".toolbar-plan", ".choice-row", ".tl-row .name", ".list-name", ".palette-label"].forEach((sel) => {
       const decls = Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
       expect([sel, decls["overflow"], decls["text-overflow"], decls["white-space"]]).toEqual([sel, "hidden", "ellipsis", "nowrap"]);
     });
+  });
+
+  it("clamps a board card title to two lines", () => {
+    const decls = Object.assign({}, ...sheet.rules.filter((r) => r.selector === ".card-name" && r.conditions.length === 0).map((r) => r.decls));
+    expect([decls["display"], decls["-webkit-line-clamp"], decls["-webkit-box-orient"], decls["overflow"], decls["white-space"]]).toEqual(["-webkit-box", "2", "vertical", "hidden", "normal"]);
   });
 
   it("sizes the shared modal at 520 px and the wide calendar modal at 600 px", () => {

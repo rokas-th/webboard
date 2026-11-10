@@ -81,9 +81,9 @@ const made = async (...a: Parameters<typeof testSession>): Promise<TestSession> 
   return t;
 };
 
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 
-const toastNodes = (): HTMLElement[] => screen.queryAllByRole("status");
+const toastNodes = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast"));
 
 const slot = (name: string): Element | null => document.querySelector(`[data-slot="${name}"]`);
 
@@ -470,6 +470,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
       window.dispatchEvent(new ErrorEvent("error", { error: new Error("thrown in a handler"), message: "Uncaught Error: thrown in a handler" }));
     });
     expect(toastTexts()).toEqual(["Holiday warm for plan p failed: boom", "plain reason", "thrown in a handler"]);
+    expect(screen.getAllByRole("button", { name: "Copy details" })).toHaveLength(3);
     view.unmount();
     clearToasts();
     const probe = render(<div />);

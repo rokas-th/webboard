@@ -18,6 +18,7 @@ import "./styles/sync.css";
 import "./styles/sheet.css";
 import "./styles/phone.css";
 import App from "./App";
+import { RootBoundary } from "./ui/shell/RootBoundary";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("index.html has no #root element");
@@ -32,7 +33,9 @@ if (import.meta.env.VITE_WEBBOARD_PROBE === "1") {
 } else {
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
-      <App />
+      <RootBoundary reload={() => window.location.reload()}>
+        <App />
+      </RootBoundary>
     </React.StrictMode>,
   );
 }

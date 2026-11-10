@@ -32,3 +32,7 @@
     --grid-w: 252px;
   }
 }
+
+html[data-form="phone"] {
+  --grid-w: 132px;
+}

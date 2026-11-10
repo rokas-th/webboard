@@ -111,7 +111,7 @@ const one = (sel: string, root: ParentNode = document): HTMLElement => {
 };
 
 const sheet = (): HTMLElement => screen.getByRole("dialog", { name: "Choose which to keep" });
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 const badToasts = (): (string | null)[] => all(".toast.bad").map((e) => e.textContent);
 
 const only = (t: TestSession): Choice => {

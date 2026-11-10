@@ -27,11 +27,25 @@ function PlanTools(p: { session: PlanSession; files: PlanFiles; today(): IsoDate
       <span className="phone-plan-name">{view.plan.name}</span>
       <HeldChip view={view} onChoose={p.onChoose} />
       <NewItemMenu label="+" className="button-primary phone-add" disabled={readOnly} onPick={create} />
-      <button type="button" className="button-small" disabled={readOnly || !p.session.canUndo()} onClick={() => run.undo()}>
-        Undo
+      <button
+        type="button"
+        className="button-small phone-glyph"
+        aria-label="Undo"
+        title="Undo"
+        disabled={readOnly || !p.session.canUndo()}
+        onClick={() => run.undo()}
+      >
+        ↶
       </button>
-      <button type="button" className="button-small" disabled={readOnly || !p.session.canRedo()} onClick={() => run.redo()}>
-        Redo
+      <button
+        type="button"
+        className="button-small phone-glyph"
+        aria-label="Redo"
+        title="Redo"
+        disabled={readOnly || !p.session.canRedo()}
+        onClick={() => run.redo()}
+      >
+        ↷
       </button>
       <SyncChip compact />
       <button type="button" className="button-small phone-more" aria-label="Plan" aria-haspopup="dialog" onClick={() => setSheet(true)}>

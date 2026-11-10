@@ -325,7 +325,7 @@ const EMPTY_NAME = "The name is empty. Type at least one character.";
 const CUT_OFF = "The last change before WebBoard stopped was cut off while saving and was not kept.";
 const INDEX_CUT = "The last change to the plan list before WebBoard closed was not saved.";
 
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 
 const topBar = (): HTMLElement => {
   const el = document.querySelector(".phone-head");
@@ -638,7 +638,7 @@ describe("PhoneShell plans (Step 1)", () => {
     await act(async () => g.open());
     await settle();
     expect(createPlan.mock.calls).toEqual([["Gamma"]]);
-    expect(screen.queryAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([["Disk full.", "toast bad"]]);
+    expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => [e.textContent, e.className])).toEqual([["Disk full.", "toast bad"]]);
     expect(within(openPlans()).queryByText("Disk full.")).toBeNull();
     listShows("Alpha");
   });
@@ -659,7 +659,7 @@ describe("PhoneShell plans (Step 1)", () => {
     openPlans();
     await act(async () => g.open());
     await settle();
-    expect(screen.queryAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([["Disk full.", "toast bad"]]);
+    expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => [e.textContent, e.className])).toEqual([["Disk full.", "toast bad"]]);
     expect(within(plansSheet()).queryByText("Disk full.")).toBeNull();
   });
 
@@ -763,7 +763,7 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     fireEvent.click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
     await settle();
     expect(reload.mock.calls).toEqual([[gamma]]);
-    expect(screen.queryAllByRole("status").map((n) => [n.textContent, n.className])).toEqual([["Permission denied (os error 13)", "toast bad"]]);
+    expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((n) => [n.textContent, n.className])).toEqual([["Permission denied (os error 13)", "toast bad"]]);
     expect(screen.getByRole("dialog", { name: RELOAD })).toBeTruthy();
     reload.mockResolvedValueOnce(undefined);
     fireEvent.click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
@@ -1130,6 +1130,15 @@ describe("PhoneShell undo and redo (Step 2)", () => {
   const REVIEW: readonly SeedItem[] = [{ name: "Review", start: "2026-11-10", dur: 2 }];
   const undoButton = (): HTMLElement => within(topBar()).getByRole("button", { name: "Undo" });
   const redoButton = (): HTMLElement => within(topBar()).getByRole("button", { name: "Redo" });
+
+  it("Undo and Redo are glyph buttons named by their words, so the plan name keeps the width", async () => {
+    const t = await testSession(REVIEW);
+    sessions.push(t.session);
+    await shown(t);
+    expect([undoButton().textContent, undoButton().getAttribute("aria-label"), undoButton().title]).toEqual(["↶", "Undo", "Undo"]);
+    expect([redoButton().textContent, redoButton().getAttribute("aria-label"), redoButton().title]).toEqual(["↷", "Redo", "Redo"]);
+    expect(undoButton().classList.contains("phone-glyph")).toBe(true);
+  });
 
   it("Undo and Redo follow canUndo and canRedo and report their toasts", async () => {
     const t = await testSession(REVIEW);
@@ -1670,7 +1679,7 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     expect(within(historyRow(root[0].id)).queryAllByRole("button")).toEqual([]);
     entries
       .filter((e) => !e.root)
-      .forEach((e) => expect(within(historyRow(e.id)).getAllByRole("button").map((b) => b.textContent)).toEqual([e.active ? "Revert this action" : "Bring this action back"]));
+      .forEach((e) => expect(within(historyRow(e.id)).getAllByRole("button").map((b) => [b.textContent, b.getAttribute("aria-label")])).toEqual([e.active ? ["Revert", "Revert this action"] : ["Bring back", "Bring this action back"]]));
   });
 
   it("reverting a side opens its choice", async () => {

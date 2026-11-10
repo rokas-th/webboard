@@ -66,7 +66,7 @@ const all = (sel: string, root: ParentNode = document): HTMLElement[] =>
 const col = (h: string): HTMLElement => one(`[data-col="${h}"]`);
 const card = (id: string): HTMLElement => one(`[data-card="${id}"]`);
 const cardsIn = (h: string): (string | undefined)[] => all("[data-card]", col(h)).map((c) => c.dataset.card);
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 
 const pointer = (el: Element, kind: "down" | "up", x: number, y: number): void => {
   const init = { clientX: x, clientY: y, button: 0, pointerId: 1, pointerType: "mouse" };

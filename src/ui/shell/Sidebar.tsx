@@ -57,12 +57,14 @@ export function Sidebar(p: SidebarProps) {
                 <span className="entry-name">{l.name ?? "Loading…"}</span>
               </button>
               {shown && <p className="entry-bad">{failure.message}</p>}
-              <div className="entry-actions">
-                {shown && l.loaded && (
+              {shown && l.loaded && (
+                <div className="entry-actions entry-retry">
                   <button type="button" className="button-small" onClick={() => void p.registry.retryPlan(l.id)}>
                     Try again
                   </button>
-                )}
+                </div>
+              )}
+              <div className="entry-actions entry-more">
                 {movable(l) && (
                   <button type="button" className="button-small" onClick={() => p.onMove(l.id)}>
                     Move to space

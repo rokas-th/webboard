@@ -275,7 +275,7 @@
 
 .history li {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 10px;
 }
 

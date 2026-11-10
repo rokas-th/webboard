@@ -199,9 +199,9 @@ const clickApply = async (): Promise<void> => {
   await settle();
 };
 
-const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 
-const toastNodes = (): HTMLElement[] => screen.queryAllByRole("status");
+const toastNodes = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast"));
 
 const impact = (): string | null => dialog().querySelector(".impact")?.textContent ?? null;
 

@@ -197,6 +197,20 @@
   padding: 6px 10px;
 }
 
+.phone-glyph {
+  min-width: 36px;
+  padding: 6px 8px;
+  font-family: var(--prose);
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+html[data-form="phone"] .tl-corner .days,
+html[data-form="phone"] .tl-row .days {
+  display: none;
+}
+
 .phone .empty-state > .entry-bad,
 .plans-new > .entry-bad {
   font-size: 12px;

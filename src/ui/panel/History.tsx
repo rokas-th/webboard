@@ -11,6 +11,8 @@ import { historyTime, revertText } from "./historyText";
 
 export const REVERT = "Revert this action";
 export const BRING_BACK = "Bring this action back";
+export const REVERT_SHORT = "Revert";
+export const BRING_BACK_SHORT = "Bring back";
 export const HISTORY_PAGE = 50;
 
 const entryOf = (session: PlanSession, id: ActionId): HistoryEntry => {
@@ -43,8 +45,8 @@ export function History(p: { session: PlanSession; readOnly: boolean }) {
               {` · ${e.device} · ${e.label}`}
             </span>
             {!p.readOnly && !e.root && (
-              <button type="button" className="button-small" onClick={() => offer(e.id)}>
-                {e.active ? REVERT : BRING_BACK}
+              <button type="button" className="button-small" aria-label={e.active ? REVERT : BRING_BACK} onClick={() => offer(e.id)}>
+                {e.active ? REVERT_SHORT : BRING_BACK_SHORT}
               </button>
             )}
           </li>

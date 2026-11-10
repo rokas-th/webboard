@@ -73,7 +73,7 @@ const button = (name: string): HTMLElement => within(sheet()).getByRole("button"
 const noButton = (name: string): HTMLElement | null => within(sheet()).queryByRole("button", { name });
 const startText = (): string | null => sheet().querySelector(".isheet-start")?.textContent ?? null;
 const intents = (apply: { mock: { calls: Intent[][] } }): Intent[] => apply.mock.calls.map((c) => c[0]);
-const toasts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const toasts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
 const linkRow = (key: string): HTMLElement => {
   const el = sheet().querySelector(`[data-link="${key}"]`);
   if (!(el instanceof HTMLElement)) throw new Error("no link row " + key);
@@ -234,7 +234,7 @@ describe("ItemSheet", () => {
     });
     const before = t.session.history().length;
     fireEvent.click(within(linkRow("Review>Ship")).getByRole("button", { name: "Lag +1" }));
-    expect(screen.queryAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([[message, "toast bad"]]);
+    expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => [e.textContent, e.className])).toEqual([[message, "toast bad"]]);
     expect(t.session.history().length).toBe(before);
     expect(lagField(linkRow("Review>Ship")).value).toBe("0");
   });
@@ -263,7 +263,7 @@ describe("ItemSheet", () => {
     ["", "2.7"].forEach((v) => {
       fireEvent.change(lag(), { target: { value: v } });
       fireEvent.click(button("Add a dependency"));
-      expect([v, screen.queryAllByRole("status").map((e) => [e.textContent, e.className])]).toEqual([v, [["Lag must be a whole number of working days.", "toast bad"]]]);
+      expect([v, Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => [e.textContent, e.className])]).toEqual([v, [["Lag must be a whole number of working days.", "toast bad"]]]);
       clearToasts();
     });
     expect(apply).toHaveBeenCalledTimes(0);
@@ -501,7 +501,7 @@ describe("ItemSheet editing (Step 4)", () => {
     fireEvent.change(field, { target: { value: "   " } });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(apply).toHaveBeenCalledTimes(0);
-    expect(screen.queryAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([[EMPTY_NAME, "toast bad"]]);
+    expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => [e.textContent, e.className])).toEqual([[EMPTY_NAME, "toast bad"]]);
     expect(nameField().value).toBe("Review");
     clearToasts();
     fireEvent.change(nameField(), { target: { value: "Review 2" } });
