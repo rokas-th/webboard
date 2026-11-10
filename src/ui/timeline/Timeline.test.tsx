@@ -24,6 +24,7 @@ vi.mock("../state", async (importOriginal) => {
 const ZH: RegionRef = { src: "openholidays", country: "CH", subdivision: "CH-ZH" };
 const sessions: PlanSession[] = [];
 const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
 const offsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
 const widths = { scroll: 1440, grid: 300 };
 
@@ -59,7 +60,8 @@ afterEach(async () => {
   vi.mocked(useUi).mockClear();
   if (clientHeight === undefined) Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
   else Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeight);
-  Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+  if (clientWidth === undefined) Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+  else Object.defineProperty(HTMLElement.prototype, "clientWidth", clientWidth);
   if (offsetWidth === undefined) Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
   else Object.defineProperty(HTMLElement.prototype, "offsetWidth", offsetWidth);
   await Promise.all(sessions.splice(0).map((s) => s.close()));

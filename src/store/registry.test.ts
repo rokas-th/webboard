@@ -264,6 +264,12 @@ function appErrorOf(e: unknown): AppError {
   return e;
 }
 
+function refusedOf(e: unknown): Refused {
+  expect(e).toBeInstanceOf(Refused);
+  if (!(e instanceof Refused)) throw new Error(`not a Refused: ${String(e)}`);
+  return e;
+}
+
 function errorOf(e: unknown): Error {
   expect(e).toBeInstanceOf(Error);
   if (!(e instanceof Error)) throw new Error(`not an Error: ${String(e)}`);
@@ -656,7 +662,7 @@ describe("IndexDoc", () => {
       thrown = e;
     }
     expect(thrown).toBeInstanceOf(Refused);
-    expect((thrown as Refused).message).toBe("The name is empty. Type at least one character.");
+    expect(refusedOf(thrown).message).toBe("The name is empty. Type at least one character.");
     await flush();
     expect(callsOf(from, "store_append")).toHaveLength(0);
     expect(ix.devices().has("dev-B")).toBe(false);
@@ -1112,7 +1118,7 @@ describe("Registry: reloadFromServer", () => {
     const from = tauri.calls.length;
     const err = await rejection(r.reloadFromServer("P"));
     expect(err).toBeInstanceOf(Refused);
-    expect((err as Refused).message).toBe(READ_ONLY);
+    expect(refusedOf(err).message).toBe(READ_ONLY);
     expect(callsOf(from, "store_set_aside")).toHaveLength(0);
     expect(r.failures().get("P")?.code).toBe("store.corrupt");
     expect(cb).not.toHaveBeenCalled();
@@ -1991,7 +1997,7 @@ describe("Registry: spaces", () => {
     const from = tauri.calls.length;
     const err = await rejection(r.reloadFromServer("P"));
     expect(err).toBeInstanceOf(Refused);
-    expect((err as Refused).message).toBe(READ_ONLY);
+    expect(refusedOf(err).message).toBe(READ_ONLY);
     expect(callsOf(from, "store_set_aside")).toHaveLength(0);
     expect(r.failures().get("P")?.message).toBe("Bad record in seg-0.log.");
     await closeAll();
@@ -2008,7 +2014,7 @@ describe("Registry: spaces", () => {
     const from2 = tauri.calls.length;
     const err2 = await rejection(r2.reloadFromServer(IX));
     expect(err2).toBeInstanceOf(Refused);
-    expect((err2 as Refused).message).toBe(READ_ONLY);
+    expect(refusedOf(err2).message).toBe(READ_ONLY);
     expect(callsOf(from2, "store_set_aside")).toHaveLength(0);
     expect(r2.indexError()?.message).toBe("Bad record in seg-0.log.");
     expect(r2.indexErrorDoc()).toBe(IX);
@@ -2090,7 +2096,7 @@ describe("Registry: spaces", () => {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(Refused);
-    expect((thrown as Refused).message).toBe("This device was removed from the space. Join again to move plans there.");
+    expect(refusedOf(thrown).message).toBe("This device was removed from the space. Join again to move plans there.");
     await flush();
     expect(callsOf(from, "store_append")).toEqual([]);
   });

@@ -201,7 +201,7 @@ function states() {
   const UPDATE_DOWNLOADING = `Downloading ${UPDATE_VERSION}… 50%`;
   const exampleHead = expect(".plan-head h1", EXAMPLE_PLAN);
   add("example/timeline", "example", {
-    sizes: "toolbar",
+    sizes: "timeline",
     place: { view: "timeline", zoom: "W" },
     actions: [viewExpect("timeline"), todayShown(), exampleHead, expect(".tl-row .name", "Visual design"), count(".plan-head .chip-magenta", 0), count(".plan-head .chip-amber", 0)],
   });
@@ -418,7 +418,7 @@ const SIZES = {
   "ipad-pro": ["1366x1024"],
   narrow: namesOf(NARROW),
   "touch-wide": namesOf([...PORTRAIT, ...LANDSCAPE, ...NARROW]),
-  toolbar: namesOf(TOOLBAR),
+  timeline: namesOf([...DESKTOP, ...PORTRAIT, ...LANDSCAPE, ...NARROW]),
 };
 
 const sizesOf = (s) => {
@@ -1139,7 +1139,7 @@ const MEASURE = String.raw`
 `;
 
 const ACT = String.raw`
-window.__probeAct = function (a, state) {
+window.__probeAct = function (a) {
   function matching(selector, text) {
     var nodes = Array.prototype.slice.call(document.querySelectorAll(selector));
     if (text === undefined) return { nodes: nodes, hit: nodes[0] };
@@ -1195,12 +1195,12 @@ window.__probeAct = function (a, state) {
     return new Promise(function (resolve) {
       (function poll() {
         var img = document.querySelector(a.loaded);
-        var done = img !== null && img.complete && img.naturalWidth > 0;
-        if (done) return resolve({ ok: true });
+        if (img !== null && img.complete && img.naturalWidth > 0) return resolve({ ok: true });
+        if (img !== null && img.complete) return resolve({ fail: a.loaded + " " + JSON.stringify(img.getAttribute("src")) + " is broken: complete with naturalWidth 0" });
         if (performance.now() - begun < ${LOAD_MS}) return setTimeout(poll, 25);
         resolve({
-          fail: state + ": " + a.loaded + (img === null ? " never appeared" :
-            " " + JSON.stringify(img.getAttribute("src")) + " did not load in " + ${LOAD_MS} + " ms: last seen complete " + img.complete + ", naturalWidth " + img.naturalWidth),
+          fail: a.loaded + (img === null ? " never appeared" :
+            " " + JSON.stringify(img.getAttribute("src")) + " did not load in " + ${LOAD_MS} + " ms: still not complete"),
         });
       })();
     });
@@ -1498,7 +1498,7 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
     if (action.key !== undefined) {
       await press(cdp, sessionId, action.key);
     } else {
-      const got = await evaluate(cdp, sessionId, `window.__probeAct(${JSON.stringify(action)}, ${JSON.stringify(state.name)})`, true);
+      const got = await evaluate(cdp, sessionId, `window.__probeAct(${JSON.stringify(action)})`, true);
       if (got.fail !== undefined) return unreached(`${describeAction(action)}: ${got.fail}`);
       if (got.at !== undefined) await pointer(cdp, sessionId, got.at);
     }
