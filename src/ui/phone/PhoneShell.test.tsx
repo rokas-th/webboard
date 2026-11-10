@@ -595,6 +595,47 @@ describe("PhoneShell plans (Step 1)", () => {
     expect(within(openPlans()).queryByText(EMPTY_NAME)).toBeNull();
   });
 
+  it("a sheet create that fails after the sheet closed is one bad toast, and the sheet reopens clean", async () => {
+    const s = await seededStore(["Alpha"]);
+    failNewDocs(new Set(["local", ...s.ids]));
+    const r = await indexOpen();
+    const real = r.registry.createPlan.bind(r.registry);
+    const g = gate();
+    const createPlan = vi.spyOn(r.registry, "createPlan").mockImplementation((name) => g.wait.then(() => real(name)));
+    await showIndex(r);
+    const sheet = openPlans();
+    fireEvent.change(within(sheet).getByRole("textbox", { name: "Plan name" }), { target: { value: "Gamma" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "New plan" }));
+    await settle();
+    closePlans();
+    await act(async () => g.open());
+    await settle();
+    expect(createPlan.mock.calls).toEqual([["Gamma"]]);
+    expect(screen.queryAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([["Disk full.", "toast bad"]]);
+    expect(within(openPlans()).queryByText("Disk full.")).toBeNull();
+    listShows("Alpha");
+  });
+
+  it("a sheet create that fails after the sheet closed and reopened is one bad toast, not the new sheet's message", async () => {
+    const s = await seededStore(["Alpha"]);
+    failNewDocs(new Set(["local", ...s.ids]));
+    const r = await indexOpen();
+    const real = r.registry.createPlan.bind(r.registry);
+    const g = gate();
+    vi.spyOn(r.registry, "createPlan").mockImplementation((name) => g.wait.then(() => real(name)));
+    await showIndex(r);
+    const sheet = openPlans();
+    fireEvent.change(within(sheet).getByRole("textbox", { name: "Plan name" }), { target: { value: "Gamma" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "New plan" }));
+    await settle();
+    closePlans();
+    openPlans();
+    await act(async () => g.open());
+    await settle();
+    expect(screen.queryAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([["Disk full.", "toast bad"]]);
+    expect(within(plansSheet()).queryByText("Disk full.")).toBeNull();
+  });
+
   it("the top bar reads Loading… for a plan whose name has not arrived", async () => {
     await seededStore(["Alpha"]);
     const r = await indexOpen();
@@ -1171,6 +1212,74 @@ describe("PhoneShell item sheet (Step 4)", () => {
     await settle();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(toastTexts()).toEqual([builtOf(undo).toast]);
+  });
+
+  const NEW_W = { t: "create", kind: "task", name: "W", parent: null, after: "Notes", start: "2026-11-12", dur: 1 } as const;
+  const itemNamed = (t: TestSession, name: string): ItemId => {
+    const it = [...t.session.view().plan.items.values()].find((x) => x.name === name);
+    if (it === undefined) throw new Error("no item " + name);
+    return it.id;
+  };
+
+  it("a peer's undo that orphans an item this device renamed closes its sheet and names the peer", async () => {
+    const t = await testSession(EDIT_SEED);
+    sessions.push(t.session);
+    const peer = await t.peer("iphone");
+    sessions.push(peer.session);
+    await shown(t);
+    act(() => {
+      peer.session.apply(NEW_W);
+      peer.sync();
+    });
+    const x = itemNamed(t, "W");
+    setUiNow({ selected: x });
+    act(() => {
+      t.session.apply({ t: "rename", item: x, name: "X" });
+      peer.sync();
+    });
+    await settle();
+    expect(screen.getByRole("dialog", { name: "X" })).toBeTruthy();
+    clearToasts();
+    act(() => {
+      peer.session.undo();
+      peer.sync();
+    });
+    await settle();
+    expect(t.session.view().plan.items.get(x)?.trashed).toBe(true);
+    expect(t.session.authorOf("e:" + x)).toBeNull();
+    expect(t.session.trashAuthorOf(x)).toEqual({ dev: "iphone", device: "iPhone" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toastTexts()).toEqual(["“X” was moved to the Trash on iPhone. Restore it from the Trash."]);
+  });
+
+  it("undoing this device's create after a peer rename closes the sheet with only the undo's toast", async () => {
+    const t = await testSession(EDIT_SEED);
+    sessions.push(t.session);
+    const peer = await t.peer("iphone");
+    sessions.push(peer.session);
+    await shown(t);
+    act(() => {
+      t.session.apply(NEW_W);
+    });
+    const x = itemNamed(t, "W");
+    setUiNow({ selected: x });
+    act(() => {
+      peer.sync();
+      peer.session.apply({ t: "rename", item: x, name: "X" });
+      peer.sync();
+    });
+    await settle();
+    expect(screen.getByRole("dialog", { name: "X" })).toBeTruthy();
+    clearToasts();
+    const undo = vi.spyOn(t.session, "undo");
+    fireEvent.click(within(topBar()).getByRole("button", { name: "Undo" }));
+    await settle();
+    const done = builtOf(undo);
+    expect(t.session.view().plan.items.get(x)?.trashed).toBe(true);
+    expect(t.session.trashAuthorOf(x)).toEqual({ dev: "mac", device: "Mac" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(done.toast).toContain("“X” was changed since on the iPhone — moved to the Trash.");
+    expect(toastTexts()).toEqual([done.toast]);
   });
 
   it("a ghost row keeps its sheet", async () => {

@@ -24,7 +24,7 @@ import { RevertDialog } from "../panel/History";
 import { ItemPanel } from "../panel/ItemPanel";
 import { PlanPanel } from "../panel/PlanPanel";
 import { Timeline } from "../timeline/Timeline";
-import { trashRootOf } from "../trashed";
+import { toastRemoteTrash } from "../trashed";
 import { HolidayState } from "./HolidayState";
 import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
@@ -118,12 +118,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       if (it === undefined || !it.trashed || ghostIds(view).has(item)) return;
       selectedItem.current = null;
       setUi({ selected: null });
-      const root = trashRootOf(session, item);
-      const a = session.trashAuthorOf(root);
-      if (a.dev === registry.device.deviceId) return;
-      const rootItem = view.plan.items.get(root);
-      if (rootItem === undefined) throw new Error(`Shell: no item ${root}`);
-      toast(`“${rootItem.name}” was moved to the Trash on ${a.device}. Restore it from the Trash.`);
+      toastRemoteTrash(session, item, registry.device.deviceId);
     };
     return session.subscribe(() => {
       bump();

@@ -1,5 +1,7 @@
 import type { ItemId } from "../domain/model";
+import type { DeviceId } from "../log/types";
 import type { PlanSession } from "../store/session";
+import { toast } from "./common/Toast";
 
 export function trashRootOf(s: PlanSession, id: ItemId): ItemId {
   const plan = s.view().plan;
@@ -9,11 +11,11 @@ export function trashRootOf(s: PlanSession, id: ItemId): ItemId {
   return parent !== undefined && parent.trashed ? trashRootOf(s, parent.id) : id;
 }
 
-export function remoteTrashText(s: PlanSession, id: ItemId, device: string): string | null {
+export function toastRemoteTrash(s: PlanSession, id: ItemId, device: DeviceId): void {
   const root = trashRootOf(s, id);
-  const a = s.authorOf("e:" + root);
-  if (a === null || a.dev === device) return null;
+  const a = s.trashAuthorOf(root);
+  if (a.dev === device) return;
   const rootItem = s.view().plan.items.get(root);
   if (rootItem === undefined) throw new Error(`No item ${root}`);
-  return `“${rootItem.name}” was moved to the Trash on ${a.device}. Restore it from the Trash.`;
+  toast(`“${rootItem.name}” was moved to the Trash on ${a.device}. Restore it from the Trash.`);
 }

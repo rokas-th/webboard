@@ -11,7 +11,7 @@ import { usePlanFiles, usePlanSelection, type PlanFiles, type PlanMain } from ".
 import { NewPlanButton } from "../shell/Sidebar";
 import { UiContext, useUi, useUiValue, type DialogState } from "../state";
 import { Timeline } from "../timeline/Timeline";
-import { remoteTrashText } from "../trashed";
+import { toastRemoteTrash } from "../trashed";
 import { ChoiceSheet } from "./ChoiceSheet";
 import { ItemSheet } from "./ItemSheet";
 import { PhoneList } from "./PhoneList";
@@ -65,8 +65,7 @@ function useSheetLetGo(session: PlanSession, device: string): void {
         selected.current = null;
         setUi({ selected: null, naming: null });
         if (it === undefined) return;
-        const notice = remoteTrashText(session, item, device);
-        if (notice !== null) toast(notice);
+        toastRemoteTrash(session, item, device);
       }),
     [session, device, setUi],
   );
@@ -186,7 +185,13 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
   const [plans, setPlans] = useState(false);
   const [emptyError, setEmptyError] = useState<string | null>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
+  const sheetShown = useRef(0);
+  const showPlans = useCallback(() => {
+    sheetShown.current += 1;
+    setPlans(true);
+  }, []);
   const closePlans = useCallback(() => {
+    sheetShown.current += 1;
     setPlans(false);
     setSheetError(null);
   }, []);
@@ -199,12 +204,15 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
     [closePlans, open],
   );
   const files = usePlanFiles(p.registry, openPlan);
-  const createFrom =
-    (set: (message: string | null) => void) =>
-    (name: string): void => {
-      set(null);
-      files.newPlan(name, set);
-    };
+  const newFromEmpty = (name: string): void => {
+    setEmptyError(null);
+    files.newPlan(name, setEmptyError);
+  };
+  const newFromSheet = (name: string): void => {
+    setSheetError(null);
+    const shown = sheetShown.current;
+    files.newPlan(name, (message) => (sheetShown.current === shown ? setSheetError(message) : toast(message, "bad")));
+  };
   const openChoice = useCallback(
     (choice: string, side?: string) => setUi({ dialog: side === undefined ? { t: "choice", id: choice } : { t: "choice", id: choice, side } }),
     [setUi],
@@ -218,18 +226,18 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
           name={listedName(p.registry, main.k === "empty" ? null : main.id)}
           session={session}
           today={() => p.clock.today()}
-          onPlans={() => setPlans(true)}
+          onPlans={showPlans}
           onChoose={(choice) => openChoice(choice)}
           onCreated={(id) => setUi({ selected: id, naming: id })}
         />
-        <Main registry={p.registry} main={main} files={files} error={emptyError} onNew={createFrom(setEmptyError)} open={open} trash={trash} />
+        <Main registry={p.registry} main={main} files={files} error={emptyError} onNew={newFromEmpty} open={open} trash={trash} />
         {plans && (
           <PlansSheet
             registry={p.registry}
             selected={ui.plan}
             files={files}
             error={sheetError}
-            onNew={createFrom(setSheetError)}
+            onNew={newFromSheet}
             onOpen={openPlan}
             onTrash={trash}
             onClose={closePlans}
