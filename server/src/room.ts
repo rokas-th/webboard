@@ -91,7 +91,7 @@ export class Room extends YServer {
 
   private loaded = false;
 
-  private erased = false;
+  private tombstone: 'unread' | 'none' | 'erasing' | 'stored' = 'unread';
 
   private hasTombstone(): boolean {
     const sql = this.ctx.storage.sql;
@@ -102,7 +102,10 @@ export class Room extends YServer {
   }
 
   private isGone(): boolean {
-    return this.erased || this.hasTombstone();
+    if (this.tombstone === 'unread') {
+      this.tombstone = this.hasTombstone() ? 'stored' : 'none';
+    }
+    return this.tombstone !== 'none';
   }
 
   private tables(): void {
@@ -347,15 +350,17 @@ export class Room extends YServer {
 
   async purge(): Promise<number> {
     const open = [...this.getConnections()];
-    if (this.hasTombstone()) {
+    this.isGone();
+    if (this.tombstone === 'stored') {
       open.forEach((conn) => conn.close(4410, 'Plan deleted'));
       return open.length;
     }
-    this.erased = true;
+    this.tombstone = 'erasing';
     open.forEach((conn) => conn.close(4410, 'Plan deleted'));
     await this.ctx.storage.deleteAll();
     this.ctx.storage.sql.exec('CREATE TABLE gone (at INTEGER NOT NULL)');
     this.ctx.storage.sql.exec('INSERT INTO gone (at) VALUES (?)', Date.now());
+    this.tombstone = 'stored';
     return open.length;
   }
 }

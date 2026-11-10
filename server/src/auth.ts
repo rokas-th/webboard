@@ -9,6 +9,7 @@ export type ErrorCode =
   | 'not_found'
   | 'too_large'
   | 'too_many_plans'
+  | 'unknown_plan'
   | 'gone'
   | 'purge_pending'
   | 'not_configured'
@@ -106,6 +107,12 @@ const TOO_MANY_PLANS: Failure = {
   message: `This device has joined ${MAX_PLANS_PER_DEVICE} plans, the most one device may join.`,
 };
 const GONE: Failure = { ok: false, status: 410, error: 'gone', message: 'This plan was deleted forever on another device.' };
+const UNKNOWN_PLAN: Failure = {
+  ok: false,
+  status: 404,
+  error: 'unknown_plan',
+  message: 'The server does not know this plan yet. Let it sync, then delete it again.',
+};
 export const PURGE_PENDING: Failure = {
   ok: false,
   status: 500,
@@ -544,6 +551,9 @@ export async function purgePlan(
     }
     if (!PLAN_DOC.test(doc)) {
       return BAD_DOC;
+    }
+    if (!isPurged(sql, doc) && sql.exec('SELECT 1 FROM joins WHERE doc = ? LIMIT 1', doc).toArray().length === 0) {
+      return UNKNOWN_PLAN;
     }
     sql.exec('INSERT INTO purged (doc, device, at, erased_at) VALUES (?, ?, ?, NULL) ON CONFLICT (doc) DO NOTHING', doc, who.id, now);
     ['joins', 'tickets', 'untold'].forEach((table) => sql.exec(`DELETE FROM ${table} WHERE doc = ?`, doc));

@@ -1,4 +1,4 @@
-import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
+import { env, listDurableObjectIds, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { getServerByName } from 'partyserver';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEVICE_HEADER } from '../src/limits';
@@ -648,6 +648,91 @@ describe('Space purge', () => {
     expect(await purgedIn(space)).toEqual([{ doc, device: DEV_B, erased: true }]);
   });
 
+  it('a purge of a plan the space does not know is 404 unknown_plan, calls no room and stores nothing', async () => {
+    const space = spaceOf('purge-unknown');
+    const { a } = await twoDevices(space);
+    const doc = newDoc();
+    const purges = await runInDurableObject(space, (instance: Space) => vi.spyOn(instance.rooms, 'purge'));
+    expect(await space.purgePlan(a, doc)).toEqual({
+      ok: false,
+      status: 404,
+      error: 'unknown_plan',
+      message: 'The server does not know this plan yet. Let it sync, then delete it again.',
+    });
+    expect(purges).not.toHaveBeenCalled();
+    expect(await purgedIn(space)).toEqual([]);
+    expect(await alarmOf(space)).toBeNull();
+    const id = env.Room.idFromName(doc);
+    expect((await listDurableObjectIds(env.Room)).some((listed) => listed.equals(id))).toBe(false);
+    expect(await storedText(space)).not.toContain(doc);
+  });
+
+  it('a device purges a plan that only another device of the space joined', async () => {
+    const space = spaceOf('purge-other');
+    const { a, b } = await twoDevices(space);
+    const doc = newDoc();
+    const open = await synced(space, a, doc, DEV_A);
+    expect(await space.purgePlan(b, doc)).toEqual({ ok: true, value: { closed: 1 } });
+    expect(await open.closed).toEqual(PLAN_DELETED);
+    expect(await purgedIn(space)).toEqual([{ doc, device: DEV_B, erased: true }]);
+    expect(await space.purgePlan(b, doc)).toEqual({ ok: true, value: { closed: 0 } });
+  });
+
+  it('a purge arms the retry before it calls the room', async () => {
+    const space = spaceOf('purge-arm-first');
+    const { a, b } = await twoDevices(space);
+    const doc = newDoc();
+    value(await space.ticket(a, doc));
+    const seen: (number | null)[] = [];
+    await runInDurableObject(space, (instance: Space, state) => {
+      vi.spyOn(instance.rooms, 'purge').mockImplementation(async () => {
+        seen.push(await state.storage.getAlarm());
+        return 0;
+      });
+    });
+    const before = Date.now();
+    expect(await space.purgePlan(b, doc)).toEqual({ ok: true, value: { closed: 0 } });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBeGreaterThanOrEqual(before + 60_000);
+    expect(seen[0]).toBeLessThanOrEqual(Date.now() + 60_000);
+    expect(await purgedIn(space)).toEqual([{ doc, device: DEV_B, erased: true }]);
+  });
+
+  it('a pending purge keeps the alarm at a minute while an untold retry is backed off longer, and leaves the untold rows alone', async () => {
+    const space = spaceOf('purge-alarm-minimum');
+    const { a, b } = await twoDevices(space);
+    const kept = 'docK0000000';
+    const doc = newDoc();
+    value(await space.ticket(a, kept));
+    value(await space.ticket(b, doc));
+    await failCloseIn(space, kept);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
+    await [1, 2, 3].reduce<Promise<void>>(async (done) => {
+      await done;
+      await dueNow(space);
+      expect(await runDurableObjectAlarm(space)).toBe(true);
+    }, Promise.resolve());
+    const backedOff = await retryOf(space, DEV_A);
+    expect(backedOff?.delay).toBe(480_000);
+    let down = true;
+    await failPurgeIn(space, () => down);
+    const before = Date.now();
+    expect(await space.purgePlan(b, doc)).toEqual(PURGE_PENDING);
+    const armed = await alarmOf(space);
+    expect(armed).toBeGreaterThanOrEqual(before + 60_000);
+    expect(armed).toBeLessThanOrEqual(Date.now() + 60_000);
+    const closes = await runInDurableObject(space, (instance: Space) => vi.spyOn(instance.rooms, 'close'));
+    closes.mockClear();
+    down = false;
+    expect(await runDurableObjectAlarm(space)).toBe(true);
+    expect(await purgedIn(space)).toEqual([{ doc, device: DEV_B, erased: true }]);
+    expect(closes).not.toHaveBeenCalled();
+    expect(await untoldIn(space)).toEqual([`${DEV_A} ${kept}`]);
+    expect(await retryOf(space, DEV_A)).toEqual(backedOff);
+    expect(await alarmOf(space)).toBe(backedOff?.due);
+  });
+
   it('after a purge no stored value on the server holds the plan name or content', async () => {
     const space = spaceOf('purge-traces');
     const { a } = await twoDevices(space);
@@ -675,6 +760,7 @@ describe('Space purge', () => {
     const space = spaceOf('purge-cap');
     const { a, b } = await twoDevices(space);
     const doc = newDoc();
+    value(await space.ticket(b, doc));
     value(await space.purgePlan(b, doc));
     await runInDurableObject(space, (_space, state) => {
       Array.from({ length: 500 }, () => newDoc()).forEach((joined) =>

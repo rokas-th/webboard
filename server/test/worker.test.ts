@@ -366,6 +366,15 @@ describe('the worker', () => {
     await refused(await exports.default.fetch(upgrade('/parties/room/' + doc + '?ticket=' + encodeURIComponent(late))), 410, GONE);
   });
 
+  it('DELETE /plans/<doc> of a plan the space does not know is 404 unknown_plan and reaches no room', async () => {
+    const a = await enrol(newDevice(), 'Mac');
+    const doc = newDoc();
+    const unknown = { error: 'unknown_plan', message: 'The server does not know this plan yet. Let it sync, then delete it again.' };
+    await refused(await send('/plans/' + doc, { method: 'DELETE', token: a }), 404, unknown);
+    expect(await roomExists(doc)).toBe(false);
+    expect(await ticketFor(a, doc)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
   it('DELETE /plans/<doc> refuses unknown and removed devices and docs that are not plans', async () => {
     const devB = newDevice();
     const a = await enrol(newDevice(), 'Mac');

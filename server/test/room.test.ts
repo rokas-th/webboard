@@ -601,13 +601,31 @@ describe('Room purge', () => {
   it('closes an open socket with 4410 on its next message once the room is gone', async () => {
     const doc = 'purge-receive';
     const a = await join(doc, DEV_A);
+    const purged = await runInDurableObject(stubOf(doc), async (room: Room) => {
+      vi.spyOn(room, 'getConnections').mockReturnValueOnce([]);
+      return room.purge();
+    });
+    expect(purged).toBe(0);
+    actions(a).set('a1', { lbl: 'late' });
+    expect(await a.closed).toEqual(PLAN_DELETED);
+    expect(await tablesOf(doc)).toEqual(['gone']);
+  });
+
+  it('a live room reads the tombstone once per wake, not on every message', async () => {
+    const doc = 'purge-read-once';
+    const a = await join(doc, DEV_A);
+    actions(a).set('a1', { lbl: 'one' });
+    await until(async () => (await count(doc, 'updates')) === 1, 'a1 to be stored');
     await runInDurableObject(stubOf(doc), (_room, state) => {
       state.storage.sql.exec('CREATE TABLE gone (at INTEGER NOT NULL)');
       state.storage.sql.exec('INSERT INTO gone (at) VALUES (1)');
     });
-    actions(a).set('a1', { lbl: 'late' });
-    expect(await a.closed).toEqual(PLAN_DELETED);
-    expect(await count(doc, 'updates')).toBe(0);
+    actions(a).set('a2', { lbl: 'two' });
+    await until(async () => (await count(doc, 'updates')) === 2, 'a2 to be stored');
+    await closeAll(a);
+    await evictDurableObject(stubOf(doc));
+    const cold = await connectDoc(routed(doc, DEV_B));
+    expect(await cold.closed).toEqual(PLAN_DELETED);
   });
 
   it('an alarm on a purged room writes nothing', async () => {

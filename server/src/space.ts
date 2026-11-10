@@ -95,9 +95,9 @@ export class Space extends DurableObject<Env> {
     if (!purged.ok) {
       return purged;
     }
+    await this.arm();
     const erased = await this.erase(purged.value.device, doc);
     if (erased === null) {
-      await this.arm();
       return auth.PURGE_PENDING;
     }
     return { ok: true, value: { closed: erased } };

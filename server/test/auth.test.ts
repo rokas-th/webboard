@@ -434,17 +434,13 @@ describe('auth', () => {
       keepUntold(storage, T, DEV_A, ['docA0000000'], true);
       expect(await purgePlan(storage, T + 1, b.token, 'docA0000000')).toEqual({ ok: true, value: { device: DEV_B } });
       expect(await purgePlan(storage, T + 2, a.token, 'docA0000000')).toEqual({ ok: true, value: { device: DEV_A } });
-      expect(await purgePlan(storage, T + 3, a.token, 'docC0000000')).toEqual({ ok: true, value: { device: DEV_A } });
       expect(count(storage, 'joins')).toBe(1);
       expect(count(storage, 'tickets')).toBe(1);
       expect(count(storage, 'untold')).toBe(0);
-      expect(unerased(storage)).toEqual([
-        { doc: 'docA0000000', device: DEV_B },
-        { doc: 'docC0000000', device: DEV_A },
-      ]);
+      expect(unerased(storage)).toEqual([{ doc: 'docA0000000', device: DEV_B }]);
       markErased(storage, T + 4, 'docA0000000');
       markErased(storage, T + 5, 'docA0000000');
-      expect(unerased(storage)).toEqual([{ doc: 'docC0000000', device: DEV_A }]);
+      expect(unerased(storage)).toEqual([]);
       expect(int(storage.sql.exec("SELECT erased_at FROM purged WHERE doc = 'docA0000000'").one(), 'erased_at')).toBe(T + 4);
     });
   });
@@ -460,6 +456,27 @@ describe('auth', () => {
       value(await removeDevice(storage, T, a.token, DEV_B));
       expect(await purgePlan(storage, T, b.token, 'docA0000000')).toEqual(REVOKED);
       expect(count(storage, 'purged')).toBe(0);
+    });
+  });
+
+  it('a purge of a plan no device joined and nobody purged is 404 unknown_plan and stores nothing', async () => {
+    await inSpace('purge-unknown', async (storage) => {
+      const a = await enrolled(storage, DEV_A);
+      const b = await enrolled(storage, DEV_B);
+      value(await ticket(storage, T, a.token, 'docA0000000'));
+      const unknown = {
+        ok: false,
+        status: 404,
+        error: 'unknown_plan',
+        message: 'The server does not know this plan yet. Let it sync, then delete it again.',
+      };
+      expect(await purgePlan(storage, T, a.token, 'docC0000000')).toEqual(unknown);
+      expect(await purgePlan(storage, T, b.token, 'docC0000000')).toEqual(unknown);
+      expect(count(storage, 'purged')).toBe(0);
+      expect(count(storage, 'joins')).toBe(1);
+      expect(await purgePlan(storage, T + 1, b.token, 'docA0000000')).toEqual({ ok: true, value: { device: DEV_B } });
+      expect(await purgePlan(storage, T + 2, a.token, 'docA0000000')).toEqual({ ok: true, value: { device: DEV_A } });
+      expect(unerased(storage)).toEqual([{ doc: 'docA0000000', device: DEV_B }]);
     });
   });
 
