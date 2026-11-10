@@ -1,8 +1,7 @@
 import { memo } from "react";
 import { toDay, toIso, weekday, yearOf, type Day } from "../../domain/dates";
-import type { Zoom } from "../state";
 import { WEEKDAYS } from "./dayText";
-import type { Geometry } from "./geometry";
+import { DAY_TICKS_PPD, WEEK_TICKS_PPD, type Geometry } from "./geometry";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 
@@ -24,7 +23,7 @@ interface Month {
   m: number;
 }
 
-export const Scale = memo(function Scale(p: { geo: Geometry; zoom: Zoom; today: Day; missing: readonly number[] }) {
+export const Scale = memo(function Scale(p: { geo: Geometry; today: Day; missing: readonly number[] }) {
   const { geo } = p;
   const last = geo.origin + geo.days;
   const days = Array.from({ length: geo.days }, (_, i) => geo.origin + i);
@@ -59,7 +58,7 @@ export const Scale = memo(function Scale(p: { geo: Geometry; zoom: Zoom; today: 
             </div>
           );
         })}
-        {p.zoom === "W"
+        {geo.ppd >= DAY_TICKS_PPD
           ? days.map((d) => {
               const off = geo.cal.off(d);
               const cls = off !== null ? "tl-tick hol" : geo.cal.isWork(d) ? "tl-tick" : "tl-tick off";
@@ -73,7 +72,7 @@ export const Scale = memo(function Scale(p: { geo: Geometry; zoom: Zoom; today: 
               .filter((d) => weekday(d) === 1)
               .map((d) => (
                 <div key={d} className="tl-tick" style={{ left: geo.x(d), width: 7 * geo.ppd }}>
-                  {p.zoom === "M" ? `W${isoWeek(d)} · ${dateOf(d)}` : isoWeek(d)}
+                  {geo.ppd >= WEEK_TICKS_PPD ? `W${isoWeek(d)} · ${dateOf(d)}` : isoWeek(d)}
                 </div>
               ))}
         <div className="tl-today-label" style={{ left: tx }}>

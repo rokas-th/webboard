@@ -26,7 +26,7 @@ const sessions: PlanSession[] = [];
 const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
 const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
 const offsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
-const widths = { scroll: 1440, grid: 300 };
+const widths = { scroll: 1440, grid: 300, label: 0 };
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -38,6 +38,7 @@ beforeEach(() => {
   });
   widths.scroll = 1440;
   widths.grid = 300;
+  widths.label = 0;
   Object.defineProperty(HTMLElement.prototype, "clientWidth", {
     configurable: true,
     get(this: HTMLElement) {
@@ -47,7 +48,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
     configurable: true,
     get(this: HTMLElement) {
-      return this.classList.contains("tl-grid") ? widths.grid : 0;
+      return this.classList.contains("tl-grid") ? widths.grid : this.classList.contains("bar-label") ? widths.label : 0;
     },
   });
 });
@@ -1110,5 +1111,112 @@ describe("the render path", () => {
 
   it("has no elementFromPoint unless the test stubs it", () => {
     expect(() => document.elementFromPoint(0, 0)).toThrow("elementFromPoint is not stubbed in this test");
+  });
+});
+
+describe("fit zoom", () => {
+  const SEED: SeedItem[] = [
+    { id: "a", name: "A", start: "2026-12-01", dur: 2 },
+    { id: "b", name: "B", start: "2026-12-14", dur: 5 },
+    { id: "u", name: "u" },
+  ];
+  const FIRST = toDay("2026-12-01") - 7;
+  const fit = (): void => {
+    act(() => {
+      fireEvent.click(within(one(".seg-zoom")).getByRole("button", { name: "F" }));
+    });
+  };
+  const resized: (() => void)[] = [];
+  const watch = (): void => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          resized.push(cb);
+        }
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+  };
+  const resize = (scroll: number): void => {
+    widths.scroll = scroll;
+    act(() => resized.forEach((cb) => cb()));
+  };
+  const ticks = (): string[] => all(".tl-tick").map((e) => e.textContent ?? "");
+
+  beforeEach(() => {
+    resized.splice(0);
+  });
+
+  it("sits after W, M and Q, fits the plan's days to the visible chart and scrolls to a week before its first start", async () => {
+    widths.scroll = 300 + 640;
+    const t = await shown(SEED, { today: "2026-11-10" });
+    const buttons = within(one(".seg-zoom")).getAllByRole("button");
+    expect(buttons.map((b) => b.textContent)).toEqual(["W", "M", "Q", "F"]);
+    expect(buttons[3].title).toBe("Fit the whole plan");
+    fit();
+    expect(uiNow()[0].zoom).toBe("F");
+    const g = geometry(t.session.view(), "F", 640);
+    expect(g.ppd).toBe(20);
+    expect(barOf("a").style.left).toBe(`${g.x(toDay("2026-12-01"))}px`);
+    expect(barOf("b").style.width).toBe("100px");
+    expect(one(".tl-scroll").scrollLeft).toBe(g.x(FIRST));
+    expect(ticks().every((s) => /^W\d+ · \d+$/.test(s))).toBe(true);
+  });
+
+  it("recomputes when the chart resizes and picks the header by px a day", async () => {
+    watch();
+    widths.scroll = 300 + 640;
+    const t = await shown(SEED, { today: "2026-11-10" });
+    fit();
+    resize(300 + 1140);
+    const wide = geometry(t.session.view(), "F", 1140);
+    expect(wide.ppd).toBeCloseTo(35.625, 10);
+    expect(barOf("a").style.left).toBe(`${wide.x(toDay("2026-12-01"))}px`);
+    expect(one(".tl-scroll").scrollLeft).toBe(wide.x(FIRST));
+    expect(ticks().slice(0, 2)).toEqual(["M 2", "T 3"]);
+    resize(300 + 192);
+    const narrow = geometry(t.session.view(), "F", 192);
+    expect(narrow.ppd).toBe(6);
+    expect(barOf("a").style.left).toBe(`${narrow.x(toDay("2026-12-01"))}px`);
+    expect(ticks().every((s) => /^\d+$/.test(s))).toBe(true);
+    act(() => {
+      fireEvent.click(within(one(".seg-zoom")).getByRole("button", { name: "W" }));
+    });
+    resize(300 + 900);
+    expect(barOf("a").style.left).toBe(`${geometry(t.session.view(), "W").x(toDay("2026-12-01"))}px`);
+  });
+
+  it("hides the label of a bar narrower than it, at fit only", async () => {
+    widths.scroll = 300 + 640;
+    widths.label = 60;
+    await shown(SEED, { today: "2026-11-10" });
+    const label = (id: string): HTMLElement => {
+      const next = barOf(id).nextElementSibling;
+      if (!(next instanceof HTMLElement)) throw new Error(`no label after ${id}`);
+      return next;
+    };
+    expect([label("a").classList.contains("hidden"), label("b").classList.contains("hidden")]).toEqual([false, false]);
+    fit();
+    expect([label("a").classList.contains("hidden"), label("b").classList.contains("hidden")]).toEqual([true, false]);
+  });
+
+  it("schedules a tray chip at the fit day under the pointer", async () => {
+    widths.scroll = 300 + 640;
+    const t = await shown(SEED, { today: "2026-11-10" });
+    fit();
+    const apply = vi.spyOn(t.session, "apply");
+    const chart = one(".tl-chart");
+    vi.spyOn(chart, "getBoundingClientRect").mockReturnValue(rect(0));
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(chart);
+    const chip = one('[data-chip="u"]');
+    const g = geometry(t.session.view(), "F", 640);
+    expect(g.ppd).toBe(20);
+    pointer(chip, "down", 0);
+    pointer(chip, "move", 120);
+    pointer(chip, "up", 500);
+    expect(apply.mock.calls).toEqual([[{ t: "schedule", item: "u", set: { start: toIso(g.dayAt(500)) } }]]);
   });
 });

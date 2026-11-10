@@ -1,11 +1,11 @@
-import { memo, useEffect, useLayoutEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { q, workingDays } from "../../actions/copy";
 import { fmtShort, toDay, toIso, type Day } from "../../domain/dates";
 import { linkKey, type Item, type ItemId } from "../../domain/model";
 import { liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import type { SetUi, UiState, Zoom } from "../state";
-import { ROW, type Geometry } from "./geometry";
+import { pinched, ROW, WEEK_TICKS_PPD, type Geometry } from "./geometry";
 import type { Marks, Placed } from "./Grid";
 import { linkPath, type End } from "./linkPath";
 import { dayLabel } from "./dayText";
@@ -27,7 +27,6 @@ export interface TouchHost {
 
 const HIT_PX = 44;
 const HANDLE_INSIDE_PX = 14;
-const ZOOM_ORDER: readonly Zoom[] = ["Q", "M", "W"];
 
 export interface DropGhost {
   item: ItemId;
@@ -128,12 +127,6 @@ function touchHit(mounted: readonly Placed[], geo: Geometry, target: EventTarget
   return bar instanceof HTMLElement && bar.dataset.bar !== undefined ? { item: bar.dataset.bar, handle: "body" } : null;
 }
 
-const zoomed = (zoom: Zoom, step: 1 | -1): Zoom => {
-  const at = ZOOM_ORDER.indexOf(zoom);
-  if (at < 0) throw new Error(`Timeline: unknown zoom ${zoom}`);
-  return ZOOM_ORDER[Math.min(ZOOM_ORDER.length - 1, Math.max(0, at + step))];
-};
-
 const timer = (ms: number, fn: () => void): (() => void) => {
   const id = setTimeout(fn, ms);
   return () => clearTimeout(id);
@@ -161,7 +154,8 @@ function useTouch(p: ChartProps): {
     throw new Error("Timeline: a touch reset before the chart mounted");
   });
   const allowPickup = !p.readOnly;
-  const { setUi, zoom, touch } = p;
+  const { setUi, touch } = p;
+  const ppd = p.geo.ppd;
 
   const live = (): TouchGesture => {
     const g = gesture.current;
@@ -180,8 +174,8 @@ function useTouch(p: ChartProps): {
     handle.current = (events) =>
       events.forEach((ev) => {
         if (ev.k === "zoom") {
-          const next = zoomed(zoom, ev.step);
-          if (next !== zoom) setUi({ zoom: next });
+          const next = pinched(ppd, ev.step);
+          if (next !== null) setUi({ zoom: next });
         } else if (ev.k === "cancel") {
           picked.current = null;
           touch.clear();
@@ -276,7 +270,7 @@ function useTouch(p: ChartProps): {
   };
 }
 
-const Shading = memo(function Shading(p: { geo: Geometry; zoom: Zoom }) {
+const Shading = memo(function Shading(p: { geo: Geometry }) {
   const { geo } = p;
   return (
     <>
@@ -285,7 +279,7 @@ const Shading = memo(function Shading(p: { geo: Geometry; zoom: Zoom }) {
         if (off !== null) {
           return [<div key={d} className={off.origin === "closure" ? "tl-off closure" : "tl-off hol"} style={{ left: geo.x(d), width: geo.ppd }} title={off.name} />];
         }
-        if (geo.cal.isWork(d) || p.zoom === "Q") return [];
+        if (geo.cal.isWork(d) || geo.ppd < WEEK_TICKS_PPD) return [];
         return [<div key={d} className="tl-off" style={{ left: geo.x(d), width: geo.ppd }} />];
       })}
     </>
@@ -347,6 +341,22 @@ function titleOf(p: ChartProps, item: Item, start: Day, end: Day): string {
   }
   if (item.kind === "milestone") return `${item.name} · ${dayLabel(start)}`;
   return `${item.name} · ${fmt(start)} – ${fmt(end)} · ${workingDays(p.geo.cal.workBetween(start, end))}`;
+}
+
+function BarLabel(p: { left: number; top: number; bar: number; fit: boolean; children: ReactNode }) {
+  const label = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  const { bar, fit } = p;
+  useLayoutEffect(() => {
+    const el = label.current;
+    if (el === null) throw new Error("Timeline: no bar label to measure");
+    setNarrow(fit && bar < el.offsetWidth);
+  });
+  return (
+    <div ref={label} className={narrow ? "bar-label hidden" : "bar-label"} style={{ left: p.left, top: p.top }}>
+      {p.children}
+    </div>
+  );
 }
 
 function Bar(p: ChartProps & { placed: Placed; slip: ReadonlyMap<ItemId, number> | null }) {
@@ -421,11 +431,11 @@ function Bar(p: ChartProps & { placed: Placed; slip: ReadonlyMap<ItemId, number>
         {!p.readOnly && <span className="h r" data-h="r" />}
         {nub}
       </div>
-      <div className="bar-label" style={{ left: x + w + 22, top: y + 8 }}>
+      <BarLabel left={x + w + 22} top={y + 8} bar={w} fit={p.zoom === "F"}>
         {item.name}
         {meta !== "" && <span className="meta">{meta}</span>}
         {extra}
-      </div>
+      </BarLabel>
     </>
   );
 }
@@ -454,7 +464,7 @@ export function Chart(p: ChartProps) {
   const { root, handlers } = useTouch(p);
   return (
     <div className="tl-chart" ref={root} style={{ width: geo.width, height }} {...handlers}>
-      <Shading geo={geo} zoom={p.zoom} />
+      <Shading geo={geo} />
       {p.mounted.map((m) => (
         <div key={m.row.id} className={p.ui.selected === m.row.id ? "tl-rowline selected" : "tl-rowline"} style={{ top: m.index * ROW }} />
       ))}

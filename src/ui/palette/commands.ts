@@ -51,6 +51,7 @@ const ZOOMS: readonly (readonly [Zoom, string])[] = [
   ["W", "Week"],
   ["M", "Month"],
   ["Q", "Quarter"],
+  ["F", "Fit"],
 ];
 
 const STEPS: readonly number[] = [1, -1, 5, -5];

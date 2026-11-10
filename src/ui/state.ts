@@ -4,7 +4,8 @@ import type { PlanListing } from "../store/registry";
 import { toast } from "./common/Toast";
 
 export type ViewKind = "timeline" | "board" | "list";
-export type Zoom = "W" | "M" | "Q";
+export type FixedZoom = "W" | "M" | "Q";
+export type Zoom = FixedZoom | "F";
 
 export type SyncPane = "setup" | "join" | "pair" | "devices";
 
@@ -33,7 +34,7 @@ export const PLACE_KEY = "webboard.place";
 export const PLACE_UNREADABLE = "Saved view settings could not be read; they were reset.";
 
 const VIEWS: readonly string[] = ["timeline", "board", "list"];
-const ZOOMS: readonly string[] = ["W", "M", "Q"];
+const ZOOMS: readonly string[] = ["W", "M", "Q", "F"];
 
 const isView = (v: unknown): v is ViewKind => typeof v === "string" && VIEWS.includes(v);
 const isZoom = (v: unknown): v is Zoom => typeof v === "string" && ZOOMS.includes(v);

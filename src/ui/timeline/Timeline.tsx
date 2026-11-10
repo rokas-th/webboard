@@ -8,7 +8,7 @@ import { EMPTY_PLAN } from "../copy";
 import { useRun } from "../run";
 import { useUiValue } from "../state";
 import { Chart, itemOf, rowAt, type DropGhost, type Point, type TempLink, type TouchHost } from "./Chart";
-import { geometry, leadFor, ROW, type Geometry } from "./geometry";
+import { fitSpan, geometry, leadFor, ROW, type Geometry } from "./geometry";
 import { gestureIntent, isClick, startIntent } from "./gesture";
 import { Grid, type Marks, type Placed } from "./Grid";
 import { timelineRows, visibleRange } from "./rows";
@@ -42,7 +42,7 @@ const marksOf = (view: PlanView): Marks => {
   return { early, badLinks, dayoff };
 };
 
-const chartWidth = (scroller: HTMLElement): number => {
+export const chartWidth = (scroller: HTMLElement): number => {
   const grid = scroller.querySelector(".tl-grid");
   if (!(grid instanceof HTMLElement)) throw new Error("Timeline: no task column to lead past");
   return scroller.clientWidth - grid.offsetWidth;
@@ -100,7 +100,9 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   const view = usePlanView(p.session);
   const { ui, setUi } = useUiValue();
   const { run } = useRun(p.session);
-  const geo = useMemo(() => geometry(view, ui.zoom), [view, ui.zoom]);
+  const [width, setWidth] = useState(0);
+  const fitWidth = ui.zoom === "F" ? width : undefined;
+  const geo = useMemo(() => geometry(view, ui.zoom, fitWidth), [view, ui.zoom, fitWidth]);
   const rows = useMemo(() => timelineRows(view, ui.collapsed), [view, ui.collapsed]);
   const marks = useMemo(() => marksOf(view), [view]);
   const scroller = useRef<HTMLDivElement>(null);
@@ -117,15 +119,21 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el === null) throw new Error("Timeline: no scroller");
-    setHeight(el.clientHeight);
-    const observer = new ResizeObserver(() => setHeight(el.clientHeight));
+    const measure = (): void => {
+      setHeight(el.clientHeight);
+      if (!empty) setWidth(chartWidth(el));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [empty]);
 
   const today = toDay(view.today);
   const planId = view.plan.id;
   const opening = useMemo(() => openingDay(view, today), [view, today]);
+  const fitFirst = useMemo(() => fitSpan(view).first, [view]);
+  const fit = ui.zoom === "F";
 
   const scrollTo = (el: HTMLElement, left: number): void => {
     el.scrollLeft = Math.max(0, left);
@@ -139,13 +147,14 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     if (empty) return;
     const prev = place.current;
     const lead = leadIn(el);
-    if (prev === null || prev.plan !== planId) el.scrollLeft = Math.max(0, geo.x(opening) - lead);
+    if (prev === null || prev.plan !== planId) el.scrollLeft = Math.max(0, fit ? geo.x(fitFirst) : geo.x(opening) - lead);
+    else if (fit && (prev.origin !== geo.origin || prev.ppd !== geo.ppd)) el.scrollLeft = Math.max(0, geo.x(fitFirst));
     else if (prev.origin !== geo.origin || prev.ppd !== geo.ppd) {
       const day = prev.origin + (prev.left + lead) / prev.ppd;
       el.scrollLeft = Math.max(0, Math.round((day - geo.origin) * geo.ppd - lead));
     }
     place.current = { plan: planId, origin: geo.origin, ppd: geo.ppd, left: el.scrollLeft };
-  }, [planId, empty, geo, opening]);
+  }, [planId, empty, geo, opening, fit, fitFirst]);
 
   const index = useMemo(() => new Map(rows.map((r, i) => [r.id, i] as const)), [rows]);
 
@@ -347,7 +356,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
         <p className="tl-empty">{EMPTY_PLAN}</p>
       ) : (
         <div className="tl-canvas" style={{ width: `calc(var(--grid-w) + ${geo.width}px)` }}>
-          <Scale geo={geo} zoom={ui.zoom} today={today} missing={view.derived.missingYears} />
+          <Scale geo={geo} today={today} missing={view.derived.missingYears} />
           <div className="tl-body">
             <Grid mounted={mounted} count={rows.length} view={view} geo={geo} marks={marks} ui={ui} setUi={setUi} />
             <Chart

@@ -484,6 +484,10 @@
   line-height: 18px;
 }
 
+.bar-label.hidden {
+  visibility: hidden;
+}
+
 .bar-label .meta {
   color: var(--dim);
   margin-left: 8px;

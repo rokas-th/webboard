@@ -515,6 +515,20 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect(saved).toEqual({ plan: t.session.view().plan.id, view: "list", zoom: "W", collapsed: [] });
   });
 
+  it("reads and keeps a stored fit zoom", async () => {
+    const t = await made(MESA_SEED);
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, view: "timeline", zoom: "F", collapsed: [] }));
+    const { ui } = shellFor(t);
+    render(withSync(ui));
+    await settle();
+    expect(toastTexts()).toEqual([]);
+    const fit = screen.getByRole("button", { name: "F" });
+    expect([fit.getAttribute("aria-pressed"), fit.title]).toEqual(["true", "Fit the whole plan"]);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    const saved: unknown = JSON.parse(window.localStorage.getItem(PLACE_KEY) ?? "null");
+    expect(saved).toEqual({ plan: t.session.view().plan.id, view: "list", zoom: "F", collapsed: [] });
+  });
+
   it("does not toast a missing webboard.place", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);

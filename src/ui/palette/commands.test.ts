@@ -118,7 +118,7 @@ describe("commands()", () => {
     const h = harness(t, { selected: "a" }, ["p2"]);
     const all = ids(h.ctx);
     const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash", "today", "select-next", "select-prev"];
-    const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "about"];
+    const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", "zoom-F", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "about"];
     const goTo = ["g1", "a", "b", "one", "m", "u"].map((x) => `goto:${x}`);
     expect([...keyed, ...more, ...goTo].filter((x) => !all.includes(x))).toEqual([]);
     expect(all.filter((x) => x === "close-dialog" || x === "deselect")).toEqual([]);

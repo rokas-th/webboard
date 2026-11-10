@@ -7,6 +7,7 @@ import { useRun } from "../run";
 import { useUiValue } from "../state";
 import { geometry } from "../timeline/geometry";
 import { isClick } from "../timeline/gesture";
+import { chartWidth } from "../timeline/Timeline";
 
 interface ChipDrag {
   id: ItemId;
@@ -61,7 +62,9 @@ export function Tray(p: { session: PlanSession; readOnly: boolean }) {
     const hit = document.elementFromPoint(e.clientX, e.clientY);
     const chart = hit === null ? null : hit.closest(".tl-chart");
     if (chart === null) return;
-    const day = geometry(view, ui.zoom).dayAt(e.clientX - chart.getBoundingClientRect().left);
+    const scroller = chart.closest(".tl-scroll");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Tray: a chart outside the timeline scroller");
+    const day = geometry(view, ui.zoom, chartWidth(scroller)).dayAt(e.clientX - chart.getBoundingClientRect().left);
     run({ t: "schedule", item: d.id, set: { start: toIso(day) } });
   };
 

@@ -374,6 +374,18 @@ describe("touch on the timeline bars", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
+  it("a pinch out at fit zooms to the next fixed zoom wider than the fit", async () => {
+    await shown();
+    act(() => uiNow()[1]({ zoom: "F" }));
+    const y = rowY("Review") + 200;
+    touch(chart(), "down", 100, y, 1);
+    touch(chart(), "down", 200, y, 2);
+    touch(chart(), "move", 260, y, 2);
+    touch(chart(), "up", 260, y, 2);
+    touch(chart(), "up", 100, y, 1);
+    expect(uiNow()[0].zoom).toBe("Q");
+  });
+
   it("touchmove is prevented only during a pickup", async () => {
     const t = await shown();
     const y = rowY("Review");

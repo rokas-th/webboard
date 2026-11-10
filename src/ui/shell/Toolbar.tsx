@@ -9,7 +9,12 @@ const TABS: readonly (readonly [ViewKind, string])[] = [
   ["list", "List"],
 ];
 
-const ZOOMS: readonly Zoom[] = ["W", "M", "Q"];
+const ZOOMS: readonly (readonly [Zoom, string | undefined])[] = [
+  ["W", undefined],
+  ["M", undefined],
+  ["Q", undefined],
+  ["F", "Fit the whole plan"],
+];
 
 interface ToolbarProps {
   session: PlanSession | null;
@@ -43,10 +48,11 @@ function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState;
       </div>
       <span className="toolbar-spacer" />
       <div className="seg seg-zoom" aria-label="Zoom">
-        {ZOOMS.map((z) => (
+        {ZOOMS.map(([z, title]) => (
           <button
             key={z}
             type="button"
+            title={title}
             aria-pressed={p.ui.zoom === z}
             className={p.ui.zoom === z ? "active" : undefined}
             onClick={() => p.setUi({ zoom: z })}
