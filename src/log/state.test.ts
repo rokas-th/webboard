@@ -341,6 +341,17 @@ describe("LogState", () => {
     expect(log.valueWithout("missing-unit", new Set())).toBeUndefined();
   });
 
+  it("orders two ready actions as order() does, and refuses an unknown one", () => {
+    const log = logOf(act("a", [], [["x", 1]]), act("b", ["a"], [["x", 2]]), act("c", [], [["y", 1]], "d2"));
+    const order = log.order();
+    const pairs = order.flatMap((x) => order.filter((y) => y !== x).map((y) => [x, y] as const));
+    expect(pairs.map(([x, y]) => log.before(x, y))).toEqual(pairs.map(([x, y]) => order.indexOf(x) < order.indexOf(y)));
+    expect(log.before("a", "b")).toBe(true);
+    expect(log.before("b", "a")).toBe(false);
+    expect(() => log.before("nope", "a")).toThrow("Action nope is not ready");
+    expect(() => log.before("a", "nope")).toThrow("Action nope is not ready");
+  });
+
   it("reports a head action's units and itself", () => {
     const log = logOf(act("a", [], [["x", 1]]));
     const delta = log.add([act("b", ["a"], [["x", 2], ["y", 3]])]);

@@ -1587,6 +1587,7 @@ describe("the panel slot", () => {
       });
       expect(t.session.view().plan.items.get(x)?.trashed).toBe(true);
       expect(t.session.authorOf("e:" + x)).toBeNull();
+      expect(t.session.trashAuthorOf(x)).toEqual({ dev: "iphone", device: "iPhone" });
       expect(uiNow()[0].selected).toBeNull();
       expect(toastTexts()).toEqual(["“X” was moved to the Trash on iPhone. Restore it from the Trash."]);
     });

@@ -1173,9 +1173,9 @@ describe("trashAuthorOf", () => {
     expect(t.session.trashAuthorOf("A")).toEqual({ dev: "mac", device: "Mac" });
   });
 
-  it("throws when no action trashed the item", async () => {
+  it("throws for an item with no existence writer", async () => {
     const { t } = await two();
-    expect(() => t.session.trashAuthorOf("nope")).toThrow("Item nope is trashed but no action trashed it");
+    expect(() => t.session.trashAuthorOf("nope")).toThrow("Item nope has no existence writer");
   });
 });
 

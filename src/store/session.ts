@@ -377,23 +377,25 @@ export class PlanSession implements HolidayHost {
   authorOf(u: UnitKey): { dev: DeviceId; device: string } | null {
     const unit = this.log.unit(u);
     if (unit === undefined) return null;
-    const a = this.log.get(unit.from);
-    if (a === undefined) throw new Error(`Action ${unit.from} wrote ${u} but is not ready`);
-    return { dev: a.dev, device: deviceName(this.devices, a.dev) };
+    return this.authorNamed(unit.from, `Action ${unit.from} wrote ${u} but is not ready`);
   }
 
   trashAuthorOf(item: ItemId): { dev: DeviceId; device: string } {
     const live = this.authorOf(key.e(item));
     if (live !== null) return live;
-    const order = this.log.order();
-    const by = this.log
-      .writers(key.e(item))
+    const writers = this.log.writers(key.e(item));
+    if (writers.length === 0) throw new Error(`Item ${item} has no existence writer`);
+    const by = writers
       .map((w) => this.log.unit(key.a(w)))
       .flatMap((st) => (st !== undefined && st.value === false ? [st.from] : []))
-      .reduce<ActionId | null>((m, x) => (m === null || order.indexOf(x) > order.indexOf(m) ? x : m), null);
+      .reduce<ActionId | null>((m, x) => (m === null || this.log.before(m, x) ? x : m), null);
     if (by === null) throw new Error(`Item ${item} is trashed but no action trashed it`);
-    const a = this.log.get(by);
-    if (a === undefined) throw new Error(`Action ${by} trashed ${item} but is not ready`);
+    return this.authorNamed(by, `Action ${by} trashed ${item} but is not ready`);
+  }
+
+  private authorNamed(id: ActionId, notReady: string): { dev: DeviceId; device: string } {
+    const a = this.log.get(id);
+    if (a === undefined) throw new Error(notReady);
     return { dev: a.dev, device: deviceName(this.devices, a.dev) };
   }
 
