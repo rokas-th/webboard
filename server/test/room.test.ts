@@ -26,6 +26,13 @@ function stubOf(doc: string): DurableObjectStub<Room> {
   return env.Room.get(env.Room.idFromName(doc));
 }
 
+function routed(doc: string, device: string): () => Promise<Response> {
+  return () =>
+    stubOf(doc).fetch(
+      new Request('https://x/parties/room/' + doc, { headers: { Upgrade: 'websocket', 'x-partykit-namespace': 'room', [DEVICE_HEADER]: device } }),
+    );
+}
+
 interface RawSocket {
   ws: WebSocket;
   greeted: Promise<void>;
@@ -426,14 +433,53 @@ describe('Room', () => {
     await closeAll(a);
   });
 
-  it('refuses a socket without the device header', async () => {
+  it('refuses a socket without the device header with 4500, logging the reason and sending no stack trace', async () => {
     const doc = 'no-header';
+    const logged = vi.spyOn(console, 'error');
     const missing = await connectDoc(opener(doc, null));
-    expect((await missing.closed).code).toBe(1011);
-    expect(missing.errors.join('\n')).toContain(DEVICE_HEADER);
+    expect(await missing.closed).toEqual({ code: 4500, reason: 'Server error' });
+    expect(missing.errors).toEqual([]);
     const invalid = await connectDoc(opener(doc, 'short'));
-    expect((await invalid.closed).code).toBe(1011);
-    expect(invalid.errors.join('\n')).toContain(DEVICE_HEADER);
+    expect(await invalid.closed).toEqual({ code: 4500, reason: 'Server error' });
+    expect(invalid.errors).toEqual([]);
+    expect(
+      logged.mock.calls.filter(
+        (call) =>
+          String(call[0]).startsWith(`Room ${doc} failed while opening a connection`) &&
+          call.some((arg) => arg instanceof Error && arg.message.includes(DEVICE_HEADER)),
+      ),
+    ).toHaveLength(2);
+    logged.mockRestore();
+  });
+
+  it('closes with 4500 and sends no stack trace when the stored plan cannot be loaded, and loads once storage is sound', async () => {
+    const doc = 'load-fault';
+    const a = await join(doc, DEV_A);
+    actions(a).set('a1', { lbl: 'one' });
+    await until(async () => (await count(doc, 'updates')) === 1, 'a1 to be stored');
+    await closeAll(a);
+    await runInDurableObject(stubOf(doc), (_room, state) => {
+      state.storage.sql.exec("INSERT INTO updates (id, part, data) VALUES (99, 0, 'not a blob')");
+    });
+    await evictDurableObject(stubOf(doc));
+    const logged = vi.spyOn(console, 'error');
+    const c = await connectDoc(routed(doc, DEV_C));
+    expect(await c.closed).toEqual({ code: 4500, reason: 'Server error' });
+    expect(c.errors).toEqual([]);
+    expect(
+      logged.mock.calls.some(
+        (call) =>
+          String(call[0]).startsWith(`Room ${doc} failed while opening a connection`) &&
+          call.some((arg) => arg instanceof Error && arg.message === 'Storage holds a string where a BLOB belongs'),
+      ),
+    ).toBe(true);
+    logged.mockRestore();
+    await runInDurableObject(stubOf(doc), (_room, state) => {
+      state.storage.sql.exec('DELETE FROM updates WHERE id = 99');
+    });
+    const b = await join(doc, DEV_B);
+    expect(actions(b).get('a1')).toEqual({ lbl: 'one' });
+    await closeAll(b);
   });
 
   it('refuses a connect when the stored plan is over MAX_MESSAGE_BYTES with 4413', async () => {

@@ -405,6 +405,20 @@ async function live(status, body) {
   };
 }
 
+async function dropping() {
+  const requests = [];
+  const server = createServer((req) => {
+    requests.push(req.url);
+    req.socket.destroy();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${server.address().port}/releases/latest.json`,
+    requests,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+}
+
 async function published() {
   const p = await project();
   const r = release(p.root, "manifest", CURRENT, "--notes", "n");
@@ -494,9 +508,13 @@ test("check fails loudly when the live latest.json cannot be read or names no ve
   } finally {
     await odd.close();
   }
-  const gone = await live(200, "{}");
-  await gone.close();
-  failsWith(await releaseAsync(p.root, "check", "--live", gone.url), `could not read ${gone.url}: `);
+  const dropped = await dropping();
+  try {
+    failsWith(await releaseAsync(p.root, "check", "--live", dropped.url), `could not read ${dropped.url}: `);
+    assert.deepEqual(dropped.requests, ["/releases/latest.json"]);
+  } finally {
+    await dropped.close();
+  }
 });
 
 test("check takes one version at most, and no --notes", async () => {

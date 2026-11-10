@@ -391,6 +391,18 @@ describe("buildAction: refusals", () => {
     refusedWith(done, { t: "schedule", item: "Admin", set: { progress: 40 } }, "“Admin” is done. Mark it in progress to set its progress.");
   });
 
+  it("refuses only a long closure the action writes, so a 400-day one from the log does not block other calendar edits", () => {
+    const ctx = ctxFrom(replaced(CHAIN, [w("cc:Z", ["2026-01-01", "2027-02-04", "Sabbatical"])]));
+    const cal = ctx.view.plan.calendar;
+    expect(cal.closures.get("Z")).toEqual({ id: "Z", from: "2026-01-01", to: "2027-02-04", name: "Sabbatical" });
+    const fourDays = buildAction(ctx, { t: "calendar", next: { ...cal, workdays: [1, 2, 3, 4] } });
+    expect(units(fourDays).filter((u) => u.startsWith("c"))).toEqual(["cw"]);
+    const added = new Map([...cal.closures, ["Y", { id: "Y", from: "2026-12-24", to: "2026-12-31", name: "Offsite" }]]);
+    expect(units(buildAction(ctx, { t: "calendar", next: { ...cal, closures: added } })).filter((u) => u.startsWith("c"))).toEqual(["cc:Y"]);
+    refusedWith(ctx, { t: "calendar", next: { ...cal, closures: new Map([["Z", { id: "Z", from: "2026-01-01", to: "2027-02-04", name: "Leave" }]]) } }, "A closure can last at most 366 days.");
+    expect(writeOf(buildAction(ctx, { t: "calendar", next: { ...cal, closures: new Map() } }), "cc:Z").v).toBeNull();
+  });
+
   it("refuses edits on groups, trashed items and unscheduled items", () => {
     const ctx = groups();
     refusedWith(ctx, { t: "link", from: "S4", to: "R", type: "FS", lag: 0 }, "Groups take no dependencies; link the tasks inside them.");

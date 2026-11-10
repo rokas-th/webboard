@@ -42,6 +42,21 @@ function bytesOf(message: ArrayBuffer | ArrayBufferView): Uint8Array {
     : new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
 }
 
+function deviceOf(request: Request): string {
+  const device = request.headers.get(DEVICE_HEADER);
+  if (device === null || !DEVICE_ID.test(device)) {
+    throw new Error(`The ${DEVICE_HEADER} header is missing or not a device id`);
+  }
+  return device;
+}
+
+function closedSocket(code: number, reason: string): Response {
+  const pair = new WebSocketPair();
+  pair[1].accept();
+  pair[1].close(code, reason);
+  return new Response(null, { status: 101, webSocket: pair[0] });
+}
+
 function isEmptyUpdate(update: Uint8Array): boolean {
   return update.length === 2 && update[0] === 0 && update[1] === 0;
 }
@@ -74,6 +89,8 @@ export class Room extends YServer {
 
   stateBytes = 0;
 
+  private loaded = false;
+
   private tables(): void {
     const sql = this.ctx.storage.sql;
     sql.exec('CREATE TABLE IF NOT EXISTS snapshot (part INTEGER PRIMARY KEY, data BLOB NOT NULL)');
@@ -83,7 +100,24 @@ export class Room extends YServer {
     sql.exec('CREATE TABLE IF NOT EXISTS revoked (device TEXT PRIMARY KEY)');
   }
 
-  async onLoad(): Promise<undefined> {
+  async fetch(request: Request): Promise<Response> {
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+      return super.fetch(request);
+    }
+    try {
+      deviceOf(request);
+      this.load();
+    } catch (error) {
+      console.error(`Room ${this.name} failed while opening a connection:`, error);
+      return closedSocket(4500, 'Server error');
+    }
+    return super.fetch(request);
+  }
+
+  private load(): void {
+    if (this.loaded) {
+      return;
+    }
     this.tables();
     const sql = this.ctx.storage.sql;
     const snapshot = concat(sql.exec('SELECT data FROM snapshot ORDER BY part').toArray().map((row) => blob(row.data)));
@@ -96,6 +130,11 @@ export class Room extends YServer {
     }
     updates.forEach((update) => Y.applyUpdate(this.document, update));
     this.stateBytes = updates.reduce((sum, update) => sum + update.length, snapshot.length);
+    this.loaded = true;
+  }
+
+  async onLoad(): Promise<undefined> {
+    this.load();
     return undefined;
   }
 
@@ -209,11 +248,7 @@ export class Room extends YServer {
   }
 
   getConnectionTags(_conn: Connection, ctx: ConnectionContext): string[] {
-    const device = ctx.request.headers.get(DEVICE_HEADER);
-    if (device === null || !DEVICE_ID.test(device)) {
-      throw new Error(`The ${DEVICE_HEADER} header is missing or not a device id`);
-    }
-    return ['d:' + device];
+    return ['d:' + deviceOf(ctx.request)];
   }
 
   onConnect(conn: Connection, ctx: ConnectionContext): void {

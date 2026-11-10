@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { syncDevices, syncRemoveDevice, type DeviceEntry } from "../../services/ipc";
 import { toast } from "../common/Toast";
-import { usePaneCommand } from "./command";
+import { PaneFailures, usePaneCommand } from "./command";
 import { dayTime } from "./time";
 
 export function DevicesPane() {
@@ -14,13 +14,24 @@ export function DevicesPane() {
   }, []);
   const remove = (d: DeviceEntry): void =>
     cmd.run(async () => {
-      try {
-        await syncRemoveDevice(d.id);
-        toast(`${d.name} removed`);
-      } finally {
-        setAsking(null);
-        setDevices(await syncDevices());
-      }
+      const removal = await syncRemoveDevice(d.id).then(
+        () => {
+          toast(`${d.name} removed`);
+          return [];
+        },
+        (e: unknown) => [e],
+      );
+      setAsking(null);
+      const refresh = await syncDevices().then(
+        (list) => {
+          setDevices(list);
+          return [];
+        },
+        (e: unknown) => [e],
+      );
+      const failed = [...removal, ...refresh];
+      if (failed.length === 1) throw failed[0];
+      if (failed.length > 1) throw new PaneFailures(failed);
     });
   return (
     <div className="sync-form">
@@ -52,7 +63,11 @@ export function DevicesPane() {
           </div>
         </div>
       )}
-      {cmd.error !== null && <p className="sync-error bad">{cmd.error}</p>}
+      {cmd.errors.map((m, i) => (
+        <p key={i} className="sync-error bad">
+          {m}
+        </p>
+      ))}
     </div>
   );
 }

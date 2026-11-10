@@ -163,7 +163,6 @@ const checkedCalendar = (cal: Calendar): Calendar => {
     [...cal.closures].map(([id, c]): [string, Closure] => {
       if (c.name.trim() === "" || c.from === "") throw new Refused(refusal.closure);
       if (toDay(c.to) < toDay(c.from)) throw new Refused(refusal.closureOrder);
-      if (closureTooLong(c.from, c.to)) throw new Refused(refusal.closureLength);
       return [id, { ...c, name: normalizeName(c.name) }];
     }),
   );
@@ -171,6 +170,10 @@ const checkedCalendar = (cal: Calendar): Calendar => {
     [...cal.tuning].map(([date, t]): [IsoDate, Tuning] => [date, t.kind === "add" ? { kind: "add", name: normalizeName(t.name) } : t]),
   );
   return { ...cal, closures, tuning };
+};
+
+const refuseLongClosures = (cal: Calendar, written: (id: string) => boolean): void => {
+  if ([...cal.closures].some(([id, c]) => written(id) && closureTooLong(c.from, c.to))) throw new Refused(refusal.closureLength);
 };
 
 const linkOf = (plan: PlanState, k: string): Link => {
@@ -422,11 +425,14 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
     case "unlink":
       return removeLink(ctx, linkOf(plan, intent.link));
     case "calendar": {
-      const next = calendarUnits(checkedCalendar(intent.next));
+      const cal = checkedCalendar(intent.next);
+      const next = calendarUnits(cal);
       const base = calendarUnits(intent.base ?? plan.calendar);
       const writes = unique([...next.keys(), ...base.keys()])
         .filter((u) => !planRules.same(u, next.get(u) ?? null, base.get(u) ?? null))
         .map((u) => own(u, next.get(u) ?? null));
+      const written = new Set(writes.map((x) => x.u));
+      refuseLongClosures(cal, (id) => written.has(key.cc(id)));
       return {
         own: writes,
         ...none,
@@ -622,7 +628,9 @@ export function buildAction(ctx: Ctx, intent: Intent): Built {
 
 export function initialAction(a: { dev: DeviceId; ses: SessionId; now: number; name: string; calendar: Calendar }): Action {
   const name = normalizeName(a.name);
-  const w = [own(key.pn, codec.name.enc(name)), ...[...calendarUnits(checkedCalendar(a.calendar))].map(([u, v]) => own(u, v))];
+  const cal = checkedCalendar(a.calendar);
+  refuseLongClosures(cal, () => true);
+  const w = [own(key.pn, codec.name.enc(name)), ...[...calendarUnits(cal)].map(([u, v]) => own(u, v))];
   w.forEach(validateWrite);
   return { id: newId(), dev: a.dev, ses: a.ses, at: a.now, par: [], lbl: label.created(name), w };
 }

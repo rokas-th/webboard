@@ -8,7 +8,7 @@ import { parseKey } from "../plan/units";
 import { act } from "../test/act";
 import { ctxOf } from "../test/planCtx";
 import { buildAction } from "./build";
-import type { Built, Ctx } from "./intents";
+import { Refused, type Built, type Ctx } from "./intents";
 import { buildResolve, canPick, previewResolve, settleText, type ResolveOptions, type ResolvePreview } from "./resolve";
 import { buildRevert, buildUndo } from "./undo";
 
@@ -739,5 +739,45 @@ describe("an item created inside a group trashed apart (Ruling A-final)", () => 
     expect(after.view.plan.items.get("Y")?.trashed).toBe(true);
     expect(valueOf(after, "s:Y")).toEqual(sched("2026-11-25", 2));
     expect(after.view.choices).toEqual([]);
+  });
+});
+
+describe("a parent loop that only a resolution would close", () => {
+  const GROUPS: Write[] = [...item("G1", "group", "Design", null, "a0"), ...item("G2", "group", "Build", null, "a1")];
+
+  const looped = (): Ctx => {
+    const mac0 = ctxFrom(GROUPS);
+    const phone0 = ctxOf(mac0.log.fork(), "d2", TODAY);
+    const into = buildAction(mac0, { t: "place", item: "G1", parent: "G2", after: null });
+    const back = buildAction(phone0, { t: "place", item: "G2", parent: "G1", after: null });
+    return add(applied(mac0, into), back.action);
+  };
+
+  it("refuses a per-item pick that keeps each group inside the other, building nothing", () => {
+    const ctx = looped();
+    const c = only(ctx);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["p:G1", "p:G2"]);
+    const before = snapshot(ctx.log);
+    const pick = { side: sideKey(c, "Mac"), perUnit: new Map([["p:G2", sideKey(c, "iPhone")]]) };
+    let caught: unknown = null;
+    try {
+      buildResolve(ctx, c, pick, ON);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Refused);
+    expect(caught instanceof Error && caught.message).toBe("Keeping this would put “Design” inside itself. Keep the other side, or move one of the groups first.");
+    expect(snapshot(ctx.log)).toEqual(before);
+    expect(previewResolve(ctx, c, pick, ON).rows).toBeDefined();
+  });
+
+  it("keeps either side whole, which leaves no loop", () => {
+    const ctx = looped();
+    const c = only(ctx);
+    const mac = applied(ctx, buildResolve(ctx, c, { side: sideKey(c, "Mac") }, ON));
+    expect(mac.view.choices).toEqual([]);
+    expect(mac.view.plan.items.get("G1")?.place.parent).toBe("G2");
+    expect(mac.view.plan.items.get("G2")?.place.parent).toBeNull();
   });
 });

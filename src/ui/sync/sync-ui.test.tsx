@@ -523,6 +523,38 @@ describe("the sync panes", () => {
     expect(toasts()).toEqual([]);
   });
 
+  it("a failed removal whose refresh fails too shows both errors, the removal's first", async () => {
+    const internal = "Server answered 500 internal: The device was removed, but one of its open connections could not be closed; it stops syncing when that connection drops.";
+    const unreachable = "Could not reach https://webboard.rokass.org: connection reset.";
+    const list = [
+      { id: "dev-A", name: "Mac", createdAt: 0, lastSeenAt: NOW, current: true },
+      { id: "dev-I", name: "iPad", createdAt: 0, lastSeenAt: NOW, current: false },
+    ];
+    let listed = 0;
+    const w = await spaceWorld({
+      answers: {
+        sync_devices: () => {
+          listed += 1;
+          if (listed > 1) throw { code: "sync.unreachable", message: unreachable };
+          return list;
+        },
+        sync_remove_device: () => {
+          throw { code: "sync.http", message: internal };
+        },
+      },
+    });
+    const { f } = await mounted(w);
+    syncAll(f);
+    const p = await openPane("Devices");
+    await click(within(p).getByRole("button", { name: "Remove" }));
+    await click(within(pane("Devices")).getByRole("button", { name: "Remove device" }));
+    expect(calls("sync_remove_device")).toBe(1);
+    expect(calls("sync_devices")).toBe(2);
+    expect(within(pane("Devices")).queryByRole("button", { name: "Remove device" })).toBeNull();
+    expect(errorText(pane("Devices"))).toEqual([internal, unreachable]);
+    expect(toasts()).toEqual([]);
+  });
+
   it("removing asks first", async () => {
     const w = await spaceWorld({
       answers: {

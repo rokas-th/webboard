@@ -471,12 +471,21 @@ describe("kept lines for items that no longer project", () => {
     let ctx = on(ctxFrom(group), "d2");
     ctx = on(applied(ctx, buildAction(ctx, { t: "create", kind: "task", name: "Review", parent: "G", after: null, start: "2026-11-17", dur: 2 })), "d1");
     const u = buildUndo(ctx, "c");
-    expect(u.preview.kept).toEqual(["“Review” was placed inside it on iPhone — moved to the top level"]);
-    expect(u.toast).toBe("Undid: Added group “Sprint 4”. “Review” was placed inside it on iPhone — moved to the top level.");
+    expect(u.preview.kept).toEqual(["“Review” was placed inside it on the iPhone — moved to the top level"]);
+    expect(u.toast).toBe("Undid: Added group “Sprint 4”. “Review” was placed inside it on the iPhone — moved to the top level.");
     ctx = applied(ctx, u);
     const review = [...ctx.view.plan.items.values()].find((i) => i.name === "Review");
     expect(review?.place.parent).toBeNull();
     expect(ctx.view.plan.items.has("G")).toBe(false);
+  });
+
+  it("undoing a group's create that this device placed an item inside names the item without a device", () => {
+    const group = act("c", ["a0"], [w("e:G", { k: "group", t: false }), w("n:G", "Sprint 4"), w("p:G", [null, "a3"])], { dev: "d1", lbl: "Added group “Sprint 4”" });
+    let ctx = ctxFrom(group);
+    ctx = applied(ctx, buildAction(ctx, { t: "create", kind: "task", name: "Review", parent: "G", after: null, start: "2026-11-17", dur: 2 }));
+    const u = buildUndo(ctx, "c");
+    expect(u.preview.kept).toEqual(["“Review” was placed inside it — moved to the top level"]);
+    expect(u.toast).toBe("Undid: Added group “Sprint 4”. “Review” was placed inside it — moved to the top level.");
   });
 });
 

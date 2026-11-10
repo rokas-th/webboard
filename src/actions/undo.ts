@@ -71,12 +71,19 @@ const subjectOf = (log: LogState, plans: readonly PlanState[], w: Write): Subjec
   throw new Error(`No subject for ${w.u}`);
 };
 
-const fromDevice = (ctx: Ctx, log: LogState, u: UnitKey): string => {
+const liveWriter = (log: LogState, u: UnitKey): Action => {
   const st = log.unit(u);
   if (st === undefined) throw new Error(`Unit ${u} has no live value`);
   const by = log.get(st.from);
   if (by === undefined) throw new Error(`Action ${st.from} is not ready`);
-  return deviceName(ctx.devices, by.dev);
+  return by;
+};
+
+const fromDevice = (ctx: Ctx, log: LogState, u: UnitKey): string => deviceName(ctx.devices, liveWriter(log, u).dev);
+
+const placedBy = (ctx: Ctx, log: LogState, u: UnitKey): string => {
+  const dev = liveWriter(log, u).dev;
+  return dev === ctx.dev ? "" : ` on the ${deviceName(ctx.devices, dev)}`;
 };
 
 const trashedBy = (log: LogState, a: Action, item: ItemId): UnitKey | undefined => {
@@ -117,7 +124,7 @@ const keptLines = (ctx: Ctx, fork: LogState, after: PlanState, flipped: readonly
       if (st === undefined) return;
       const parent = decodeAs("place", u, st.value).parent;
       if (parent === null || !removed.has(parent)) return;
-      lines.set("i:" + it.id, `${q(it.name)} was placed inside it on ${fromDevice(ctx, fork, u)} — moved to the top level`);
+      lines.set("i:" + it.id, `${q(it.name)} was placed inside it${placedBy(ctx, fork, u)} — moved to the top level`);
     });
   return [...lines.values()];
 };

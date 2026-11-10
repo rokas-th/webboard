@@ -249,7 +249,13 @@ const cycles = (parentOf: ReadonlyMap<ItemId, ItemId | null>): ItemId[][] => {
   });
 };
 
-const placeLoops = (r: Reader): Found[] => {
+interface ParentLoop {
+  items: readonly ItemId[];
+  units: readonly UnitKey[];
+  parts: readonly ActionId[];
+}
+
+const parentLoops = (r: Reader): ParentLoop[] => {
   const parentOf = new Map(
     [...r.plan.items.keys()].flatMap((id): [ItemId, ItemId | null][] => {
       const u = key.p(id);
@@ -257,20 +263,24 @@ const placeLoops = (r: Reader): Found[] => {
       return st === undefined ? [] : [[id, parentIn(r.plan, decodeAs("place", u, st.value).parent)]];
     }),
   );
-  return cycles(parentOf).flatMap((loop): Found[] => {
+  return cycles(parentOf).map((loop): ParentLoop => {
     const froms = loop.map((y): [UnitKey, ActionId] => {
       const u = key.p(y);
       const st = r.log.unit(u);
       if (st === undefined) throw new Error(`Unit ${u} in a parent loop has no live value`);
       return [u, st.from];
     });
-    const parts = unique(froms.map(([, f]) => f));
+    return { items: loop, units: froms.map(([u]) => u), parts: unique(froms.map(([, f]) => f)) };
+  });
+};
+
+const placeLoops = (r: Reader): Found[] =>
+  parentLoops(r).flatMap(({ units, parts }): Found[] => {
     if (parts.length < 2) return [];
     const pairs = parts.flatMap((f, i) => parts.slice(i + 1).map((g) => [f, g]));
     const apart = pairs.filter(([f, g]) => r.concurrent(f, g));
-    return [{ units: froms.map(([u]) => u), parts, lists: apart.length > 0 ? apart : pairs, bound: [], deletions: [] }];
+    return [{ units, parts, lists: apart.length > 0 ? apart : pairs, bound: [], deletions: [] }];
   });
-};
 
 const grouped = (found: readonly Found[]): Found[] => {
   const root = found.map((_, i) => i);
@@ -445,6 +455,12 @@ export function choices(log: LogState, plan: PlanState, devices: ReadonlyMap<Dev
   return found
     .map((f) => build(r, f, devices))
     .sort((a, b) => r.at(a.sides[0].actions[0]) - r.at(b.sides[0].actions[0]));
+}
+
+export function silentLoops(log: LogState, plan: PlanState): readonly (readonly ItemId[])[] {
+  return parentLoops(new Reader(log, plan))
+    .filter((l) => l.parts.length < 2)
+    .map((l) => l.items);
 }
 
 export function heldItems(choices: readonly Choice[], plan: PlanState): ReadonlySet<ItemId> {

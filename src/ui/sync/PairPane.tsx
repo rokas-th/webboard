@@ -35,7 +35,11 @@ export function PairPane() {
           </button>
         </div>
       )}
-      {cmd.error !== null && <p className="sync-error bad">{cmd.error}</p>}
+      {cmd.errors.map((m, i) => (
+        <p key={i} className="sync-error bad">
+          {m}
+        </p>
+      ))}
     </div>
   );
 }

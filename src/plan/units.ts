@@ -1,4 +1,4 @@
-import { CLOSURE_TOO_LONG, closureTooLong, type HolidayDay, type HolidayKind, type HolidayYear, type RegionRef, type Tuning } from "../domain/calendar";
+import type { HolidayDay, HolidayKind, HolidayYear, RegionRef, Tuning } from "../domain/calendar";
 import { toDay, type IsoDate, type Weekday } from "../domain/dates";
 import type { BaselineId, Horizon, ItemId, ItemKind, LinkType, PlanState, Place, Schedule, Status } from "../domain/model";
 import type { ActionId, Cause, UnitKey, Write } from "../log/types";
@@ -261,7 +261,6 @@ const closureSpec: Spec<ClosureValue> = {
     const [from, to, name] = tuple(unit, v, 3);
     const c: ClosureValue = { from: date(unit, "from", from), to: date(unit, "to", to), name: nameRule(unit, "name", name) };
     if (toDay(c.from) > toDay(c.to)) throw fail(unit, "closure ends before it starts");
-    if (closureTooLong(c.from, c.to)) throw fail(unit, CLOSURE_TOO_LONG);
     return c;
   },
 };

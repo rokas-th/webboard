@@ -390,6 +390,7 @@ impl Local {
         let _guard = self.guard()?;
         let mut stored = match (self.read()?, only) {
             (Some(stored), Some(m)) if stored.space.space_id != m.space_id => return Ok(false),
+            (Some(stored), Some(_)) if stored.revoked => return Ok(true),
             (None, Some(_)) => return Ok(false),
             (None, None) => return Err(not_joined()),
             (Some(stored), _) => stored,
@@ -2053,6 +2054,49 @@ mod tests {
             f.tokens.get(OTHER).expect("get").as_deref(),
             Some("tok_OTHER")
         );
+    }
+
+    #[tokio::test]
+    async fn a_second_403_after_the_first_revoked_the_space_is_still_revoked() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        let path = f.dir.path().join("sync.json");
+        let server = f.url();
+        let tokens = f.tokens.clone();
+        let m = f
+            .server
+            .mock("POST", "/ticket")
+            .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+            .with_status(403)
+            .with_body_from_request(move |_| {
+                fs::write(
+                    &path,
+                    json!({ "server": server, "spaceId": SPACE, "deviceId": DEVICE, "deviceName": "Mac", "revoked": true })
+                        .to_string(),
+                )
+                .expect("write the first 403's revoked state");
+                tokens.delete(SPACE).expect("delete the token as the first 403 did");
+                json!({ "error": "revoked", "message": REVOKED })
+                    .to_string()
+                    .into_bytes()
+            })
+            .expect(1)
+            .create_async()
+            .await;
+        let client = f.client();
+        assert_eq!(
+            client.ticket("ix-sp000000000").await.map(|_| ()),
+            Err(err("sync.revoked", REVOKED))
+        );
+        m.assert_async().await;
+        assert_eq!(
+            client.status().await,
+            Ok(SyncStatus {
+                space: Some(f.space()),
+                revoked: true
+            })
+        );
+        assert_eq!(f.token(), None);
     }
 
     #[tokio::test]

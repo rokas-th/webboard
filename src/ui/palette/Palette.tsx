@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useModalFocus } from "../common/Dialog";
 import type { Command } from "./commands";
 
 const LIMIT = 40;
@@ -12,20 +13,12 @@ export function shownCommands(all: readonly Command[], query: string): Command[]
 export function Palette(p: { commands: readonly Command[]; onClose(): void }) {
   const [query, setQuery] = useState("");
   const [on, setOn] = useState(0);
-  const input = useRef<HTMLInputElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const shown = shownCommands(p.commands, query);
   const at = Math.min(on, Math.max(0, shown.length - 1));
 
-  useEffect(() => {
-    const el = input.current;
-    if (el === null) throw new Error("Palette rendered without its input");
-    const before = document.activeElement;
-    el.focus();
-    return () => {
-      if (before instanceof HTMLElement && before.isConnected) before.focus();
-    };
-  }, []);
+  useModalFocus(box, "Palette");
 
   useEffect(() => {
     const box = list.current;
@@ -64,9 +57,8 @@ export function Palette(p: { commands: readonly Command[]; onClose(): void }) {
         if (e.target === e.currentTarget) p.onClose();
       }}
     >
-      <div className="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div ref={box} className="palette" role="dialog" aria-modal="true" aria-label="Command palette">
         <input
-          ref={input}
           type="text"
           placeholder="Type a command or an item name"
           autoComplete="off"

@@ -123,7 +123,7 @@ const FILTERS = [{ name: "WebBoard plan", extensions: ["webboard"] }];
 
 const xpath = (c: Call): string | null => new Headers(c.options?.headers).get("x-path");
 const xname = (c: Call): string | null => new Headers(c.options?.headers).get("x-name");
-const xdoc =(c: Call): string | null => new Headers(c.options?.headers).get("x-doc");
+const xdoc = (c: Call): string | null => new Headers(c.options?.headers).get("x-doc");
 const callsOf = (from: number, cmd: string): Call[] => tauri.calls.slice(from).filter((c) => c.cmd === cmd);
 const appendsAfter = (from: number): Call[] => callsOf(from, "store_append");
 
@@ -360,6 +360,24 @@ describe("export on iOS", () => {
     await expect(exportPlan(session, "ios")).rejects.toBe(broken);
     expect(fileCalls(from)).toEqual(["file_stage", "file_unstage"]);
     expect(s.names()).toEqual([]);
+  });
+
+  it("names both failures, the dialog's first, when the dialog fails and the staged copy cannot be removed", async () => {
+    const reg = await registry();
+    const session = await reg.session(await reg.createPlan("Bridge"));
+    staging();
+    tauri.answers.file_unstage = () => {
+      throw { code: "file.io", message: "Could not remove /var/Documents/Bridge.webboard: Operation not permitted." };
+    };
+    const broken = new Error("the dialog broke");
+    vi.mocked(save).mockRejectedValue(broken);
+    const from = tauri.calls.length;
+    const failed = exportPlan(session, "ios");
+    await expect(failed).rejects.toThrow(
+      "the dialog broke (removing the staged copy afterwards failed too: Could not remove /var/Documents/Bridge.webboard: Operation not permitted.)",
+    );
+    await expect(failed).rejects.toMatchObject({ cause: broken, suppressed: { code: "file.io" } });
+    expect(fileCalls(from)).toEqual(["file_stage", "file_unstage"]);
   });
 
   it("shows a failure to remove the staged copy", async () => {

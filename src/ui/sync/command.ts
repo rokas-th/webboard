@@ -3,23 +3,38 @@ import { Refused } from "../../actions/intents";
 import { AppError } from "../../services/ipc";
 import { useSyncState } from "../../sync/SyncProvider";
 
-export function usePaneCommand(): { error: string | null; busy: boolean; run(work: () => Promise<void>): void } {
+const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+export class PaneFailures extends Error {
+  readonly failures: readonly unknown[];
+
+  constructor(failures: readonly unknown[]) {
+    super(failures.map(messageOf).join(" "));
+    this.name = "PaneFailures";
+    this.failures = failures;
+  }
+}
+
+const shown = (e: unknown): e is AppError | Refused => e instanceof AppError || e instanceof Refused;
+
+export function usePaneCommand(): { errors: readonly string[]; busy: boolean; run(work: () => Promise<void>): void } {
   const { manager } = useSyncState();
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<readonly string[]>([]);
   const [busy, setBusy] = useState(false);
   const run = (work: () => Promise<void>): void => {
     setBusy(true);
-    setError(null);
+    setErrors([]);
     void work()
       .then(
         () => undefined,
         (e: unknown) => {
-          if (!(e instanceof AppError || e instanceof Refused)) throw e;
-          setError(e.message);
-          if (e instanceof AppError && e.code === "sync.revoked") void manager.markRevoked();
+          const failures = e instanceof PaneFailures ? e.failures : [e];
+          if (!failures.every(shown)) throw e;
+          setErrors(failures.map((f) => f.message));
+          if (failures.some((f) => f instanceof AppError && f.code === "sync.revoked")) void manager.markRevoked();
         },
       )
       .finally(() => setBusy(false));
   };
-  return { error, busy, run };
+  return { errors, busy, run };
 }

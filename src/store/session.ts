@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import * as Y from "yjs";
 import { buildAction } from "../actions/build";
-import { deviceName, refusal } from "../actions/copy";
+import { deviceName } from "../actions/copy";
 import { Refused, type Built, type Ctx, type Intent, type Preview } from "../actions/intents";
 import { buildResolve, previewResolve, type Pick, type ResolveOptions, type ResolvePreview } from "../actions/resolve";
 import { buildRevert, buildUndo, OfferRefused, undoChanges, undoOffer, type Offer } from "../actions/undo";
@@ -259,14 +259,19 @@ export class PlanSession implements HolidayHost {
     }
   }
 
-  private liveTop(stack: readonly ActionId[]): ActionId | null {
-    return [...stack].reverse().find((id) => this.log.active(id)) ?? null;
+  private liveTop(stack: readonly ActionId[], live: (id: ActionId) => boolean = (id) => this.log.active(id)): ActionId | null {
+    return [...stack].reverse().find(live) ?? null;
   }
 
-  private prune(stack: ActionId[]): ActionId | null {
-    const top = this.liveTop(stack);
+  private prune(stack: ActionId[], live?: (id: ActionId) => boolean): ActionId | null {
+    const top = this.liveTop(stack, live);
     stack.length = top === null ? 0 : stack.lastIndexOf(top) + 1;
     return top;
+  }
+
+  private redoable(): (id: ActionId) => boolean {
+    const ctx = this.ctx();
+    return (id) => this.log.active(id) && (undoOffer(ctx, id) !== null || undoChanges(this.log, id));
   }
 
   private pushed(built: Built): Built {
@@ -322,10 +327,9 @@ export class PlanSession implements HolidayHost {
 
   redo(): Built | null {
     this.writable();
-    const target = this.prune(this.redoStack);
+    const target = this.prune(this.redoStack, this.redoable());
     if (target === null) return null;
     this.offerFor(target);
-    if (!undoChanges(this.log, target)) throw new Refused(refusal.nothing);
     const built = buildUndo(this.ctx(), target);
     return this.commit(built, () => {
       this.redoStack.pop();
@@ -338,8 +342,7 @@ export class PlanSession implements HolidayHost {
   }
 
   canRedo(): boolean {
-    const target = this.liveTop(this.redoStack);
-    return target !== null && (undoOffer(this.ctx(), target) !== null || undoChanges(this.log, target));
+    return this.liveTop(this.redoStack, this.redoable()) !== null;
   }
 
   revert(id: ActionId): Built {

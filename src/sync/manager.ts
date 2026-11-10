@@ -3,6 +3,7 @@ import type { ActionId, DeviceId } from "../log/types";
 import { notifyEach } from "../services/clock";
 import { AppError, syncMarkRevoked, syncStatus, syncTicket, type SpaceInfo } from "../services/ipc";
 import type { PersistedDoc } from "../store/persist";
+import { SPACE_PREFIX } from "../store/plan-id";
 import { readActions } from "../store/read-actions";
 import { RegistryClosed, type Registry } from "../store/registry";
 import type { PlanSession } from "../store/session";
@@ -66,7 +67,6 @@ const PRECEDENCE: readonly ErrorCode[] = [
 const rank = (c: ErrorCode): number => PRECEDENCE.indexOf(c);
 const LIMITED = rank("limited");
 
-const SPACE_PREFIX = "ix-";
 const isIndex = (doc: string): boolean => doc.startsWith(SPACE_PREFIX);
 const RESET_HINT = " Reset sync, then join with a code again.";
 const MAX_BACKOFF_MS = 30_000;

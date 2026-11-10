@@ -186,11 +186,10 @@ describe("codecs", () => {
     expect(() => validateWrite({ u: "cc:Z", v: ["2026-12-31", "2026-12-24", "X"], c: "own" })).toThrow("cc:Z: closure ends before it starts");
   });
 
-  it("accepts a closure of 366 days and refuses one of 367", () => {
+  it("reads a closure longer than 366 days, which only the build path refuses", () => {
     expect(closure.dec(["2026-12-24", "2027-12-24", "X"])).toEqual({ from: "2026-12-24", to: "2027-12-24", name: "X" });
-    expect(closure.dec(["2028-01-01", "2028-12-31", "X"])).toEqual({ from: "2028-01-01", to: "2028-12-31", name: "X" });
-    expect(() => closure.dec(["2026-12-24", "2027-12-25", "X"])).toThrow("cc: A closure can last at most 366 days.");
-    expect(() => validateWrite({ u: "cc:Z", v: ["2026-12-24", "3026-01-02", "X"], c: "own" })).toThrow("cc:Z: A closure can last at most 366 days.");
+    expect(closure.dec(["2026-12-24", "2027-12-25", "X"])).toEqual({ from: "2026-12-24", to: "2027-12-25", name: "X" });
+    expect(() => validateWrite({ u: "cc:Z", v: ["2026-01-01", "2027-02-04", "X"], c: "own" })).not.toThrow();
   });
 
   it("refuses an encode of a malformed value", () => {

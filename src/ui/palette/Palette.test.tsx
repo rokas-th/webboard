@@ -179,6 +179,22 @@ describe("opening the palette", () => {
     expect(document.activeElement).toBe(query());
   });
 
+  it("returns focus, when a dialog a palette command opened closes, to what had focus before the palette", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    const opener = button(panel(), "Change calendar…");
+    opener.focus();
+    press("k", { metaKey: true }, opener);
+    expect(document.activeElement).toBe(query());
+    type("About WebBoard");
+    press("Enter", {}, query());
+    const about = screen.getByRole("dialog", { name: "About WebBoard" });
+    expect(about.contains(document.activeElement)).toBe(true);
+    press("Escape", {}, about);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
   it("does nothing on ⌘K while another dialog is open, and the dialog keeps its draft", async () => {
     const t = await made(MESA_SEED);
     await shown(t);

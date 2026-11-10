@@ -122,6 +122,13 @@ describe("projectPlan", () => {
     expect(projectPlan("P", log)).toEqual(expected);
   });
 
+  it("projects a 400-day closure that an older build wrote to the log", () => {
+    const log = logOf(act("a0", [], [...plan0, w("cc:Z", ["2026-01-01", "2027-02-04", "Sabbatical"]), ...item("T", "task", "Spec", null, "a0", sched("2026-11-16"))]));
+    const plan = projectPlan("P", log);
+    expect(plan.calendar.closures).toEqual(new Map([["Z", { id: "Z", from: "2026-01-01", to: "2027-02-04", name: "Sabbatical" }]]));
+    expect(derive(plan, new Set(), "2026-11-09").missingYears).toEqual([]);
+  });
+
   it("throws PlanIncomplete before the plan name, holiday region and working week exist", () => {
     expect(() => projectPlan("P", new LogState(planRules))).toThrow(PlanIncomplete);
     expect(() => projectPlan("P", logOf(act("a0", [], [w("pn", "Plan"), w("cr", null)])))).toThrow(PlanIncomplete);

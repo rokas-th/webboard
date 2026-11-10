@@ -171,10 +171,10 @@ export class HolidayService {
       this.notify();
       throw e;
     }
-    if (changed.some((c) => c)) this.notify();
     started.forEach((y) => {
       void this.fetchMissing(plan, host, region, y);
     });
+    if (changed.some((c) => c)) this.notify();
   }
 
   async load(plan: PlanId, host: HolidayHost, year: number): Promise<void> {
@@ -188,8 +188,9 @@ export class HolidayService {
     }
     this.failures.delete(slot(regionKey(region), year));
     this.put(plan, { k: "loading", year });
+    const fetching = this.fetchMissing(plan, host, region, year);
     this.notify();
-    await this.fetchMissing(plan, host, region, year);
+    await fetching;
   }
 
   async refresh(plan: PlanId, host: HolidayHost): Promise<void> {

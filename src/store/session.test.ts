@@ -1119,7 +1119,7 @@ describe("PlanSession", () => {
     expect(s.canRedo()).toBe(true);
   });
 
-  it("a redo whose action another device reverted meanwhile is not offered and is refused, building nothing", async () => {
+  it("a redo whose action another device reverted meanwhile is skipped, building nothing", async () => {
     const e = env();
     const s = await open(e);
     const a = itemId(s, "A");
@@ -1134,12 +1134,33 @@ describe("PlanSession", () => {
     await settle(e);
     const before = appends();
     expect(s.canRedo()).toBe(false);
-    const err = thrown(() => s.redo());
-    expect(err).toBeInstanceOf(Refused);
-    expect(err instanceof Error && err.message).toBe("Nothing to change.");
+    expect(s.redo()).toBeNull();
     await settle(e);
     expect(appends()).toBe(before);
     expect(nameOf(s, a)).toBe("A");
+  });
+
+  it("a redo entry another device's revert made a no-op does not block the redo entry below it", async () => {
+    const e = env();
+    const s = await open(e);
+    const a = itemId(s, "A");
+    const b = itemId(s, "B");
+    const n = s.apply({ t: "rename", item: a, name: "North" }).action.id;
+    s.apply({ t: "rename", item: b, name: "South" });
+    const r = remoteOf(s);
+    expect(s.undo()?.action.lbl).toBe("Undid: Renamed “B” to “South”");
+    expect(s.undo()?.action.lbl).toBe("Undid: Renamed “A” to “North”");
+    expect([nameOf(s, a), nameOf(s, b)]).toEqual(["A", "B"]);
+    new PlanDoc(r).append(buildRevert(ctxOf(logOf(r), "dev-B", TODAY, DEVICES), n).action, []);
+    deliver(r, e);
+    await settle(e);
+    expect(s.view().choices).toEqual([]);
+    expect(s.canRedo()).toBe(true);
+    const redone = s.redo();
+    expect(redone?.action.lbl).toBe("Redid: Renamed “B” to “South”");
+    expect([nameOf(s, a), nameOf(s, b)]).toEqual(["A", "South"]);
+    expect(s.canRedo()).toBe(false);
+    expect(s.redo()).toBeNull();
   });
 
   it("usePlanView subscribes once per session", async () => {

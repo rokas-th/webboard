@@ -935,6 +935,44 @@ describe("subscribers", () => {
     expect(only(svc.notices(PLAN_ID)).k).toBe("ready");
   });
 
+  it("onMissing starts the fetch before a throwing subscriber hears of it, so no loading notice is left without a fetch", async () => {
+    resetTauri({ holidays_year: yearAnswer(() => ({ days: DAYS_2028 })) });
+    const svc = new HolidayService();
+    const { host } = stub(CH_ZH, [2028]);
+    const boom = new Error("strip broke");
+    let throws = true;
+    svc.subscribe(() => {
+      if (!throws) return;
+      throws = false;
+      throw boom;
+    });
+    const from = tauri.calls.length;
+    expect(() => svc.onMissing(PLAN_ID, host, [2028], "own")).toThrow(boom);
+    expect(yearCalls(from)).toBe(1);
+    expect(svc.notices(PLAN_ID)).toEqual([{ k: "loading", year: 2028 }]);
+    await flush();
+    expect(only(svc.notices(PLAN_ID)).k).toBe("ready");
+  });
+
+  it("load starts the fetch before a throwing subscriber hears of it, and rejects with the subscriber's error", async () => {
+    resetTauri({ holidays_year: yearAnswer(() => ({ days: DAYS_2028 })) });
+    const svc = new HolidayService();
+    const { host } = stub(CH_ZH, [2028]);
+    const boom = new Error("strip broke");
+    let throws = true;
+    svc.subscribe(() => {
+      if (!throws) return;
+      throws = false;
+      throw boom;
+    });
+    const from = tauri.calls.length;
+    const loading = svc.load(PLAN_ID, host, 2028);
+    expect(yearCalls(from)).toBe(1);
+    await expect(loading).rejects.toBe(boom);
+    await flush();
+    expect(only(svc.notices(PLAN_ID)).k).toBe("ready");
+  });
+
   it("throws from several subscribers are collected", () => {
     hold("holidays_year");
     const svc = new HolidayService();

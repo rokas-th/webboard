@@ -5,13 +5,13 @@ import type { ItemId, PlanState } from "../domain/model";
 import { newId } from "../log/ids";
 import type { LogState } from "../log/state";
 import type { Action, ActionId, UnitKey, Write } from "../log/types";
-import { heldItems, type Choice, type ChoiceSide } from "../plan/choices";
+import { heldItems, silentLoops, type Choice, type ChoiceSide } from "../plan/choices";
 import { applyWrites, cmp, liveLinks, projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { decodeAs, parseKey, validateWrite } from "../plan/units";
 import { previewOf, withDerived, type Derivation } from "./build";
-import { calendarSuffix, items, toastOf } from "./copy";
-import type { Built, Ctx, Preview } from "./intents";
+import { calendarSuffix, items, refusal, toastOf } from "./copy";
+import { Refused, type Built, type Ctx, type Preview } from "./intents";
 import { forkWith, subjectOf, unique } from "./settle";
 
 export { settleText } from "./settle";
@@ -157,6 +157,7 @@ const ownWrites = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): 
 interface Resolved {
   built: Built;
   after: PlanState;
+  fork: LogState;
 }
 
 const activityLabel = (ctx: Ctx, choice: Choice, side: ChoiceSide, w: readonly Write[]): string => {
@@ -196,16 +197,22 @@ const resolved = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): R
   const w = [...d.writes, ...activity];
   w.forEach(validateWrite);
   const draft = draftOf(ctx, choice, w);
-  const after = projectPlan(plan.id, forkWith(ctx.log, draft));
+  const fork = forkWith(ctx.log, draft);
+  const after = projectPlan(plan.id, fork);
   const preview = previewOf(ctx, after, d, []);
   const lbl = labelOf(ctx, choice, sideOf(choice, pick.side), w, after, preview);
   const moved = d.push?.moves.size ?? 0;
   const action: Action = { ...draft, lbl };
-  return { built: { action, newNotes: [], toast: toastOf(lbl, moved === 0 ? [] : [`${items(moved)} moved.`]), preview }, after };
+  return { built: { action, newNotes: [], toast: toastOf(lbl, moved === 0 ? [] : [`${items(moved)} moved.`]), preview }, after, fork };
 };
 
 export function buildResolve(ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): Built {
-  return resolved(ctx, choice, pick, opts).built;
+  const { built, after, fork } = resolved(ctx, choice, pick, opts);
+  const loop = silentLoops(fork, after)[0];
+  if (loop === undefined) return built;
+  const group = after.items.get(loop[0]);
+  if (group === undefined) throw new Error(`Item ${loop[0]} in a parent loop is not in the plan`);
+  throw new Refused(refusal.keptLoop(group.name));
 }
 
 const span = (dv: Derived, id: ItemId): { start: Day; end: Day } | null => {

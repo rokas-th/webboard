@@ -266,12 +266,15 @@ function snapshot(session: PlanSession): { body: Uint8Array; unreadable: number 
 async function exportStaged(session: PlanSession, defaultPath: string): Promise<Exported> {
   const { body, unreadable } = snapshot(session);
   const name = await call<string>("file_stage", body, { headers: { "x-name": encodeURIComponent(defaultPath) } });
-  try {
-    const path = await save({ defaultPath: name, filters: FILTERS });
-    return path === null ? null : { path, unreadable };
-  } finally {
-    await call<null>("file_unstage", { name });
-  }
+  const unstage = (): Promise<null> => call<null>("file_unstage", { name });
+  const path = await save({ defaultPath: name, filters: FILTERS }).catch(async (e: unknown): Promise<never> => {
+    await unstage().catch((u: unknown) => {
+      throw Object.assign(new Error(`${messageOf(e)} (removing the staged copy afterwards failed too: ${messageOf(u)})`), { cause: e, suppressed: u });
+    });
+    throw e;
+  });
+  await unstage();
+  return path === null ? null : { path, unreadable };
 }
 
 export async function exportPlan(session: PlanSession, platform: DeviceInfo["platform"]): Promise<Exported> {

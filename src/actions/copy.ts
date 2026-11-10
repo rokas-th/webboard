@@ -108,6 +108,7 @@ export const refusal = {
   trashed: (name: string): string => `${q(name)} is in the Trash. Restore it first.`,
   inside: (name: string, group: string): string => `${q(name)} is inside ${q(group)}, which is in the Trash. Restore ${q(group)} first.`,
   selfParent: "A group cannot go inside itself.",
+  keptLoop: (group: string): string => `Keeping this would put ${q(group)} inside itself. Keep the other side, or move one of the groups first.`,
   milestoneStatus: (name: string): string => `${q(name)} is done when its predecessors are done.`,
   lockedFix: (name: string, lock: "done" | "doing"): string =>
     `${q(name)} is ${STATUS[lock]}; done and in-progress items keep their dates. Shorten the lag or remove the link.`,

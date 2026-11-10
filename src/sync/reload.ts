@@ -1,9 +1,10 @@
 import type { PlanId } from "../domain/model";
+import { SPACE_PREFIX } from "../store/plan-id";
 import type { SyncState } from "./manager";
 
 export type SyncAction = "export" | "reset" | "retry";
 
-const isIndex = (doc: string): boolean => doc.startsWith("ix-");
+const isIndex = (doc: string): boolean => doc.startsWith(SPACE_PREFIX);
 
 export function canReload(s: SyncState): boolean {
   switch (s.kind) {
