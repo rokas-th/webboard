@@ -1,4 +1,4 @@
-import { env, listDurableObjectIds, runInDurableObject } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { exports } from 'cloudflare:workers';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomBase64url } from '../src/auth';
@@ -7,7 +7,7 @@ import { DEVICE_HEADER } from '../src/limits';
 import type { Room } from '../src/room';
 import type { Space } from '../src/space';
 import { connectDoc, type TestClient } from './client';
-import { newDoc } from './helpers';
+import { newDoc, roomExists } from './helpers';
 
 const ORIGIN = 'https://webboard.rokass.org';
 const SECRET = env.SETUP_SECRET;
@@ -94,11 +94,6 @@ function retryAfter(response: Response): number {
   const header = response.headers.get('Retry-After');
   expect(header).toEqual(expect.stringMatching(/^[0-9]+$/));
   return Number(header);
-}
-
-async function roomExists(doc: string): Promise<boolean> {
-  const id = env.Room.idFromName(doc);
-  return (await listDurableObjectIds(env.Room)).some((listed) => listed.equals(id));
 }
 
 async function enrol(device: string, name: string): Promise<string> {
@@ -356,8 +351,10 @@ describe('the worker', () => {
     const b = await enrol(devB, 'iPad');
     const doc = newDoc();
     const late = await ticketFor(a, doc);
+    expect(await roomExists(doc)).toBe(false);
     const purged = await send('/plans/' + doc, { method: 'DELETE', token: b });
     expect(purged.status).toBe(200);
+    expect(await roomExists(doc)).toBe(true);
     expect(await json(purged)).toEqual({ closed: 0 });
     const again = await send('/plans/' + doc, { method: 'DELETE', token: a });
     expect(again.status).toBe(200);

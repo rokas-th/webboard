@@ -39,9 +39,24 @@ export interface DeviceEntry {
   current: boolean;
 }
 
+interface PriorDevice {
+  name: string;
+  tokenHash: string;
+  lastSeenAt: number;
+  revokedAt: number | null;
+}
+
+export interface Prior {
+  device: PriorDevice | null;
+  untold: string[];
+  retry: { delay: number; due: number } | null;
+  code: string | null;
+}
+
 export interface Admission {
   enrolled: Enrolled;
   joins: string[];
+  prior: Prior;
 }
 
 const ATTEMPT_WINDOW_MS = 600_000;
@@ -240,6 +255,33 @@ function dropSettledRetries(sql: SqlStorage): void {
   sql.exec('DELETE FROM retry WHERE device NOT IN (SELECT device FROM untold)');
 }
 
+function priorDevice(sql: SqlStorage, deviceId: string): PriorDevice | null {
+  const rows = sql.exec('SELECT name, token_hash, last_seen_at, revoked_at FROM devices WHERE id = ?', deviceId).toArray();
+  if (rows.length === 0) {
+    return null;
+  }
+  const revokedAt = rows[0].revoked_at;
+  return {
+    name: text(rows[0], 'name'),
+    tokenHash: text(rows[0], 'token_hash'),
+    lastSeenAt: int(rows[0], 'last_seen_at'),
+    revokedAt: revokedAt === null ? null : int(rows[0], 'revoked_at'),
+  };
+}
+
+function priorOf(sql: SqlStorage, deviceId: string, code: string | null): Prior {
+  const retry = sql.exec('SELECT delay, due FROM retry WHERE device = ?', deviceId).toArray();
+  return {
+    device: priorDevice(sql, deviceId),
+    untold: sql
+      .exec('SELECT doc FROM untold WHERE device = ? ORDER BY doc', deviceId)
+      .toArray()
+      .map((row) => text(row, 'doc')),
+    retry: retry.length === 0 ? null : { delay: int(retry[0], 'delay'), due: int(retry[0], 'due') },
+    code,
+  };
+}
+
 function admit(
   sql: SqlStorage,
   spaceId: string,
@@ -248,7 +290,9 @@ function admit(
   token: string,
   tokenHash: string,
   now: number,
+  code: string | null,
 ): Admission {
+  const prior = priorOf(sql, deviceId, code);
   sql.exec(
     'INSERT INTO devices (id, name, token_hash, created_at, last_seen_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL) ON CONFLICT (id) DO UPDATE SET name = excluded.name, token_hash = excluded.token_hash, last_seen_at = excluded.last_seen_at, revoked_at = NULL',
     deviceId,
@@ -259,7 +303,38 @@ function admit(
   );
   sql.exec('DELETE FROM untold WHERE device = ?', deviceId);
   dropSettledRetries(sql);
-  return { enrolled: { spaceId, deviceId, token }, joins: joinsOf(sql, deviceId) };
+  return { enrolled: { spaceId, deviceId, token }, joins: joinsOf(sql, deviceId), prior };
+}
+
+export function unadmit(storage: DurableObjectStorage, now: number, deviceId: string, prior: Prior, restored: readonly string[]): void {
+  inTransaction(storage, (sql) => {
+    const { device } = prior;
+    if (device === null) {
+      sql.exec('DELETE FROM devices WHERE id = ?', deviceId);
+    } else {
+      sql.exec(
+        'UPDATE devices SET name = ?, token_hash = ?, last_seen_at = ?, revoked_at = ? WHERE id = ?',
+        device.name,
+        device.tokenHash,
+        device.lastSeenAt,
+        device.revokedAt,
+        deviceId,
+      );
+    }
+    const joined = new Set(joinsOf(sql, deviceId));
+    const reclose = device !== null && device.revokedAt !== null ? restored : [];
+    const untold = [...new Set([...prior.untold, ...reclose])].filter((doc) => joined.has(doc));
+    sql.exec('DELETE FROM untold WHERE device = ?', deviceId);
+    untold.forEach((doc) => sql.exec('INSERT INTO untold (device, doc) VALUES (?, ?)', deviceId, doc));
+    sql.exec('DELETE FROM retry WHERE device = ?', deviceId);
+    const retry = prior.retry ?? { delay: UNTOLD_FIRST_RETRY_MS, due: now + UNTOLD_FIRST_RETRY_MS };
+    if (untold.length > 0) {
+      sql.exec('INSERT INTO retry (device, delay, due) VALUES (?, ?, ?)', deviceId, retry.delay, retry.due);
+    }
+    if (prior.code !== null) {
+      sql.exec('UPDATE codes SET used_at = NULL WHERE hash = ?', prior.code);
+    }
+  });
 }
 
 export async function enrol(
@@ -295,7 +370,7 @@ export async function enrol(
     if (existing === null) {
       sql.exec("INSERT INTO meta (key, value) VALUES ('spaceId', ?)", spaceId);
     }
-    return ok(admit(sql, spaceId, deviceId, deviceName, token, tokenHash, now));
+    return ok(admit(sql, spaceId, deviceId, deviceName, token, tokenHash, now, null));
   });
 }
 
@@ -355,7 +430,7 @@ export async function claim(
       .toArray();
     if (found.length > 0) {
       sql.exec('UPDATE codes SET used_at = ? WHERE hash = ?', now, codeHash);
-      return ok(admit(sql, requireSpaceId(sql), deviceId, deviceName, token, tokenHash, now));
+      return ok(admit(sql, requireSpaceId(sql), deviceId, deviceName, token, tokenHash, now, codeHash));
     }
     const waits = [
       retryAfter(sql, ipScope, MAX_CLAIM_FAILURES_PER_IP, now),

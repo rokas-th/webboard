@@ -1,11 +1,11 @@
-import { env, listDurableObjectIds, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
+import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { getServerByName } from 'partyserver';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEVICE_HEADER } from '../src/limits';
 import type { Room } from '../src/room';
 import type { Space } from '../src/space';
 import { connectDoc, type TestClient } from './client';
-import { newDoc, value } from './helpers';
+import { newDoc, roomExists, value } from './helpers';
 
 const SECRET = env.SETUP_SECRET;
 const DEV_A = 'devA0000000';
@@ -27,7 +27,7 @@ function restoreFailed(untold: number): unknown {
     ok: false,
     status: 500,
     error: 'internal',
-    message: `This device joined, but ${plans} not told to let it connect again. Join again.`,
+    message: `This device did not join: ${plans} not told to let it connect again. Join again.`,
   };
 }
 const REMOVED = { code: 4403, reason: 'Device removed' };
@@ -308,7 +308,7 @@ describe('Space', () => {
     await closeAll(middle);
   });
 
-  it('an enrolment that cannot restore every room answers 500 and restores the rest', async () => {
+  it('an enrolment that cannot restore every room answers 500 and leaves the device removed', async () => {
     const space = spaceOf('restore-enrol');
     const { a, b } = await twoDevices(space);
     value(await space.ticket(a, 'docC0000000'));
@@ -316,13 +316,26 @@ describe('Space', () => {
     value(await space.removeDevice(b, DEV_A));
     await failRestoreIn(space, 'docX0000000');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const before = Date.now();
     expect(await space.enrol(SECRET, DEV_A, 'iPad', '1.1.1.1')).toEqual(restoreFailed(1));
     expect(logged.mock.calls).toEqual([roomDown('restoreDevice', 'docX0000000')]);
-    expect(await revokedIn('docC0000000', DEV_A)).toBe(false);
+    expect(await space.ticket(a, 'docC0000000')).toMatchObject({ ok: false, status: 403, error: 'revoked' });
+    expect(value(await space.devices(b)).devices.map((d) => d.id)).toEqual([DEV_B]);
+    expect(await untoldIn(space)).toEqual([`${DEV_A} docC0000000`]);
+    expect(await alarmOf(space)).toBeGreaterThanOrEqual(before + 60_000);
+    vi.restoreAllMocks();
+    await dueNow(space);
+    expect(await runDurableObjectAlarm(space)).toBe(true);
+    expect(await revokedIn('docC0000000', DEV_A)).toBe(true);
     expect(await revokedIn('docX0000000', DEV_A)).toBe(true);
+    expect(await untoldIn(space)).toEqual([]);
+    const again = value(await space.enrol(SECRET, DEV_A, 'iPad', '1.1.1.1'));
+    expect(await revokedIn('docC0000000', DEV_A)).toBe(false);
+    expect(await revokedIn('docX0000000', DEV_A)).toBe(false);
+    value(await space.ticket(again.token, 'docX0000000'));
   });
 
-  it('a claim that cannot restore every room answers 500 and restores the rest', async () => {
+  it('a claim that cannot restore every room answers 500, leaves the code unused and counts no failure', async () => {
     const space = spaceOf('restore-claim');
     const { a, b } = await twoDevices(space);
     value(await space.ticket(a, 'docD0000000'));
@@ -333,8 +346,41 @@ describe('Space', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(await space.claim(code, DEV_A, 'iPad', '1.1.1.1')).toEqual(restoreFailed(1));
     expect(logged.mock.calls).toEqual([roomDown('restoreDevice', 'docW0000000')]);
-    expect(await revokedIn('docD0000000', DEV_A)).toBe(false);
-    expect(await revokedIn('docW0000000', DEV_A)).toBe(true);
+    expect(await space.ticket(a, 'docD0000000')).toMatchObject({ ok: false, status: 403, error: 'revoked' });
+    vi.restoreAllMocks();
+    const again = value(await space.claim(code, DEV_A, 'iPad', '1.1.1.1'));
+    expect(await runInDurableObject(space, (_space, state) => state.storage.sql.exec('SELECT COUNT(*) AS n FROM attempts').one().n)).toBe(0);
+    expect(await revokedIn('docW0000000', DEV_A)).toBe(false);
+    value(await space.ticket(again.token, 'docW0000000'));
+  });
+
+  it('a syncing device whose join cannot restore every room keeps its token', async () => {
+    const space = spaceOf('restore-syncing');
+    const { a } = await twoDevices(space);
+    value(await space.ticket(a, 'docJ0000000'));
+    await failRestoreIn(space, 'docJ0000000');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await space.enrol(SECRET, DEV_A, 'Renamed', '1.1.1.1')).toEqual(restoreFailed(1));
+    value(await space.ticket(a, 'docJ0000000'));
+    expect(value(await space.devices(a)).devices.find((d) => d.id === DEV_A)).toMatchObject({ name: 'iPad', current: true });
+    expect(await untoldIn(space)).toEqual([]);
+    expect(await retryOf(space, DEV_A)).toBeNull();
+  });
+
+  it('a removed device whose join cannot restore every room keeps its earlier untold plans and their wait', async () => {
+    const space = spaceOf('restore-untold');
+    const { a, b } = await twoDevices(space);
+    value(await space.ticket(a, 'docG0000000'));
+    value(await space.ticket(a, 'docH0000000'));
+    await failCloseIn(space, 'docG0000000');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
+    const wait = await retryOf(space, DEV_A);
+    expect(wait).not.toBeNull();
+    await failRestoreIn(space, 'docH0000000');
+    expect(await space.enrol(SECRET, DEV_A, 'iPad', '1.1.1.1')).toEqual(restoreFailed(1));
+    expect(await untoldIn(space)).toEqual([`${DEV_A} docG0000000`]);
+    expect(await retryOf(space, DEV_A)).toEqual(wait);
   });
 
   it('removing a device tells its plans in sequential chunks of at most 50', async () => {
@@ -662,8 +708,7 @@ describe('Space purge', () => {
     expect(purges).not.toHaveBeenCalled();
     expect(await purgedIn(space)).toEqual([]);
     expect(await alarmOf(space)).toBeNull();
-    const id = env.Room.idFromName(doc);
-    expect((await listDurableObjectIds(env.Room)).some((listed) => listed.equals(id))).toBe(false);
+    expect(await roomExists(doc)).toBe(false);
     expect((await storedText(space)).filter((cell) => cell.includes(doc))).toEqual([]);
   });
 

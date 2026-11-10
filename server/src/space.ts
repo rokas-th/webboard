@@ -26,7 +26,7 @@ function roomRestoreFailed(untold: number): Failure {
     ok: false,
     status: 500,
     error: 'internal',
-    message: `This device joined, but ${plans} not told to let it connect again. Join again.`,
+    message: `This device did not join: ${plans} not told to let it connect again. Join again.`,
   };
 }
 
@@ -167,10 +167,16 @@ export class Space extends DurableObject<Env> {
     if (!admitted.ok) {
       return admitted;
     }
-    const { enrolled, joins } = admitted.value;
+    const { enrolled, joins, prior } = admitted.value;
     const settled = await this.inChunks(joins, (doc) => this.rooms.restore(doc, enrolled.deviceId));
     const untold = this.logFailures('restoreDevice', enrolled.deviceId, joins, settled);
-    return untold > 0 ? roomRestoreFailed(untold) : { ok: true, value: enrolled };
+    if (untold === 0) {
+      return { ok: true, value: enrolled };
+    }
+    const restored = joins.filter((_doc, index) => settled[index].status === 'fulfilled');
+    auth.unadmit(this.ctx.storage, Date.now(), enrolled.deviceId, prior, restored);
+    await this.arm();
+    return roomRestoreFailed(untold);
   }
 
   private logFailures(call: string, deviceId: string, docs: readonly string[], settled: readonly PromiseSettledResult<unknown>[]): number {
