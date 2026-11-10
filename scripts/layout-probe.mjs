@@ -75,6 +75,7 @@ const style = (selector, prop, value) => ({ style: [selector, prop, value] });
 const valued = (selector, text) => ({ valued: [selector, text] });
 const ellipsed = (selector) => ({ ellipsed: selector });
 const within_ = (selector, box, n) => ({ within: [selector, box, n] });
+const fitLabels = () => ({ fitLabels: true });
 const raise = (message) => ({ raise: message });
 
 const VIEWS = [
@@ -131,6 +132,7 @@ function states() {
       actions: [viewExpect(place.view), tap(names, PICKED), expect(".slot-panel .panel .kind", "TASK")],
     });
   });
+  add("fit/labels", "mesa", { place: { view: "timeline", zoom: "F" }, actions: [viewExpect("timeline"), fitLabels()] });
   add("scale", "scale", { actions: [expect(".tl-row .name", "WS01 task 01"), valued(".plan-head h1 input", "Scale: 1,000 items")] });
   VIEWS.forEach(([slug, place]) =>
     add(`long-names/${slug}`, "long-names", {
@@ -495,7 +497,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -1336,6 +1338,23 @@ window.__probeAct = function (a) {
     if (!fields.some(function (f) { return f.value === a.valued[1]; })) {
       return { fail: "no " + a.valued[0] + " holding " + JSON.stringify(a.valued[1]) + " (have: " + fields.slice(0, 6).map(function (f) { return JSON.stringify(String(f.value).slice(0, 40)); }).join(" | ") + ")" };
     }
+    return { ok: true };
+  }
+  if (a.fitLabels !== undefined) {
+    var pairs = Array.prototype.slice.call(document.querySelectorAll(".tl-chart .bar[data-bar]")).map(function (bar) {
+      var label = bar.nextElementSibling;
+      return { bar: bar, label: label !== null && label.classList.contains("bar-label") ? label : null };
+    });
+    var unpaired = pairs.filter(function (pr) { return pr.label === null; });
+    if (unpaired.length > 0) return { fail: unpaired.length + " task bars have no .bar-label after them" };
+    var narrowOnes = pairs.filter(function (pr) { return pr.bar.offsetWidth < pr.label.offsetWidth; });
+    var wideOnes = pairs.filter(function (pr) { return pr.bar.offsetWidth >= pr.label.offsetWidth; });
+    if (narrowOnes.length === 0) return { fail: "the Fit zoom shows no task bar narrower than its label, so the rule is not tested" };
+    var visible = function (el) { return getComputedStyle(el).visibility !== "hidden"; };
+    var shownNarrow = narrowOnes.filter(function (pr) { return visible(pr.label); });
+    var hiddenWide = wideOnes.filter(function (pr) { return !visible(pr.label); });
+    if (shownNarrow.length > 0) return { fail: shownNarrow.length + " task bars narrower than their label still show it, first " + shownNarrow[0].bar.getAttribute("data-bar") + " (" + shownNarrow[0].bar.offsetWidth + " < " + shownNarrow[0].label.offsetWidth + " px)" };
+    if (hiddenWide.length > 0) return { fail: hiddenWide.length + " task bars as wide as their label hide it, first " + hiddenWide[0].bar.getAttribute("data-bar") };
     return { ok: true };
   }
   if (a.within !== undefined) {
