@@ -558,6 +558,64 @@ function spaceIndex(plans) {
   return log.doc();
 }
 
+export const CONVERTED_FILE = "Probe plan 20260901.gantt";
+
+const ganttTask = (id, name, start, end, dur, extra = {}) => ({
+  TaskID: id,
+  TaskName: name,
+  StartDate: `${start}T06:00:00.000Z`,
+  EndDate: `${end}T15:00:00.000Z`,
+  Duration: dur,
+  DurationUnit: "day",
+  Progress: 0,
+  Predecessor: "",
+  resources: [],
+  color: "#3366ff",
+  info: "",
+  subtasks: [],
+  ...extra,
+});
+
+const GANTT_SOURCE = {
+  data: [
+    ganttTask(1, "Phase", "2026-09-07", "2026-09-18", 10, {
+      Predecessor: null,
+      color: "#999999",
+      subtasks: [
+        ganttTask(2, "Survey", "2026-09-07", "2026-09-11", 5, { Progress: 100, info: "<p>Site &amp; access</p>" }),
+        ganttTask(3, "Build", "2026-09-14", "2026-09-18", 5, { Progress: 40, Predecessor: "2FS" }),
+        ganttTask(4, "Handover", "2026-09-18", "2026-09-18", 0, { Predecessor: "3FF" }),
+      ],
+    }),
+  ],
+  resources: [],
+  projectStartDate: null,
+  projectEndDate: null,
+  advanced: {
+    timezone: "Europe/Zurich",
+    timezoneOffset: -60,
+    dependencyConflict: "Add Offset to Dependency",
+    workWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+    workTime: [
+      { from: 8, to: 12 },
+      { from: 13, to: 17 },
+    ],
+    holidays: [],
+  },
+};
+
+function converted() {
+  const f = fixtureOf([]);
+  return {
+    ...f,
+    ipc: {
+      ...f.ipc,
+      "plugin:dialog|open": `/probe/${CONVERTED_FILE}`,
+      file_read: { __bytes: Buffer.from(JSON.stringify(GANTT_SOURCE)).toString("base64") },
+    },
+  };
+}
+
 function syncLocal() {
   const space = mesa(mesaLog("mesaS"));
   const f = fixtureOf([
@@ -605,6 +663,7 @@ export function buildFixtures() {
     "sync-dialog": copyOf(mesaOnMac),
     "sync-space": inSpace(mesaOnMac, false),
     "sync-local": syncLocal(),
+    converted: converted(),
     "sync-receiving": inSpace(unreadable, false),
     "sync-removed": inSpace(mesaOnMac, true),
     "phone-sync-sheet": copyOf(mesaOnMac),

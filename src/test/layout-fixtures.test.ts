@@ -191,6 +191,7 @@ describe("layout fixtures", () => {
       "all-trashed",
       "blank-plan",
       "choices",
+      "converted",
       "empty",
       "example",
       "long-names",

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
-import { buildFixtures, LONG_NAMES, PLAN_IDS, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "./layout-fixtures.mjs";
+import { buildFixtures, CONVERTED_FILE, LONG_NAMES, PLAN_IDS, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "./layout-fixtures.mjs";
 
 const DIST = fileURLToPath(new URL("../dist", import.meta.url));
 
@@ -487,6 +487,19 @@ function states() {
   add("history", "mesa", {
     actions: [reveal(".slot-panel .panel h2", "History"), width(".slot-panel .history li button", 1, 90), count(".slot-panel .history li", 40)],
   });
+  add("converted-report", "converted", {
+    place: null,
+    sizes: "desktop-and-compact",
+    dialog: true,
+    actions: [
+      click(".empty-state button", "Import plan…"),
+      expect('[role="dialog"] p', `Plan “Probe plan” from ${CONVERTED_FILE}`),
+      count(".converted-dropped li", 5),
+      style(".converted-dropped", "list-style-type", "none"),
+      style(".converted-dropped", "padding-left", "10px"),
+      within_(".converted-dropped li", ".converted-dropped", 5),
+    ],
+  });
   add("revert-preview", "mesa", {
     dialog: true,
     actions: [click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), expect(".revert-text p")],
@@ -586,6 +599,7 @@ const SHIM = String.raw`
     }
     if (!(cmd in ipc)) return missing(cmd, "no fixture");
     var a = ipc[cmd];
+    if (a !== null && typeof a === "object" && typeof a.__bytes === "string") return Promise.resolve(bytes(a.__bytes).buffer);
     if (a !== null && typeof a === "object" && "__reject" in a) return Promise.reject(a.__reject);
     if (a !== null && typeof a === "object" && typeof a.__channel === "string") {
       var channel = args ? args[a.__channel] : undefined;

@@ -311,6 +311,14 @@ describe("the Cyberdeck look", () => {
     expect(plain(".tl-links marker path")["stroke"]).toBe("none");
   });
 
+  it("styles the converted report's list like the calendar dialog's list", () => {
+    const plain = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    const keys = ["list-style", "margin", "padding", "border", "border-radius", "background"];
+    const day = plain(".day-list");
+    expect(keys.map((k) => [k, plain(".converted-dropped")[k]])).toEqual(keys.map((k) => [k, day[k]]));
+    expect(day["list-style"]).toBe("none");
+  });
+
   it("tints timeline greys with --dim's channels", () => {
     const timeline = SHEETS["./timeline.css"];
     if (timeline === undefined) throw new Error("timeline.css not read");
