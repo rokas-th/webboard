@@ -92,7 +92,8 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   const { main, open: openPlan, trashOwn } = usePlanSelection(registry);
   const files = usePlanFiles(registry, openPlan);
   const { creating, importing, importPlan } = files;
-  const newPlan = (): void => files.newPlan("New plan", (message) => toast(message, "bad"));
+  const [namingPlan, setNamingPlan] = useState<PlanId | null>(null);
+  const newPlan = (): void => files.newPlan("New plan", (message) => toast(message, "bad"), compact ? undefined : setNamingPlan);
   const newExample = (): void => files.newExample((message) => toast(message, "bad"));
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
   const [sheet, setSheet] = useState<CompactSheet>(null);
@@ -136,6 +137,8 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   const closeDialog = useCallback(() => setUi({ dialog: null }), [setUi]);
 
   const clearNaming = useCallback(() => setUi({ naming: null }), [setUi]);
+
+  const clearPlanNaming = useCallback(() => setNamingPlan(null), []);
 
   const plans = registry.plans();
   const listingOf = (id: PlanId): PlanListing | undefined => plans.find((l) => l.id === id);
@@ -329,7 +332,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       </Sheet>
       {session !== null && (
         <Sheet open={sheet === "plan"} title="Plan" onClose={closeSheet}>
-          <PlanPanel session={session} readOnly={readOnly} />
+          <PlanPanel session={session} readOnly={readOnly} naming={false} onNamed={clearPlanNaming} />
         </Sheet>
       )}
       {session !== null && selectedItemShown !== null && (
@@ -373,7 +376,11 @@ function WideBody(p: ShellProps & { compact: boolean }) {
           </main>
           {session !== null && !compact && (
             <div className="slot slot-panel" data-slot="panel">
-              {selectedItemShown !== null ? itemPanel(selectedItemShown, session) : <PlanPanel session={session} readOnly={readOnly} />}
+              {selectedItemShown !== null ? (
+                itemPanel(selectedItemShown, session)
+              ) : (
+                <PlanPanel session={session} readOnly={readOnly} naming={namingPlan === session.view().plan.id} onNamed={clearPlanNaming} />
+              )}
             </div>
           )}
         </div>

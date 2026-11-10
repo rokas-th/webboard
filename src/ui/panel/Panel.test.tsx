@@ -167,17 +167,92 @@ describe("ItemPanel fields", () => {
     expect(t.session.view().plan.items.get("X")?.name).toBe("Ship");
   });
 
-  it("schedules a new start and leaves the end as text", async () => {
+  it("schedules a new start and the End field follows it", async () => {
     const t = await made(ITEM_SEED);
     await shown(t);
     select("X");
     expect(input("Start").value).toBe("2026-11-16");
-    expect(inPanel().queryByLabelText("End")).toBeNull();
-    expect(panel().textContent).toContain("End18 Nov");
+    expect(input("End").value).toBe("2026-11-18");
     const apply = vi.spyOn(t.session, "apply");
     edit(input("Start"), "2026-11-17", "blur");
     expect(apply.mock.calls).toEqual([[{ t: "schedule", item: "X", set: { start: "2026-11-17" } }]]);
-    expect(panel().textContent).toContain("End19 Nov");
+    expect(input("End").value).toBe("2026-11-19");
+  });
+
+  it("types an end date as one resize, and refuses a day before the start or a day off with copy", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("X");
+    expect([input("End").min, input("End").max]).toEqual(["1900-01-01", "2199-12-31"]);
+    const apply = vi.spyOn(t.session, "apply");
+    edit(input("End"), "2026-11-20", "Enter");
+    expect(apply.mock.calls).toEqual([[{ t: "resize", item: "X", dur: 5 }]]);
+    expect([t.session.view().plan.items.get("X")?.schedule?.dur, input("Duration").value, input("End").value]).toEqual([5, "5", "2026-11-20"]);
+    expect(document.activeElement).not.toBe(input("End"));
+    clearToasts();
+    edit(input("End"), "2026-11-13", "Enter");
+    expect(toastTexts()).toEqual(["The end cannot come before the start, 16 Nov."]);
+    expect(input("End").value).toBe("2026-11-20");
+    clearToasts();
+    edit(input("End"), "2026-11-21", "blur");
+    expect(toastTexts()).toEqual(["21 Nov is not a working day. Pick a working day for the end."]);
+    expect(input("End").value).toBe("2026-11-20");
+    edit(input("End"), "", "blur");
+    expect(input("End").value).toBe("2026-11-20");
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no End field on an unscheduled task or a milestone", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("U");
+    expect(inPanel().queryByLabelText("End")).toBeNull();
+    expect(panel().textContent).toContain("End—");
+    select("M");
+    expect(inPanel().queryByLabelText("End")).toBeNull();
+  });
+
+  it("types a duration as one resize, keeps the steppers, and refuses a broken or out-of-range one", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("X");
+    expect([input("Duration").type, input("Duration").min, input("Duration").max, input("Duration").value]).toEqual(["number", "1", "3650", "3"]);
+    const apply = vi.spyOn(t.session, "apply");
+    edit(input("Duration"), "7", "Enter");
+    expect(apply.mock.calls).toEqual([[{ t: "resize", item: "X", dur: 7 }]]);
+    expect(input("End").value).toBe("2026-11-24");
+    click(button("Longer by one working day"));
+    expect(apply.mock.calls[1]).toEqual([{ t: "resize", item: "X", dur: 8 }]);
+    expect(input("Duration").value).toBe("8");
+    clearToasts();
+    edit(input("Duration"), "2.5", "Enter");
+    expect(toastTexts()).toEqual(["A duration is a whole number of working days."]);
+    expect(input("Duration").value).toBe("8");
+    clearToasts();
+    edit(input("Duration"), "4000", "blur");
+    expect(toastTexts()).toEqual(["A task lasts 1 to 3650 working days."]);
+    expect(input("Duration").value).toBe("8");
+    clearToasts();
+    edit(input("Duration"), "", "blur");
+    edit(input("Duration"), "08", "blur");
+    expect([input("Duration").value, toastTexts()]).toEqual(["8", []]);
+    expect(apply).toHaveBeenCalledTimes(3);
+  });
+
+  it("puts a typed duration back on Escape and writes nothing", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("X");
+    const apply = vi.spyOn(t.session, "apply");
+    act(() => {
+      input("Duration").focus();
+      fireEvent.change(input("Duration"), { target: { value: "9" } });
+    });
+    act(() => {
+      fireEvent.keyDown(input("Duration"), { key: "Escape" });
+    });
+    expect([input("Duration").value, document.activeElement === input("Duration"), uiNow()[0].selected]).toEqual(["3", false, "X"]);
+    expect(apply).not.toHaveBeenCalled();
   });
 
   it("bounds the Start field to the plan window and names a year that is not this year", async () => {
@@ -191,7 +266,7 @@ describe("ItemPanel fields", () => {
     clearToasts();
     edit(input("Start"), "2027-11-16", "blur");
     expect(toastTexts()).toEqual(["Scheduled “X” from 16 Nov 2027; 1 dependent item moved."]);
-    expect(panel().textContent).toContain("End18 Nov 2027");
+    expect(input("End").value).toBe("2027-11-18");
   });
 
   it("never unschedules from the Start or Date field: an empty or malformed value puts the stored date back", async () => {
@@ -221,11 +296,11 @@ describe("ItemPanel fields", () => {
     select("X");
     const apply = vi.spyOn(t.session, "apply");
     click(button("Longer by one working day"));
-    expect(panel().textContent).toContain("4 working days");
+    expect(input("Duration").value).toBe("4");
     click(button("Shorter by one working day"));
     expect(apply.mock.calls).toEqual([[{ t: "resize", item: "X", dur: 4 }], [{ t: "resize", item: "X", dur: 3 }]]);
     select("One");
-    expect(panel().textContent).toContain("1 working day");
+    expect([input("Duration").value, input("Duration").nextElementSibling?.textContent]).toEqual(["1", "working day"]);
     expect(button("Shorter by one working day").disabled).toBe(true);
     expect(button("Longer by one working day").disabled).toBe(false);
   });
@@ -333,20 +408,34 @@ describe("ItemPanel links", () => {
     const type = within(row).getByLabelText("Dependency type");
     if (!(type instanceof HTMLSelectElement)) throw new Error("no type select");
     expect([...type.options].map((o) => o.value)).toEqual(["FS", "SS", "FF", "SF"]);
-    expect(row.textContent).toContain("0d");
+    const lag = (): HTMLInputElement => {
+      const el = within(one('[data-dep="W"]', panel())).getByRole("spinbutton", { name: "Lag" });
+      if (!(el instanceof HTMLInputElement)) throw new Error("no lag field");
+      return el;
+    };
+    expect([lag().value, lag().min, lag().max]).toEqual(["0", "-1000", "1000"]);
     const apply = vi.spyOn(t.session, "apply");
     choose(type, "SS");
     click(within(one('[data-dep="W"]', panel())).getByRole("button", { name: "More lag" }));
-    expect(one('[data-dep="W"]', panel()).textContent).toContain("+1d");
+    expect(lag().value).toBe("1");
     click(within(one('[data-dep="W"]', panel())).getByRole("button", { name: "Less lag" }));
     click(within(one('[data-dep="W"]', panel())).getByRole("button", { name: "Less lag" }));
-    expect(one('[data-dep="W"]', panel()).textContent).toContain("−1d");
+    expect(lag().value).toBe("-1");
+    edit(lag(), "3", "Enter");
+    clearToasts();
+    edit(lag(), "1001", "Enter");
+    expect(toastTexts()).toEqual(["A lag is at most 1000 working days either way."]);
+    expect(lag().value).toBe("3");
+    edit(lag(), "-2", "blur");
     click(within(one('[data-dep="W"]', panel())).getByRole("button", { name: "Remove dependency" }));
     expect(apply.mock.calls).toEqual([
       [{ t: "link", from: "W", to: "X", type: "SS", lag: 0 }],
       [{ t: "link", from: "W", to: "X", type: "SS", lag: 1 }],
       [{ t: "link", from: "W", to: "X", type: "SS", lag: 0 }],
       [{ t: "link", from: "W", to: "X", type: "SS", lag: -1 }],
+      [{ t: "link", from: "W", to: "X", type: "SS", lag: 3 }],
+      [{ t: "link", from: "W", to: "X", type: "SS", lag: 1001 }],
+      [{ t: "link", from: "W", to: "X", type: "SS", lag: -2 }],
       [{ t: "unlink", link: "W>X" }],
     ]);
     expect(panel().querySelector("[data-dep]")).toBeNull();
@@ -588,7 +677,7 @@ describe("ItemPanel read-only", () => {
       "0d",
     ];
     expect(values).toEqual(["X", "2026-11-16", "3 working days", "In progress", "40 %", "Top level", "FS", "0d"]);
-    expect(panel().textContent).toContain("3 working days");
+    expect([input("Duration").value, input("End").value, within(row).getByRole("spinbutton", { name: "Lag" }) instanceof HTMLInputElement]).toEqual(["3", "2026-11-18", true]);
     expect(panel().textContent).toContain("40 %");
     const note = inPanel().getByLabelText("Notes");
     const apply = vi.spyOn(t.session, "apply");

@@ -11,6 +11,8 @@ const VIEWS: Readonly<Record<string, string>> = { "1": "view-timeline", "2": "vi
 
 const ARROWS: Readonly<Record<string, number>> = { ArrowRight: 1, ArrowLeft: -1 };
 
+const STEPS: Readonly<Record<string, string>> = { ArrowUp: "move-up", ArrowDown: "move-down" };
+
 const TEXT_TYPES: ReadonlySet<string> = new Set(["text", "search", "email", "url", "tel", "password", "number", "date"]);
 
 const STEPPED_TYPES: ReadonlySet<string> = new Set(["range", "radio"]);
@@ -47,9 +49,13 @@ export function keyToCommand(e: KeyInput, s: KeyState): string | null {
     const days = arrow * (e.altKey ? 5 : 1);
     return `${e.shiftKey ? "resize" : "nudge"}${days > 0 ? "+" : ""}${days}`;
   }
-  if (e.altKey) return null;
+  if (e.altKey) {
+    const step = e.shiftKey || !s.selected ? undefined : STEPS[e.key];
+    return step ?? null;
+  }
   if (e.key === "Delete" || e.key === "Backspace") return s.selected ? "trash" : null;
   if (e.key.toLowerCase() === "n") return "new-task";
+  if (e.key.toLowerCase() === "m") return "new-milestone";
   if (e.shiftKey) return null;
   if (e.key === "ArrowDown" || e.key === "ArrowUp") return e.key === "ArrowDown" ? "select-next" : "select-prev";
   if (e.key.toLowerCase() === "t") return "today";

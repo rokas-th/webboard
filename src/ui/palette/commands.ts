@@ -9,6 +9,7 @@ import type { PlanSession } from "../../store/session";
 import type { Updates } from "../../store/updates";
 import { countedConflicts, goToFirstPatch } from "../choices/HeadCounts";
 import { baselineDefault } from "../panel/Baselines";
+import { placeStep } from "../panel/placeStep";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { UiState, ViewKind, Zoom } from "../state";
 import { timelineRows } from "../timeline/rows";
@@ -55,6 +56,11 @@ const ZOOMS: readonly (readonly [Zoom, string])[] = [
 ];
 
 const STEPS: readonly number[] = [1, -1, 5, -5];
+
+const ORDER: readonly (readonly [1 | -1, string, string, string])[] = [
+  [-1, "up", "Move up", "↑"],
+  [1, "down", "Move down", "↓"],
+];
 
 const signed = (n: number): string => `${n > 0 ? "+" : ""}${n}`;
 
@@ -143,9 +149,14 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
       run: () => resize(session, run, sel, n),
     }),
   );
-  if (it.kind === "group") return [...nudges, trash];
-  if (!dated(it)) return [trash];
-  return [...nudges, ...resizes, trash];
+  const order = ORDER.flatMap(([by, id, label, arrow]): Command[] => {
+    const step = placeStep(session.view().plan, it, by);
+    if (step === null) return [];
+    return [{ id: `move-${id}`, group: "Edit", label, keys: `${ctx.mac ? "⌥" : "Alt "}${arrow}`, run: () => void run(step) }];
+  });
+  if (it.kind === "group") return [...nudges, ...order, trash];
+  if (!dated(it)) return [...order, trash];
+  return [...nudges, ...resizes, ...order, trash];
 }
 
 function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
@@ -204,14 +215,23 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
       ctx.setUi({ selected: target, follow: target });
     },
   });
+  const groups = [...view.plan.items.values()].filter((it) => it.kind === "group" && !it.trashed).map((it) => it.id);
+  const folding: Command[] =
+    groups.length === 0
+      ? []
+      : [
+          { id: "collapse-all", group: "View", label: "Collapse all groups", run: () => ctx.setUi({ collapsed: new Set(groups) }) },
+          { id: "expand-all", group: "View", label: "Expand all groups", run: () => ctx.setUi({ collapsed: new Set() }) },
+        ];
   const steps = ctx.ui.view === "timeline" ? [step("select-next", "Select the next row", "↓", 1), step("select-prev", "Select the previous row", "↑", -1)] : [];
   return [
     create("task", "N"),
-    create("milestone"),
+    create("milestone", "M"),
     create("group"),
     ...views,
     { id: "today", group: "View", label: "Jump to today", keys: "T", run: () => ctx.reveal("today") },
     ...steps,
+    ...folding,
     ...baselines,
     ...zooms,
     { id: "calendar", group: "Plan", label: "Change calendar: region, working days, closures", run: () => ctx.setUi({ dialog: { t: "calendar" } }) },

@@ -184,7 +184,7 @@ describe("empty plan", () => {
     const scroll = one('[data-slot="timeline"] .tl-scroll');
     expect(scroll.textContent).toBe(EMPTY_PLAN);
     expect(one('[data-slot="timeline"]').textContent).toBe(EMPTY_PLAN);
-    expect(EMPTY_PLAN).toBe("No items yet. Add one with + Task.");
+    expect(EMPTY_PLAN).toBe("No items yet. Add one with + New.");
     expect(all(".tl-row")).toHaveLength(0);
   });
 

@@ -1,9 +1,12 @@
-import { useContext, useEffect, useId, useRef, useState } from "react";
+import { useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { normalizeName } from "../../actions/build";
 import { Refused } from "../../actions/intents";
-import { toDay } from "../../domain/dates";
+import { toDay, type Day } from "../../domain/dates";
 import type { Horizon, Item, ItemId, Link, LinkType, Status } from "../../domain/model";
-import { linkKey } from "../../domain/model";
+import { linkKey, MAX_LAG, MAX_TASK_DUR } from "../../domain/model";
+import { DUR_NOT_WHOLE, LAG_NOT_WHOLE } from "../copy";
+import { durText } from "../panel/ItemPanel";
+import { EndField, WholeField } from "../panel/typed";
 import { wouldLoop } from "../../domain/schedule";
 import { childrenOf, liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
@@ -50,8 +53,6 @@ const horizonText = (h: Horizon): string => {
 
 const WHOLE = /^-?\d+$/;
 
-const LAG_NOT_WHOLE = "Lag must be a whole number of working days.";
-
 const typeOf = (v: string): LinkType => {
   const found = TYPES.find((t) => t === v);
   if (found === undefined) throw new Error(`ItemSheet: no link type ${v}`);
@@ -70,7 +71,13 @@ const nameOf = (view: PlanView, id: ItemId): string => {
   return it.name;
 };
 
-function Stepper(p: { label: string; value: string; valueClass: string; readOnly: boolean; less: (() => void) | null; more: () => void }) {
+const endOf = (view: PlanView, id: ItemId): Day => {
+  const d = view.derived.end.get(id);
+  if (d === undefined) throw new Error(`ItemSheet: scheduled item ${id} has no derived end`);
+  return d;
+};
+
+function Stepper(p: { label: string; value: string; valueClass: string; readOnly: boolean; less: (() => void) | null; more: () => void; children?: ReactNode }) {
   return (
     <span className="inline">
       {!p.readOnly && (
@@ -78,6 +85,7 @@ function Stepper(p: { label: string; value: string; valueClass: string; readOnly
           −
         </button>
       )}
+      {!p.readOnly && p.children}
       <span className={p.valueClass}>{p.value}</span>
       {!p.readOnly && (
         <button type="button" className="step" aria-label={`${p.label} +1${p.label === "Start" ? " working day" : ""}`} onClick={p.more}>
@@ -154,12 +162,31 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
           <label>Duration</label>
           <Stepper
             label="Duration"
-            value={`${sc.dur} ${sc.dur === 1 ? "working day" : "working days"}`}
+            value={p.readOnly ? durText(sc.dur) : sc.dur === 1 ? "working day" : "working days"}
             valueClass="val"
             readOnly={p.readOnly}
             less={sc.dur <= 1 ? null : () => p.run.run({ t: "resize", item: it.id, dur: sc.dur - 1 })}
             more={() => p.run.run({ t: "resize", item: it.id, dur: sc.dur + 1 })}
-          />
+          >
+            <WholeField
+              label="Duration"
+              value={sc.dur}
+              min={1}
+              max={MAX_TASK_DUR}
+              notWhole={DUR_NOT_WHOLE}
+              onCommit={(dur) => p.run.run({ t: "resize", item: it.id, dur }) !== null}
+            />
+          </Stepper>
+          {sc.start !== null && !it.trashed && (
+            <>
+              <label>End</label>
+              {p.readOnly ? (
+                <span className="val">{dayLabelNear(endOf(p.view, it.id), p.view.today)}</span>
+              ) : (
+                <EndField view={p.view} item={it} label="End" run={p.run} />
+              )}
+            </>
+          )}
         </>
       )}
       <label>Status</label>
@@ -214,7 +241,11 @@ function LinkRow(p: { view: PlanView; link: Link; other: ItemId; readOnly: boole
             −
           </button>
         )}
-        <span className="val">{lagText(l.lag)}</span>
+        {p.readOnly ? (
+          <span className="val">{lagText(l.lag)}</span>
+        ) : (
+          <WholeField label="Link lag" value={l.lag} min={-MAX_LAG} max={MAX_LAG} notWhole={LAG_NOT_WHOLE} onCommit={(lag) => p.run.run({ t: "link", from: l.from, to: l.to, type: l.type, lag }) !== null} />
+        )}
         {!p.readOnly && (
           <button type="button" className="step" aria-label="Lag +1" onClick={() => set(l.type, l.lag + 1)}>
             +

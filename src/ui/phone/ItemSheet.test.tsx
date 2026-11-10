@@ -85,6 +85,72 @@ const typeSelect = (row: HTMLElement): HTMLSelectElement => {
   return el;
 };
 
+const lagField = (row: HTMLElement): HTMLInputElement => {
+  const el = within(row).getByRole("spinbutton", { name: "Link lag" });
+  if (!(el instanceof HTMLInputElement)) throw new Error("no link lag field");
+  return el;
+};
+const field = (label: string): HTMLInputElement => {
+  const el = within(sheet()).getByLabelText(label);
+  if (!(el instanceof HTMLInputElement)) throw new Error(label + " is not an input");
+  return el;
+};
+const typed = (el: HTMLInputElement, value: string, end: "Enter" | "Escape" | "blur"): void => {
+  act(() => {
+    el.focus();
+    fireEvent.change(el, { target: { value } });
+  });
+  act(() => {
+    if (end === "blur") el.blur();
+    else fireEvent.keyDown(el, { key: end });
+  });
+};
+
+describe("ItemSheet typed fields", () => {
+  it("types a duration and an end date as one resize each, and refuses an end on a day off", async () => {
+    const t = await made([REVIEW]);
+    const { apply } = shown(t, "Review");
+    expect([field("Duration").value, field("End").value]).toEqual(["3", "2026-11-17"]);
+    typed(field("Duration"), "5", "Enter");
+    expect(intents(apply)).toEqual([{ t: "resize", item: "Review", dur: 5 }]);
+    expect(field("End").value).toBe("2026-11-19");
+    typed(field("End"), "2026-11-23", "Enter");
+    expect(intents(apply)[1]).toEqual({ t: "resize", item: "Review", dur: 7 });
+    expect(field("Duration").value).toBe("7");
+    clearToasts();
+    typed(field("End"), "2026-11-22", "Enter");
+    expect(toasts()).toEqual(["22 Nov is not a working day. Pick a working day for the end."]);
+    typed(field("End"), "2026-11-12", "blur");
+    expect(toasts()).toEqual(["22 Nov is not a working day. Pick a working day for the end.", "The end cannot come before the start, 13 Nov."]);
+    typed(field("Duration"), "9", "Escape");
+    expect([field("Duration").value, field("End").value, screen.queryByRole("dialog") !== null]).toEqual(["7", "2026-11-23", true]);
+    expect(apply).toHaveBeenCalledTimes(2);
+  });
+
+  it("types a link's lag through the link intent and refuses one that is not whole", async () => {
+    const t = await made([REVIEW, { name: "Ship", start: "2026-11-18", dur: 1, deps: [fs("Review")] }]);
+    const { apply } = shown(t, "Review");
+    typed(lagField(linkRow("Review>Ship")), "-2", "Enter");
+    expect(intents(apply)).toEqual([{ t: "link", from: "Review", to: "Ship", type: "FS", lag: -2 }]);
+    clearToasts();
+    typed(lagField(linkRow("Review>Ship")), "1.5", "blur");
+    expect(toasts()).toEqual(["Lag must be a whole number of working days."]);
+    expect([lagField(linkRow("Review>Ship")).value, apply.mock.calls.length]).toEqual(["-2", 1]);
+  });
+
+  it("shows no End on an unscheduled task, and text in place of every field while read-only", async () => {
+    const t = await made([REVIEW, { name: "Loose" }]);
+    shown(t, "Loose");
+    expect(within(sheet()).queryByLabelText("End")).toBeNull();
+    cleanup();
+    t.session.setReadOnly(true);
+    shown(t, "Review");
+    expect(sheet().querySelectorAll("input")).toHaveLength(0);
+    expect(sheet().textContent).toContain("3 working days");
+    expect(sheet().textContent).toContain("EndTue 17 Nov");
+  });
+});
+
 describe("ItemSheet", () => {
   it("is a sheet named after the item", async () => {
     const t = await made([REVIEW]);
@@ -144,7 +210,7 @@ describe("ItemSheet", () => {
     const t = await made([REVIEW, { name: "Ship", start: "2026-11-18", dur: 1, deps: [fs("Review")] }]);
     const { apply } = shown(t, "Review");
     const row = linkRow("Review>Ship");
-    expect(within(row).getByText("0d")).toBeTruthy();
+    expect(lagField(row).value).toBe("0");
     fireEvent.change(typeSelect(row), { target: { value: "FS" } });
     expect(apply).toHaveBeenCalledTimes(0);
     fireEvent.click(within(row).getByRole("button", { name: "Lag +1" }));
@@ -170,7 +236,7 @@ describe("ItemSheet", () => {
     fireEvent.click(within(linkRow("Review>Ship")).getByRole("button", { name: "Lag +1" }));
     expect(screen.queryAllByRole("status").map((e) => [e.textContent, e.className])).toEqual([[message, "toast bad"]]);
     expect(t.session.history().length).toBe(before);
-    expect(within(linkRow("Review>Ship")).getByText("0d")).toBeTruthy();
+    expect(lagField(linkRow("Review>Ship")).value).toBe("0");
   });
 
   it("adds a dependency only from items that would not loop", async () => {

@@ -214,7 +214,7 @@ describe("List", () => {
   it("says so for an empty plan", async () => {
     const t = await made([]);
     await list(t);
-    expect(all(".list-wrap .note").map((e) => e.textContent)).toEqual(["No items yet. Add one with + Task."]);
+    expect(all(".list-wrap .note").map((e) => e.textContent)).toEqual(["No items yet. Add one with + New."]);
     expect(all("tbody tr")).toHaveLength(0);
   });
 

@@ -698,7 +698,7 @@ describe("removal and the space", () => {
     expect(panel().querySelectorAll("input, select")).toHaveLength(0);
     expect(panel().textContent).toContain("A");
     expect(within(panel()).queryByRole("button", { name: "Delete" })).toBeNull();
-    expect([within(toolbar()).getByRole("button", { name: "New task" }), within(toolbar()).getByRole("button", { name: "New group" })].map((b) => b.hasAttribute("disabled"))).toEqual([true, true]);
+    expect(within(toolbar()).getByRole("button", { name: "+ New" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("removed device offers joining", async () => {

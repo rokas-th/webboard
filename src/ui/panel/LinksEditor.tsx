@@ -1,5 +1,7 @@
 import type { Item, ItemId, Link, LinkType } from "../../domain/model";
-import { linkKey } from "../../domain/model";
+import { linkKey, MAX_LAG } from "../../domain/model";
+import { LAG_NOT_WHOLE } from "../copy";
+import { WholeField } from "./typed";
 import { wouldLoop } from "../../domain/schedule";
 import { childrenOf, liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
@@ -65,7 +67,11 @@ function DepRow(p: { view: PlanView; link: Link; readOnly: boolean; run: Run }) 
             −
           </button>
         )}
-        <span className="val">{lagText(l.lag)}</span>
+        {p.readOnly ? (
+          <span className="val">{lagText(l.lag)}</span>
+        ) : (
+          <WholeField label="Lag" value={l.lag} min={-MAX_LAG} max={MAX_LAG} notWhole={LAG_NOT_WHOLE} onCommit={(lag) => p.run.run({ t: "link", from: l.from, to: l.to, type: l.type, lag }) !== null} />
+        )}
         {!p.readOnly && (
           <button type="button" className="step" aria-label="More lag" onClick={() => set(l.type, l.lag + 1)}>
             +

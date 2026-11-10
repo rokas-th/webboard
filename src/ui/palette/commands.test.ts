@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intent } from "../../actions/intents";
+import { childrenOf } from "../../plan/project";
 import { AppError } from "../../services/ipc";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
@@ -486,6 +487,58 @@ describe("new items", () => {
     ["new-task", "new-milestone", "new-group"].forEach((id) => find(h.ctx, id).run());
     expect(apply).not.toHaveBeenCalled();
     expect(h.setUi).not.toHaveBeenCalled();
+  });
+
+  it("puts M on New milestone", async () => {
+    const t = await made(SMALL);
+    expect(find(harness(t).ctx, "new-milestone").keys).toBe("M");
+  });
+});
+
+describe("order and groups", () => {
+  it("moves the selected item one place up or down among its siblings with the place intent", async () => {
+    const t = await made(SMALL);
+    const apply = vi.spyOn(t.session, "apply");
+    const up = find(harness(t, { selected: "b" }).ctx, "move-up");
+    expect([up.label, up.keys, up.group]).toEqual(["Move up", "⌥↑", "Edit"]);
+    up.run();
+    expect(created(apply)).toEqual([{ t: "place", item: "b", parent: "g1", after: null }]);
+    expect(childrenOf(t.session.view().plan, "g1").map((i) => i.id)).toEqual(["b", "a"]);
+    find(harness(t, { selected: "b" }).ctx, "move-down").run();
+    expect(created(apply)[1]).toEqual({ t: "place", item: "b", parent: "g1", after: "a" });
+    find(harness(t, { selected: "one" }).ctx, "move-down").run();
+    expect(created(apply)[2]).toEqual({ t: "place", item: "one", parent: null, after: "m" });
+    find(harness(t, { selected: "one" }).ctx, "move-up").run();
+    expect(created(apply)[3]).toEqual({ t: "place", item: "one", parent: null, after: "g1" });
+    expect(childrenOf(t.session.view().plan, null).map((i) => i.id)).toEqual(["g1", "one", "m", "u"]);
+  });
+
+  it("offers Move up only below the first sibling and Move down only above the last, with Alt keys off macOS", async () => {
+    const t = await made(SMALL);
+    const first = ids(harness(t, { selected: "a" }).ctx);
+    const last = ids(harness(t, { selected: "b" }).ctx);
+    expect([first.includes("move-up"), first.includes("move-down"), last.includes("move-up"), last.includes("move-down")]).toEqual([false, true, true, false]);
+    expect(ids(harness(t).ctx).filter((x) => x.startsWith("move-"))).toEqual([]);
+    const pc = harness(t, { selected: "b" });
+    expect(find({ ...pc.ctx, mac: false }, "move-up").keys).toBe("Alt ↑");
+    expect(find({ ...pc.ctx, mac: false, ui: { ...pc.ctx.ui, selected: "a" } }, "move-down").keys).toBe("Alt ↓");
+  });
+
+  it("collapses every group and expands them all again", async () => {
+    const t = await made([...SMALL, { id: "g2", name: "Inner", kind: "group", parent: "g1" }, { id: "g3", name: "Gone", kind: "group" }]);
+    t.session.apply({ t: "trash", items: ["g3"] });
+    const h = harness(t);
+    const collapse = find(h.ctx, "collapse-all");
+    const expand = find(h.ctx, "expand-all");
+    expect([collapse.label, collapse.group, expand.label, expand.group]).toEqual(["Collapse all groups", "View", "Expand all groups", "View"]);
+    collapse.run();
+    expand.run();
+    expect(h.setUi.mock.calls).toEqual([[{ collapsed: new Set(["g1", "g2"]) }], [{ collapsed: new Set() }]]);
+  });
+
+  it("offers neither collapse nor expand in a plan with no group", async () => {
+    const t = await made([{ id: "a", name: "A", start: "2026-11-10", dur: 2 }]);
+    expect(ids(harness(t).ctx).filter((x) => x.endsWith("-all"))).toEqual([]);
   });
 });
 

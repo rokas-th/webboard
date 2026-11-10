@@ -1156,7 +1156,27 @@ describe("Shell on Registry.open", () => {
     expect(tauri.calls.filter((c) => c.cmd === "holidays_year")).toEqual([]);
     expect(currentName()).toBe("New plan");
     expectTimeline();
-    expect(slot("timeline")?.textContent).toBe("No items yet. Add one with + Task.");
+    expect(slot("timeline")?.textContent).toBe("No items yet. Add one with + New.");
+    const panelSlot = slot("panel");
+    if (!(panelSlot instanceof HTMLElement)) throw new Error("no panel");
+    const name = within(panelSlot).getByLabelText("Plan name");
+    if (!(name instanceof HTMLInputElement)) throw new Error("no Plan name field");
+    expect([document.activeElement === name, name.selectionStart, name.selectionEnd]).toEqual([true, 0, "New plan".length]);
+    act(() => {
+      fireEvent.change(name, { target: { value: "Launch" } });
+    });
+    act(() => {
+      fireEvent.keyDown(name, { key: "Enter" });
+    });
+    expect([currentName(), document.activeElement === name]).toEqual(["Launch", false]);
+  });
+
+  it("focuses nothing in the panel when an existing plan opens", async () => {
+    await store(["Alpha"], { lastRegion: ZH });
+    const registry = await opened();
+    render(withSync(shellOn(registry)));
+    await settle();
+    expect(document.activeElement).toBe(document.body);
   });
 
   const runPalette = (query: string): void => {

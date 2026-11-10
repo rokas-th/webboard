@@ -44,7 +44,7 @@ const FONTS = [
   ["Chakra Petch", '600 12px "Chakra Petch"'],
 ];
 
-const EMPTY_PLAN = "No items yet. Add one with + Task.";
+const EMPTY_PLAN = "No items yet. Add one with + New.";
 const EXAMPLE_PLAN = "Example: Website relaunch";
 const CALENDAR_BANNER = "The calendar was changed on two devices. Nothing moves until you choose.";
 const PICKED = "Tracking: review results";

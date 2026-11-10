@@ -114,12 +114,13 @@ describe('compact shell, data-form="compact"', () => {
     expect(document.activeElement).toBe(row);
   });
 
-  it("+ Task names the new item in its sheet, and Esc returns focus to + Task", async () => {
+  it("New task from + New names the new item in its sheet; Esc leaves the name, a second Esc closes the sheet and returns focus to + New", async () => {
     const t = await made();
     await shown(t);
-    const add = within(toolbar()).getByRole("button", { name: "New task" });
+    const add = within(toolbar()).getByRole("button", { name: "+ New" });
     add.focus();
     fireEvent.click(add);
+    fireEvent.click(within(toolbar()).getByRole("menuitem", { name: "New task" }));
     await settle();
     const sheet = screen.getByRole("dialog");
     const input = sheet.querySelector(".title-input");
@@ -128,6 +129,8 @@ describe('compact shell, data-form="compact"', () => {
     expect(input.value.length).toBeGreaterThan(0);
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, input.value.length]);
     fireEvent.keyDown(input, { key: "Escape" });
+    expect([screen.queryByRole("dialog"), document.activeElement]).toEqual([sheet, sheet]);
+    fireEvent.keyDown(sheet, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(add);
   });

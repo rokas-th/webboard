@@ -1,6 +1,7 @@
 import { usePlanView, type PlanSession } from "../../store/session";
 import { useRun } from "../run";
 import type { UiState, ViewKind, Zoom } from "../state";
+import { NewItemMenu } from "../common/NewItemMenu";
 import { SyncChip } from "./SyncChip";
 
 const TABS: readonly (readonly [ViewKind, string])[] = [
@@ -92,14 +93,7 @@ export function Toolbar(p: ToolbarProps) {
         {p.mac ? "⌘K" : "Ctrl K"}
       </button>
       {p.session !== null && (
-        <>
-          <button type="button" className="button-primary" aria-label="New task" disabled={p.readOnly} onClick={() => p.onCommand("new-task")}>
-            + Task
-          </button>
-          <button type="button" aria-label="New group" disabled={p.readOnly} onClick={() => p.onCommand("new-group")}>
-            + Group
-          </button>
-        </>
+        <NewItemMenu label="+ New" className="button-primary" disabled={p.readOnly} onPick={(kind) => p.onCommand(`new-${kind}`)} />
       )}
       <SyncChip />
       {p.compact !== null && p.session !== null && (

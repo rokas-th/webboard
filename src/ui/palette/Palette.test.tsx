@@ -116,6 +116,11 @@ const bar = (): HTMLElement => {
   return el;
 };
 
+const pickNew = (name: string): void => {
+  fireEvent.click(button(bar(), "+ New"));
+  fireEvent.click(within(within(bar()).getByRole("menu")).getByRole("menuitem", { name }));
+};
+
 const button = (root: HTMLElement, name: string): HTMLButtonElement => {
   const el = within(root).getByRole("button", { name });
   if (!(el instanceof HTMLButtonElement)) throw new Error("no button " + name);
@@ -253,13 +258,13 @@ describe("the palette list", () => {
     await shown(t);
     press("k", { metaKey: true });
     type("view");
-    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "Go toTracking: review results"]);
+    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results"]);
     expect(highlighted()).toBe("ViewTimeline1");
     press("ArrowUp", {}, query());
     expect(highlighted()).toBe("ViewTimeline1");
     const scrolled = vi.mocked(Element.prototype.scrollIntoView);
     scrolled.mockClear();
-    [1, 2, 3, 4, 5].forEach(() => press("ArrowDown", {}, query()));
+    [1, 2, 3, 4, 5, 6, 7].forEach(() => press("ArrowDown", {}, query()));
     expect(highlighted()).toBe("Go toTracking: review results");
     const lastScrolled = (): string | null => {
       const el: unknown = scrolled.mock.contexts[scrolled.mock.contexts.length - 1];
@@ -267,11 +272,11 @@ describe("the palette list", () => {
       expect(el.classList.contains("on")).toBe(true);
       return el.textContent;
     };
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([4, "Go toTracking: review results"]);
-    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4].map(() => [{ block: "nearest" }]));
-    [1, 2, 3].forEach(() => press("ArrowUp", {}, query()));
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([6, "Go toTracking: review results"]);
+    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4, 5, 6].map(() => [{ block: "nearest" }]));
+    [1, 2, 3, 4, 5].forEach(() => press("ArrowUp", {}, query()));
     expect(highlighted()).toBe("ViewNow · Next · Later2");
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([7, "ViewNow · Next · Later2"]);
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([11, "ViewNow · Next · Later2"]);
     press("Enter", {}, query());
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(uiNow()[0].view).toBe("board");
@@ -385,23 +390,64 @@ describe("new items from keys, toolbar and palette", () => {
     const t = await made(MESA_SEED);
     await shown(t);
     const apply = vi.spyOn(t.session, "apply");
-    if (from === "toolbar") fireEvent.click(button(bar(), "New group"));
+    if (from === "toolbar") pickNew("New group");
     else runFromPalette("New group");
     expect(apply.mock.calls).toEqual([[{ t: "create", kind: "group", name: "New group", parent: null, after: null, start: null }]]);
     expect(t.session.history()[0].label).toBe("Added group “New group”");
     expectNameFocused("New group");
   });
 
-  it("adds a task from the toolbar's + Task", async () => {
+  it("offers task, milestone and group from the toolbar's one + New menu", async () => {
     const t = await made(MESA_SEED);
     await shown(t);
-    const apply = vi.spyOn(t.session, "apply");
-    const add = button(bar(), "New task");
-    expect(add.textContent).toBe("+ Task");
-    expect(button(bar(), "New group").textContent).toBe("+ Group");
+    expect(within(bar()).queryByRole("button", { name: "+ Task" })).toBeNull();
+    expect(within(bar()).queryByRole("button", { name: "+ Group" })).toBeNull();
+    const add = button(bar(), "+ New");
+    expect([add.getAttribute("aria-haspopup"), add.getAttribute("aria-expanded")]).toEqual(["menu", "false"]);
     fireEvent.click(add);
+    const menu = within(bar()).getByRole("menu", { name: "New item" });
+    expect(within(menu).getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["New task", "New milestone", "New group"]);
+    expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: "New task" }));
+    const apply = vi.spyOn(t.session, "apply");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "New task" }));
     expect(apply).toHaveBeenCalledTimes(1);
+    expect(within(bar()).queryByRole("menu")).toBeNull();
     expectNameFocused("New task");
+  });
+
+  it("adds a milestone after the selection from the + New menu and on M", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    setUi({ selected: "t3" });
+    const apply = vi.spyOn(t.session, "apply");
+    pickNew("New milestone");
+    expect(apply.mock.calls).toEqual([[{ t: "create", kind: "milestone", name: "New milestone", parent: "g2", after: "t3", start: "2026-11-10" }]]);
+    expectNameFocused("New milestone");
+    act(() => {
+      nameField().blur();
+    });
+    press("m");
+    expect(apply.mock.calls.map((c) => c[0].t)).toEqual(["create", "create"]);
+    expectNameFocused("New milestone");
+    press("m", {}, nameField());
+    expect(apply).toHaveBeenCalledTimes(2);
+  });
+
+  it("enters items from the keyboard alone: N, type, Enter, N again", async () => {
+    const t = await made([{ id: "a", name: "Alpha", start: "2026-11-10", dur: 2 }]);
+    await shown(t);
+    press("n");
+    act(() => {
+      fireEvent.change(nameField(), { target: { value: "First" } });
+    });
+    act(() => {
+      fireEvent.keyDown(nameField(), { key: "Enter" });
+    });
+    expect(document.activeElement).toBe(document.body);
+    press("n");
+    expectNameFocused("New task");
+    const names = [...t.session.view().plan.items.values()].map((i) => i.name).sort();
+    expect(names).toEqual(["Alpha", "First", "New task"]);
   });
 
   it("adds a milestone from the palette", async () => {
@@ -521,22 +567,22 @@ describe("keys on the selection", () => {
 });
 
 describe("read-only", () => {
-  it("disables + Task and + Group, and refuses every new item with the read-only toast", async () => {
+  it("disables + New, and refuses every new item with the read-only toast", async () => {
     const t = await made(MESA_SEED);
     await shown(t);
     act(() => t.session.setReadOnly(true));
-    const task = button(bar(), "New task");
-    const group = button(bar(), "New group");
-    expect([task.disabled, group.disabled]).toEqual([true, true]);
+    const add = button(bar(), "+ New");
+    expect(add.disabled).toBe(true);
     const apply = vi.spyOn(t.session, "apply");
     runFromPalette("New task");
     runFromPalette("New milestone");
     runFromPalette("New group");
     press("n");
+    press("m");
     expect(apply).toHaveBeenCalledTimes(0);
-    expect(toastTexts()).toEqual([READ_ONLY, READ_ONLY, READ_ONLY, READ_ONLY]);
+    expect(toastTexts()).toEqual([READ_ONLY, READ_ONLY, READ_ONLY, READ_ONLY, READ_ONLY]);
     act(() => t.session.setReadOnly(false));
-    expect([task.disabled, group.disabled]).toEqual([false, false]);
+    expect(add.disabled).toBe(false);
   });
 
   it("answers writing keys with the read-only message and leaves no enabled writing control", async () => {

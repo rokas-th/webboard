@@ -191,7 +191,7 @@ export function restorePlan(registry: Registry, id: PlanId): void {
 export interface PlanFiles {
   creating: boolean;
   importing: boolean;
-  newPlan(raw: string, fail: (message: string) => void): void;
+  newPlan(raw: string, fail: (message: string) => void, made?: (id: PlanId) => void): void;
   newExample(fail: (message: string) => void): void;
   importPlan(): void;
 }
@@ -201,12 +201,15 @@ export function usePlanFiles(registry: Registry, open: (id: PlanId) => void): Pl
   const [importing, setImporting] = useState(false);
   const creatingRef = useRef(false);
   const importingRef = useRef(false);
-  const create = (make: () => Promise<PlanId>, fail: (message: string) => void): void => {
+  const create = (make: () => Promise<PlanId>, fail: (message: string) => void, made?: (id: PlanId) => void): void => {
     creatingRef.current = true;
     setCreating(true);
     make()
       .then(
-        (id) => open(id),
+        (id) => {
+          open(id);
+          made?.(id);
+        },
         (e: unknown) => fail(surfaced(e)),
       )
       .finally(() => {
@@ -214,7 +217,7 @@ export function usePlanFiles(registry: Registry, open: (id: PlanId) => void): Pl
         setCreating(false);
       });
   };
-  const newPlan = (raw: string, fail: (message: string) => void): void => {
+  const newPlan = (raw: string, fail: (message: string) => void, made?: (id: PlanId) => void): void => {
     if (creatingRef.current) return;
     let name: string;
     try {
@@ -223,7 +226,7 @@ export function usePlanFiles(registry: Registry, open: (id: PlanId) => void): Pl
       fail(surfaced(e));
       return;
     }
-    create(() => registry.createPlan(name), fail);
+    create(() => registry.createPlan(name), fail, made);
   };
   const newExample = (fail: (message: string) => void): void => {
     if (creatingRef.current) return;

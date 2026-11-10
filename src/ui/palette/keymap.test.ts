@@ -71,6 +71,19 @@ describe("keyToCommand on macOS", () => {
     expect([keyToCommand(k("ArrowDown", { shiftKey: true }), MAC), keyToCommand(k("ArrowUp", { altKey: true }), MAC)]).toEqual([null, null]);
   });
 
+  it("moves the selected item up and down among its siblings on Alt+ArrowUp and Alt+ArrowDown, only with a selection", () => {
+    const sel = { ...MAC, selected: true };
+    expect([keyToCommand(k("ArrowUp", { altKey: true }), sel), keyToCommand(k("ArrowDown", { altKey: true }), { ...PC, selected: true })]).toEqual(["move-up", "move-down"]);
+    expect([keyToCommand(k("ArrowUp", { altKey: true }), MAC), keyToCommand(k("ArrowDown", { altKey: true }), MAC)]).toEqual([null, null]);
+    expect([keyToCommand(k("ArrowUp", { altKey: true }), { ...sel, typing: true }), keyToCommand(k("ArrowDown", { altKey: true }), { ...sel, dialog: true })]).toEqual([null, null]);
+    expect(keyToCommand(k("ArrowUp", { altKey: true, shiftKey: true }), sel)).toBeNull();
+  });
+
+  it("adds a milestone on M, never while typing or in a dialog", () => {
+    expect([keyToCommand(k("m"), MAC), keyToCommand(k("M", { shiftKey: true }), { ...PC, selected: true })]).toEqual(["new-milestone", "new-milestone"]);
+    expect([keyToCommand(k("m"), { ...MAC, typing: true }), keyToCommand(k("m"), { ...MAC, dialog: true }), keyToCommand(k("m", { altKey: true }), MAC)]).toEqual([null, null, null]);
+  });
+
   it("jumps to today on T, never while typing or in a dialog", () => {
     expect([keyToCommand(k("t"), MAC), keyToCommand(k("T"), { ...PC, selected: true })]).toEqual(["today", "today"]);
     expect([keyToCommand(k("t"), { ...MAC, typing: true }), keyToCommand(k("t"), { ...MAC, dialog: true })]).toEqual([null, null]);

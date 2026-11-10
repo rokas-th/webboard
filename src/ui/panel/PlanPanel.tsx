@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { goneSet } from "../../domain/derive";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { useRun } from "../run";
@@ -20,8 +21,19 @@ function Stat(p: { k: string; v: number; tone?: "amber" | "magenta" }) {
   );
 }
 
-export function PlanPanel(p: { session: PlanSession; readOnly: boolean }) {
+export function PlanPanel(p: { session: PlanSession; readOnly: boolean; naming: boolean; onNamed(): void }) {
   const view = usePlanView(p.session);
+  const root = useRef<HTMLDivElement>(null);
+  const { naming, onNamed, readOnly } = p;
+  useEffect(() => {
+    if (!naming) return;
+    onNamed();
+    if (readOnly) return;
+    const input = root.current?.querySelector(".title-input");
+    if (!(input instanceof HTMLInputElement)) throw new Error("PlanPanel: no Plan name field to focus");
+    input.focus();
+    input.select();
+  }, [naming, onNamed, readOnly]);
   const run = useRun(p.session);
   const { setUi } = useUiValue();
   const plan = view.plan;
@@ -32,7 +44,7 @@ export function PlanPanel(p: { session: PlanSession; readOnly: boolean }) {
   const late = items.filter((i) => view.derived.late.has(i.id)).length;
   const conflicts = view.derived.conflicts.filter((c) => c.kind !== "dayoff").length;
   return (
-    <div className="panel">
+    <div className="panel" ref={root}>
       <h2>Plan</h2>
       <TextField className="title-input" label="Plan name" value={plan.name} readOnly={p.readOnly} onCommit={(next) => run.run({ t: "planName", name: next }) !== null} />
       <div className="stat">

@@ -78,6 +78,12 @@
   font-size: 12.5px;
 }
 
+.panel .num-input {
+  width: 64px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
 .panel .dimc {
   color: var(--dim);
 }

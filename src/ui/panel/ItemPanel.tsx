@@ -1,6 +1,6 @@
 import { useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { fmtNear, isCalendarDate, toIso, type Day, type IsoDate } from "../../domain/dates";
-import type { Item, ItemId, PlanState, Schedule, Status } from "../../domain/model";
+import { MAX_TASK_DUR, type Item, type ItemId, type PlanState, type Schedule, type Status } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
@@ -12,6 +12,9 @@ import { planGroupPath } from "../list/groups";
 import { OpenChoice, READ_ONLY, useRun, type Run } from "../run";
 import { derivedStatus } from "../status";
 import { LinksEditor } from "./LinksEditor";
+import { placeStep } from "./placeStep";
+import { EndField, WholeField } from "./typed";
+import { DUR_NOT_WHOLE } from "../copy";
 import { bindTextarea, type NoteBinding } from "./noteBinding";
 import { TextField } from "./TextField";
 
@@ -50,6 +53,8 @@ const dayText = (m: ReadonlyMap<ItemId, Day>, it: Item, what: string, today: Iso
   if (d === undefined) throw new Error(`ItemPanel: scheduled item ${it.id} has no derived ${what}`);
   return fmtNear(toIso(d), today);
 };
+
+export const durText = (dur: number): string => `${dur} ${dur === 1 ? "working day" : "working days"}`;
 
 const scheduleOf = (it: Item): Schedule => {
   if (it.schedule === null) throw new Error(`ItemPanel: item ${it.id} has no schedule`);
@@ -142,9 +147,21 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
                 −
               </button>
             )}
-            <span className="val">
-              {sc.dur} {sc.dur === 1 ? "working day" : "working days"}
-            </span>
+            {p.readOnly ? (
+              <span className="val">{durText(sc.dur)}</span>
+            ) : (
+              <>
+                <WholeField
+                  label="Duration"
+                  value={sc.dur}
+                  min={1}
+                  max={MAX_TASK_DUR}
+                  notWhole={DUR_NOT_WHOLE}
+                  onCommit={(dur) => p.run.run({ t: "resize", item: it.id, dur }) !== null}
+                />
+                <span className="val">{sc.dur === 1 ? "working day" : "working days"}</span>
+              </>
+            )}
             {!p.readOnly && (
               <button type="button" className="step" aria-label="Longer by one working day" onClick={() => p.run.run({ t: "resize", item: it.id, dur: sc.dur + 1 })}>
                 +
@@ -152,7 +169,11 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
             )}
           </span>
           <label>End</label>
-          <span className="val">{dated ? dayText(p.view.derived.end, it, "end", p.view.today) : "—"}</span>
+          {dated && !p.readOnly ? (
+            <EndField view={p.view} item={it} label="End" run={p.run} />
+          ) : (
+            <span className="val">{dated ? dayText(p.view.derived.end, it, "end", p.view.today) : "—"}</span>
+          )}
         </>
       )}
       <label htmlFor={statusId}>Status</label>
@@ -194,9 +215,8 @@ export function PlaceFields(p: { plan: PlanState; item: Item; readOnly: boolean;
   const options = groupOptions(plan, it.id);
   const current = options.find((o) => o.id === it.place.parent);
   const currentLabel = it.place.parent === null ? TOP_LEVEL : planGroupPath(plan, it.place.parent);
-  const siblings = childrenOf(plan, it.place.parent).filter((s) => !s.trashed || s.id === it.id);
-  const at = siblings.findIndex((s) => s.id === it.id);
-  if (at < 0) throw new Error(`ItemPanel: item ${it.id} is not among its parent's children`);
+  const up = placeStep(plan, it, -1);
+  const down = placeStep(plan, it, 1);
   const place = (parent: ItemId | null, after: ItemId | null): void => {
     p.run.run({ t: "place", item: it.id, parent, after });
   };
@@ -224,10 +244,10 @@ export function PlaceFields(p: { plan: PlanState; item: Item; readOnly: boolean;
       </div>
       {!p.readOnly && (
         <div className="actions">
-          <button type="button" className="button-small" disabled={at === 0} onClick={() => place(it.place.parent, at >= 2 ? siblings[at - 2].id : null)}>
+          <button type="button" className="button-small" disabled={up === null} onClick={up === null ? undefined : () => p.run.run(up)}>
             Move up
           </button>
-          <button type="button" className="button-small" disabled={at === siblings.length - 1} onClick={() => place(it.place.parent, siblings[at + 1].id)}>
+          <button type="button" className="button-small" disabled={down === null} onClick={down === null ? undefined : () => p.run.run(down)}>
             Move down
           </button>
           {it.schedule !== null && it.schedule.start !== null && (
