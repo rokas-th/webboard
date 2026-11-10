@@ -153,6 +153,7 @@ export class Registry {
   private readonly trackers = new Map<PlanId, Tracker>();
   private readonly failed = new Map<PlanId, AppError>();
   private readonly indexFailed = new Map<string, AppError>();
+  private readonly reloadingDocs = new Set<string>();
   private readonly sessionMemo = new Map<PlanId, Promise<PlanSession>>();
   private readonly sessions = new Map<PlanId, PlanSession>();
   private readonly deviceCbs = new Set<() => void>();
@@ -668,6 +669,10 @@ export class Registry {
     return this.indexStates().find(([, e]) => e !== null)?.[0] ?? null;
   }
 
+  indexErrorOf(doc: string): AppError | null {
+    return this.indexFailed.get(doc) ?? this.loaded.get(doc)?.error() ?? null;
+  }
+
   async retryIndex(): Promise<void> {
     this.usable();
     const failing = this.indexStates().flatMap(([id, e]) => (e === null ? [] : [id]));
@@ -731,20 +736,30 @@ export class Registry {
     this.usable();
     if (this.spaceReadOnly()) throw new Refused(READ_ONLY);
     if (docId === LOCAL_INDEX) throw new Error("The local plan list is not loaded from the server");
-    const p: Promise<PersistedDoc> = this.setAside(docId).then(
-      () =>
-        this.closed
-          ? this.loadFailed(docId, p, false, new RegistryClosed(docId), [])
-          : openPersisted(docId).then(
-              (d) => this.adopt(docId, p, d, true),
-              (e: unknown) => this.loadFailed(docId, p, true, e, []),
-            ),
-      (e: unknown) => this.loadFailed(docId, p, false, e, []),
-    );
-    this.memo.set(docId, p);
-    await p;
-    if (docId.startsWith(SPACE_PREFIX)) this.putSpace(docId, await this.openIndex(docId));
+    this.reloadingDocs.add(docId);
     this.emit();
+    try {
+      const p: Promise<PersistedDoc> = this.setAside(docId).then(
+        () =>
+          this.closed
+            ? this.loadFailed(docId, p, false, new RegistryClosed(docId), [])
+            : openPersisted(docId).then(
+                (d) => this.adopt(docId, p, d, true),
+                (e: unknown) => this.loadFailed(docId, p, true, e, []),
+              ),
+        (e: unknown) => this.loadFailed(docId, p, false, e, []),
+      );
+      this.memo.set(docId, p);
+      await p;
+      if (docId.startsWith(SPACE_PREFIX)) this.putSpace(docId, await this.openIndex(docId));
+    } finally {
+      this.reloadingDocs.delete(docId);
+      this.emit();
+    }
+  }
+
+  reloading(doc: string): boolean {
+    return this.reloadingDocs.has(doc);
   }
 
   private async setAside(id: string): Promise<void> {

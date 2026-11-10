@@ -8,6 +8,7 @@ import { LogState } from "../log/state";
 import type { Action, ActionId, DeviceId, Write } from "../log/types";
 import { planRules } from "../plan/rules";
 import { fixedClock } from "../services/clock";
+import { AppError } from "../services/ipc";
 import { decodeAction, encodeAction, PlanDoc } from "../store/doc";
 import { readActions } from "../store/read-actions";
 import { Registry } from "../store/registry";
@@ -15,7 +16,7 @@ import { act } from "../test/act";
 import { fakeFactory, type FakeFactory, type FakeProvider } from "../test/fakeProvider";
 import { memoryStore, type MemoryStore } from "../test/fixtures/store";
 import { ctxOf } from "../test/planCtx";
-import { commandsWith, resetTauri, tauri, type Call } from "../test/tauriMock";
+import { commandsWith, hold, resetTauri, tauri, type Call } from "../test/tauriMock";
 import { chipText, holdsPlan, SyncManager, type SyncState } from "./manager";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
@@ -126,13 +127,17 @@ function seedPlan(mem: MemoryStore | null, id: string, name: string, o: { items?
   return ydoc;
 }
 
+const actionsOf = (ydoc: Y.Doc): Action[] => {
+  const { ok, unreadable } = readActions(ydoc.getMap("actions").entries(), () => undefined);
+  expect(unreadable).toEqual([]);
+  return ok;
+};
+
 const headsOf = (ydoc: Y.Doc): ActionId[] => {
-  const { ok } = readActions(ydoc.getMap("actions").entries(), () => undefined);
+  const ok = actionsOf(ydoc);
   const parents = new Set(ok.flatMap((a) => [...a.par]));
   return ok.map((a) => a.id).filter((id) => !parents.has(id));
 };
-
-const actionsOf = (ydoc: Y.Doc): Action[] => readActions(ydoc.getMap("actions").entries(), () => undefined).ok;
 
 function remoteUpdate(base: Y.Doc, id: ActionId, raw: unknown): Uint8Array {
   const other = new Y.Doc();
@@ -640,8 +645,6 @@ describe("SyncManager: removal", () => {
     expect(r.spaceReadOnly()).toBe(false);
     prov(f, IX).closeWith(4403, "Device removed");
     await settle();
-    prov(f, "P").closeWith(4403, "Device removed");
-    await settle();
     expect(marks(0)).toBe(1);
     expect(errorOf(m.state()).code).toBe("revoked");
     expect(f.all.every((x) => x.calls.includes("disconnect"))).toBe(true);
@@ -1104,6 +1107,286 @@ describe("SyncManager: loading again from the server", () => {
   });
 });
 
+describe("SyncManager: sent changes", () => {
+  const renames = (s: { apply(i: { t: "rename"; item: ItemId; name: string }): unknown }, item: ItemId, names: readonly string[]): void =>
+    names.forEach((name) => s.apply({ t: "rename", item, name }));
+
+  const fire = (w: World, online: boolean): void => {
+    w.net.online = online;
+    [...w.net.cbs].forEach((cb) => cb());
+  };
+
+  it("a change made while connected and synced counts as sent", async () => {
+    const { w, r, f, m, seeded } = await started();
+    if (seeded === null) throw new Error("no seed");
+    syncAll(f);
+    await settle();
+    const a = itemNamed(seeded, "A");
+    renames(await r.session("P"), a, ["One", "Two", "Three"]);
+    await settle();
+    w.net.online = false;
+    prov(f, "P").emitStatus("disconnected");
+    expect(m.state()).toEqual({ kind: "offline", waiting: 0 });
+    expect(chipText(m.state(), NAME(r))).toBe("Offline");
+    expect(r.syncedHeads("P")).toEqual(headsOf(prov(f, "P").ydoc));
+    m.stop();
+    await settle();
+    await Promise.all(registries.splice(0).map((x) => x.close()));
+
+    const r2 = await openRegistry();
+    const f2 = fakeFactory();
+    const m2 = managerOf(w, r2, f2);
+    await m2.start();
+    await settle();
+    expect(m2.state()).toEqual({ kind: "offline", waiting: 0 });
+    renames(await r2.session("P"), a, ["Four", "Five", "Six"]);
+    await settle();
+    expect(chipText(m2.state(), NAME(r2))).toBe("Offline — 3 changes waiting");
+  });
+
+  it("a change made before the doc is synced waits until it is", async () => {
+    const { w, r, f, m, seeded } = await started();
+    if (seeded === null) throw new Error("no seed");
+    syncAll(f);
+    await settle();
+    const p = prov(f, "P");
+    p.emitStatus("disconnected");
+    p.emitStatus("connected");
+    renames(await r.session("P"), itemNamed(seeded, "A"), ["One", "Two", "Three"]);
+    await settle();
+    fire(w, false);
+    expect(chipText(m.state(), NAME(r))).toBe("Offline — 3 changes waiting");
+    fire(w, true);
+    p.emitSynced(true);
+    await settle();
+    fire(w, false);
+    expect(chipText(m.state(), NAME(r))).toBe("Offline");
+  });
+
+  it("an unreadable action by this device always waits", async () => {
+    const { w, r, f, m } = await started();
+    prov(f, "P").ydoc.getMap("actions").set("bad-1", ["dev-A", "s1", 0, [], 42, []]);
+    syncAll(f);
+    await settle();
+    fire(w, false);
+    expect(chipText(m.state(), NAME(r))).toBe("Offline — 1 change waiting");
+  });
+});
+
+describe("SyncManager: loading the space index again", () => {
+  it("the space index attaches again after a notify while it was released", async () => {
+    const { w, r, f, m } = await started();
+    syncAll(f);
+    await settle();
+    w.mem.fail("store_append", IX, { code: "store.io", message: "Disk full." });
+    remoteIndex(prov(f, IX), "s-S", [ip("S", false)]);
+    await settle();
+    expect(errorOf(m.state())).toMatchObject({ code: "local-failed", doc: IX, op: "save" });
+    w.mem.recover("store_append", IX);
+    const old = prov(f, IX);
+    const held = hold("store_set_aside");
+    const reload = r.reloadFromServer(IX);
+    await settle();
+    await r.retrySettings();
+    await settle();
+    held.resolve(null);
+    await reload;
+    await settle();
+    const fresh = prov(f, IX);
+    expect(fresh).not.toBe(old);
+    expect(fresh.connects()).toBe(1);
+    expect(fresh.ydoc).toBe((await r.doc(IX)).ydoc);
+    syncAll(f);
+    await settle();
+    expect(m.state()).toEqual({ kind: "synced" });
+    remoteIndex(fresh, "s-T", [ip("T", false)]);
+    await settle();
+    expect(prov(f, "T").connects()).toBe(1);
+  });
+
+  it("a plan's old provider stops before the plan is released", async () => {
+    const { r, f } = await started();
+    syncAll(f);
+    await settle();
+    const old = prov(f, "P");
+    const held = hold("store_set_aside");
+    const reload = r.reloadFromServer("P");
+    await settle();
+    expect(old.calls).toContain("destroy");
+    const from = tauri.calls.length;
+    const late = remoteUpdate(old.ydoc, "late-1", encodeAction(act("late-1", headsOf(old.ydoc), [own("pn", "Late")], { dev: "dev-B", lbl: "Rename plan" })));
+    expect(() => old.deliver(late)).not.toThrow();
+    expect(old.ydoc.getMap("actions").has("late-1")).toBe(false);
+    await settle();
+    expect(appendsTo(from, "P")).toHaveLength(0);
+    held.resolve(null);
+    await reload;
+    await settle();
+    const fresh = prov(f, "P");
+    expect(fresh).not.toBe(old);
+    expect(fresh.connects()).toBe(1);
+    expect(fresh.ydoc).toBe((await r.doc("P")).ydoc);
+  });
+
+  it("this space index's own error is shown when the local one fails too", async () => {
+    const { w, r, f, m } = await started();
+    syncAll(f);
+    await settle();
+    w.mem.fail("store_append", "local", { code: "store.io", message: "Local disk full." });
+    r.trashPlan("L");
+    await settle();
+    expect(r.indexErrorDoc()).toBe("local");
+    w.mem.fail("store_append", IX, { code: "store.io", message: "Disk full." });
+    remoteIndex(prov(f, IX), "s-S", [ip("S", false)]);
+    await settle();
+    expect(errorOf(m.state())).toMatchObject({ code: "local-failed", doc: IX, message: "Disk full.", cause: "store.io", op: "save" });
+    w.mem.recover("store_append", "local");
+    w.mem.recover("store_append", IX);
+    await r.retryIndex();
+    await settle();
+    expect(r.indexError()).toBeNull();
+    m.stop();
+    await settle();
+    await Promise.all(registries.splice(0).map((x) => x.close()));
+
+    const two = await started();
+    syncAll(two.f);
+    await settle();
+    two.w.mem.fail("store_append", "local", { code: "store.io", message: "Local disk full." });
+    two.r.trashPlan("L");
+    await settle();
+    two.w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+    await expect(two.r.reloadFromServer(IX)).rejects.toMatchObject({ code: "store.corrupt" });
+    await settle();
+    expect(errorOf(two.m.state())).toMatchObject({ code: "local-failed", doc: IX, message: "Bad record in seg-0.log.", cause: "store.corrupt", op: "load" });
+    const old = prov(two.f, IX);
+    two.w.mem.recover("store_append", "local");
+    two.w.mem.recover("store_load", IX);
+    await two.r.retryIndex();
+    await settle();
+    expect(two.r.indexError()).toBeNull();
+    expect(prov(two.f, IX)).not.toBe(old);
+    expect(prov(two.f, IX).connects()).toBe(1);
+  });
+});
+
+describe("SyncManager: fault handling", () => {
+  it("a rate limit with no readable wait stops that doc", async () => {
+    const { r, f, m } = await started({
+      before: (w) => {
+        const ok = w.ticket;
+        w.ticket = (doc) => (doc === "P" ? fail({ code: "sync.rate_limited", message: "Slow down." })() : ok(doc));
+      },
+    });
+    expect(m.state()).toEqual({ kind: "error", code: "failed", since: NOW, doc: "P", waiting: 6, message: "Slow down.", cause: "sync.rate_limited", op: null });
+    expect(chipText(m.state(), NAME(r))).toBe("Sync stopped: Slow down.");
+    await stopped(f, "P");
+  });
+
+  it("a carried store failure outranks unreachable", async () => {
+    const { w, r, f, m } = await started();
+    syncAll(f);
+    await settle();
+    prov(f, "P").closeWith(4500, "Server could not store the update");
+    w.ticket = fail({ code: "sync.http", message: "No network connection." });
+    await m.restart();
+    await settle();
+    expect(errorOf(m.state())).toMatchObject({ code: "store-failed", doc: "P" });
+    expect(chipText(m.state(), NAME(r))).toBe("Server could not store changes to “Launch” since 14:02");
+  });
+
+  it("the state reads removed while the mark is in flight", async () => {
+    const { r, f, m } = await started();
+    syncAll(f);
+    await settle();
+    const held = hold("sync_mark_revoked");
+    const marking = m.markRevoked();
+    expect(errorOf(m.state()).code).toBe("revoked");
+    expect(chipText(m.state(), NAME(r))).toBe("Device removed");
+    held.resolve(null);
+    await marking;
+    expect(errorOf(m.state())).toMatchObject({ code: "revoked", message: null });
+  });
+
+  it("a revoked ticket wins over a concurrent keychain failure", async () => {
+    const later = (e: Err, ms: number): Promise<never> => new Promise((_, reject) => setTimeout(() => reject({ ...e }), ms));
+    const { f, m } = await started({
+      before: (w) => {
+        w.ticket = (doc) =>
+          doc === IX
+            ? later({ code: "keychain.unavailable", message: "No Secret Service is running." }, 5)
+            : later({ code: "sync.revoked", message: "This device was removed from the space." }, 10);
+      },
+    });
+    expect([...f.providers.keys()].sort()).toEqual([IX, "P", "P2"].sort());
+    await advance(5);
+    expect(errorOf(m.state()).code).toBe("keychain");
+    await advance(5);
+    expect(marks(0)).toBe(1);
+    expect(errorOf(m.state()).code).toBe("revoked");
+  });
+
+  it("a revoke marked after stop still makes the space read-only", async () => {
+    const one = await started();
+    syncAll(one.f);
+    const failing = hold("sync_mark_revoked");
+    const marking = one.m.markRevoked();
+    one.m.stop();
+    const saveFailed = { code: "sync.io", message: "Could not save the sync state: Permission denied (os error 13)" };
+    failing.reject(saveFailed);
+    await expect(marking).rejects.toMatchObject(saveFailed);
+    expect(one.r.spaceReadOnly()).toBe(true);
+    await settle();
+    await Promise.all(registries.splice(0).map((x) => x.close()));
+
+    const two = await started();
+    syncAll(two.f);
+    const ok = hold("sync_mark_revoked");
+    const marked = two.m.markRevoked();
+    two.m.stop();
+    ok.resolve(null);
+    await marked;
+    expect(two.r.spaceReadOnly()).toBe(true);
+  });
+
+  it("an attach error the registry did not record is not swallowed", async () => {
+    const cases: ((w: World) => void)[] = [
+      (w) => (w.status = () => ({ space: SPACE, revoked: true })),
+      (w) => (w.status = fail({ code: "sync.io", message: "Could not read the sync state: invalid JSON" })),
+    ];
+    for (const set of cases) {
+      const w = world();
+      seedBase(w);
+      set(w);
+      const r = await openRegistry();
+      const stray = new AppError("store.io", "Not recorded anywhere.");
+      vi.spyOn(r, "attachSpace").mockRejectedValue(stray);
+      const m = managerOf(w, r, fakeFactory());
+      await expect(m.start()).rejects.toBe(stray);
+      m.stop();
+      await settle();
+      await Promise.all(registries.splice(0).map((x) => x.close()));
+    }
+  });
+
+  it("many plans syncing warm the registry at most twice", async () => {
+    const { r, f } = await started({
+      before: (w) => {
+        seedIndex(w.mem, IX, [ixAct("s-P3", ["s-P2"], [ip("P3", false)]), ixAct("s-P4", ["s-P3"], [ip("P4", false)])]);
+        seedPlan(w.mem, "P3", "Third");
+        seedPlan(w.mem, "P4", "Fourth");
+      },
+    });
+    expect([...f.providers.keys()].sort()).toEqual([IX, "P", "P2", "P3", "P4"].sort());
+    const warm = vi.spyOn(r, "warm");
+    syncAll(f);
+    await settle();
+    await advance(1000);
+    expect(warm.mock.calls.length).toBeGreaterThan(0);
+    expect(warm.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+});
+
 describe("chipText", () => {
   const err = (o: Partial<Extract<SyncState, { kind: "error" }>> & Pick<Extract<SyncState, { kind: "error" }>, "code">): SyncState => ({
     kind: "error",
@@ -1124,5 +1407,9 @@ describe("chipText", () => {
     expect(chipText(err({ code: "failed", message: "sync_ticket: channel closed" }), none)).toBe("Sync stopped: sync_ticket: channel closed");
     expect(chipText(err({ code: "too-large", doc: "P" }), none)).toBe("Too large to sync: a plan");
     expect(chipText(err({ code: "rejected", doc: "P" }), () => "Launch")).toBe("The server refused a change from this device — export this plan and check for an update");
+  });
+
+  it("a failed state without a message is a programming error", () => {
+    expect(() => chipText(err({ code: "failed" }), () => null)).toThrow("A failed sync state carries no message");
   });
 });

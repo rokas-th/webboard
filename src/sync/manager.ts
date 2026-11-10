@@ -116,7 +116,8 @@ function errorText(s: ErrorState, docName: (doc: string) => string | null): stri
     case "not-configured":
       return "Sync is not set up on the server";
     case "failed":
-      return `Sync stopped: ${s.message ?? ""}`;
+      if (s.message === null) throw new Error("A failed sync state carries no message");
+      return `Sync stopped: ${s.message}`;
     case "limited":
       return "Server asked to wait — retrying";
     case "unreachable":
@@ -174,6 +175,7 @@ function parseStatus(raw: unknown): { space: SpaceInfo | null; revoked: boolean 
 class Waiting {
   private readonly par = new Map<ActionId, readonly ActionId[]>();
   private readonly mine = new Set<ActionId>();
+  private readonly unreadable = new Set<ActionId>();
   private covered = new Set<ActionId>();
   count = 0;
 
@@ -187,16 +189,23 @@ class Waiting {
   }
 
   add(ids: readonly ActionId[]): void {
-    const fresh = ids.filter((id) => !this.par.has(id));
-    readActions(
+    const fresh = ids.filter((id) => !this.par.has(id) && !this.unreadable.has(id));
+    const read = readActions(
       fresh.map((id): readonly [string, unknown] => [id, this.map.get(id)]),
       () => undefined,
-    ).ok.forEach((a) => {
+    );
+    read.ok.forEach((a) => {
       this.par.set(a.id, a.par);
       if (a.dev !== this.dev) return;
       this.mine.add(a.id);
       if (!this.covered.has(a.id)) this.count += 1;
     });
+    read.unreadable
+      .filter((u) => u.dev === this.dev)
+      .forEach((u) => {
+        this.unreadable.add(u.id);
+        this.count += 1;
+      });
   }
 
   heads(): ActionId[] {
@@ -207,14 +216,13 @@ class Waiting {
   cover(heads: readonly ActionId[]): void {
     const seen = new Set<ActionId>();
     const stack = [...heads];
-    while (stack.length > 0) {
-      const id = stack.pop() as ActionId;
+    for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
       if (seen.has(id)) continue;
       seen.add(id);
       stack.push(...(this.par.get(id) ?? []));
     }
     this.covered = seen;
-    this.count = [...this.mine].filter((id) => !seen.has(id)).length;
+    this.count = [...this.mine].filter((id) => !seen.has(id)).length + this.unreadable.size;
   }
 }
 
@@ -262,6 +270,8 @@ export class SyncManager {
   private attached = false;
   private attaching = false;
   private revokedLatch = false;
+  private warming = false;
+  private rewarm = false;
   private last: SyncState = { kind: "off" };
 
   constructor(deps: SyncManagerDeps) {
@@ -322,12 +332,7 @@ export class SyncManager {
       this.registry.setSpaceReadOnly(true);
       this.revokedLatch = true;
       this.global = this.fault("revoked", null, null, null);
-      await this.registry.attachSpace(space.spaceId).then(
-        () => undefined,
-        (e: unknown) => {
-          if (!(e instanceof AppError)) throw e;
-        },
-      );
+      await this.attachRecorded(space.spaceId);
       if (gen === this.gen) this.emit();
       return;
     }
@@ -352,6 +357,7 @@ export class SyncManager {
     if (this.revokedLatch) return;
     this.revokedLatch = true;
     const gen = this.gen;
+    this.global = this.fault("revoked", null, null, null);
     this.links.forEach((l) => this.halt(l));
     this.emit();
     let failure: AppError | null = null;
@@ -361,14 +367,18 @@ export class SyncManager {
       if (!(e instanceof AppError)) throw e;
       failure = e;
     }
-    if (gen !== this.gen) return;
     if (failure !== null && failure.code === "sync.not_joined") {
+      if (gen !== this.gen) throw failure;
       this.global = this.fault("failed", null, failure.message, failure.code);
       this.emit();
       return;
     }
     this.registry.setSpaceReadOnly(true);
-    this.global = this.fault("revoked", null, failure?.message ?? null, failure?.code ?? null);
+    if (gen !== this.gen) {
+      if (failure !== null) throw failure;
+      return;
+    }
+    if (failure !== null || this.global?.code !== "revoked") this.global = this.fault("revoked", null, failure?.message ?? null, failure?.code ?? null);
     this.emit();
   }
 
@@ -404,10 +414,14 @@ export class SyncManager {
   private async attachTheOneOnDisk(): Promise<void> {
     const spaces = this.registry.localSpaces();
     if (spaces.length !== 1) return;
-    await this.registry.attachSpace(spaces[0]).then(
+    await this.attachRecorded(spaces[0]);
+  }
+
+  private async attachRecorded(spaceId: string): Promise<void> {
+    await this.registry.attachSpace(spaceId).then(
       () => undefined,
       (e: unknown) => {
-        if (!(e instanceof AppError)) throw e;
+        if (!(e instanceof AppError) || this.registry.indexErrorOf(SPACE_PREFIX + spaceId) !== e) throw e;
       },
     );
   }
@@ -429,8 +443,10 @@ export class SyncManager {
     if (gen !== this.gen) return;
     this.attaching = false;
     this.attached = true;
-    this.indexFault = null;
+    const e = this.registry.indexErrorOf(this.indexId);
+    this.indexFault = e === null ? null : this.indexFaultFor(e, "save");
     this.scan(gen);
+    this.emit();
   }
 
   private onRegistry(gen: number): void {
@@ -440,13 +456,15 @@ export class SyncManager {
     }
     const reg = this.registry;
     const ix = this.indexId;
-    if (this.attached && reg.attachedSpace() !== this.space.spaceId) {
-      this.attached = false;
-      const e = reg.indexError();
-      if (reg.indexErrorDoc() === ix && e !== null) this.indexFault = this.fault("local-failed", ix, e.message, e.code, "load");
-    }
+    const spaceId = this.space.spaceId;
+    [...this.links.values()].filter((l) => reg.reloading(l.doc)).forEach((l) => this.drop(l));
+    const open = reg.attachedSpace() === spaceId;
+    if (this.attached && !open) this.attached = false;
+    const e = reg.indexErrorOf(ix);
+    if (e !== null) this.indexFault = this.indexFaultFor(e, open ? "save" : "load");
+    else if (open) this.indexFault = null;
     if (!this.attached) {
-      if (!this.attaching && this.global === null && this.indexFault?.op === "load" && reg.indexError() === null) {
+      if (open && !this.attaching && this.global === null) {
         void this.attach(gen).then(() => {
           if (gen === this.gen && this.space !== null) this.registry.nameThisDevice(this.space.deviceName);
         });
@@ -454,19 +472,18 @@ export class SyncManager {
       this.emit();
       return;
     }
-    const e = reg.indexError();
-    if (reg.indexErrorDoc() === ix && e !== null) {
-      const same = this.indexFault?.op === "save" && this.indexFault.cause === e.code && this.indexFault.message === e.message;
-      if (!same) this.indexFault = this.fault("local-failed", ix, e.message, e.code, "save");
-    } else if (e === null && this.indexFault?.op === "save") {
-      this.indexFault = null;
-    }
     if (this.global === null) this.scan(gen);
     this.emit();
   }
 
+  private indexFaultFor(e: AppError, op: "load" | "save"): Fault {
+    const f = this.indexFault;
+    if (f !== null && f.op === op && f.cause === e.code && f.message === e.message) return f;
+    return this.fault("local-failed", this.indexId, e.message, e.code, op);
+  }
+
   private failing(doc: string): boolean {
-    return this.registry.failures().has(doc) || this.registry.indexErrorDoc() === doc;
+    return this.registry.failures().has(doc) || this.registry.indexErrorOf(doc) !== null;
   }
 
   private scan(gen: number): void {
@@ -474,7 +491,7 @@ export class SyncManager {
     const spaceId = this.space.spaceId;
     const docs = [this.indexId, ...this.registry.plans().flatMap((p) => (p.space === spaceId ? [p.id] : []))];
     this.links.forEach((link) => {
-      if (this.failing(link.doc)) return;
+      if (this.failing(link.doc) || this.registry.reloading(link.doc)) return;
       void this.registry.doc(link.doc).then(
         (d) => {
           if (gen !== this.gen || this.links.get(link.doc) !== link || d === link.persisted) return;
@@ -485,7 +502,7 @@ export class SyncManager {
         (e: unknown) => this.loadFailed(link.doc, e, gen),
       );
     });
-    docs.filter((d) => !this.links.has(d) && !this.loading.has(d) && !this.failing(d)).forEach((d) => this.load(d, gen));
+    docs.filter((d) => !this.links.has(d) && !this.loading.has(d) && !this.failing(d) && !this.registry.reloading(d)).forEach((d) => this.load(d, gen));
   }
 
   private load(doc: string, gen: number): void {
@@ -494,7 +511,7 @@ export class SyncManager {
     void this.registry.doc(doc).then(
       (d) => {
         loading.delete(doc);
-        if (gen !== this.gen || this.global !== null || this.revokedLatch || this.links.has(doc)) return;
+        if (gen !== this.gen || this.global !== null || this.revokedLatch || this.links.has(doc) || this.registry.reloading(doc)) return;
         this.makeLink(doc, d);
         this.emit();
       },
@@ -506,7 +523,7 @@ export class SyncManager {
   }
 
   private loadFailed(doc: string, e: unknown, gen: number): void {
-    if (e instanceof AppError && (this.registry.failures().get(doc) === e || this.registry.indexError() === e)) {
+    if (e instanceof AppError && (this.registry.failures().get(doc) === e || this.registry.indexErrorOf(doc) === e)) {
       if (gen === this.gen) this.emit();
       return;
     }
@@ -532,6 +549,7 @@ export class SyncManager {
     };
     const observer = (event: Y.YMapEvent<unknown>): void => {
       link.waiting.add([...event.keysChanged]);
+      if (event.transaction.origin !== link.provider && link.status === "connected" && link.synced && this.deps.online()) this.recordHeads(link);
       this.emit();
     };
     map.observe(observer);
@@ -568,7 +586,7 @@ export class SyncManager {
       providerOf(link).disconnect();
       if (e instanceof AppError) {
         this.handled.add(e);
-        if (!link.dead && !link.stopped) this.ticketFailed(link, e);
+        if (!link.dead && (!link.stopped || e.code === "sync.revoked")) this.ticketFailed(link, e);
       }
       throw e;
     }
@@ -599,13 +617,19 @@ export class SyncManager {
       case "sync.io":
         this.stopAll(this.fault("local-failed", null, e.message + RESET_HINT, e.code));
         return;
-      case "sync.rate_limited":
-        link.fault = this.fault("limited", link.doc, e.message, e.code);
-        this.schedule(link, this.rateWait(e.message));
+      case "sync.rate_limited": {
+        const wait = this.rateWait(e.message);
+        if (wait === null) {
+          this.stopDoc(link, this.fault("failed", link.doc, e.message, e.code));
+          return;
+        }
+        this.setFault(link, this.fault("limited", link.doc, e.message, e.code));
+        this.schedule(link, wait);
         this.emit();
         return;
+      }
       case "sync.http":
-        link.fault = link.fault?.code === "unreachable" ? { ...link.fault, message: e.message, cause: e.code } : this.fault("unreachable", link.doc, e.message, e.code);
+        this.setFault(link, link.fault?.code === "unreachable" ? { ...link.fault, message: e.message, cause: e.code } : this.fault("unreachable", link.doc, e.message, e.code));
         this.schedule(link, Math.min(1000 * 2 ** link.attempt, MAX_BACKOFF_MS));
         link.attempt += 1;
         this.emit();
@@ -615,11 +639,39 @@ export class SyncManager {
     }
   }
 
-  private rateWait(message: string): number {
+  private rateWait(message: string): number | null {
     const minutes = MINUTES.exec(message);
     if (minutes !== null) return Number(minutes[1]) * 60_000;
-    if (LATER.test(message)) return LATER_MS;
-    throw new Error(`A rate limit gave no wait: ${message}`);
+    return LATER.test(message) ? LATER_MS : null;
+  }
+
+  private setFault(link: Link, fault: Fault): void {
+    if (link.fault === null || rank(fault.code) <= rank(link.fault.code)) link.fault = fault;
+  }
+
+  private recordHeads(link: Link): void {
+    const heads = link.waiting.heads();
+    link.waiting.cover(heads);
+    void this.registry.setSyncedHeads(link.doc, heads);
+  }
+
+  private warm(): void {
+    if (this.warming) {
+      this.rewarm = true;
+      return;
+    }
+    this.warming = true;
+    this.rewarm = false;
+    void this.registry.warm().then(
+      () => {
+        this.warming = false;
+        if (this.rewarm) this.warm();
+      },
+      (e: unknown) => {
+        this.warming = false;
+        throw e;
+      },
+    );
   }
 
   private schedule(link: Link, ms: number): void {
@@ -643,10 +695,8 @@ export class SyncManager {
     link.synced = on;
     if (on) {
       if (link.fault?.code === "store-failed" || link.fault?.code === "unreachable" || link.fault?.code === "limited") link.fault = null;
-      const heads = link.waiting.heads();
-      link.waiting.cover(heads);
-      void this.registry.setSyncedHeads(link.doc, heads);
-      if (!isIndex(link.doc)) void this.registry.warm();
+      this.recordHeads(link);
+      if (!isIndex(link.doc)) this.warm();
     }
     this.emit();
   }
@@ -669,7 +719,7 @@ export class SyncManager {
         return;
       default:
         if (link.status === "connected") return;
-        if (link.fault?.code !== "unreachable") link.fault = this.fault("unreachable", link.doc, null, null);
+        if (link.fault?.code !== "unreachable") this.setFault(link, this.fault("unreachable", link.doc, null, null));
         this.emit();
     }
   }
@@ -702,7 +752,7 @@ export class SyncManager {
   }
 
   private stopDoc(link: Link, fault: Fault): void {
-    link.fault = fault;
+    this.setFault(link, fault);
     this.halt(link);
     this.emit();
   }

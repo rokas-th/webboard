@@ -17,6 +17,7 @@ export class FakeProvider implements ProviderLike {
   private readonly syncedCbs = new Set<(synced: boolean) => void>();
   private readonly closeCbs = new Set<(ev: { code: number; reason: string }) => void>();
   private watching = false;
+  private destroyed = false;
 
   constructor(host: string, doc: string, ydoc: Y.Doc, params: () => Promise<Record<string, string>>, syncOnConnect: boolean) {
     this.host = host;
@@ -53,6 +54,7 @@ export class FakeProvider implements ProviderLike {
 
   destroy(): void {
     this.calls.push("destroy");
+    this.destroyed = true;
     this.synced = false;
     this.ydoc.off("update", this.onUpdate);
     this.emitStatus("disconnected");
@@ -82,6 +84,7 @@ export class FakeProvider implements ProviderLike {
   }
 
   deliver(update: Uint8Array): void {
+    if (this.destroyed) return;
     Y.applyUpdate(this.ydoc, update, this);
   }
 

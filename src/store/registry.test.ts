@@ -63,8 +63,8 @@ interface Env {
   state: { settings: unknown; writeFail: Err | null };
 }
 
-function env(o: { settings?: unknown; platform?: "macos" | "linux" | "ios"; holidays?: Answer; answers?: Record<string, Answer> } = {}): Env {
-  const mem = memoryStore();
+function env(o: { settings?: unknown; platform?: "macos" | "linux" | "ios"; holidays?: Answer; answers?: Record<string, Answer>; mem?: MemoryStore } = {}): Env {
+  const mem = o.mem ?? memoryStore();
   const state: Env["state"] = { settings: o.settings ?? null, writeFail: null };
   resetTauri({
     ...mem.answers,
@@ -1450,6 +1450,18 @@ describe("Registry: spaces", () => {
     return r;
   }
 
+  async function reopenMine(theirs: Registry, mine: Env): Promise<Registry> {
+    await flush();
+    const update = Y.encodeStateAsUpdate((await theirs.doc(IX)).ydoc);
+    forget(theirs);
+    await theirs.close();
+    env({ settings: mine.state.settings, mem: mine.mem });
+    mine.mem.seed(IX, update);
+    const r = await open();
+    await r.attachSpace(SP);
+    return r;
+  }
+
   it("attachSpace merges the space index", async () => {
     const e = spaceEnv();
     seedIndex(e.mem, "local", listing("P", "Q"));
@@ -1524,8 +1536,11 @@ describe("Registry: spaces", () => {
     expect(planOf(r, "P").trashed).toBe(true);
     const seen = await peer(r, Y.encodeStateAsUpdate(ixDoc));
     expect(planOf(seen, "P")).toMatchObject({ trashed: true, space: SP });
-    forget(seen);
-    await seen.close();
+    seen.restorePlan("P");
+    const mine = await reopenMine(seen, e);
+    expect(planOf(mine, "P")).toMatchObject({ trashed: false, space: SP });
+    forget(mine);
+    await mine.close();
 
     const back = spaceEnv();
     seedIndex(back.mem, "local", listing("P"));
