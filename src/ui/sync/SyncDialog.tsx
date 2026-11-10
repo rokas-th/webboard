@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AppError, syncReset } from "../../services/ipc";
+import { SPACE_PREFIX } from "../../store/plan-id";
 import { chipText, holdsPlan, type SyncState } from "../../sync/manager";
 import { canReload, syncActions } from "../../sync/reload";
 import { useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
@@ -140,8 +141,8 @@ export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet
   }, [confirm]);
   const pane = p.pane ?? opened;
   const error = state.kind === "error" ? state : null;
-  const indexDoc = error !== null && error.code === "local-failed" && error.doc !== null && error.doc.startsWith("ix-");
-  const holds = error !== null && error.doc !== null && !error.doc.startsWith("ix-") && holdsPlan(registry, error.doc);
+  const indexDoc = error !== null && error.code === "local-failed" && error.doc !== null && error.doc.startsWith(SPACE_PREFIX);
+  const holds = error !== null && error.doc !== null && !error.doc.startsWith(SPACE_PREFIX) && holdsPlan(registry, error.doc);
   const body = (
     <>
       {error !== null && (

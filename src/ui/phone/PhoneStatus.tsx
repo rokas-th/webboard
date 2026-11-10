@@ -4,6 +4,7 @@ import { sideText } from "../../plan/choices";
 import type { Clock } from "../../services/clock";
 import { noticeText, type HolidayNotice } from "../../services/holidays";
 import type { PlanView } from "../../store/doc";
+import { SPACE_PREFIX } from "../../store/plan-id";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { chipText, holdsPlan, type SyncState } from "../../sync/manager";
@@ -92,7 +93,7 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
   const syncLead = (sync: PhoneSync): Line[] => {
     const s = sync.state;
     if (s.kind !== "error") return [];
-    const holds = s.doc !== null && !s.doc.startsWith("ix-") && holdsPlan(registry, s.doc);
+    const holds = s.doc !== null && !s.doc.startsWith(SPACE_PREFIX) && holdsPlan(registry, s.doc);
     const actions = (
       <SyncActionButtons holds={holds} small>
         <Act label="Open sync" onPress={() => leave(sync.open)} />
@@ -112,7 +113,7 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
   const registryLines = (): Line[] => {
     const index = registry.indexError();
     const doc = registry.indexErrorDoc();
-    const space = index !== null && index.code === "store.corrupt" && doc !== null && doc.startsWith("ix-") ? doc : null;
+    const space = index !== null && index.code === "store.corrupt" && doc !== null && doc.startsWith(SPACE_PREFIX) ? doc : null;
     const spaceReadOnly = registry.spaceReadOnly();
     const settings = registry.settingsError();
     return [

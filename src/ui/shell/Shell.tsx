@@ -3,6 +3,7 @@ import { Refused } from "../../actions/intents";
 import type { ItemId, PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
 import { AppError } from "../../services/ipc";
+import { SPACE_PREFIX } from "../../store/plan-id";
 import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { About } from "../common/About";
@@ -67,7 +68,7 @@ function IndexBanner(p: { registry: Registry; error: AppError }) {
   const reloadable = canReload(useSyncState().state);
   const [confirm, setConfirm] = useState<string | null>(null);
   const doc = p.registry.indexErrorDoc();
-  const space = p.error.code === "store.corrupt" && doc !== null && doc.startsWith("ix-") ? doc : null;
+  const space = p.error.code === "store.corrupt" && doc !== null && doc.startsWith(SPACE_PREFIX) ? doc : null;
   const readOnly = p.registry.spaceReadOnly();
   return (
     <Banner message={p.error.message}>

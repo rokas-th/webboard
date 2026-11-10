@@ -780,4 +780,15 @@ describe("a parent loop that only a resolution would close", () => {
     expect(mac.view.plan.items.get("G1")?.place.parent).toBe("G2");
     expect(mac.view.plan.items.get("G2")?.place.parent).toBeNull();
   });
+
+  it("accepts resolving an unrelated choice in a log that already holds a one-action loop", () => {
+    const TASK: Write[] = [...GROUPS, ...item("A", "task", "Alpha", null, "a2", sched("2026-11-16", 2))];
+    const loop = act("o1", ["a0"], [w("p:G1", ["G2", "a0"]), w("p:G2", ["G1", "a0"])], mac);
+    const ctx = ctxFrom(TASK, loop, act("m1", ["o1"], [w("n:A", "Mac")], mac), act("p1", ["o1"], [w("n:A", "Phone")], iph));
+    const c = only(ctx);
+    expect(c.units).toEqual(["n:A"]);
+    const after = applied(ctx, buildResolve(ctx, c, { side: sideKey(c, "iPhone") }, ON));
+    expect(after.view.choices).toEqual([]);
+    expect(valueOf(after, "n:A")).toBe("Phone");
+  });
 });

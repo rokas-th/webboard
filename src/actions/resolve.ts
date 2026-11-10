@@ -208,7 +208,9 @@ const resolved = (ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): R
 
 export function buildResolve(ctx: Ctx, choice: Choice, pick: Pick, opts: ResolveOptions): Built {
   const { built, after, fork } = resolved(ctx, choice, pick, opts);
-  const loop = silentLoops(fork, after)[0];
+  const loopKey = (loop: readonly string[]): string => [...loop].sort().join(" ");
+  const before = new Set(silentLoops(ctx.log, ctx.view.plan).map(loopKey));
+  const loop = silentLoops(fork, after).find((l) => !before.has(loopKey(l)));
   if (loop === undefined) return built;
   const group = after.items.get(loop[0]);
   if (group === undefined) throw new Error(`Item ${loop[0]} in a parent loop is not in the plan`);
