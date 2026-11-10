@@ -9,6 +9,7 @@ export const ABOUT_TITLE = "About WebBoard";
 function AboutText() {
   return (
     <>
+      <img className="about-mark" src="/logo-mark.svg" alt="" width={48} height={48} />
       <p>{`WebBoard ${version}`}</p>
       <p className="dimp">{HOLIDAY_ATTRIBUTION}</p>
     </>

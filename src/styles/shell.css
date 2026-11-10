@@ -647,6 +647,13 @@ button.chip {
   margin: 0 0 12px;
 }
 
+.about-mark {
+  display: block;
+  width: 48px;
+  height: 48px;
+  margin: 0 0 12px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

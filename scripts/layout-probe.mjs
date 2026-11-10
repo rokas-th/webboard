@@ -156,6 +156,15 @@ function states() {
     dialog: true,
     actions: [key("k", "KeyK", 4), expect('.palette[role="dialog"]'), expect(".palette-item .palette-label")],
   });
+  add("about", "mesa", {
+    dialog: true,
+    actions: [
+      key("k", "KeyK", 4),
+      tap(".palette-item .palette-label", "About WebBoard"),
+      expect('.modal[role="dialog"] h3', "About WebBoard"),
+      count('.modal[role="dialog"] img.about-mark', 1),
+    ],
+  });
   add("linux-toolbar", "mesa-linux", {
     sizes: "smallest",
     actions: [viewExpect("timeline"), expect("header.toolbar .wordmark", "WebBoard"), count(".toolbar-mac", 0)],
@@ -263,6 +272,16 @@ function states() {
       expect(".plan-sheet h2", "History"),
       expect(".plan-sheet button", "Export plan…"),
       expect(".plan-sheet button.about-row", "About WebBoard"),
+    ],
+  });
+  add("phone-about", "mesa", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-head button.phone-more", "⋯"),
+      click(".plan-sheet button.about-row", "About WebBoard"),
+      expect('.sheet[role="dialog"] .sheet-title', "About WebBoard"),
+      count('.sheet[role="dialog"] .about-sheet img.about-mark', 1),
     ],
   });
   add("phone-status/strip", "phone-status", {
