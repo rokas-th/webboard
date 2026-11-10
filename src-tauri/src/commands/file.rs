@@ -91,28 +91,33 @@ fn read_file(path: &Path) -> Result<Vec<u8>> {
 }
 
 fn export_name(plan: &str) -> Result<String> {
-    if plan.is_empty() {
+    let name = plan.replace(['/', '\\'], "-");
+    let stem = name.trim_end_matches('.');
+    if stem.is_empty() {
         return Err(io("The plan has no name to export under."));
     }
-    Ok(format!("{}.{EXTENSION}", plan.replace(['/', '\\'], "-")))
+    Ok(format!("{stem}.{EXTENSION}"))
 }
 
 #[cfg(any(desktop, test))]
 fn with_extension(path: PathBuf) -> PathBuf {
-    let has = path
+    let trimmed = match path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.trim_end_matches('.'))
+    {
+        Some(stem) if !stem.is_empty() => path.with_file_name(stem),
+        _ => path,
+    };
+    let has = trimmed
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION));
     if has {
-        return path;
+        return trimmed;
     }
-    let dotted = path.as_os_str().as_encoded_bytes().ends_with(b".");
-    let mut text = path.into_os_string();
-    text.push(if dotted {
-        EXTENSION.to_string()
-    } else {
-        format!(".{EXTENSION}")
-    });
+    let mut text = trimmed.into_os_string();
+    text.push(format!(".{EXTENSION}"));
     PathBuf::from(text)
 }
 
@@ -704,6 +709,23 @@ mod tests {
     }
 
     #[test]
+    fn export_name_trims_every_trailing_dot() {
+        [
+            ("Plan.", "Plan.webboard"),
+            ("Plan..", "Plan.webboard"),
+            ("Plan.v2...", "Plan.v2.webboard"),
+            ("a/.", "a-.webboard"),
+            ("v1.2", "v1.2.webboard"),
+        ]
+        .iter()
+        .for_each(|(plan, offered)| assert_eq!(export_name(plan).unwrap(), *offered, "{plan}"));
+        assert_eq!(
+            export_name("...").unwrap_err(),
+            CommandError::new("file.io", "The plan has no name to export under.")
+        );
+    }
+
+    #[test]
     fn export_name_refuses_an_empty_name() {
         assert_eq!(
             export_name("").unwrap_err(),
@@ -719,6 +741,10 @@ mod tests {
             ("/x/Plan.WEBBOARD", "/x/Plan.WEBBOARD"),
             ("/x/Plan.webboard", "/x/Plan.webboard"),
             ("/x/Plan.", "/x/Plan.webboard"),
+            ("/x/Plan..", "/x/Plan.webboard"),
+            ("/x/Plan...", "/x/Plan.webboard"),
+            ("/x/Plan.v2..", "/x/Plan.v2.webboard"),
+            ("/x/Plan.webboard.", "/x/Plan.webboard"),
         ]
         .iter()
         .for_each(|(picked, written)| {
@@ -749,6 +775,29 @@ mod tests {
         assert_eq!(
             fs::read(tmp.path().join("Bridge.webboard")).unwrap(),
             b"WBX1 plan"
+        );
+    }
+
+    #[test]
+    fn export_asks_about_the_corrected_name_and_a_no_writes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("Plan.webboard"), b"old plan").unwrap();
+        let mut asked = Vec::new();
+        let answer = export_with(
+            "Plan.webboard",
+            b"new plan",
+            |_| Some(in_dir(tmp.path(), "Plan.")),
+            |name| {
+                asked.push(name.to_string());
+                false
+            },
+        );
+        assert_eq!(answer, Ok(None));
+        assert_eq!(asked, ["Plan.webboard"]);
+        assert_eq!(names(tmp.path()), ["Plan.webboard"]);
+        assert_eq!(
+            fs::read(tmp.path().join("Plan.webboard")).unwrap(),
+            b"old plan"
         );
     }
 

@@ -4,6 +4,8 @@ use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -662,6 +664,8 @@ type DocTable = HashMap<String, Arc<Mutex<DocStore>>>;
 pub struct Store {
     root: PathBuf,
     docs: Arc<Mutex<DocTable>>,
+    #[cfg(test)]
+    fail_next_sync: Arc<AtomicBool>,
 }
 
 impl Store {
@@ -669,7 +673,21 @@ impl Store {
         Self {
             root,
             docs: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            fail_next_sync: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    fn sync_root(&self) -> Result<()> {
+        #[cfg(test)]
+        if self.fail_next_sync.swap(false, Ordering::SeqCst) {
+            return Err(io_error(
+                "Could not sync the directory",
+                &self.root,
+                io::Error::other("injected sync fault"),
+            ));
+        }
+        sync_dir(&self.root)
     }
 
     fn table(&self) -> Result<std::sync::MutexGuard<'_, DocTable>> {
@@ -764,9 +782,10 @@ impl Store {
             ));
         }
         let dir = self.root.join(id);
+        let folder = plan_folder(&dir)?;
         let held = match docs.remove(id) {
             Some(doc) => Some(Held::Doc(doc)),
-            None if dir.is_dir() => Some(Held::File(lock_dir(&dir, id)?)),
+            None if folder => Some(Held::File(lock_dir(&dir, id)?)),
             None => None,
         };
         let Some(copies) = self.copies(id)? else {
@@ -777,19 +796,25 @@ impl Store {
             .into_iter()
             .chain(whole.then_some(dir.clone()))
             .collect();
+        if targets.is_empty() {
+            return Ok(());
+        }
         let removed = remove_in_order(&targets);
         drop(held);
-        removed?;
-        sync_dir(&self.root).map_err(|e| {
-            if whole {
-                CommandError::new(
-                    "store.io",
-                    format!("{} was removed, but {}", dir.display(), e.message),
-                )
-            } else {
-                e
-            }
-        })
+        match removed {
+            Err(e) => Err(match self.sync_root() {
+                Ok(()) => e,
+                Err(s) => CommandError::new("store.io", format!("{} {}", e.message, s.message)),
+            }),
+            Ok(()) => self.sync_root().map_err(|e| {
+                let done = if whole {
+                    format!("{} was removed", dir.display())
+                } else {
+                    format!("Removed {}", shown(&targets))
+                };
+                CommandError::new("store.io", format!("{done}, but {}", e.message))
+            }),
+        }
     }
 
     fn copies(&self, id: &str) -> Result<Option<Vec<PathBuf>>> {
@@ -851,6 +876,18 @@ impl Store {
     }
 }
 
+fn plan_folder(dir: &Path) -> Result<bool> {
+    match fs::symlink_metadata(dir) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(io_error("Could not read", dir, e)),
+        Ok(meta) if meta.is_dir() => Ok(true),
+        Ok(_) => Err(CommandError::new(
+            "store.io",
+            format!("{} is not a plan folder", dir.display()),
+        )),
+    }
+}
+
 fn shown(paths: &[PathBuf]) -> String {
     paths
         .iter()
@@ -869,12 +906,16 @@ fn remove_in_order(targets: &[PathBuf]) -> Result<()> {
                     [] => "Nothing was removed.".to_string(),
                     done => format!("Removed {}.", shown(done)),
                 };
+                let kept = match &targets[i + 1..] {
+                    [] => String::new(),
+                    rest => format!(" Still on disk: {}.", shown(rest)),
+                };
                 Err(CommandError::new(
                     "store.io",
                     format!(
-                        "Could not remove {}: {e}. {removed} Still on disk: {}.",
+                        "Could not remove {}: {e}. {removed} {} is partly removed or untouched.{kept}",
                         path.display(),
-                        shown(&targets[i..])
+                        path.display()
                     ),
                 ))
             }
@@ -1650,7 +1691,7 @@ mod tests {
         );
         assert!(
             e.message.ends_with(&format!(
-                ". Removed {}. Still on disk: {}, {}.",
+                ". Removed {}. {} is partly removed or untouched. Still on disk: {}.",
                 gone.display(),
                 copy.display(),
                 docs.join("P").display()
@@ -1684,6 +1725,7 @@ mod tests {
         let dir = docs.join("P");
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
         let e = store.delete("P").unwrap_err();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(e.code, "store.io");
         assert!(
             e.message
@@ -1693,16 +1735,16 @@ mod tests {
         );
         assert!(
             e.message.ends_with(&format!(
-                ". Removed {}. Still on disk: {}.",
+                ". Removed {}. {} is partly removed or untouched.",
                 copy.display(),
                 dir.display()
             )),
             "{}",
             e.message
         );
+        assert!(!e.message.contains("Still on disk"), "{}", e.message);
         assert!(!copy.exists());
         assert!(entry.upgrade().is_none(), "the cached entry was kept");
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
         fs::remove_file(dir.join("seg-1.log")).unwrap();
         assert_eq!(
             store
@@ -1710,13 +1752,117 @@ mod tests {
                 .unwrap()
                 .lock()
                 .unwrap()
-                .load()
-                .unwrap()
-                .last_seq,
-            0
+                .append(3, &payload(3))
+                .unwrap_err(),
+            CommandError::new("store.seq", "seq 3 into an empty document")
         );
         store.delete("P").unwrap();
         assert!(!dir.exists());
+    }
+
+    #[test]
+    fn delete_refuses_a_file_in_place_of_the_plan_folder() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        fs::create_dir_all(docs.join("P.bad-1")).unwrap();
+        fs::write(docs.join("P"), b"not a plan").unwrap();
+        let store = Store::new(docs.clone());
+        assert_eq!(
+            store.delete("P").unwrap_err(),
+            CommandError::new(
+                "store.io",
+                format!("{} is not a plan folder", docs.join("P").display())
+            )
+        );
+        assert_eq!(fs::read(docs.join("P")).unwrap(), b"not a plan");
+        assert!(docs.join("P.bad-1").is_dir());
+    }
+
+    #[test]
+    fn delete_names_the_cause_when_the_root_cannot_be_searched() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        append_range(
+            &mut Store::new(docs.clone()).doc("P").unwrap().lock().unwrap(),
+            1..=2,
+        );
+        let store = Store::new(docs.clone());
+        let dir = docs.join("P");
+        fs::set_permissions(&docs, fs::Permissions::from_mode(0o600)).unwrap();
+        let refused = fs::symlink_metadata(&dir).is_err();
+        let e = store.delete("P");
+        fs::set_permissions(&docs, fs::Permissions::from_mode(0o755)).unwrap();
+        if refused {
+            let e = e.unwrap_err();
+            assert_eq!(e.code, "store.io");
+            assert!(
+                e.message
+                    .starts_with(&format!("Could not read {}: ", dir.display())),
+                "{}",
+                e.message
+            );
+            assert!(e.message.contains("Permission denied"), "{}", e.message);
+            assert!(dir.join("seg-1.log").is_file());
+            assert_eq!(
+                seqs(&store.doc("P").unwrap().lock().unwrap().load().unwrap()),
+                [1, 2]
+            );
+        }
+        store.delete("P").unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_failed_delete_syncs_the_root_and_appends_a_sync_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let store = Store::new(docs.clone());
+        append_range(&mut store.doc("P").unwrap().lock().unwrap(), 1..=2);
+        let copy = docs.join("P.bad-1");
+        fs::create_dir(&copy).unwrap();
+        fs::write(copy.join("seg-1.log"), b"old").unwrap();
+        fs::set_permissions(&copy, fs::Permissions::from_mode(0o555)).unwrap();
+        store.fail_next_sync.store(true, Ordering::SeqCst);
+        let e = store.delete("P").unwrap_err();
+        fs::set_permissions(&copy, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(e.code, "store.io");
+        assert!(
+            e.message.ends_with(&format!(
+                ". Nothing was removed. {} is partly removed or untouched. Still on disk: {}. Could not sync the directory {}: injected sync fault",
+                copy.display(),
+                docs.join("P").display(),
+                docs.display()
+            )),
+            "{}",
+            e.message
+        );
+        assert!(!store.fail_next_sync.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_sync_failure_after_removing_only_copies_says_they_were_removed() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        fs::create_dir_all(docs.join("P.bad-1")).unwrap();
+        fs::create_dir_all(docs.join("P.bad-2")).unwrap();
+        let store = Store::new(docs.clone());
+        store.fail_next_sync.store(true, Ordering::SeqCst);
+        assert_eq!(
+            store.delete("P").unwrap_err(),
+            CommandError::new(
+                "store.io",
+                format!(
+                    "Removed {}, {}, but Could not sync the directory {}: injected sync fault",
+                    docs.join("P.bad-1").display(),
+                    docs.join("P.bad-2").display(),
+                    docs.display()
+                )
+            )
+        );
+        assert!(!docs.join("P.bad-1").exists());
+        assert!(!docs.join("P.bad-2").exists());
     }
 
     #[test]
