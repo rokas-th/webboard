@@ -4,6 +4,8 @@ export const DUR_NOT_WHOLE = "A duration is a whole number of working days.";
 
 export const LAG_NOT_WHOLE = "Lag must be a whole number of working days.";
 
+export const DATE_UNREADABLE = "The date is not complete. Enter a day, month and year.";
+
 export const endBeforeStart = (start: string): string => `The end cannot come before the start, ${start}.`;
 
 export const endOnDayOff = (day: string): string => `${day} is not a working day. Pick a working day for the end.`;

@@ -4,11 +4,13 @@ import { fmtNear, isCalendarDate, toDay, toIso } from "../../domain/dates";
 import type { Item } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import { toast } from "../common/Toast";
-import { endBeforeStart, endOnDayOff } from "../copy";
+import { DATE_UNREADABLE, endBeforeStart, endOnDayOff } from "../copy";
 import type { Run } from "../run";
 import { TextField } from "./TextField";
 
 const WHOLE = /^[-+]?\d+$/;
+
+export const dateUnreadable = (): void => toast(DATE_UNREADABLE, "bad");
 
 export function WholeField(p: { label: string; value: number; min: number; max: number; notWhole: string; onCommit(n: number): boolean }) {
   const notWhole = (): void => toast(p.notWhole, "bad");
@@ -44,5 +46,5 @@ export function EndField(p: { view: PlanView; item: Item; label: string; run: Ru
     }
     return p.run.run({ t: "resize", item: it.id, dur: cal.workBetween(start, day) }) !== null;
   };
-  return <TextField type="date" className="date-input" label={p.label} value={toIso(end)} readOnly={false} onCommit={commit} />;
+  return <TextField type="date" className="date-input" label={p.label} value={toIso(end)} readOnly={false} onCommit={commit} onUnreadable={dateUnreadable} />;
 }

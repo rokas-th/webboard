@@ -265,6 +265,19 @@ describe("ItemPanel fields", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
+  it("toasts and writes nothing when the browser holds a start date it cannot read", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("X");
+    const apply = vi.spyOn(t.session, "apply");
+    const before = input("Start").value;
+    Object.defineProperty(input("Start"), "validity", { configurable: true, value: { badInput: true } });
+    clearToasts();
+    edit(input("Start"), "", "Enter");
+    expect([input("Start").value, toastTexts()]).toEqual([before, ["The date is not complete. Enter a day, month and year."]]);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("puts a typed duration back on Escape and writes nothing", async () => {
     const t = await made(ITEM_SEED);
     await shown(t);

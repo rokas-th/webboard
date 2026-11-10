@@ -13,7 +13,7 @@ import { OpenChoice, READ_ONLY, useRun, type Run } from "../run";
 import { derivedStatus } from "../status";
 import { LinksEditor } from "./LinksEditor";
 import { placeStep } from "./placeStep";
-import { EndField, WholeField } from "./typed";
+import { dateUnreadable, EndField, WholeField } from "./typed";
 import { DUR_NOT_WHOLE } from "../copy";
 import { bindTextarea, type NoteBinding } from "./noteBinding";
 import { TextField } from "./TextField";
@@ -131,6 +131,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
         value={sc.start ?? ""}
         readOnly={p.readOnly}
         onCommit={(next) => isCalendarDate(next) && schedule({ start: next })}
+        onUnreadable={dateUnreadable}
       />
       {!milestone && (
         <>

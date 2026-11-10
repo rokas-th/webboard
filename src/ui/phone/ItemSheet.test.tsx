@@ -127,6 +127,16 @@ describe("ItemSheet typed fields", () => {
     expect(apply).toHaveBeenCalledTimes(2);
   });
 
+  it("toasts and writes nothing when the browser holds an end date it cannot read", async () => {
+    const t = await made([REVIEW]);
+    const { apply } = shown(t, "Review");
+    Object.defineProperty(field("End"), "validity", { configurable: true, value: { badInput: true } });
+    clearToasts();
+    typed(field("End"), "", "Enter");
+    expect([field("End").value, toasts()]).toEqual(["2026-11-17", ["The date is not complete. Enter a day, month and year."]]);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("types a link's lag through the link intent and refuses one that is not whole", async () => {
     const t = await made([REVIEW, { name: "Ship", start: "2026-11-18", dur: 1, deps: [fs("Review")] }]);
     const { apply } = shown(t, "Review");
