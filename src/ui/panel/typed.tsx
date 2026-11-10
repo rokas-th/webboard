@@ -11,17 +11,18 @@ import { TextField } from "./TextField";
 const WHOLE = /^[-+]?\d+$/;
 
 export function WholeField(p: { label: string; value: number; min: number; max: number; notWhole: string; onCommit(n: number): boolean }) {
+  const notWhole = (): void => toast(p.notWhole, "bad");
   const commit = (next: string): boolean => {
     if (next === "") return false;
     if (!WHOLE.test(next)) {
-      toast(p.notWhole, "bad");
+      notWhole();
       return false;
     }
     const n = Number(next);
     if (n === p.value) return false;
     return p.onCommit(n);
   };
-  return <TextField type="number" className="num-input" label={p.label} min={String(p.min)} max={String(p.max)} value={String(p.value)} readOnly={false} onCommit={commit} />;
+  return <TextField type="number" className="num-input" label={p.label} min={String(p.min)} max={String(p.max)} value={String(p.value)} readOnly={false} onCommit={commit} onUnreadable={notWhole} />;
 }
 
 export function EndField(p: { view: PlanView; item: Item; label: string; run: Run }) {

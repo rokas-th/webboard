@@ -239,6 +239,26 @@ describe("ItemPanel fields", () => {
     expect(apply).toHaveBeenCalledTimes(3);
   });
 
+  it("toasts and writes nothing when the browser holds a duration or lag it cannot read as a number", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("X");
+    const apply = vi.spyOn(t.session, "apply");
+    const unreadable = (el: HTMLInputElement): HTMLInputElement => {
+      Object.defineProperty(el, "validity", { configurable: true, value: { badInput: true } });
+      return el;
+    };
+    clearToasts();
+    edit(unreadable(input("Duration")), "", "Enter");
+    expect([input("Duration").value, toastTexts()]).toEqual(["3", ["A duration is a whole number of working days."]]);
+    clearToasts();
+    const lag = within(one('[data-dep="W"]', panel())).getByRole("spinbutton", { name: "Lag" });
+    if (!(lag instanceof HTMLInputElement)) throw new Error("no lag field");
+    edit(unreadable(lag), "", "blur");
+    expect([lag.value, toastTexts()]).toEqual(["0", ["Lag must be a whole number of working days."]]);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("puts a typed duration back on Escape and writes nothing", async () => {
     const t = await made(ITEM_SEED);
     await shown(t);

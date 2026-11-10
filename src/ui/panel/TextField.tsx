@@ -16,6 +16,7 @@ export function TextField(p: {
   min?: string;
   max?: string;
   onCommit(next: string): boolean;
+  onUnreadable?(): void;
 }) {
   const [draft, setDraft] = useState(p.value);
   const sent = useRef<string | null>(null);
@@ -39,6 +40,14 @@ export function TextField(p: {
   }
   const commit = (): void => {
     const next = draft.trim();
+    const unread = p.onUnreadable;
+    if (unread !== undefined && input.current !== null && input.current.validity.badInput) {
+      if (next === sent.current) return;
+      sent.current = next;
+      unread();
+      setDraft(p.value);
+      return;
+    }
     if (next === p.value) {
       setDraft(p.value);
       return;
