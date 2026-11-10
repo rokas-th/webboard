@@ -412,7 +412,7 @@ describe("SyncManager: connecting", () => {
     r.subscribe(cb);
     remoteIndex(prov(f, IX), "s-S", [ip("S", false)]);
     await settle();
-    expect(r.plans().filter((p) => p.id === "S")).toEqual([{ id: "S", name: null, trashed: false, loaded: false, space: SP }]);
+    expect(r.plans().filter((p) => p.id === "S")).toEqual([{ id: "S", name: null, trashed: false, loaded: false, space: SP, example: false }]);
     expect(cb).toHaveBeenCalled();
     const s = prov(f, "S");
     expect(s.connects()).toBe(1);

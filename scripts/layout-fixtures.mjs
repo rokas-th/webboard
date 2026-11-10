@@ -14,6 +14,7 @@ export const PLAN_IDS = {
   longRtl: "planLongRtl",
   phone: "planPhone01",
   status: "planStatus1",
+  example: "planExample",
 };
 
 export const OUT_OF_RANGE = { code: "holidays.out_of_range", message: "OpenHolidays has CH holidays for 2020–2030, not 2031" };
@@ -438,6 +439,12 @@ function statusLog() {
   return log;
 }
 
+function exampleLog() {
+  const log = new Log("exmpl", START);
+  log.act({ lbl: "Created the example plan", w: rootWrites("Example: Website relaunch", ZH) });
+  return log;
+}
+
 function blankLog() {
   const log = new Log("blank", START);
   log.act({ lbl: `Created the plan ${q("Blank plan")}`, w: rootWrites("Blank plan", ZH) });
@@ -551,6 +558,18 @@ function spaceIndex(plans) {
   return log.doc();
 }
 
+function syncLocal() {
+  const space = mesa(mesaLog("mesaS"));
+  const f = fixtureOf([
+    { id: PLAN_IDS.example, name: "Example: Website relaunch", log: exampleLog() },
+    { id: PLAN_IDS.long, name: LONG.plan, log: longLog() },
+    { id: PLAN_IDS.longRtl, name: LONG.rtlPlan, log: rtlLog() },
+  ]);
+  const names = { ...f.ipc.settings_read.names, [space.id]: space.name };
+  const withSpacePlan = { docs: { ...f.docs, [space.id]: frame(space.log.doc()) }, ipc: { ...f.ipc, settings_read: { ...f.ipc.settings_read, names } } };
+  return inSpace(withSpacePlan, false, [space.id]);
+}
+
 function inSpace(f, revoked, plans = []) {
   const docs = { ...f.docs, [SPACE_INDEX]: frame(spaceIndex(plans)) };
   return {
@@ -585,6 +604,7 @@ export function buildFixtures() {
     ),
     "sync-dialog": copyOf(mesaOnMac),
     "sync-space": inSpace(mesaOnMac, false),
+    "sync-local": syncLocal(),
     "sync-receiving": inSpace(unreadable, false),
     "sync-removed": inSpace(mesaOnMac, true),
     "phone-sync-sheet": copyOf(mesaOnMac),

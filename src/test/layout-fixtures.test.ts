@@ -203,6 +203,7 @@ describe("layout fixtures", () => {
       "phone-sync-sheet",
       "scale",
       "sync-dialog",
+      "sync-local",
       "sync-receiving",
       "sync-removed",
       "sync-space",
@@ -216,7 +217,7 @@ describe("layout fixtures", () => {
 
   it("answers sync_status in every state, local only unless the state joins a space", () => {
     const joined = { space: { server: "https://probe.invalid", spaceId: "sp000000000", deviceId: "mac", deviceName: "Mac" }, revoked: false };
-    const expected: Record<string, unknown> = { "sync-space": joined, "sync-receiving": joined, "sync-removed": { ...joined, revoked: true }, "phone-removed-banner": { ...joined, revoked: true } };
+    const expected: Record<string, unknown> = { "sync-space": joined, "sync-local": joined, "sync-receiving": joined, "sync-removed": { ...joined, revoked: true }, "phone-removed-banner": { ...joined, revoked: true } };
     Object.entries(FIXTURES).forEach(([name, f]) => expect(f.ipc.sync_status, name).toEqual(expected[name] ?? { space: null, revoked: false }));
   });
 
@@ -247,7 +248,7 @@ describe("layout fixtures", () => {
 
   it("gives every space state its index doc and a ticket, and no other state either", () => {
     Object.entries(FIXTURES).forEach(([name, f]) => {
-      const space = ["sync-space", "sync-receiving", "sync-removed", "phone-removed-banner"].includes(name);
+      const space = ["sync-space", "sync-local", "sync-receiving", "sync-removed", "phone-removed-banner"].includes(name);
       expect("ix-sp000000000" in f.docs, name).toBe(space);
       expect(f.ipc.sync_ticket, name).toEqual(space ? { ticket: "tk_probe", expiresAt: new Date(2026, 10, 9, 10, 0, 0, 0).getTime() } : undefined);
     });
@@ -281,6 +282,21 @@ describe("layout fixtures", () => {
     expect(registry.plans().map((l) => [l.id, l.space])).toEqual([["planMesa001", null]]);
     await registry.attachSpace("sp000000000");
     expect(registry.plans().map((l) => [l.id, l.name, l.trashed, l.space])).toEqual([["planMesa001", "MESA 1.0", false, "sp000000000"]]);
+  });
+
+  it("sync-local is a space holding the mesa plan, with the example and two long-named plans on this device only", async () => {
+    resetTauri(answersOf(fixture("sync-local")));
+    const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
+    openRegistries.push(registry);
+    await registry.attachSpace("sp000000000");
+    await registry.warm();
+    const listed = registry.plans().map((l) => [l.id, l.trashed, l.space, l.loaded, l.example]);
+    expect(listed).toEqual([
+      ["planExample", false, null, true, true],
+      ["planLong001", false, null, true, false],
+      ["planLongRtl", false, null, true, false],
+      ["planMesa001", false, "sp000000000", true, false],
+    ]);
   });
 
   it("shares no ipc answers object between states", () => {
@@ -565,6 +581,7 @@ describe("layout fixtures", () => {
       const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
       try {
         expect(registry.device.name).toBe(name === "mesa-linux" ? "Linux" : "Mac");
+        if ("ix-sp000000000" in f.docs) await registry.attachSpace("sp000000000");
         expect(registry.plans().map((p) => p.id).sort()).toEqual(planDocs(f).sort());
         for (const doc of planDocs(f)) {
           const session = await registry.session(doc);

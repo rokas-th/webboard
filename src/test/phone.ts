@@ -11,7 +11,7 @@ export async function phoneRegistry(t: { session: PlanSession; clock: Clock }, o
   tauri.answers.settings_write ??= () => null;
   const registry = await Registry.open({ clock: t.clock, holidays: opts?.holidays });
   const view = t.session.view();
-  vi.spyOn(registry, "plans").mockReturnValue([{ id: view.plan.id, name: view.plan.name, trashed: false, loaded: true, space: null }]);
+  vi.spyOn(registry, "plans").mockReturnValue([{ id: view.plan.id, name: view.plan.name, trashed: false, loaded: true, space: null, example: false }]);
   vi.spyOn(registry, "session").mockResolvedValue(t.session);
   return registry;
 }

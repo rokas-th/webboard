@@ -8,6 +8,8 @@ import { ABOUT_TITLE } from "../common/About";
 import { Sheet } from "../common/Sheet";
 import { FailedPlanView } from "../shell/PlanFailed";
 import { restorePlan, type PlanFiles } from "../shell/selection";
+import { EntryTag, LocalLine } from "../shell/LocalLine";
+import { canMoveToSpace } from "../shell/moving";
 import { NewPlanButton } from "../shell/Sidebar";
 import type { SyncPane } from "../state";
 
@@ -38,6 +40,7 @@ function PlanRow(p: {
   listing: PlanListing;
   current: boolean;
   locked: boolean;
+  tagged: boolean;
   reloadEnabled: boolean;
   onOpen(id: PlanId): void;
   onTrash(id: PlanId): void;
@@ -48,6 +51,7 @@ function PlanRow(p: {
     <li className={p.current ? "entry active" : "entry"}>
       <button type="button" className="entry-open" aria-current={p.current ? "page" : undefined} onClick={() => p.onOpen(l.id)}>
         <span className="entry-name">{l.name ?? "Loading…"}</span>
+        <EntryTag listing={l} shown={p.tagged} />
       </button>
       {failure === undefined ? (
         <div className="entry-actions">
@@ -97,6 +101,7 @@ export function PlansSheet(p: {
   onNew(name: string): void;
   onOpen(id: PlanId): void;
   onTrash(id: PlanId): void;
+  onMoveAll(ids: readonly PlanId[]): void;
   onAbout?: () => void;
   onSync(pane: SyncPane): void;
   onClose(): void;
@@ -107,6 +112,7 @@ export function PlansSheet(p: {
   const plans = registry.plans();
   const readOnly = registry.spaceReadOnly();
   const locked = (l: PlanListing): boolean => l.space !== null && readOnly;
+  const canMove = canMoveToSpace(registry, state);
   const live = plans.filter((l) => !l.trashed);
   const trashed = plans.filter((l) => l.trashed);
   return (
@@ -128,12 +134,14 @@ export function PlansSheet(p: {
               listing={l}
               current={l.id === p.selected}
               locked={locked(l)}
+              tagged={canMove}
               reloadEnabled={canReload(state)}
               onOpen={p.onOpen}
               onTrash={p.onTrash}
             />
           ))}
         </ul>
+        <LocalLine plans={plans} shown={canMove} onMoveAll={p.onMoveAll} />
         {trashed.length > 0 && (
           <section aria-label="Trash">
             <div className="group-title">Trash</div>

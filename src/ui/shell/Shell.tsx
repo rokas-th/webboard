@@ -37,6 +37,7 @@ import { PlanHead } from "./PlanHead";
 import { PlanMenu } from "./PlanMenu";
 import { ConvertedReport } from "./ConvertedReport";
 import { ReloadConfirm } from "./ReloadConfirm";
+import { moveAllToSpace } from "./moving";
 import { messageOf, restorePlan, usePlanFiles, usePlanSelection } from "./selection";
 import { ExampleButton, NewPlanButton, Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
@@ -154,6 +155,8 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     }
     toast("Moved to the space");
   };
+
+  const moveAll = (ids: readonly PlanId[]): void => moveAllToSpace(registry, ids);
 
   const sel = ui.plan;
   const listing = sel === null ? undefined : listingOf(sel);
@@ -321,6 +324,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       onTrash={(id) => void trashOwn(id)}
       onRestore={(id) => restorePlan(registry, id)}
       onMove={moveToSpace}
+      onMoveAll={moveAll}
     />
   );
 

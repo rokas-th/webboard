@@ -15,6 +15,7 @@ import { History } from "../panel/History";
 import { TextField } from "../panel/TextField";
 import { Trash } from "../panel/Trash";
 import { useRun } from "../run";
+import { canMoveToSpace } from "../shell/moving";
 import { exportFlow } from "../shell/fileFlows";
 import type { PlanFiles } from "../shell/selection";
 import { useUiValue } from "../state";
@@ -39,13 +40,7 @@ function SyncSection(p: { session: PlanSession }) {
   useEffect(() => registry.subscribe(bump), [registry]);
   const id = p.session.view().plan.id;
   const listing = registry.plans().find((l) => l.id === id);
-  const movable =
-    listing !== undefined &&
-    listing.space === null &&
-    registry.attachedSpace() !== null &&
-    !registry.spaceReadOnly() &&
-    state.kind !== "off" &&
-    !(state.kind === "error" && state.code === "local-failed");
+  const movable = listing !== undefined && listing.space === null && canMoveToSpace(registry, state);
   const move = (): void => {
     try {
       registry.movePlanToSpace(id);

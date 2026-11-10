@@ -1,6 +1,8 @@
 import type { PlanId } from "../../domain/model";
 import type { PlanListing, Registry } from "../../store/registry";
 import { useSyncState } from "../../sync/SyncProvider";
+import { EntryTag, LocalLine } from "./LocalLine";
+import { canMoveToSpace } from "./moving";
 import { UpdateLine, useUpdates } from "./UpdateLine";
 
 export function NewPlanButton(p: { creating: boolean; onNew(): void }) {
@@ -29,6 +31,7 @@ interface SidebarProps {
   onTrash(id: PlanId): void;
   onRestore(id: PlanId): void;
   onMove(id: PlanId): void;
+  onMoveAll(ids: readonly PlanId[]): void;
 }
 
 export function Sidebar(p: SidebarProps) {
@@ -36,8 +39,8 @@ export function Sidebar(p: SidebarProps) {
   const updates = useUpdates();
   const failures = p.registry.failures();
   const readOnly = p.registry.spaceReadOnly();
-  const movable = (l: PlanListing): boolean =>
-    l.space === null && p.registry.attachedSpace() !== null && !readOnly && state.kind !== "off" && !(state.kind === "error" && state.code === "local-failed");
+  const canMove = canMoveToSpace(p.registry, state);
+  const movable = (l: PlanListing): boolean => l.space === null && canMove;
   const locked = (l: PlanListing): boolean => l.space !== null && readOnly;
   const live = p.plans.filter((l) => !l.trashed);
   const trashed = p.plans.filter((l) => l.trashed);
@@ -55,6 +58,7 @@ export function Sidebar(p: SidebarProps) {
             <li key={l.id} className={l.id === p.selected ? "entry active" : "entry"}>
               <button type="button" className="entry-open" aria-current={l.id === p.selected ? "page" : undefined} onClick={() => p.onSelect(l.id)}>
                 <span className="entry-name">{l.name ?? "Loading…"}</span>
+                <EntryTag listing={l} shown={canMove} />
               </button>
               {shown && <p className="entry-bad">{failure.message}</p>}
               {shown && l.loaded && (
@@ -78,6 +82,7 @@ export function Sidebar(p: SidebarProps) {
           );
         })}
       </ul>
+      <LocalLine plans={p.plans} shown={canMove} onMoveAll={p.onMoveAll} />
       {trashed.length > 0 && (
         <section aria-label="Trash">
           <div className="group-title">Trash</div>

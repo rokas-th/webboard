@@ -51,7 +51,7 @@ export function testRegistry(t: TestSession, over: Partial<Registry> = {}): Test
     ...stubs,
     device: { deviceId: "mac", name: "Mac", platform: "macos" },
     holidays: t.holidays,
-    plans: () => [{ id, name: t.session.view().plan.name, trashed: false, loaded: true, space: null }],
+    plans: () => [{ id, name: t.session.view().plan.name, trashed: false, loaded: true, space: null, example: false }],
     session: (x: string) => (x === id ? Promise.resolve(t.session) : Promise.reject(unknown(x))),
     doc: (x: string) => (x === id ? Promise.resolve(t.doc) : Promise.reject(unknown(x))),
     failures: () => failures,

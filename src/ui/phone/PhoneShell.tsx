@@ -11,6 +11,7 @@ import { toast, Toasts } from "../common/Toast";
 import { ghostIds } from "../ghosts";
 import { OpenChoice } from "../run";
 import { ConvertedReport } from "../shell/ConvertedReport";
+import { moveAllToSpace } from "../shell/moving";
 import { FailedPlanView } from "../shell/PlanFailed";
 import { usePlanFiles, usePlanSelection, type PlanFiles, type PlanMain } from "../shell/selection";
 import { ExampleButton, NewPlanButton } from "../shell/Sidebar";
@@ -261,6 +262,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
     [setUi],
   );
   const trash = (id: PlanId): void => void trashOwn(id);
+  const moveAll = (ids: readonly PlanId[]): void => moveAllToSpace(p.registry, ids);
   const session = main.k === "open" ? main.session : null;
   const closeDialog = (): void => setUi({ dialog: null });
   const about = (): void => {
@@ -313,6 +315,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
             onNew={newFromSheet}
             onOpen={openPlan}
             onTrash={trash}
+            onMoveAll={moveAll}
             onAbout={main.k === "empty" ? about : undefined}
             onSync={openSync}
             onClose={closePlans}

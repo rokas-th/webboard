@@ -730,8 +730,8 @@ describe("a choice settled meanwhile", () => {
       x === id ? Promise.resolve(mine) : x === "p-other" ? Promise.resolve(theirs) : Promise.reject(new Error("no plan " + x));
     const { ui, registry } = shellFor(t, {
       plans: () => [
-        { id, name: "One", trashed, loaded: true, space: null },
-        { id: "p-other", name: "Two", trashed: false, loaded: true, space: null },
+        { id, name: "One", trashed, loaded: true, space: null, example: false },
+        { id: "p-other", name: "Two", trashed: false, loaded: true, space: null, example: false },
       ],
       session: (x) => pick(x, t.session, other.session),
       doc: (x) => pick(x, t.doc, other.doc),

@@ -1,5 +1,6 @@
 import * as Y from "yjs";
 import { buildAction, initialAction } from "../actions/build";
+import { EXAMPLE_LABEL, EXAMPLE_NAME } from "../actions/example";
 import type { Calendar } from "../domain/calendar";
 import type { Item, ItemId } from "../domain/model";
 import { LogState } from "../log/state";
@@ -98,12 +99,13 @@ export const ixAct = (id: ActionId, par: readonly ActionId[], w: readonly Write[
   encodeAction(action(id, par, w, { dev, lbl })),
 ];
 
-export function seedPlan(mem: MemoryStore | null, id: string, name: string, o: { items?: readonly string[]; dev?: DeviceId; link?: boolean } = {}): Y.Doc {
+export function seedPlan(mem: MemoryStore | null, id: string, name: string, o: { items?: readonly string[]; dev?: DeviceId; link?: boolean; example?: boolean } = {}): Y.Doc {
   const ydoc = new Y.Doc();
   const pd = new PlanDoc(ydoc);
   const log = new LogState(planRules);
   const dev = o.dev ?? "dev-A";
-  const root = initialAction({ dev, ses: "seed", now: 0, name, calendar: PLAIN });
+  const initial = initialAction({ dev, ses: "seed", now: 0, name, calendar: PLAIN });
+  const root = o.example === true ? { ...initial, lbl: EXAMPLE_LABEL } : initial;
   pd.append(root, []);
   log.add([root]);
   (o.items ?? []).forEach((item) => {
@@ -174,8 +176,12 @@ export function appendedWrites(calls: readonly Call[]): [string, Write][] {
     });
 }
 
-export function seedSpace(w: SyncWorld, o: { trashedP2?: boolean; link?: boolean } = {}): void {
-  seedIndex(w.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("l-L", ["l-n"], [ip("L", false)])]);
+export function seedSpace(w: SyncWorld, o: { trashedP2?: boolean; link?: boolean; local?: boolean } = {}): void {
+  seedIndex(w.mem, "local", [
+    ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"),
+    ixAct("l-L", ["l-n"], [ip("L", false)]),
+    ...(o.local === true ? [ixAct("l-M", ["l-L"], [ip("M", false)]), ixAct("l-E", ["l-M"], [ip("E", false)])] : []),
+  ]);
   seedIndex(w.mem, IX, [
     ixAct("s-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"),
     ixAct("s-P", ["s-n"], [ip("P", false)]),
@@ -183,5 +189,9 @@ export function seedSpace(w: SyncWorld, o: { trashedP2?: boolean; link?: boolean
   ]);
   seedPlan(w.mem, "P", "Launch", { items: o.link === true ? ["A", "B"] : ["A"], link: o.link });
   seedPlan(w.mem, "L", "Alpha");
+  if (o.local === true) {
+    seedPlan(w.mem, "M", "Mango");
+    seedPlan(w.mem, "E", EXAMPLE_NAME, { example: true });
+  }
   if (o.trashedP2 === true) seedPlan(w.mem, "P2", "Pod");
 }

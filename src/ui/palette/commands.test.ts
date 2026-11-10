@@ -74,9 +74,9 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
   const id = t.session.view().plan.id;
   const registry = testRegistry(t, {
     plans: () => [
-      { id, name: "Plan", trashed: false, loaded: true, space: null },
-      ...plans.map((p) => ({ id: p, name: `Plan ${p}`, trashed: false, loaded: true, space: null })),
-      { id: "gone", name: "Gone", trashed: true, loaded: true, space: null },
+      { id, name: "Plan", trashed: false, loaded: true, space: null, example: false },
+      ...plans.map((p) => ({ id: p, name: `Plan ${p}`, trashed: false, loaded: true, space: null, example: false })),
+      { id: "gone", name: "Gone", trashed: true, loaded: true, space: null, example: false },
     ],
     ...more,
   });
@@ -335,9 +335,9 @@ describe("commands()", () => {
     const id = t.session.view().plan.id;
     const h = harness(t, {}, [], {
       plans: () => [
-        { id, name: "Plan", trashed: false, loaded: true, space: null },
-        { id: "bad", name: null, trashed: false, loaded: false, space: null },
-        { id: "slow", name: null, trashed: false, loaded: false, space: null },
+        { id, name: "Plan", trashed: false, loaded: true, space: null, example: false },
+        { id: "bad", name: null, trashed: false, loaded: false, space: null, example: false },
+        { id: "slow", name: null, trashed: false, loaded: false, space: null, example: false },
       ],
       failures: () => new Map([["bad", new AppError("store.corrupt", "The plan file is damaged.")]]),
     });

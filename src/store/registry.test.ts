@@ -302,7 +302,7 @@ describe("Registry: creating plans", () => {
     expect(r.openSessions()[0].view().plan.name).toBe("Beta");
     const writes = settingsWrites(from);
     expect(writes[writes.length - 1].names[id]).toBe("Beta");
-    expect(planOf(r, id)).toEqual({ id, name: "Beta", trashed: false, loaded: true, space: null });
+    expect(planOf(r, id)).toEqual({ id, name: "Beta", trashed: false, loaded: true, space: null, example: false });
   });
 
   it("createPlan warms holidays", async () => {
@@ -705,7 +705,7 @@ describe("IndexDoc", () => {
     await a.close();
     await b.close();
     const r = await open();
-    expect(r.plans()).toEqual([{ id: "P", name: null, trashed: true, loaded: false, space: null }]);
+    expect(r.plans()).toEqual([{ id: "P", name: null, trashed: true, loaded: false, space: null, example: false }]);
     expect(r.failures().size).toBe(0);
     expect(r.indexError()).toBeNull();
   });
@@ -779,7 +779,7 @@ describe("Registry: listing and loading", () => {
     seedIndex(e.mem, "local", listing("P"));
     seedPlan(e.mem, "P", "Alpha");
     const r = await open();
-    expect(r.plans()).toEqual([{ id: "P", name: "Alpha", trashed: false, loaded: false, space: null }]);
+    expect(r.plans()).toEqual([{ id: "P", name: "Alpha", trashed: false, loaded: false, space: null, example: false }]);
     expect(callsOf(0, "store_load").map(docOfArgs)).toEqual(["local"]);
   });
 
@@ -794,7 +794,7 @@ describe("Registry: listing and loading", () => {
     await r.warm();
     expect(callsOf(from, "store_load").map(docOfArgs)).toEqual(["alpha", "beta"]);
     expect(r.failures().get("beta")?.code).toBe("store.corrupt");
-    expect(planOf(r, "alpha")).toEqual({ id: "alpha", name: "Alpha", trashed: false, loaded: true, space: null });
+    expect(planOf(r, "alpha")).toEqual({ id: "alpha", name: "Alpha", trashed: false, loaded: true, space: null, example: false });
   });
 
   it("warm is idempotent", async () => {
@@ -805,7 +805,7 @@ describe("Registry: listing and loading", () => {
     e.mem.fail("store_load", "beta", { code: "store.corrupt", message: "beta: a record is damaged" });
     const r = await open();
     await r.warm();
-    expect(planOf(r, "gamma")).toEqual({ id: "gamma", name: null, trashed: false, loaded: false, space: null });
+    expect(planOf(r, "gamma")).toEqual({ id: "gamma", name: null, trashed: false, loaded: false, space: null, example: false });
     expect(r.failures().has("gamma")).toBe(false);
     const plans = r.plans();
     const failures = new Map(r.failures());
@@ -1655,7 +1655,7 @@ describe("Registry: spaces", () => {
     expect(await r.attachSpace(SP)).toBe(ix);
     expect(r.attachedSpace()).toBe(SP);
     expect(loadsOf(0, IX)).toBe(1);
-    expect(r.plans().filter((p) => p.id === "P")).toEqual([{ id: "P", name: null, trashed: false, loaded: false, space: SP }]);
+    expect(r.plans().filter((p) => p.id === "P")).toEqual([{ id: "P", name: null, trashed: false, loaded: false, space: SP, example: false }]);
     expect(planOf(r, "Q").space).toBeNull();
     await closeAll();
 
@@ -1909,7 +1909,7 @@ describe("Registry: spaces", () => {
     const r = await open();
     await r.attachSpace(SP);
     r.setSpaceReadOnly(true);
-    expect(r.plans().filter((p) => p.id === "P")).toEqual([{ id: "P", name: null, trashed: false, loaded: false, space: SP }]);
+    expect(r.plans().filter((p) => p.id === "P")).toEqual([{ id: "P", name: null, trashed: false, loaded: false, space: SP, example: false }]);
     expect((await r.session("P")).readOnly).toBe(true);
     await flush();
     const from = tauri.calls.length;
@@ -2148,6 +2148,102 @@ describe("Registry: spaces", () => {
     expect(callsOf(from, "store_append")).toEqual([]);
   });
 
+  describe("movePlansToSpace", () => {
+    const placed = (r: Registry): (readonly [string, string | null, boolean])[] => r.plans().map((p) => [p.id, p.space, p.trashed] as const);
+    const twoLocal = async (): Promise<Registry> => {
+      const e = spaceEnv();
+      seedIndex(e.mem, "local", listing("Q", "R", "S"));
+      seedPlan(e.mem, "Q", "Queue");
+      seedPlan(e.mem, "R", "River");
+      seedPlan(e.mem, "S", "Stay");
+      const r = await open();
+      await r.attachSpace(SP);
+      await flush();
+      return r;
+    };
+
+    it("lists every moved plan in the space and trashes its local entry; a repeat adds no action", async () => {
+      const r = await twoLocal();
+      const from = tauri.calls.length;
+      r.movePlansToSpace(["Q", "R"]);
+      await flush();
+      expect(appendsTo(from, IX).map(writesOf)).toEqual([[ip("Q", false)], [ip("R", false)]]);
+      expect(appendsTo(from, "local").map(writesOf)).toEqual([[ip("Q", true)], [ip("R", true)]]);
+      expect(placed(r)).toEqual([
+        ["Q", SP, false],
+        ["R", SP, false],
+        ["S", null, false],
+      ]);
+      const again = tauri.calls.length;
+      r.movePlansToSpace(["Q", "R"]);
+      await flush();
+      expect(callsOf(again, "store_append")).toEqual([]);
+    });
+
+    it("refuses on a read-only space and changes nothing", async () => {
+      const r = await twoLocal();
+      r.setSpaceReadOnly(true);
+      await flush();
+      const from = tauri.calls.length;
+      let thrown: unknown = null;
+      try {
+        r.movePlansToSpace(["Q", "R"]);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(Refused);
+      expect(refusedOf(thrown).message).toBe("This device was removed from the space. Join again to move plans there.");
+      await flush();
+      expect(callsOf(from, "store_append")).toEqual([]);
+    });
+
+    it("throws for a plan that is not on this device, naming it, before it moves any", async () => {
+      const r = await twoLocal();
+      const from = tauri.calls.length;
+      expect(() => r.movePlansToSpace(["Q", "nope"])).toThrow(new Error("Cannot move nope: not a plan on this device."));
+      r.trashPlan("S");
+      await flush();
+      const trashed = tauri.calls.length;
+      expect(() => r.movePlansToSpace(["Q", "S"])).toThrow(new Error("Cannot move S: not a plan on this device."));
+      await flush();
+      expect(callsOf(from, "store_append").filter((c) => xdoc(c) === IX)).toEqual([]);
+      expect(callsOf(trashed, "store_append")).toEqual([]);
+    });
+
+    it("says how many moved when one fails half-way, lists that plan once, and finishes it on the next call", async () => {
+      const r = await twoLocal();
+      await r.doc("R");
+      await flush();
+      const real = IndexDoc.prototype.trashPlan;
+      let calls = 0;
+      const spy = vi.spyOn(IndexDoc.prototype, "trashPlan").mockImplementation(function (this: IndexDoc, id) {
+        calls += 1;
+        if (calls === 2) throw new Error("Disk full");
+        real.call(this, id);
+      });
+      let thrown: unknown = null;
+      try {
+        r.movePlansToSpace(["Q", "R"]);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(AppError);
+      expect([appErrorOf(thrown).code, appErrorOf(thrown).message]).toEqual(["move.partial", "Moved 1 of 2 plans to the space. River: Disk full"]);
+      expect(placed(r)).toEqual([
+        ["Q", SP, false],
+        ["R", SP, false],
+        ["S", null, false],
+      ]);
+      spy.mockRestore();
+      await flush();
+      const from = tauri.calls.length;
+      r.movePlansToSpace(["Q", "R"]);
+      await flush();
+      expect(appendsTo(from, IX)).toEqual([]);
+      expect(appendsTo(from, "local").map(writesOf)).toEqual([[ip("R", true)]]);
+    });
+  });
+
   it("movePlanToSpace with no space throws", async () => {
     const e = spaceEnv();
     seedIndex(e.mem, "local", listing("Q"));
@@ -2212,6 +2308,19 @@ describe("Registry: the example plan", () => {
     expect(listedAt).toBeGreaterThanOrEqual(0);
     expect(flagged).toBeGreaterThan(appended);
     expect(flagWrites(0)).toBe(1);
+  });
+
+  it("marks only the example plan as the example in its listing", async () => {
+    env({ settings: null });
+    const r = await open({ clock: fixedClock(TODAY) });
+    await flush();
+    const made = await r.createPlan("Mine");
+    await r.session(made);
+    await flush();
+    expect(r.plans().map((l) => [l.name, l.loaded, l.example])).toEqual([
+      [EXAMPLE, true, true],
+      ["Mine", true, false],
+    ]);
   });
 
   it("writes the example as one root action that History shows alone and nothing can undo or revert", async () => {

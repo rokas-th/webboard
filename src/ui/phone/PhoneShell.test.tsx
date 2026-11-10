@@ -2084,6 +2084,35 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     expect(within(await planMenu()).queryByRole("button", { name: "Move to space" })).toBeNull();
   });
 
+  it("the Plans sheet tags the plans kept on this device and moves them in one go", async () => {
+    const w = world({ local: true });
+    const { r, f } = await mounted(w);
+    syncAll(f);
+    await deep();
+    await tap(within(topBar()).getByRole("button", { name: "Plans" }));
+    const sheet = (): HTMLElement => screen.getByRole("dialog", { name: "Plans" });
+    const tagged = (cls: string): (string | null | undefined)[] =>
+      [...sheet().querySelectorAll(`.entry-open .entry-tag.${cls}`)].map((t) => t.closest(".entry-open")?.querySelector(".entry-name")?.textContent);
+    expect([tagged("tag-local"), tagged("tag-example")]).toEqual([["Alpha", "Mango"], ["Example: Website relaunch"]]);
+    const line = sheet().querySelector(".local-line");
+    if (!(line instanceof HTMLElement)) throw new Error("no local line in the Plans sheet");
+    expect([line.querySelector("p")?.textContent, within(line).getByRole("button").textContent]).toEqual([
+      "2 plans are on this device only. Move them to the space to see them on other devices.",
+      "Move both",
+    ]);
+    const move = vi.spyOn(r, "movePlansToSpace");
+    await tap(within(line).getByRole("button", { name: "Move both" }));
+    expect(move.mock.calls).toEqual([[["L", "M"]]]);
+    expect(toastTexts()).toEqual(["Moved 2 plans to the space"]);
+    expect([sheet().querySelector(".local-line"), tagged("tag-local")]).toEqual([null, []]);
+    await fresh();
+    const off = world({ local: true });
+    off.status = () => ({ space: null, revoked: false });
+    await mounted(off);
+    await tap(within(topBar()).getByRole("button", { name: "Plans" }));
+    expect([sheet().querySelectorAll(".entry-tag").length, sheet().querySelector(".local-line")]).toEqual([0, null]);
+  });
+
   describe("sync errors show on the phone", () => {
     it("a missing sync key", async () => {
       const w = world();

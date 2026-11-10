@@ -368,8 +368,8 @@ describe("Shell on testSession(MESA_SEED)", () => {
     const id = t.session.view().plan.id;
     const { ui } = shellFor(t, {
       plans: () => [
-        { id, name: "Plan", trashed: false, loaded: true, space: null },
-        { id: "other000000", name: null, trashed: false, loaded: false, space: null },
+        { id, name: "Plan", trashed: false, loaded: true, space: null, example: false },
+        { id: "other000000", name: null, trashed: false, loaded: false, space: null, example: false },
       ],
     });
     render(withSync(ui));
@@ -874,7 +874,7 @@ describe("Shell banners on a stub registry", () => {
       .mockRejectedValueOnce(new AppError("plan.incomplete", INCOMPLETE))
       .mockResolvedValue(t.session);
     const { ui, registry } = shellFor(t, {
-      plans: () => [{ id, name: "Beta", trashed: false, loaded: false, space: null }],
+      plans: () => [{ id, name: "Beta", trashed: false, loaded: false, space: null, example: false }],
       session,
     });
     render(withSync(ui));
@@ -899,7 +899,7 @@ describe("Shell banners on a stub registry", () => {
       .mockRejectedValueOnce(new AppError("plan.incomplete", INCOMPLETE))
       .mockReturnValue(held.promise);
     const { ui, registry } = shellFor(t, {
-      plans: () => [{ id, name: "Beta", trashed: false, loaded: false, space: null }],
+      plans: () => [{ id, name: "Beta", trashed: false, loaded: false, space: null, example: false }],
       session,
     });
     render(withSync(ui));
@@ -1525,7 +1525,7 @@ describe("Shell on Registry.open", () => {
 });
 
 describe("selection rule", () => {
-  const listing = (id: string, trashed: boolean) => ({ id, name: id, trashed, loaded: false, space: null });
+  const listing = (id: string, trashed: boolean) => ({ id, name: id, trashed, loaded: false, space: null, example: false });
 
   it("picks a listed untrashed plan", () => {
     const plans = [listing("p1", true), listing("p2", false), listing("p3", false)];
@@ -1700,8 +1700,8 @@ describe("the panel slot", () => {
       const t = await made(SEED);
       const id = t.session.view().plan.id;
       const plans = () => [
-        { id, name: "Plan", trashed: false, loaded: true, space: null },
-        { id: "other", name: "Other", trashed: false, loaded: true, space: null },
+        { id, name: "Plan", trashed: false, loaded: true, space: null, example: false },
+        { id: "other", name: "Other", trashed: false, loaded: true, space: null, example: false },
       ];
       const session = (x: string): Promise<PlanSession> => (x === id ? Promise.resolve(t.session) : new Promise<PlanSession>(() => undefined));
       render(withSync(shellFor(t, { plans, session }).ui));

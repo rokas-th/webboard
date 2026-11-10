@@ -821,6 +821,57 @@ describe("removal and the space", () => {
     expect(within(entry("Alpha")).queryByRole("button", { name: "Move to space" })).toBeNull();
   });
 
+  describe("plans that live only on this device", () => {
+    const LINE_TWO = "2 plans are on this device only. Move them to the space to see them on other devices.";
+    const tagged = (cls: string): (string | null | undefined)[] =>
+      [...sidebar().querySelectorAll(`.entry-open .entry-tag.${cls}`)].map((t) => t.closest(".entry-open")?.querySelector(".entry-name")?.textContent);
+    const line = (): HTMLElement | null => sidebar().querySelector(".local-line");
+
+    it("tags each one, says how many, and moves them all with one button", async () => {
+      const w = await spaceWorld({ local: true });
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await settle();
+      expect(r.plans().filter((l) => l.example).map((l) => l.id)).toEqual(["E"]);
+      expect([tagged("tag-local"), tagged("tag-example")]).toEqual([["Alpha", "Mango"], ["Example: Website relaunch"]]);
+      expect([...sidebar().querySelectorAll(".entry-tag")].map((t) => t.textContent)).toEqual(["this device only", "this device only", "example"]);
+      const shown = line();
+      if (shown === null) throw new Error("no local line");
+      expect([shown.querySelector("p")?.textContent, within(shown).getByRole("button").textContent]).toEqual([LINE_TWO, "Move both"]);
+      const trash = within(sidebar()).queryByRole("region", { name: "Trash" });
+      expect(trash === null || (shown.compareDocumentPosition(trash) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+      const move = vi.spyOn(r, "movePlansToSpace");
+      await click(within(shown).getByRole("button", { name: "Move both" }));
+      expect(move.mock.calls).toEqual([[["L", "M"]]]);
+      expect(toasts()).toEqual(["Moved 2 plans to the space"]);
+      expect([line(), tagged("tag-local"), tagged("tag-example")]).toEqual([null, [], ["Example: Website relaunch"]]);
+      expect(r.plans().filter((l) => !l.trashed && l.space === SP).map((l) => l.id).sort()).toEqual(["L", "M", "P"]);
+    });
+
+    it("toasts a move that stopped half-way, and the line stays", async () => {
+      const w = await spaceWorld({ local: true });
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await settle();
+      vi.spyOn(r, "movePlansToSpace").mockImplementation(() => {
+        throw new AppError("move.partial", "Moved 1 of 2 plans to the space. Mango: Disk full");
+      });
+      const shown = line();
+      if (shown === null) throw new Error("no local line");
+      await click(within(shown).getByRole("button", { name: "Move both" }));
+      expect(badToasts()).toEqual(["Moved 1 of 2 plans to the space. Mango: Disk full"]);
+      expect(line()).not.toBeNull();
+    });
+
+    it("shows no tags and no line while sync is off", async () => {
+      const w = await spaceWorld({ local: true });
+      w.status = () => ({ space: null, revoked: false });
+      await mounted(w);
+      expect(chip().textContent).toBe("Local only");
+      expect([sidebar().querySelectorAll(".entry-tag").length, line()]).toEqual([0, null]);
+    });
+  });
+
   it("no Move to space after Reset sync", async () => {
     const w = await spaceWorld({ answers: { sync_reset: () => null } });
     w.status = fail({ code: "sync.io", message: "Could not read the sync state: invalid JSON" });

@@ -1,6 +1,6 @@
 import type * as Y from "yjs";
 import { initialAction, normalizeName } from "../actions/build";
-import { buildExample, exampleYears } from "../actions/example";
+import { buildExample, EXAMPLE_LABEL, exampleYears } from "../actions/example";
 import { Refused } from "../actions/intents";
 import { regionKey, type Calendar, type HolidayYear, type RegionRef } from "../domain/calendar";
 import { toDay, yearOf } from "../domain/dates";
@@ -43,6 +43,7 @@ export interface PlanListing {
   trashed: boolean;
   loaded: boolean;
   space: string | null;
+  example: boolean;
 }
 
 const READ_ONLY = "This device was removed from the space; its plans are read-only.";
@@ -55,6 +56,12 @@ const PROBE = "probe";
 const isIndexDoc = (id: string): boolean => id === LOCAL_INDEX || id.startsWith(SPACE_PREFIX);
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+const createdAsExample = (log: LogState): boolean =>
+  log.order().some((id) => {
+    const a = log.get(id);
+    return a !== undefined && a.par.length === 0 && a.lbl === EXAMPLE_LABEL;
+  });
 
 export function defaultDeviceName(platform: DeviceInfo["platform"], shortSide: number): string {
   switch (platform) {
@@ -134,6 +141,7 @@ export class RegistryClosed extends Error {
 interface Tracker {
   log: LogState;
   projected: boolean;
+  example: boolean;
   off(): void;
 }
 
@@ -340,7 +348,7 @@ export class Registry {
 
   private track(id: PlanId, d: PersistedDoc, offs: (() => void)[]): void {
     const map = d.ydoc.getMap("actions");
-    const tracker: Tracker = { log: new LogState(planRules), projected: false, off: () => map.unobserve(observer) };
+    const tracker: Tracker = { log: new LogState(planRules), projected: false, example: false, off: () => map.unobserve(observer) };
     const feed = (ids: readonly string[]): void => {
       tracker.log.add(readActions(ids.map((k): readonly [string, unknown] => [k, map.get(k)]), validateWrite).ok);
       this.project(id, tracker);
@@ -365,6 +373,7 @@ export class Registry {
       return;
     }
     const first = !tracker.projected;
+    if (first) tracker.example = createdAsExample(tracker.log);
     tracker.projected = true;
     const named = this.cacheName(id, plan.name);
     if (first || named) this.emit();
@@ -484,7 +493,9 @@ export class Registry {
   }
 
   private listingOf(id: PlanId, trashed: boolean, space: string | null): PlanListing {
-    return { id, name: this.settings.names[id] ?? null, trashed, loaded: this.trackers.get(id)?.projected ?? false, space };
+    const tracker = this.trackers.get(id);
+    const loaded = tracker?.projected ?? false;
+    return { id, name: this.settings.names[id] ?? null, trashed, loaded, space, example: loaded && tracker !== undefined && tracker.example };
   }
 
   plans(): readonly PlanListing[] {
@@ -658,6 +669,27 @@ export class Registry {
     const ix = this.spaceIndex();
     if (ix === null) throw new Error("No space is attached.");
     movePlan(id, this.local, ix);
+  }
+
+  movePlansToSpace(ids: readonly PlanId[]): void {
+    this.usable();
+    if (this.readOnlySpace) throw new Refused(MOVE_READ_ONLY);
+    const ix = this.spaceIndex();
+    if (ix === null) throw new Error("No space is attached.");
+    const local = this.local.plans();
+    const inSpace = new Set(ix.plans().map((p) => p.id));
+    const live = new Set(local.filter((p) => !p.trashed).map((p) => p.id));
+    const listed = new Set(local.map((p) => p.id));
+    const stray = ids.find((id) => !listed.has(id) || !(live.has(id) || inSpace.has(id)));
+    if (stray !== undefined) throw new Error(`Cannot move ${stray}: not a plan on this device.`);
+    [...inSpace].filter((id) => live.has(id)).forEach((id) => movePlan(id, this.local, ix));
+    ids.forEach((id, at) => {
+      try {
+        movePlan(id, this.local, ix);
+      } catch (e) {
+        throw new AppError("move.partial", `Moved ${at} of ${ids.length} plans to the space. ${this.settings.names[id] ?? id}: ${messageOf(e)}`);
+      }
+    });
   }
 
   async setLastRegion(r: RegionRef): Promise<void> {

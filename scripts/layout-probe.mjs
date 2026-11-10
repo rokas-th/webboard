@@ -74,6 +74,7 @@ const width = (selector, min, max) => ({ width: [selector, min, max] });
 const style = (selector, prop, value) => ({ style: [selector, prop, value] });
 const valued = (selector, text) => ({ valued: [selector, text] });
 const ellipsed = (selector) => ({ ellipsed: selector });
+const within_ = (selector, box, n) => ({ within: [selector, box, n] });
 const raise = (message) => ({ raise: message });
 
 const VIEWS = [
@@ -434,6 +435,20 @@ function states() {
     clip: true,
     actions: [viewExpect("board"), style(".card .card-name", "-webkit-line-clamp", "2")],
   });
+  const localTags = [count(".entry-open .entry-tag", 3), within_(".entry-tag", ".entry-open", 3), expect(".local-line button", "Move both")];
+  add("sync-local", "sync-local", {
+    place: { plan: PLAN_IDS.long, view: "timeline", zoom: "W" },
+    net: { ws: "sync" },
+    clip: true,
+    actions: [viewExpect("timeline"), ...localTags],
+  });
+  add("phone-sync-local", "sync-local", {
+    place: { plan: PLAN_IDS.long, view: "timeline", zoom: "W" },
+    sizes: "phone",
+    net: { ws: "sync" },
+    dialog: true,
+    actions: [click(".phone-head button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), ...localTags],
+  });
   add("long-names/touch", "long-names", { sizes: "touch-wide", clip: true, actions: [viewExpect("timeline"), expect(".tl-row .name")] });
   const phoneChip = (tone, label) => expect(`.phone-head button.sync-chip.chip-compact.${tone}[aria-label="${label}"]`);
   add("phone-sync/off", "mesa", { sizes: "phone", actions: [phoneChip("chip-cyan", "Local only")] });
@@ -480,7 +495,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -1321,6 +1336,19 @@ window.__probeAct = function (a) {
     if (!fields.some(function (f) { return f.value === a.valued[1]; })) {
       return { fail: "no " + a.valued[0] + " holding " + JSON.stringify(a.valued[1]) + " (have: " + fields.slice(0, 6).map(function (f) { return JSON.stringify(String(f.value).slice(0, 40)); }).join(" | ") + ")" };
     }
+    return { ok: true };
+  }
+  if (a.within !== undefined) {
+    var inner = Array.prototype.slice.call(document.querySelectorAll(a.within[0]));
+    if (inner.length !== a.within[2]) return { fail: a.within[0] + " matches " + inner.length + " elements, not " + a.within[2] };
+    var outside = inner.filter(function (el) {
+      var box = el.closest(a.within[1]);
+      if (box === null) return true;
+      var r = el.getBoundingClientRect();
+      var b = box.getBoundingClientRect();
+      return r.width === 0 || r.left < b.left - 0.5 || r.right > b.right + 0.5 || r.top < b.top - 0.5 || r.bottom > b.bottom + 0.5;
+    });
+    if (outside.length > 0) return { fail: outside.length + " " + a.within[0] + " are empty or not inside their " + a.within[1] + ": " + outside.map(function (el) { return JSON.stringify(el.textContent); }).join(", ") };
     return { ok: true };
   }
   if (a.ellipsed !== undefined) {
