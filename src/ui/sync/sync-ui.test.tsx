@@ -496,7 +496,7 @@ describe("the sync panes", () => {
   });
 
   it("a failed removal closes the question, refreshes the list and keeps the error", async () => {
-    const internal = "Server answered 500 internal: The device was removed, but one of its open connections could not be closed; it stops syncing when that connection drops.";
+    const internal = "Server answered 500 internal: The device was removed, but 1 plan was not told to close its connections. The server tries again in a minute, then less often, at least once an hour; until then the device keeps syncing that plan while it stays connected.";
     let list = [
       { id: "dev-A", name: "Mac", createdAt: 0, lastSeenAt: NOW, current: true },
       { id: "dev-I", name: "iPad", createdAt: 0, lastSeenAt: NOW, current: false },
@@ -524,7 +524,7 @@ describe("the sync panes", () => {
   });
 
   it("a failed removal whose refresh fails too shows both errors, the removal's first", async () => {
-    const internal = "Server answered 500 internal: The device was removed, but one of its open connections could not be closed; it stops syncing when that connection drops.";
+    const internal = "Server answered 500 internal: The device was removed, but 1 plan was not told to close its connections. The server tries again in a minute, then less often, at least once an hour; until then the device keeps syncing that plan while it stays connected.";
     const unreachable = "Could not reach https://webboard.rokass.org: connection reset.";
     const list = [
       { id: "dev-A", name: "Mac", createdAt: 0, lastSeenAt: NOW, current: true },
