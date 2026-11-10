@@ -6,11 +6,11 @@ import { fixedClock } from "../services/clock";
 import { AppError } from "../services/ipc";
 import { act } from "../test/act";
 import { argsOf, fail, headsOf, IX, ixAct, NOW, own, ip, remoteUpdate, seedIndex, seedPlan, SP, syncWorld, TODAY, type SyncWorld } from "../test/syncWorld";
-import { tauri, type Answer, type Call } from "../test/tauriMock";
+import { hold, tauri, type Answer, type Call } from "../test/tauriMock";
 import { decodeAction, encodeAction } from "./doc";
 import { IndexDoc } from "./index-doc";
 import { openPersisted } from "./persist";
-import { Registry } from "./registry";
+import { PlanGone, Registry } from "./registry";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 
@@ -21,13 +21,14 @@ const PENDING = "The plan is deleted, but the server has not erased its history 
 const PURGE_LABEL = "Delete plan forever";
 const GONE_LABEL = "Follow a deletion on another device";
 const CONNECT = "Connect to the space to delete this plan forever.";
+const UNREAD_SPACE = "The plan list of a space on this device could not be read, so WebBoard cannot tell whether this plan belongs to it.";
 
 const gone = (plan: string): Write => own("ip:" + plan, { gone: true });
 
 const opened: Registry[] = [];
 
-async function open(): Promise<Registry> {
-  const r = await Registry.open({ clock: fixedClock(TODAY, NOW) });
+async function open(followWaitMs = 0): Promise<Registry> {
+  const r = await Registry.open({ clock: fixedClock(TODAY, NOW), followWaitMs });
   opened.push(r);
   return r;
 }
@@ -108,8 +109,8 @@ function purgeWorld(o: { trashed?: boolean; moved?: boolean; localGone?: boolean
   return w;
 }
 
-async function spaceOpen(w: SyncWorld): Promise<Registry> {
-  const r = await open();
+async function spaceOpen(w: SyncWorld, followWaitMs = 0): Promise<Registry> {
+  const r = await open(followWaitMs);
   await r.attachSpace(SP);
   await flush();
   expect(w.mem.docs.has("P")).toBe(true);
@@ -239,6 +240,28 @@ describe("IndexDoc: delete forever", () => {
       "A change to the plan list from iPhone could not be read: Malformed value for “ip:P”. Update WebBoard on this device.",
       "A change to the plan list from iPhone could not be read: Malformed value for “ip:P”. Update WebBoard on this device.",
     ]);
+    await ix.close();
+  });
+  it("reads a tombstone or a listing for a plan list or the store probe as malformed", async () => {
+    const w = syncWorld();
+    seedIndex(w.mem, "local", [
+      ixAct("c1", [], [ip("P", false)]),
+      ixAct("c2", ["c1"], [own("dn:dev-B", "iPhone")], "dev-B", "Name device"),
+      ixAct("c3", ["c2"], [gone("local")], "dev-B", PURGE_LABEL),
+      ixAct("c4", ["c2"], [gone("ix-x")], "dev-B", PURGE_LABEL),
+      ixAct("c5", ["c2"], [gone("probe")], "dev-B", PURGE_LABEL),
+      ixAct("c6", ["c2"], [ip("ix-x", false)], "dev-B", "Add plan"),
+    ]);
+    const ix = await IndexDoc.open("local", "dev-A", openPersisted);
+    expect(ix.plans()).toEqual([{ id: "P", trashed: false }]);
+    expect(ix.gone().size).toBe(0);
+    expect(ix.unreadable().map((u) => u.message)).toEqual([
+      "A change to the plan list from iPhone could not be read: Unknown unit key “ip:local”. Update WebBoard on this device.",
+      "A change to the plan list from iPhone could not be read: Unknown unit key “ip:ix-x”. Update WebBoard on this device.",
+      "A change to the plan list from iPhone could not be read: Unknown unit key “ip:probe”. Update WebBoard on this device.",
+      "A change to the plan list from iPhone could not be read: Unknown unit key “ip:ix-x”. Update WebBoard on this device.",
+    ]);
+    expect(() => ix.markGone("local")).toThrow("Plan local is not listed in local");
     await ix.close();
   });
 });
@@ -508,5 +531,103 @@ describe("Registry: delete forever", () => {
     expect(docsOf(from, "sync_purge_plan")).toEqual(["P"]);
     expect(docsOf(from, "store_delete")).toEqual(["P"]);
     expect(w.mem.docs.has("P")).toBe(false);
+  });
+
+  it("a tombstone for a plan list from another device leaves every plan list open and erases nothing", async () => {
+    const w = purgeWorld({ trashed: true });
+    const r = await spaceOpen(w);
+    const from = tauri.calls.length;
+    await remoteGone(r, "local");
+    await remoteGone(r, IX, "dev-B", "r-g2");
+    expect(docsOf(from, "store_delete")).toEqual([]);
+    expect(r.attachedSpace()).toBe(SP);
+    expect(r.plans().map((p) => p.id)).toEqual(["L", "P"]);
+    expect(r.indexUnreadable()).toHaveLength(2);
+    r.restorePlan("L");
+    expect(r.plans().find((p) => p.id === "L")).toMatchObject({ trashed: false });
+    expect(r.takeGoneNotices()).toEqual([]);
+  });
+
+  it("refuses a local purge while a stored space's plan list cannot be read, and allows it once that list opens", async () => {
+    const w = purgeWorld({ moved: true, trashed: true });
+    w.mem.fail("store_load", IX, { code: "store.io", message: "Disk full." });
+    const r = await open();
+    await flush();
+    expect(r.purgeRefusal("L")).toBe(UNREAD_SPACE);
+    expect(r.purgeRefusal("P")).toBe(UNREAD_SPACE);
+    const from = tauri.calls.length;
+    const e = await rejection(r.purgePlan("P"));
+    await flush();
+    expect(e).toBeInstanceOf(Refused);
+    expect(e).toMatchObject({ message: UNREAD_SPACE });
+    expect(docsOf(from, "store_delete")).toEqual([]);
+    expect(writesTo(from, "local")).toEqual([]);
+    expect(w.mem.docs.has("P")).toBe(true);
+    w.mem.recover("store_load", IX);
+    await r.retryIndex();
+    await flush();
+    expect(r.purgeRefusal("L")).toBeNull();
+    expect(r.purgeRefusal("P")).toBe(CONNECT);
+  });
+
+  it("a 4410 while warm is part-way through loads nothing of the erased plan again", async () => {
+    const w = purgeWorld();
+    const r = await spaceOpen(w);
+    const held = hold("store_load");
+    const warming = r.warm();
+    await flush();
+    await r.markGone("P");
+    await flush();
+    const from = tauri.calls.length;
+    held.resolve(w.mem.answers.store_load({ doc: "L" }));
+    await warming;
+    await flush();
+    expect(docsOf(from, "store_load")).toEqual([]);
+    expect(w.mem.docs.has("P")).toBe(false);
+    await expect(r.doc("P")).rejects.toBeInstanceOf(PlanGone);
+  });
+
+  it("a load in flight when its plan is erased does not load it again", async () => {
+    const w = purgeWorld();
+    const r = await spaceOpen(w);
+    const bytes = w.mem.answers.store_load({ doc: "L" });
+    const held = hold("store_load");
+    const loading = r.doc("L");
+    await flush();
+    await r.purgePlan("L");
+    await flush();
+    const from = tauri.calls.length;
+    held.resolve(bytes);
+    const e = await rejection(loading);
+    await flush();
+    expect(e).toBeInstanceOf(PlanGone);
+    expect(docsOf(from, "store_load")).toEqual([]);
+    expect(w.mem.docs.has("L")).toBe(false);
+    expect(r.failures().has("L")).toBe(false);
+  });
+
+  it("a 4410 waits for the deleting device's entry and names that device", async () => {
+    const w = purgeWorld({ trashed: true, synced: true });
+    const r = await spaceOpen(w, 5000);
+    const from = tauri.calls.length;
+    await r.markGone("P");
+    await flush();
+    expect(docsOf(from, "store_delete")).toEqual(["P"]);
+    expect(r.takeGoneNotices()).toEqual([]);
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    await remoteGone(r, "P");
+    expect(r.takeGoneNotices()).toEqual([{ text: "“Launch” was deleted forever on iPhone. It is erased from this device too.", bad: false }]);
+    await remoteName(r, "r-n");
+    expect(r.takeGoneNotices()).toEqual([]);
+  });
+
+  it("a 4410 with no named entry says another device once the wait ends", async () => {
+    const w = purgeWorld({ trashed: true, synced: true });
+    const r = await spaceOpen(w, 30);
+    await r.markGone("P");
+    await flush();
+    expect(r.takeGoneNotices()).toEqual([]);
+    await new Promise<void>((resolve) => setTimeout(resolve, 40));
+    expect(r.takeGoneNotices()).toEqual([{ text: "“Launch” was deleted forever on another device. It is erased from this device too.", bad: false }]);
   });
 });

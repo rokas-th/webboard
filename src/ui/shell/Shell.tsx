@@ -220,8 +220,9 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       if (e.defaultPrevented) return;
       const c = ctxRef.current;
       const target = e.target instanceof Element ? e.target : null;
+      if (target !== null && target.closest('[role="menu"]') !== null && e.key !== "Escape") return;
       const typing = isTyping(e.target, e.key);
-      const dialog = c.ui.dialog !== null || (target !== null && target.closest('[aria-modal="true"]') !== null);
+      const dialog = c.ui.dialog !== null || document.querySelector('[aria-modal="true"]') !== null;
       const id = keyToCommand(e, { mac: c.mac, typing, dialog, selected: c.ui.selected !== null });
       if (id === null) return;
       if (id === "close-dialog" || id === "deselect") {
@@ -368,7 +369,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         </Sheet>
       )}
       {session !== null && selectedItemShown !== null && (
-        <Sheet open={sheet === null} title={itemName(session, selectedItemShown)} onClose={() => setUi({ selected: null })}>
+        <Sheet key={selectedItemShown} open={sheet === null} title={itemName(session, selectedItemShown)} onClose={() => setUi({ selected: null })}>
           {itemPanel(selectedItemShown, session)}
         </Sheet>
       )}

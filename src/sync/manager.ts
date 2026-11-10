@@ -5,7 +5,7 @@ import { AppError, syncMarkRevoked, syncStatus, syncTicket, type SpaceInfo } fro
 import type { PersistedDoc } from "../store/persist";
 import { SPACE_PREFIX } from "../store/plan-id";
 import { readActions } from "../store/read-actions";
-import { RegistryClosed, type Registry } from "../store/registry";
+import { PlanGone, RegistryClosed, type Registry } from "../store/registry";
 import type { PlanSession } from "../store/session";
 import type { ProviderFactory, ProviderLike, ProviderStatus } from "./provider";
 
@@ -545,6 +545,7 @@ export class SyncManager {
       return;
     }
     if (gen !== this.gen && e instanceof RegistryClosed) return;
+    if (e instanceof PlanGone) return;
     throw e;
   }
 

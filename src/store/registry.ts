@@ -57,6 +57,8 @@ const CONNECT = "Connect to the space to delete this plan forever.";
 const MOVE_READ_ONLY = "This device was removed from the space. Join again to move plans there.";
 const INCOMPLETE = "This plan has not arrived yet; it opens once it syncs.";
 const INDEX_REPAIRED = "The last change to the plan list before WebBoard closed was not saved.";
+const UNREAD_SPACE = "The plan list of a space on this device could not be read, so WebBoard cannot tell whether this plan belongs to it.";
+const FOLLOW_WAIT_MS = 5000;
 const LOCAL_INDEX = "local";
 const PROBE = "probe";
 
@@ -147,6 +149,18 @@ export class RegistryClosed extends Error {
   }
 }
 
+export class PlanGone extends Error {
+  constructor(id: string) {
+    super(`Plan ${id} was deleted forever`);
+    this.name = "PlanGone";
+  }
+}
+
+interface HeldNotice {
+  make(by: string | undefined): GoneNotice;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 interface Tracker {
   log: LogState;
   projected: boolean;
@@ -192,22 +206,31 @@ export class Registry {
   private sweeping: Promise<void> | null = null;
   private sweepAgain = false;
   private goneNotices: GoneNotice[] = [];
+  private readonly heldNotices = new Map<PlanId, HeldNotice>();
+  private readonly followWaitMs: number;
   private closed = false;
   private closing: Promise<void> | null = null;
 
-  private constructor(clock: Clock, holidays: HolidayService, settings: Settings, device: { deviceId: DeviceId; platform: DeviceInfo["platform"] }) {
+  private constructor(
+    clock: Clock,
+    holidays: HolidayService,
+    settings: Settings,
+    device: { deviceId: DeviceId; platform: DeviceInfo["platform"] },
+    followWaitMs: number,
+  ) {
     this.clock = clock;
+    this.followWaitMs = followWaitMs;
     this.holidays = holidays;
     this.settings = settings;
     this.deviceId = device.deviceId;
     this.platform = device.platform;
   }
 
-  static async open(opts?: { clock?: Clock; holidays?: HolidayService }): Promise<Registry> {
+  static async open(opts?: { clock?: Clock; holidays?: HolidayService; followWaitMs?: number }): Promise<Registry> {
     const clock = opts?.clock ?? systemClock;
     const settings = parseSettings(await call<unknown>("settings_read"));
     const device = parseDevice(await call<unknown>("device_info"));
-    const r = new Registry(clock, opts?.holidays ?? new HolidayService(() => clock.now()), settings, device);
+    const r = new Registry(clock, opts?.holidays ?? new HolidayService(() => clock.now()), settings, device, opts?.followWaitMs ?? FOLLOW_WAIT_MS);
     try {
       await r.start();
       await r.offerExample();
@@ -310,23 +333,28 @@ export class Registry {
     return this.load(id, true);
   }
 
-  private load(id: string, record: boolean): Promise<PersistedDoc> {
+  private goneHere(id: string): boolean {
+    return !isIndexDoc(id) && id !== PROBE && (this.swept.has(id) || this.isGone(id));
+  }
+
+  private load(id: string, record: boolean, erasing = false): Promise<PersistedDoc> {
     this.usable();
+    if (!erasing && this.goneHere(id)) return Promise.reject(new PlanGone(id));
     const memo = this.memo.get(id);
     if (memo !== undefined) return memo;
     const p: Promise<PersistedDoc> = openPersisted(id).then(
-      (d) => this.adopt(id, p, d, record),
+      (d) => this.adopt(id, p, d, record, erasing),
       (e: unknown) => this.loadFailed(id, p, record, e, []),
     );
     this.memo.set(id, p);
     return p;
   }
 
-  private async adopt(id: string, p: Promise<PersistedDoc>, d: PersistedDoc, record: boolean): Promise<PersistedDoc> {
+  private async adopt(id: string, p: Promise<PersistedDoc>, d: PersistedDoc, record: boolean, erasing = false): Promise<PersistedDoc> {
     if (this.closed || this.memo.get(id) !== p) {
       await d.discard();
       if (this.closed) throw new RegistryClosed(id);
-      return this.load(id, record);
+      return this.load(id, record, erasing);
     }
     try {
       this.attach(id, d);
@@ -694,7 +722,8 @@ export class Registry {
     const listing = this.plans().find((p) => p.id === id);
     if (listing === undefined || !listing.trashed) return NOT_TRASHED;
     if (listing.space !== null) return this.readOnlySpace ? READ_ONLY : null;
-    return [...this.spaces.values()].some((ix) => ix.plans().some((p) => p.id === id)) ? CONNECT : null;
+    if ([...this.spaces.values()].some((ix) => ix.plans().some((p) => p.id === id))) return CONNECT;
+    return this.spaceIds.some((s) => !this.spaces.has(s)) ? UNREAD_SPACE : null;
   }
 
   async purgePlan(id: PlanId): Promise<void> {
@@ -763,7 +792,9 @@ export class Registry {
 
   private async sweepOnce(): Promise<void> {
     if (this.closed) return;
-    const due = [...this.goneWriters()].filter(([id]) => this.held(id) && !this.swept.has(id));
+    const writers = this.goneWriters();
+    [...this.heldNotices.keys()].filter((id) => (writers.get(id) ?? null) !== null).forEach((id) => this.settleNotice(id));
+    const due = [...writers].filter(([id]) => !isIndexDoc(id) && id !== PROBE && this.held(id) && !this.swept.has(id));
     for (const [id, purger] of due) {
       if (this.closed) return;
       await this.erase(id, purger);
@@ -779,8 +810,7 @@ export class Registry {
     const check = told ? await this.unsynced(id) : false;
     const name = this.settings.names[id];
     const label = name === undefined ? "A plan" : `“${name}”`;
-    const by = purger === null ? undefined : this.devices().get(purger);
-    const where = told ? ` on ${by ?? "another device"}` : "";
+    const where = (by: string | undefined): string => (told ? ` on ${by ?? "another device"}` : "");
     const lost = check === true ? ", including changes that had not synced" : "";
     const unread = check instanceof AppError ? ` WebBoard could not read it to check for changes that had not synced: ${sentence(check.message)}.` : "";
     this.emit();
@@ -790,9 +820,10 @@ export class Registry {
       await storeDelete(id);
     } catch (e) {
       if (!(e instanceof AppError)) throw e;
-      const failure = new AppError(e.code, `${label} was deleted forever${where}${lost}, but its files on this device could not be removed: ${sentence(e.message)}. Restart WebBoard to try again.${unread}`);
-      if (own) this.ownFailures.set(id, failure);
-      else this.goneNotices.push({ text: failure.message, bad: true });
+      const failure = (by: string | undefined): AppError =>
+        new AppError(e.code, `${label} was deleted forever${where(by)}${lost}, but its files on this device could not be removed: ${sentence(e.message)}. Restart WebBoard to try again.${unread}`);
+      if (own) this.ownFailures.set(id, failure(undefined));
+      else this.tell(id, purger, (by) => ({ text: failure(by).message, bad: true }));
       this.emit();
       return;
     }
@@ -804,7 +835,7 @@ export class Registry {
       names: Object.fromEntries(Object.entries(this.settings.names).filter(([x]) => x !== id)),
       ...(heads === undefined ? {} : { syncedHeads: Object.fromEntries(Object.entries(heads).filter(([x]) => x !== id)) }),
     };
-    if (told) this.goneNotices.push({ text: `${label} was deleted forever${where}. It is erased from this device too${lost}.${unread}`, bad: check !== false });
+    if (told) this.tell(id, purger, (by) => ({ text: `${label} was deleted forever${where(by)}. It is erased from this device too${lost}.${unread}`, bad: check !== false }));
     try {
       await this.writeSettings();
     } catch (e) {
@@ -814,10 +845,28 @@ export class Registry {
     this.emit();
   }
 
+  private tell(id: PlanId, purger: DeviceId | null, make: (by: string | undefined) => GoneNotice): void {
+    if (purger !== null) {
+      this.goneNotices.push(make(this.devices().get(purger)));
+      return;
+    }
+    this.heldNotices.set(id, { make, timer: setTimeout(() => this.settleNotice(id), this.followWaitMs) });
+  }
+
+  private settleNotice(id: PlanId): void {
+    const held = this.heldNotices.get(id);
+    if (held === undefined) throw new Error(`No notice is held for plan ${id}`);
+    clearTimeout(held.timer);
+    this.heldNotices.delete(id);
+    const purger = this.goneWriters().get(id) ?? null;
+    this.goneNotices.push(held.make(purger === null ? undefined : this.devices().get(purger)));
+    this.emit();
+  }
+
   private async unsynced(id: PlanId): Promise<boolean | AppError> {
     if (!this.trackers.has(id) && (this.stored.includes(id) || this.memo.has(id))) {
       try {
-        await this.load(id, false);
+        await this.load(id, false, true);
       } catch (e) {
         if (!(e instanceof AppError)) throw e;
         return e;
@@ -880,9 +929,9 @@ export class Registry {
     for (const { id } of this.plans()) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       if (this.closed) return;
-      if (this.memo.has(id) || this.failed.has(id)) continue;
+      if (this.memo.has(id) || this.failed.has(id) || this.goneHere(id)) continue;
       await this.doc(id).then(afterEither, (e: unknown) => {
-        if (e instanceof RegistryClosed) return;
+        if (e instanceof RegistryClosed || e instanceof PlanGone) return;
         if (!(e instanceof AppError) || this.failed.get(id) !== e) throw e;
       });
     }
@@ -1101,6 +1150,8 @@ export class Registry {
 
   private async shutdown(): Promise<void> {
     this.closed = true;
+    this.heldNotices.forEach((h) => clearTimeout(h.timer));
+    this.heldNotices.clear();
     this.offLocal?.();
     this.offLocal = null;
     this.unhookSpace();

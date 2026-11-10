@@ -114,6 +114,39 @@ describe('compact shell, data-form="compact"', () => {
     expect(document.activeElement).toBe(row);
   });
 
+  it("Duplicate in the item sheet keeps focus in the sheet, and the shortcuts behind it stay off", async () => {
+    const t = await made();
+    await shown(t);
+    fireEvent.click(within(toolbar()).getByRole("tab", { name: "List" }));
+    const row = document.querySelector('[data-lrow="t3"]');
+    if (!(row instanceof HTMLElement)) throw new Error("no t3 row");
+    row.focus();
+    fireEvent.keyDown(row, { key: "Enter" });
+    const count = t.session.view().plan.items.size;
+    const duplicate = within(screen.getByRole("dialog")).getByRole("button", { name: "Duplicate" });
+    duplicate.focus();
+    fireEvent.click(duplicate);
+    await settle();
+    const copy = lastUi()[0].selected;
+    if (copy === null || copy === "t3") throw new Error("the copy is not selected");
+    expect(t.session.view().plan.items.size).toBe(count + 1);
+    const sheet = screen.getByRole("dialog");
+    expect(sheet.contains(document.activeElement)).toBe(true);
+    const before = t.session.view().plan.items.get(copy);
+    [{ key: "ArrowLeft" }, { key: "Backspace" }, { key: "n" }].forEach((k) =>
+      act(() => {
+        fireEvent.keyDown(document.activeElement ?? document.body, k);
+      }),
+    );
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    });
+    await settle();
+    expect(t.session.view().plan.items.get(copy)).toEqual(before);
+    expect(t.session.view().plan.items.size).toBe(count + 1);
+    expect(lastUi()[0].selected).toBe(copy);
+  });
+
   it("New task from + New names the new item in its sheet; Esc leaves the name, a second Esc closes the sheet and returns focus to + New", async () => {
     const t = await made();
     await shown(t);

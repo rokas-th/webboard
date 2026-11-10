@@ -278,6 +278,38 @@ describe("ItemPanel fields", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
+  it("toasts every unreadable start of an unscheduled item, once per Enter, and puts the field back to empty", async () => {
+    const t = await made(ITEM_SEED);
+    await shown(t);
+    select("U");
+    const apply = vi.spyOn(t.session, "apply");
+    const start = input("Start");
+    expect(start.value).toBe("");
+    Object.defineProperty(start, "validity", { configurable: true, value: { badInput: true } });
+    const partial = (): void => {
+      act(() => {
+        start.focus();
+      });
+      start.value = "2026-11";
+    };
+    const DATE = "The date is not complete. Enter a day, month and year.";
+    act(() => clearToasts());
+    partial();
+    act(() => start.blur());
+    expect([start.value, toastTexts()]).toEqual(["", [DATE]]);
+    act(() => clearToasts());
+    partial();
+    act(() => start.blur());
+    expect([start.value, toastTexts()]).toEqual(["", [DATE]]);
+    act(() => clearToasts());
+    partial();
+    act(() => {
+      fireEvent.keyDown(start, { key: "Enter" });
+    });
+    expect([start.value, toastTexts()]).toEqual(["", [DATE]]);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("puts a typed duration back on Escape and writes nothing", async () => {
     const t = await made(ITEM_SEED);
     await shown(t);

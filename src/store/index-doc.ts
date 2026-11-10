@@ -8,6 +8,7 @@ import type { Action, ActionId, DeviceId, Rules, SessionId, UnitKey, Write } fro
 import { notifyEach } from "../services/clock";
 import { LOCAL, PlanDoc } from "./doc";
 import type { PersistedDoc } from "./persist";
+import { SPACE_PREFIX } from "./plan-id";
 import { readActions } from "./read-actions";
 
 const deepEqual = (a: unknown, b: unknown): boolean => {
@@ -51,8 +52,10 @@ const isGoneValue = (v: unknown): v is { gone: true } =>
 
 const isDeviceName = (v: unknown): boolean => typeof v === "string" && v.trim().length > 0 && normalizeName(v) === v;
 
+const notAPlan = (id: string): boolean => id === "local" || id === "probe" || id.startsWith(SPACE_PREFIX);
+
 function checkIndexWrite(w: Write): void {
-  const plan = w.u.startsWith(PLAN) && w.u.length > PLAN.length;
+  const plan = w.u.startsWith(PLAN) && w.u.length > PLAN.length && !notAPlan(w.u.slice(PLAN.length));
   const device = w.u.startsWith(DEVICE) && w.u.length > DEVICE.length;
   if (!plan && !device) throw new Error(`Unknown unit key “${w.u}”`);
   if (plan ? !isTrash(w.v) && !isGoneValue(w.v) : !isDeviceName(w.v)) throw new Error(`Malformed value for “${w.u}”`);

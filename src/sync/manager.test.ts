@@ -1588,12 +1588,53 @@ describe("SyncManager: delete forever", () => {
     expect(m.state().kind).toBe("syncing");
     syncAll(f);
     expect(m.state()).toEqual({ kind: "synced" });
+    expect(r.takeGoneNotices()).toEqual([]);
+    const from = tauri.calls.length;
+    await advance(5_000);
     expect(r.takeGoneNotices().map((n) => n.text)).toEqual([
       "“Launch” was deleted forever on another device. It is erased from this device too, including changes that had not synced.",
     ]);
-    const from = tauri.calls.length;
     await advance(60_000);
     expect(tickets(from, "P")).toBe(0);
+  });
+
+  it("a plan load in flight when this device deletes the plan forever ends quietly and loads nothing again", async () => {
+    const { w, r, f } = await started();
+    syncAll(f);
+    tauri.answers.sync_purge_plan = () => null;
+    const bytes = w.mem.answers.store_load({ doc: "P3" });
+    const ix = prov(f, IX);
+    const held = hold("store_load");
+    remoteIndex(ix, "r-a", [ip("P3", false)]);
+    await settle();
+    remoteIndex(ix, "r-t", [ip("P3", true)]);
+    await settle();
+    await r.purgePlan("P3");
+    await settle();
+    expect(w.mem.docs.has("P3")).toBe(false);
+    const from = tauri.calls.length;
+    held.resolve(bytes);
+    await settle();
+    expect(commandsWith(from, "store_load", { doc: "P3" })).toBe(0);
+    expect(w.mem.docs.has("P3")).toBe(false);
+    expect(f.providers.has("P3")).toBe(false);
+  });
+
+  it("a 4410 close names the deleting device once its plan-list entry arrives", async () => {
+    const { r, f } = await started();
+    syncAll(f);
+    const ix = prov(f, IX);
+    ix.deliver(remoteUpdate(ix.ydoc, "r-n", encodeAction(act("r-n", headsOf(ix.ydoc), [own("dn:dev-B", "iPhone")], { dev: "dev-B", lbl: "Name device" }))));
+    await settle();
+    prov(f, "P").closeWith(4410, "Plan deleted");
+    await settle();
+    expect(r.takeGoneNotices()).toEqual([]);
+    await advance(1);
+    ix.deliver(remoteUpdate(ix.ydoc, "r-g", encodeAction(act("r-g", headsOf(ix.ydoc), [own("ip:P", { gone: true })], { dev: "dev-B", lbl: "Delete plan forever" }))));
+    await settle();
+    expect(r.takeGoneNotices().map((n) => n.text)).toEqual(["“Launch” was deleted forever on iPhone. It is erased from this device too."]);
+    await advance(10_000);
+    expect(r.takeGoneNotices()).toEqual([]);
   });
 
   it("a 4410 close drops the link and erases the plan, with no error", async () => {

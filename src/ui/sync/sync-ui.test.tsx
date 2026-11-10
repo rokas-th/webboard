@@ -652,6 +652,26 @@ describe("the sync panes", () => {
     expect(restart).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    ["Set up sync", "Create or join space", "sync_setup"],
+    ["Join with a code", "Join space", "sync_pair_join"],
+  ])("the %s pane restarts sync after a join that failed once sync.json named the new space", async (name, label, cmd) => {
+    const message = "Joined space sp000000000, but the device token of space sp111111111 could not be removed: errSecAuthFailed.";
+    const w = offWorld({
+      [cmd]: () => {
+        w.status = () => ({ space: SPACE, revoked: false });
+        throw { code: "keychain.io", message };
+      },
+    });
+    await mounted(w);
+    const restart = vi.spyOn(SyncManager.prototype, "restart");
+    const p = await openPane(name);
+    await click(button(p, label));
+    expect(restart).toHaveBeenCalledTimes(1);
+    expect(errorText(pane(name))).toEqual([message]);
+    expect(toasts()).toEqual([]);
+  });
+
   it("palette joins with no plan open", async () => {
     const w = syncWorld();
     w.status = () => ({ space: null, revoked: false });

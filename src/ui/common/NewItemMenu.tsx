@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import type { ItemKind } from "../../domain/model";
 import { NEW_NAME } from "../palette/commands";
+import { moved } from "./menu";
 
 const KINDS: readonly ItemKind[] = ["task", "milestone", "group"];
 
@@ -9,6 +10,7 @@ export function NewItemMenu(p: { label: string; className: string; disabled: boo
   const box = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const first = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const shown = open && !p.disabled;
   useEffect(() => {
     if (!shown) return;
@@ -29,10 +31,19 @@ export function NewItemMenu(p: { label: string; className: string; disabled: boo
     toggle.current?.focus();
   };
   const onKey = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (e.key !== "Escape" || !shown) return;
+    if (!shown) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+      return;
+    }
+    if (list.current === null) throw new Error("NewItemMenu: open without its list");
+    const items = [...list.current.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    const to = moved(e.key, items.findIndex((b) => b === document.activeElement), items.length);
+    if (to === null) return;
     e.preventDefault();
-    e.stopPropagation();
-    close();
+    items[to].focus();
   };
   const onLeave = (e: FocusEvent<HTMLDivElement>): void => {
     const next = e.relatedTarget;
@@ -53,7 +64,7 @@ export function NewItemMenu(p: { label: string; className: string; disabled: boo
         {p.label}
       </button>
       {shown && (
-        <div className="plan-menu-list" role="menu" aria-label="New item">
+        <div ref={list} className="plan-menu-list" role="menu" aria-label="New item">
           {KINDS.map((kind, i) => (
             <button
               key={kind}

@@ -305,6 +305,64 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect(lastUi().selected).toBe("t3");
   });
 
+  it.each([
+    ["⋯", "Plan"],
+    ["+ New", "New item"],
+  ])("with the %s menu open, the shortcuts behind it do nothing", async (toggle, menuName) => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    setUiNow({ selected: "t3" });
+    const before = t.session.view().plan.items.get("t3");
+    const count = t.session.view().plan.items.size;
+    const view = lastUi().view;
+    fireEvent.click(toggle === "⋯" ? menuToggle() : screen.getByRole("button", { name: toggle }));
+    const menu = screen.getByRole("menu", { name: menuName });
+    expect(menu.contains(document.activeElement)).toBe(true);
+    const keys = [{ key: "ArrowLeft" }, { key: "ArrowRight" }, { key: "ArrowLeft", shiftKey: true }, { key: "Backspace" }, { key: "Delete" }, { key: "2" }, { key: "n" }, { key: "m" }, { key: "t" }, { key: "d", metaKey: true }, { key: "d", ctrlKey: true }];
+    keys.forEach((k) =>
+      act(() => {
+        fireEvent.keyDown(document.activeElement ?? document.body, k);
+      }),
+    );
+    await settle();
+    expect(t.session.view().plan.items.get("t3")).toEqual(before);
+    expect(t.session.view().plan.items.size).toBe(count);
+    expect(lastUi().selected).toBe("t3");
+    expect(lastUi().view).toBe(view);
+    expect(screen.getByRole("menu", { name: menuName })).toBeTruthy();
+  });
+
+  it("moves focus through the + New menu with the arrow keys, Home and End, wrapping, and the selection stays", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    setUiNow({ selected: "t3" });
+    fireEvent.click(screen.getByRole("button", { name: "+ New" }));
+    const [task, milestone, group] = within(screen.getByRole("menu", { name: "New item" })).getAllByRole("menuitem");
+    expect(document.activeElement).toBe(task);
+    const press = (key: string): boolean => {
+      let kept = true;
+      act(() => {
+        kept = fireEvent.keyDown(document.activeElement ?? document.body, { key });
+      });
+      return kept;
+    };
+    expect(press("ArrowDown")).toBe(false);
+    expect(document.activeElement).toBe(milestone);
+    expect(press("ArrowDown")).toBe(false);
+    expect(document.activeElement).toBe(group);
+    expect(press("ArrowDown")).toBe(false);
+    expect(document.activeElement).toBe(task);
+    expect(press("ArrowUp")).toBe(false);
+    expect(document.activeElement).toBe(group);
+    expect(press("Home")).toBe(false);
+    expect(document.activeElement).toBe(task);
+    expect(press("End")).toBe(false);
+    expect(document.activeElement).toBe(group);
+    expect(lastUi().selected).toBe("t3");
+  });
+
   it("closes the ⋯ menu when focus leaves it, and keeps it while focus moves between its items", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);

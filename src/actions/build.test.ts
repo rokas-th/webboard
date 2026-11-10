@@ -617,6 +617,11 @@ describe("buildAction: fix (§6.4)", () => {
     expect(remove.action.w).toEqual([w("l:Build>Review", null)]);
   });
 
+  it("refuses to shorten a lag past 1000 working days, as a refusal with the lag copy", () => {
+    const ctx = ctxFrom(replaced(CHAIN, [w("s:Review", sched("2020-01-06", 2, "done", 100))]), late);
+    refusedWith(ctx, { t: "fix", conflict: early(ctx), how: "shorten" }, "A lag is at most 1000 working days either way.");
+  });
+
   it("refuses to push a done successor and one in progress", () => {
     const ctx = ctxFrom(replaced(CHAIN, [w("s:Review", sched("2026-12-01", 2, "done", 100))]), late);
     refusedWith(

@@ -15,6 +15,18 @@ export class PaneFailures extends Error {
   }
 }
 
+export async function enrolThenRestart(enrol: () => Promise<void>, restart: () => Promise<void>): Promise<void> {
+  try {
+    await enrol();
+  } catch (e) {
+    await restart().catch((r: unknown) => {
+      throw new PaneFailures([e, r]);
+    });
+    throw e;
+  }
+  await restart();
+}
+
 const shown = (e: unknown): e is AppError | Refused => e instanceof AppError || e instanceof Refused;
 
 export function usePaneCommand(): { errors: readonly string[]; busy: boolean; run(work: () => Promise<void>): void } {

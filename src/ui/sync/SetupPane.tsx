@@ -3,7 +3,7 @@ import { normalizeName } from "../../actions/build";
 import { syncSetup } from "../../services/ipc";
 import { useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
 import { toast } from "../common/Toast";
-import { usePaneCommand } from "./command";
+import { enrolThenRestart, usePaneCommand } from "./command";
 
 export const DEFAULT_SERVER = "https://webboard.rokass.org";
 
@@ -17,9 +17,10 @@ export function SetupPane() {
   const create = (): void =>
     cmd.run(async () => {
       const deviceName = normalizeName(name);
-      await syncSetup(server, secret, deviceName);
-      setSecret("");
-      await restart();
+      await enrolThenRestart(async () => {
+        await syncSetup(server, secret, deviceName);
+        setSecret("");
+      }, restart);
       toast("Sync set up");
     });
   return (

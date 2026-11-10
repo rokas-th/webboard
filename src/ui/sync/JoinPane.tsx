@@ -3,7 +3,7 @@ import { normalizeName } from "../../actions/build";
 import { syncPairJoin } from "../../services/ipc";
 import { useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
 import { toast } from "../common/Toast";
-import { usePaneCommand } from "./command";
+import { enrolThenRestart, usePaneCommand } from "./command";
 import { DEFAULT_SERVER } from "./SetupPane";
 
 export function JoinPane() {
@@ -16,8 +16,9 @@ export function JoinPane() {
   const join = (): void =>
     cmd.run(async () => {
       const deviceName = normalizeName(name);
-      await syncPairJoin(server, code, deviceName);
-      await restart();
+      await enrolThenRestart(async () => {
+        await syncPairJoin(server, code, deviceName);
+      }, restart);
       toast("Joined the space");
     });
   return (

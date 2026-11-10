@@ -2,20 +2,13 @@ import { useEffect, useRef, type FocusEvent, type KeyboardEvent } from "react";
 import type { PlanId } from "../../domain/model";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
+import { moved } from "../common/menu";
 import { exportFlow, importFlow } from "./fileFlows";
 
 const mounted = (b: HTMLButtonElement | null, missing: string): HTMLButtonElement => {
   if (b === null) throw new Error(missing);
   return b;
 };
-
-function moved(key: string, at: number, n: number): number | null {
-  if (key === "Home") return 0;
-  if (key === "End") return n - 1;
-  if (key === "ArrowDown") return at < 0 ? 0 : (at + 1) % n;
-  if (key === "ArrowUp") return at < 0 ? n - 1 : (at - 1 + n) % n;
-  return null;
-}
 
 export function PlanMenu(p: {
   session: PlanSession;

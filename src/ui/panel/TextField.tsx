@@ -21,6 +21,7 @@ export function TextField(p: {
   const [draft, setDraft] = useState(p.value);
   const sent = useRef<string | null>(null);
   const cancelled = useRef(false);
+  const entered = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const base = useRef(p.value);
   useEffect(() => {
@@ -42,9 +43,9 @@ export function TextField(p: {
     const next = draft.trim();
     const unread = p.onUnreadable;
     if (unread !== undefined && input.current !== null && input.current.validity.badInput) {
-      if (next === sent.current) return;
-      sent.current = next;
+      if (entered.current) return;
       unread();
+      input.current.value = p.value;
       setDraft(p.value);
       return;
     }
@@ -90,7 +91,12 @@ export function TextField(p: {
         if (e.key !== "Enter") return;
         e.preventDefault();
         commit();
-        leave(e.currentTarget);
+        entered.current = true;
+        try {
+          leave(e.currentTarget);
+        } finally {
+          entered.current = false;
+        }
       }}
     />
   );
