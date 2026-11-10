@@ -310,6 +310,18 @@ describe("the Cyberdeck look", () => {
     expect(plain(".tl-links marker path")["stroke"]).toBe("none");
   });
 
+  it("tints timeline greys with --dim's channels", () => {
+    const timeline = SHEETS["./timeline.css"];
+    if (timeline === undefined) throw new Error("timeline.css not read");
+    expect(timeline).not.toMatch(/90,\s*107,\s*133/);
+    const plain = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect([plain(".tl-tick.off")["color"], plain(".tl-off")["background"], plain(".ghost")["background"]]).toEqual([
+      "rgba(116, 133, 160, 0.55)",
+      "rgba(116, 133, 160, 0.055)",
+      "rgba(116, 133, 160, 0.75)",
+    ]);
+  });
+
   it("lets a swipe that starts on a tray chip scroll the tray", () => {
     const chip = sheet.rules.filter((r) => r.selector === ".tray-chip" && r.decls["touch-action"] !== undefined).map((r) => [r.conditions.length, r.decls["touch-action"]]);
     expect(chip).toEqual([[0, "pan-x pan-y"]]);

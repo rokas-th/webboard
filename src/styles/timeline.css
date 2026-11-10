@@ -92,7 +92,7 @@
 }
 
 .tl-tick.off {
-  color: rgba(90, 107, 133, 0.55);
+  color: rgba(116, 133, 160, 0.55);
 }
 
 .tl-tick.hol {
@@ -260,7 +260,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(90, 107, 133, 0.055);
+  background: rgba(116, 133, 160, 0.055);
   pointer-events: none;
 }
 
@@ -613,7 +613,7 @@
 .ghost {
   position: absolute;
   height: 3px;
-  background: rgba(90, 107, 133, 0.75);
+  background: rgba(116, 133, 160, 0.75);
   border-radius: 2px;
   z-index: 2;
   pointer-events: none;
