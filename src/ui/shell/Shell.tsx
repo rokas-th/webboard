@@ -94,7 +94,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   const files = usePlanFiles(registry, openPlan);
   const { creating, importing, importPlan } = files;
   const [namingPlan, setNamingPlan] = useState<PlanId | null>(null);
-  const newPlan = (): void => files.newPlan("New plan", (message) => toast(message, "bad"), compact ? undefined : setNamingPlan);
+  const newPlan = (): void => files.newPlan("New plan", (message) => toast(message, "bad"), setNamingPlan);
   const newExample = (): void => files.newExample((message) => toast(message, "bad"));
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
   const [sheet, setSheet] = useState<CompactSheet>(null);
@@ -282,6 +282,9 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         <PlanHead
           session={session}
           local={registry.device.name}
+          readOnly={readOnly}
+          naming={namingPlan === session.view().plan.id}
+          onNamed={clearPlanNaming}
           onChoose={(choice) => openChoice(choice)}
           menu={(open, setOpen) => (
             <PlanMenu session={session} registry={registry} open={open} onOpenChange={setOpen} onOpen={(id) => openPlan(id)} />
@@ -307,8 +310,14 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       plans={plans}
       selected={sel}
       creating={creating}
-      onNew={newPlan}
-      onSelect={(id) => openPlan(id)}
+      onNew={() => {
+        setSheet(null);
+        newPlan();
+      }}
+      onSelect={(id) => {
+        setSheet(null);
+        openPlan(id);
+      }}
       onTrash={(id) => void trashOwn(id)}
       onRestore={(id) => restorePlan(registry, id)}
       onMove={moveToSpace}
@@ -333,7 +342,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       </Sheet>
       {session !== null && (
         <Sheet open={sheet === "plan"} title="Plan" onClose={closeSheet}>
-          <PlanPanel session={session} readOnly={readOnly} naming={false} onNamed={clearPlanNaming} />
+          <PlanPanel session={session} readOnly={readOnly} />
         </Sheet>
       )}
       {session !== null && selectedItemShown !== null && (
@@ -380,7 +389,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
               {selectedItemShown !== null ? (
                 itemPanel(selectedItemShown, session)
               ) : (
-                <PlanPanel session={session} readOnly={readOnly} naming={namingPlan === session.view().plan.id} onNamed={clearPlanNaming} />
+                <PlanPanel session={session} readOnly={readOnly} />
               )}
             </div>
           )}

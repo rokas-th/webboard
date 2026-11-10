@@ -72,6 +72,8 @@ const edges = () => ({ edges: true });
 const shown = (selector, n) => ({ shown: [selector, n] });
 const width = (selector, min, max) => ({ width: [selector, min, max] });
 const style = (selector, prop, value) => ({ style: [selector, prop, value] });
+const valued = (selector, text) => ({ valued: [selector, text] });
+const ellipsed = (selector) => ({ ellipsed: selector });
 const raise = (message) => ({ raise: message });
 
 const VIEWS = [
@@ -128,7 +130,7 @@ function states() {
       actions: [viewExpect(place.view), tap(names, PICKED), expect(".slot-panel .panel .kind", "TASK")],
     });
   });
-  add("scale", "scale", { actions: [expect(".tl-row .name", "WS01 task 01"), expect(".plan-head h1", "Scale: 1,000 items")] });
+  add("scale", "scale", { actions: [expect(".tl-row .name", "WS01 task 01"), valued(".plan-head h1 input", "Scale: 1,000 items")] });
   VIEWS.forEach(([slug, place]) =>
     add(`long-names/${slug}`, "long-names", {
       place,
@@ -137,6 +139,7 @@ function states() {
         viewExpect(place.view),
         ...(place.view === "list" ? [width("table.list tbody tr:not(.grp) td.item", 180, 100000)] : []),
         ...(place.view === "board" ? [style(".card .card-name", "-webkit-line-clamp", "2")] : []),
+        ...(place.view === "list" ? [ellipsed(".plan-head .plan-name-input")] : []),
         shown(".sidebar .entry-more", 1),
         count(".sidebar .entry", 2),
       ],
@@ -234,7 +237,7 @@ function states() {
   const UPDATE_AVAILABLE = `WebBoard ${UPDATE_VERSION} is available`;
   const UPDATE_FAILED = `Could not check for updates: ${UPDATE_CHECK_FAILED}`;
   const UPDATE_DOWNLOADING = `Downloading ${UPDATE_VERSION}… 50%`;
-  const exampleHead = expect(".plan-head h1", EXAMPLE_PLAN);
+  const exampleHead = valued(".plan-head h1 input", EXAMPLE_PLAN);
   add("example/timeline", "example", {
     sizes: "timeline",
     place: { view: "timeline", zoom: "W" },
@@ -477,7 +480,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -1158,7 +1161,7 @@ const MEASURE = String.raw`
   function toolbarControls() {
     var bar = document.querySelector(".toolbar");
     if (bar === null) return { found: false, controls: [], overlaps: [] };
-    var picked = Array.prototype.slice.call(bar.querySelectorAll("button, .seg, .wordmark, .toolbar-plan")).filter(rendered);
+    var picked = Array.prototype.slice.call(bar.querySelectorAll("button, .seg, .wordmark")).filter(rendered);
     var tops = picked.filter(function (el) {
       return !picked.some(function (other) { return other !== el && other.contains(el); });
     });
@@ -1311,6 +1314,21 @@ window.__probeAct = function (a) {
     if (wide === undefined) return { fail: "no " + a.width[0] + " on screen to measure" };
     var ww = wide.getBoundingClientRect().width;
     if (ww < a.width[1] - 0.5 || ww > a.width[2] + 0.5) return { fail: a.width[0] + " is " + Math.round(ww * 10) / 10 + " px wide, not " + a.width[1] + ".." + a.width[2] };
+    return { ok: true };
+  }
+  if (a.valued !== undefined) {
+    var fields = Array.prototype.slice.call(document.querySelectorAll(a.valued[0]));
+    if (!fields.some(function (f) { return f.value === a.valued[1]; })) {
+      return { fail: "no " + a.valued[0] + " holding " + JSON.stringify(a.valued[1]) + " (have: " + fields.slice(0, 6).map(function (f) { return JSON.stringify(String(f.value).slice(0, 40)); }).join(" | ") + ")" };
+    }
+    return { ok: true };
+  }
+  if (a.ellipsed !== undefined) {
+    var cut = document.querySelector(a.ellipsed);
+    if (cut === null) return { fail: "no " + a.ellipsed + " to check for an ellipsis" };
+    var overflowCss = getComputedStyle(cut).textOverflow;
+    if (cut.scrollWidth <= cut.clientWidth) return { fail: a.ellipsed + " fits (" + cut.scrollWidth + " of " + cut.clientWidth + " px), so its ellipsis is not tested" };
+    if (overflowCss !== "ellipsis") return { fail: a.ellipsed + " overflows with text-overflow: " + overflowCss + ", not ellipsis" };
     return { ok: true };
   }
   if (a.style !== undefined) {

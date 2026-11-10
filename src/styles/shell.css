@@ -42,18 +42,6 @@
   flex-shrink: 0;
 }
 
-.toolbar-plan {
-  flex-shrink: 1000;
-  min-width: 0;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--dim);
-  pointer-events: none;
-}
-
 .toolbar-spacer {
   flex: 1;
 }
@@ -391,6 +379,31 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.plan-head .plan-name-input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-head input.plan-name-input {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--cyan);
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+.plan-head input.plan-name-input:focus {
+  border-bottom-style: solid;
 }
 
 .head-line {
@@ -823,7 +836,6 @@ html[data-form="compact"] .toolbar {
   padding-bottom: 8px;
 }
 
-html[data-form="compact"] .wordmark,
-html[data-form="compact"] .toolbar-plan {
+html[data-form="compact"] .wordmark {
   display: none;
 }

@@ -80,6 +80,12 @@ const input = (label: string): HTMLInputElement => {
   return el;
 };
 
+const headName = (): HTMLInputElement => {
+  const el = document.querySelector('.plan-head input[aria-label="Plan name"]');
+  if (!(el instanceof HTMLInputElement)) throw new Error("no Plan name field in the heading");
+  return el;
+};
+
 const selectOf = (label: string): HTMLSelectElement => {
   const el = inPanel().getByLabelText(label);
   if (!(el instanceof HTMLSelectElement)) throw new Error(label + " is not a select");
@@ -546,9 +552,9 @@ describe("no-op edits (refinement 36)", () => {
     });
     await shown(t);
     const apply = vi.spyOn(t.session, "apply");
-    act(() => input("Plan name").focus());
-    act(() => input("Plan name").blur());
-    edit(input("Plan name"), "  Plan  ", "Enter");
+    act(() => headName().focus());
+    act(() => headName().blur());
+    edit(headName(), "  Plan  ", "Enter");
     act(() => input("Baseline name").focus());
     act(() => input("Baseline name").blur());
     edit(input("Baseline name"), " Before ", "Enter");
@@ -753,7 +759,7 @@ describe("opens from every view (refinement 48)", () => {
       select(null);
       expect(inPanel().queryByLabelText("Name")).toBeNull();
     };
-    expect(input("Plan name")).not.toBeNull();
+    expect(panel().querySelector(".panel h2")?.textContent).toBe("Plan");
     tap(one('[data-bar="t3"]'));
     opened("t3", "Tracking: review results");
     tap(one('[data-chip="u1"]'));
@@ -808,12 +814,9 @@ describe("PlanPanel", () => {
     expect([stat("Late").textContent, stat("Late").classList.contains("amber")]).toEqual(["1", true]);
   });
 
-  it("renames the plan and summarises its calendar", async () => {
+  it("summarises the plan's calendar", async () => {
     const t = await made([{ name: "A", start: "2026-11-10", dur: 3 }]);
     await shown(t);
-    const apply = vi.spyOn(t.session, "apply");
-    edit(input("Plan name"), "Q1", "Enter");
-    expect(apply.mock.calls).toEqual([[{ t: "planName", name: "Q1" }]]);
     expect(panel().textContent).toContain("No holiday region · Mon–Fri · no closures");
     click(button("Change calendar…"));
     expect(uiNow()[0].dialog).toEqual({ t: "calendar" });

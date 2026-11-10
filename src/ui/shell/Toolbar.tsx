@@ -1,4 +1,4 @@
-import { usePlanView, type PlanSession } from "../../store/session";
+import type { PlanSession } from "../../store/session";
 import { useRun } from "../run";
 import type { UiState, ViewKind, Zoom } from "../state";
 import { NewItemMenu } from "../common/NewItemMenu";
@@ -28,11 +28,9 @@ interface ToolbarProps {
 }
 
 function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState; setUi(patch: Partial<UiState>): void; onCommand(id: string): void }) {
-  const view = usePlanView(p.session);
   const { undo, redo } = useRun(p.session);
   return (
     <>
-      <span className="toolbar-plan">{view.plan.name}</span>
       <div className="seg seg-modes" role="tablist" aria-label="Views">
         {TABS.map(([kind, label]) => (
           <button

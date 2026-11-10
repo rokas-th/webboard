@@ -246,7 +246,7 @@ describe("the Cyberdeck look", () => {
   });
 
   it("clips every name to one line", () => {
-    [".entry-name", ".plan-head h1", ".toolbar-plan", ".choice-row", ".tl-row .name", ".list-name", ".palette-label"].forEach((sel) => {
+    [".entry-name", ".plan-head h1", ".plan-head .plan-name-input", ".choice-row", ".tl-row .name", ".list-name", ".palette-label"].forEach((sel) => {
       const decls = Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
       expect([sel, decls["overflow"], decls["text-overflow"], decls["white-space"]]).toEqual([sel, "hidden", "ellipsis", "nowrap"]);
     });

@@ -243,7 +243,10 @@ describe('compact shell, data-form="compact"', () => {
     act(() => t.session.setReadOnly(true));
     const sheet = planSheet();
     expect(sheet.querySelector("input")).toBeNull();
-    expect(within(sheet).getByLabelText("Plan name").textContent).toBe("Plan");
+    expect(within(sheet).queryByLabelText("Plan name")).toBeNull();
+    const heading = document.querySelector(".plan-head h1");
+    if (!(heading instanceof HTMLElement)) throw new Error("no plan heading");
+    expect([heading.querySelector("input"), within(heading).getByLabelText("Plan name").textContent]).toEqual([null, "Plan"]);
     ["Save baseline", "Remove", "Restore", "Change calendar…", "Revert this action", "Bring this action back"].forEach((n) =>
       expect([n, within(sheet).queryByRole("button", { name: n })]).toEqual([n, null]),
     );
@@ -280,6 +283,46 @@ describe('compact shell, data-form="compact"', () => {
     if (after === null) throw new Error("the Plans sheet closed after Restore");
     expect(after.querySelector('[aria-current="page"]')?.textContent).toBe("Beta");
     expect(within(toolbar()).getByRole("button", { name: "Plan" })).toBeTruthy();
+  });
+
+  it("Plans → New plan closes the sheet and focuses the new plan's name in the heading", async () => {
+    await seededStore(["Alpha"]);
+    const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
+    registries.push(registry);
+    render(withSync(<Shell registry={registry} clock={fixedClock("2026-11-09")} />));
+    await settle();
+    const opener = within(toolbar()).getByRole("button", { name: "Plans" });
+    fireEvent.click(opener);
+    const nav = plans();
+    if (nav === null) throw new Error("no Plans navigation");
+    const box = nav.querySelector(".sidebar-new");
+    if (!(box instanceof HTMLElement)) throw new Error("no sidebar New plan");
+    fireEvent.click(within(box).getByRole("button"));
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const name = document.querySelector('.plan-head h1 input[aria-label="Plan name"]');
+    if (!(name instanceof HTMLInputElement)) throw new Error("no Plan name field in the heading");
+    expect([name.value, document.activeElement === name, name.selectionStart, name.selectionEnd]).toEqual(["New plan", true, 0, "New plan".length]);
+  });
+
+  it("Plans → a plan closes the sheet and shows that plan", async () => {
+    await seededStore(["Alpha", "Beta"]);
+    const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
+    registries.push(registry);
+    render(withSync(<Shell registry={registry} clock={fixedClock("2026-11-09")} />));
+    await settle();
+    const before = document.querySelector(".plan-head h1 input");
+    if (!(before instanceof HTMLInputElement)) throw new Error("no plan open");
+    const other = before.value === "Alpha" ? "Beta" : "Alpha";
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Plans" }));
+    const nav = plans();
+    if (nav === null) throw new Error("no Plans navigation");
+    fireEvent.click(within(nav).getByRole("button", { name: other }));
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const after = document.querySelector(".plan-head h1 input");
+    if (!(after instanceof HTMLInputElement)) throw new Error("no plan open");
+    expect(after.value).toBe(other);
   });
 
   it("shows the update line in the Plans sheet only with an update store", async () => {

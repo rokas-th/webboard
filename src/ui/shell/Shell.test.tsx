@@ -23,6 +23,7 @@ import { clearToasts } from "../common/Toast";
 import { forgetLastPlan, NO_PLAN_KEY, PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
 import { closeConverted, CONVERTED_TITLE, OPEN_PLAN, showConverted, shownConverted } from "./ConvertedReport";
 import { exportFlow, importFlow } from "./fileFlows";
+import { OpenChoice } from "../run";
 import { PlanHead } from "./PlanHead";
 import { Shell } from "./Shell";
 import { connectedStubs, withSync } from "../../test/withSync";
@@ -191,7 +192,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     const bar = document.querySelector("header.toolbar[data-tauri-drag-region]");
     if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
     expect(bar.querySelector(".wordmark")?.textContent).toBe("WebBoard");
-    expect(within(bar).getByText("Plan")).toBeTruthy();
+    expect([within(bar).queryByText("Plan"), bar.querySelector(".toolbar-plan")]).toEqual([null, null]);
     const tabs = within(bar).getAllByRole("tab");
     expect(tabs.map((b) => [b.textContent, b.getAttribute("aria-selected")])).toEqual([
       ["Timeline", "true"],
@@ -563,6 +564,14 @@ describe("Shell on testSession(MESA_SEED)", () => {
   });
 });
 
+function Head(p: { session: PlanSession; onChoose(choice: string): void }) {
+  return (
+    <OpenChoice.Provider value={vi.fn()}>
+      <PlanHead session={p.session} local="Mac" readOnly={false} naming={false} onNamed={vi.fn()} onChoose={p.onChoose} />
+    </OpenChoice.Provider>
+  );
+}
+
 describe("PlanHead", () => {
   const RAW_X1 = ["iphone", "s1", 0, [], "Bad", "not-writes"];
   const RAW_X3 = ["ipad7", "s2", 0, [], "Bad", "not-writes"];
@@ -589,10 +598,10 @@ describe("PlanHead", () => {
       { id: "x1", message: messages[0] },
       { id: "x3", message: messages[1] },
     ]);
-    const view = render(<PlanHead session={t.session} local="Mac" onChoose={vi.fn()} />);
+    const view = render(<Head session={t.session} onChoose={vi.fn()} />);
     const bad = (): (string | null)[] => [...view.container.querySelectorAll(".bad")].map((e) => e.textContent);
     expect(bad()).toEqual(messages);
-    view.rerender(<PlanHead session={t.session} local="Mac" onChoose={vi.fn()} />);
+    view.rerender(<Head session={t.session} onChoose={vi.fn()} />);
     expect(bad()).toEqual(messages);
     expect(screen.getByText("Receiving… · 1 change waiting")).toBeTruthy();
   });
@@ -601,7 +610,7 @@ describe("PlanHead", () => {
     const t = await made([{ name: "A", start: "2026-11-10", dur: 3 }], {
       raw: { x1: RAW_X1, x2: child("x2", "One"), x4: child("x4", "Two"), x5: child("x5", "Three") },
     });
-    render(<PlanHead session={t.session} local="Mac" onChoose={vi.fn()} />);
+    render(<Head session={t.session} onChoose={vi.fn()} />);
     expect(screen.getByText("Receiving… · 3 changes waiting")).toBeTruthy();
   });
 
@@ -612,11 +621,11 @@ describe("PlanHead", () => {
 
   it("counts open choices", async () => {
     const one = await made(A, { clashes: [NAME_CLASH] });
-    const first = render(<PlanHead session={one.session} local="Mac" onChoose={vi.fn()} />);
+    const first = render(<Head session={one.session} onChoose={vi.fn()} />);
     expect(chip()).toBe("1 open choice · Choose…");
     first.unmount();
     const none = await made(A);
-    const empty = render(<PlanHead session={none.session} local="Mac" onChoose={vi.fn()} />);
+    const empty = render(<Head session={none.session} onChoose={vi.fn()} />);
     expect(empty.container.textContent).not.toMatch(/open choice/);
     empty.unmount();
   });
@@ -624,7 +633,7 @@ describe("PlanHead", () => {
   it("lists every choice, calendar ones included, and opens the picked one", async () => {
     const t = await made(A, { clashes: [NAME_CLASH, DAY_CLASH] });
     const onChoose = vi.fn();
-    render(<PlanHead session={t.session} local="Mac" onChoose={onChoose} />);
+    render(<Head session={t.session} onChoose={onChoose} />);
     expect(chip()).toBe("2 open choices · Choose…");
     const chips = document.querySelector(".chips");
     if (!(chips instanceof HTMLElement)) throw new Error("no chips");
@@ -646,7 +655,7 @@ describe("PlanHead", () => {
     p.session.apply({ t: "rename", item: "A", name: "Beta" });
     p.sync();
     expect(t.session.view().choices.map((c) => c.sides.map((s) => s.label))).toEqual([["iPhone", "Mac"]]);
-    render(<PlanHead session={t.session} local="Mac" onChoose={vi.fn()} />);
+    render(<Head session={t.session} onChoose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
     const rows = within(screen.getByRole("list", { name: "Open choices" })).getAllByRole("button");
     expect(rows.map((r) => r.textContent)).toEqual(["Mac or iPhone"]);
@@ -655,7 +664,7 @@ describe("PlanHead", () => {
 
   it("closes the list when the last choice is resolved", async () => {
     const t = await made(A, { clashes: [NAME_CLASH] });
-    render(<PlanHead session={t.session} local="Mac" onChoose={vi.fn()} />);
+    render(<Head session={t.session} onChoose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
     expect(screen.queryByRole("list", { name: "Open choices" })).not.toBeNull();
     act(() => {
@@ -695,7 +704,7 @@ describe("PlanHead", () => {
   it("opens the choice holding the held items", async () => {
     const t = await made(A, { clashes: [{ unit: "s:A", mac: ["2026-11-16", 3, "todo", 0, "now"], iphone: ["2026-11-18", 3, "todo", 0, "now"] }] });
     const onChoose = vi.fn();
-    const view = render(<PlanHead session={t.session} local="Mac" onChoose={onChoose} />);
+    const view = render(<Head session={t.session} onChoose={onChoose} />);
     fireEvent.click(screen.getByRole("button", { name: "1 held" }));
     expect(onChoose.mock.calls).toEqual([[t.session.view().choices[0].id]]);
     view.unmount();
@@ -1184,8 +1193,9 @@ describe("Shell on Registry.open", () => {
     expect(slot("timeline")?.textContent).toBe("No items yet. Add one with + New.");
     const panelSlot = slot("panel");
     if (!(panelSlot instanceof HTMLElement)) throw new Error("no panel");
-    const name = within(panelSlot).getByLabelText("Plan name");
-    if (!(name instanceof HTMLInputElement)) throw new Error("no Plan name field");
+    expect(within(panelSlot).queryByLabelText("Plan name")).toBeNull();
+    const name = document.querySelector('.plan-head input[aria-label="Plan name"]');
+    if (!(name instanceof HTMLInputElement)) throw new Error("no Plan name field in the heading");
     expect([document.activeElement === name, name.selectionStart, name.selectionEnd]).toEqual([true, 0, "New plan".length]);
     act(() => {
       fireEvent.change(name, { target: { value: "Launch" } });
@@ -1193,7 +1203,13 @@ describe("Shell on Registry.open", () => {
     act(() => {
       fireEvent.keyDown(name, { key: "Enter" });
     });
+    await settle();
     expect([currentName(), document.activeElement === name]).toEqual(["Launch", false]);
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    });
+    await settle();
+    expect([currentName(), name.value]).toEqual(["New plan", "New plan"]);
   });
 
   it("focuses nothing in the panel when an existing plan opens", async () => {
@@ -1622,6 +1638,9 @@ describe("the panel slot", () => {
     if (!(el instanceof HTMLInputElement)) throw new Error(label + " is not an input");
     return el;
   };
+  const planShown = (): void => {
+    expect(document.querySelector(".slot-panel .panel h2")?.textContent).toBe("Plan");
+  };
   const button = (name: string): HTMLElement => inPanel().getByRole("button", { name });
   const click = (el: Element): void => {
     act(() => {
@@ -1663,7 +1682,7 @@ describe("the panel slot", () => {
       });
       expect(t.session.view().plan.items.has(created)).toBe(false);
       expect(uiNow()[0].selected).toBeNull();
-      expect(input("Plan name").value).toBe("Plan");
+      planShown();
       expect(toastTexts().filter((x) => x !== null && /Trash/.test(x))).toEqual([]);
     });
 
@@ -1673,7 +1692,7 @@ describe("the panel slot", () => {
       select("A");
       select("gone");
       expect(uiNow()[0].selected).toBeNull();
-      expect(input("Plan name").value).toBe("Plan");
+      planShown();
       expect(toastTexts()).toEqual([]);
     });
 
@@ -1715,7 +1734,7 @@ describe("the panel slot", () => {
       click(button("Delete"));
       expect(t.session.authorOf("e:A")).toEqual({ dev: "mac", device: "Mac" });
       expect(uiNow()[0].selected).toBeNull();
-      expect(input("Plan name").value).toBe("Plan");
+      planShown();
       const done = apply.mock.results[0];
       if (done === undefined || done.type !== "return") throw new Error("Delete did not apply");
       expect(toastTexts()).toEqual([done.value.toast]);
