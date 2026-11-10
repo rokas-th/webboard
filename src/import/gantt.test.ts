@@ -4,7 +4,7 @@ import { LogState } from "../log/state";
 import { childrenOf, projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { buildImport } from "../store/file";
-import { convertGantt, defaultPlanName, htmlToText, localDate, readBack, type GanttPlan } from "./gantt";
+import { convertGantt, defaultPlanName, htmlToText, infoToText, localDate, readBack, standardOffset, type GanttPlan } from "./gantt";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
@@ -208,10 +208,12 @@ describe("convertGantt", () => {
       "TaskID on 9 items",
       "color on 9 items",
       "group dates, duration and progress on 3 groups (WebBoard derives group spans)",
+      "resources[].resourceId on 2 resources",
       "resources[].unit on 1 resource",
       "the top-level resources list (1 entry)",
       "advanced.workTime",
-      "advanced display settings: columns, zoomLevel, timezoneOffset, dependencyConflict, dateFormat, timeFormat, firstDayOfWeek",
+      "advanced display settings: columns, zoomLevel, dateFormat, timeFormat, firstDayOfWeek",
+      'dependencyConflict "Add Offset to Dependency" (a scheduling option of the source tool; WebBoard keeps its own link rules)',
     ]);
   });
 
@@ -230,15 +232,84 @@ describe("localDate", () => {
   });
 });
 
+describe("standardOffset", () => {
+  it("gives the standard-time offset in getTimezoneOffset's sign", () => {
+    expect(standardOffset("Europe/Zurich", 2026)).toBe(-60);
+    expect(standardOffset("America/New_York", 2026)).toBe(300);
+    expect(standardOffset("Australia/Sydney", 2026)).toBe(-600);
+    expect(standardOffset("UTC", 2026)).toBe(0);
+  });
+});
+
+describe("infoToText", () => {
+  it("keeps plain text verbatim apart from the trim", () => {
+    expect(infoToText("  x &amp; y < z <b>w</b>\r\n  ", "Task 1 info")).toBe("x &amp; y < z <b>w</b>");
+  });
+
+  it("reads text that starts with < as HTML", () => {
+    expect(infoToText("  <p>a &amp; b</p>  ", "Task 1 info")).toBe("a & b");
+  });
+});
+
 describe("htmlToText", () => {
-  it("strips tags, decodes entities and ends blocks with newlines", () => {
+  it("strips allow-listed tags, decodes entities and ends blocks with newlines", () => {
     expect(htmlToText("<p>a &lt;b&gt; &quot;c&quot; &apos;d&#39;</p><div>e</div><p><br></p>", "Task 1 info")).toBe("a <b> \"c\" 'd'\ne");
     expect(htmlToText("<p><br></p>", "Task 1 info")).toBe("");
-    expect(htmlToText("x & y < z", "Task 1 info")).toBe("x & y < z");
+    expect(htmlToText('<p style="color: red" class="x"><b>bold</b> <strong>s</strong> <i>i</i> <em>e</em> <u>u</u> <span>t</span></p>', "Task 1 info")).toBe(
+      "bold s i e u t",
+    );
+  });
+
+  it("turns list items into bullet lines", () => {
+    expect(htmlToText("<p>Steps</p><ul><li>one</li><li>two</li></ul><ol><li>three</li></ol><p>after</p>", "Task 1 info")).toBe(
+      "Steps\n• one\n• two\n• three\nafter",
+    );
+    expect(htmlToText("text<ul><li>one</li></ul>", "Task 1 info")).toBe("text\n• one");
+  });
+
+  it("collapses runs of three or more newlines to two", () => {
+    expect(htmlToText("<p>a</p><p><br></p><p><br></p><p><br></p><p>b</p>", "Task 1 info")).toBe("a\n\nb");
+    expect(htmlToText("<p>a<br><br>b</p>", "Task 1 info")).toBe("a\n\nb");
+  });
+
+  it("decodes numeric entities, decimal and hex", () => {
+    expect(htmlToText("<p>&#65;&#x42;&#X43;&#128512;</p>", "Task 1 info")).toBe("ABC\u{1F600}");
+  });
+
+  it("decodes the Latin-1 and typographic named entities", () => {
+    expect(htmlToText("<p>&auml;&ouml;&uuml;&Auml;&Ouml;&Uuml;&szlig;&eacute;&egrave;&agrave;&ccedil;&deg;&plusmn;&times;</p>", "Task 1 info")).toBe(
+      "äöüÄÖÜßéèàç°±×",
+    );
+    expect(htmlToText("<p>w&nbsp;x&ndash;&mdash;&lsquo;&rsquo;&ldquo;&rdquo;&hellip;&euro;&copy;&yuml;&iexcl;</p>", "Task 1 info")).toBe(
+      "w\u00a0x–—‘’“”…€©ÿ¡",
+    );
+    expect(htmlToText("<p>&amp;&lt;&gt;&quot;&apos;</p>", "Task 1 info")).toBe("&<>\"'");
   });
 
   it("refuses an entity it cannot decode", () => {
-    expect(() => htmlToText("a &bogus; b", "Task 4 info")).toThrow(/Task 4 info.*&bogus;/);
+    expect(() => htmlToText("<p>a &bogus; b</p>", "Task 4 info")).toThrow(/Task 4 info.*&bogus;/);
+  });
+
+  it("refuses a numeric entity outside Unicode", () => {
+    expect(() => htmlToText("<p>&#x110000;</p>", "Task 4 info")).toThrow(/Task 4 info.*&#x110000;/);
+    expect(() => htmlToText("<p>&#99999999999;</p>", "Task 4 info")).toThrow(/Task 4 info.*&#99999999999;/);
+  });
+
+  it("refuses a tag outside the allow-list", () => {
+    expect(() => htmlToText('<p><a href="x">link</a></p>', "Task 4 info")).toThrow(/Task 4 info.*<a href="x">/);
+    expect(() => htmlToText("<p><h1>t</h1></p>", "Task 4 info")).toThrow(/Task 4 info.*<h1>/);
+  });
+
+  it("refuses an attribute other than style or class", () => {
+    expect(() => htmlToText('<p onclick="x()">t</p>', "Task 4 info")).toThrow(/Task 4 info.*attribute onclick/);
+  });
+
+  it("refuses a comment", () => {
+    expect(() => htmlToText("<p>a<!-- hidden --></p>", "Task 4 info")).toThrow(/Task 4 info.*<!--/);
+  });
+
+  it("refuses a < that starts no allow-listed tag", () => {
+    expect(() => htmlToText("<p>a < b</p>", "Task 4 info")).toThrow(/Task 4 info.*"< b<\/p>"/);
   });
 });
 
@@ -285,6 +356,57 @@ describe("convertGantt refuses what it cannot map", () => {
   it("a task name WebBoard cannot hold", () => refuses(source(mutate(3, { TaskName: " Build" })), /Task 3: TaskName/));
   it("text that is not JSON", () => expect(() => convertGantt({ text: "{", fileName: FILE, dev: "d", ses: "s", now: 0 })).toThrow(/not JSON/));
   it("a plan name WebBoard cannot hold", () => expect(() => convert(source(), FILE, "")).toThrow(/plan name/));
+  it("a project end date", () => refuses(source(tasks(), {}, { projectEndDate: "2026-12-01T06:00:00.000Z" }), /projectEndDate: is set/));
+  it("a resources[] field it does not know", () =>
+    refuses(source(mutate(3, { resources: [{ resourceId: "r1", resourceName: "Lab", cost: 5 }] })), /Task 3: unknown field resources\[0\]\.cost/));
+  it("a blank resourceName", () =>
+    refuses(source(mutate(3, { resources: [{ resourceId: "r1", resourceName: "  " }] })), /Task 3: resources\[0\]\.resourceName is blank/));
+  it("a task without resources", () => {
+    const data = mutate(3, {});
+    const phase = data[0].subtasks as Task[];
+    delete phase[1].resources;
+    refuses(source(data), /Task 3: resources is not a list: nothing/);
+  });
+  it("a task whose resources are null", () => refuses(source(mutate(3, { resources: null })), /Task 3: resources is not a list: null/));
+  it("a file without top-level resources", () => {
+    const src = source();
+    delete src.resources;
+    refuses(src, /The \.gantt file: resources is not a list: nothing/);
+  });
+  it("empty data", () => refuses(source([]), /no tasks in data/));
+  it("data that is missing", () => {
+    const src = source();
+    delete src.data;
+    refuses(src, /The \.gantt file: data is not a list: nothing/);
+  });
+  it("a file-name stamp that is not a real date", () => refuses(source(), /file name: its date stamp 20260230 is not a calendar date/, "Fixture Plan 20260230.gantt"));
+  it("a numeric entity outside Unicode", () => refuses(source(mutate(3, { info: "<p>&#x110000;</p>" })), /Task 3 info.*&#x110000;/));
+  it("a tag outside the allow-list in info", () => refuses(source(mutate(3, { info: "<p><img src=x></p>" })), /Task 3 info.*<img src=x>/));
+  it("a task that is not an object", () => refuses(source([5 as unknown as Task]), /data\[0\]: is not an object: 5/));
+  it("a subtask that is not an object", () => refuses(source([group(1, "G", ["x" as unknown as Task])]), /the subtasks\[0\] of Task 1: is not an object: "x"/));
+  it("a missing advanced", () => {
+    const src = source();
+    delete src.advanced;
+    refuses(src, /advanced: is not an object: nothing/);
+  });
+  it("an advanced that is not an object", () => refuses(source(tasks(), {}, { advanced: [] }), /advanced: is not an object: \[\]/));
+  it("a missing holidays", () => refuses(source(tasks(), { holidays: undefined }), /advanced: holidays is not a list: nothing/));
+  it("a missing workWeek", () => refuses(source(tasks(), { workWeek: undefined }), /advanced\.workWeek: is not a non-empty list of day names: nothing/));
+  it("a timezoneOffset that is not the time zone's standard offset", () =>
+    refuses(source(tasks(), { timezoneOffset: -120 }), /advanced\.timezoneOffset is -120, but Europe\/Zurich's standard-time offset is -60/));
+  it("a timezoneOffset that is not a number", () =>
+    refuses(source(tasks(), { timezoneOffset: "-60" }), /advanced\.timezoneOffset is "-60", but Europe\/Zurich's standard-time offset is -60/));
+  it("a dependencyConflict that is not text", () => refuses(source(tasks(), { dependencyConflict: 3 }), /advanced: dependencyConflict is not text: 3/));
+});
+
+describe("advanced.timezoneOffset", () => {
+  it("is accepted when it is the time zone's standard offset", () => {
+    expect(convert(source(tasks(), { timezone: "America/New_York", timezoneOffset: 300 })).counts.tasks).toBe(5);
+  });
+
+  it("may be absent", () => {
+    expect(convert(source(tasks(), { timezoneOffset: undefined })).counts.tasks).toBe(5);
+  });
 });
 
 describe("the fidelity check", () => {
@@ -299,6 +421,18 @@ describe("the fidelity check", () => {
     expect(() => convert(source(mutate(3, { Predecessor: "2FS+1 days" })))).toThrow(/conflict.*Task 2 Design → Task 3 Build/s);
   });
 
+  it("refuses a milestone stored done whose predecessors are not all done", () => {
+    expect(() => convert(source(mutate(4, { Progress: 100 })))).toThrow(
+      "WebBoard would show a different status than the .gantt file:\n- Task 4 Review: the .gantt file gives done, WebBoard derives todo",
+    );
+  });
+
+  it("refuses a milestone stored todo whose predecessors are all done", () => {
+    expect(() => convert(source(mutate(4, { Predecessor: "2FF" })))).toThrow(
+      "WebBoard would show a different status than the .gantt file:\n- Task 4 Review: the .gantt file gives todo, WebBoard derives done",
+    );
+  });
+
   it("refuses a start on a day off", () => {
     expect(() => convert(source(mutate(9, { StartDate: "2026-09-19T06:00:00.000Z", EndDate: "2026-09-19T15:00:00.000Z" })))).toThrow(
       /Task 9 Back: source 2026-09-19 → 2026-09-19, WebBoard 2026-09-21 → 2026-09-21/,
@@ -306,10 +440,10 @@ describe("the fidelity check", () => {
   });
 });
 
-describe("the .wbx round trip", () => {
+describe("the .webboard round trip", () => {
   it("reads back through buildImport as the same plan", () => {
     const g = convert();
-    const r = buildImport(g.bytes, "Fixture Plan 20260901.wbx", "dev-B", "ses-B", 9);
+    const r = buildImport(g.bytes, "Fixture Plan 20260901.webboard", "dev-B", "ses-B", 9);
     const log = new LogState(planRules);
     expect(log.add([r.action]).refused).toEqual([]);
     const back = projectPlan(r.planId, log);
@@ -344,6 +478,64 @@ describe("the .wbx round trip", () => {
 
   it("counts the read-back plan the way the conversion counted it", () => {
     const g = convert();
-    expect(readBack(g.bytes, "Fixture Plan 20260901.wbx")).toEqual(g.counts);
+    expect(readBack(g.bytes, "Fixture Plan 20260901.webboard", g)).toEqual(g.counts);
+  });
+});
+
+describe("readBack", () => {
+  const OUT = "Fixture Plan 20260901.webboard";
+  const withItem = (g: GanttPlan, name: string, patch: (i: Item) => Item): GanttPlan => ({
+    ...g,
+    plan: { ...g.plan, items: new Map([...g.plan.items].map(([id, i]): [ItemId, Item] => [id, i.name === name ? patch(i) : i])) },
+  });
+
+  it("refuses bytes whose plan name differs", () => {
+    const g = convert();
+    expect(() => readBack(g.bytes, OUT, { ...g, plan: { ...g.plan, name: "Other" } })).toThrow(/plan name reads back as "Fixture Plan", not "Other"/);
+  });
+
+  it("refuses bytes whose item kind, name, parent, order or schedule differs", () => {
+    const g = convert();
+    const other = byName(g.plan, "Phase B").id;
+    expect(() => readBack(g.bytes, OUT, withItem(g, "Build", (i) => ({ ...i, schedule: i.schedule && { ...i.schedule, dur: 6 } })))).toThrow(
+      /Task 3 Build: schedule reads back as/,
+    );
+    expect(() => readBack(g.bytes, OUT, withItem(g, "Build", (i) => ({ ...i, kind: "milestone" })))).toThrow(/Task 3 Build: kind reads back as "task", not "milestone"/);
+    expect(() => readBack(g.bytes, OUT, withItem(g, "Build", (i) => ({ ...i, name: "Built" })))).toThrow(/Task 3 Build: name reads back as "Build", not "Built"/);
+    expect(() => readBack(g.bytes, OUT, withItem(g, "Build", (i) => ({ ...i, place: { ...i.place, parent: other } })))).toThrow(/Task 3 Build: parent reads back as/);
+    expect(() => readBack(g.bytes, OUT, withItem(g, "Build", (i) => ({ ...i, place: { ...i.place, order: "zz" } })))).toThrow(/Task 3 Build: order reads back as/);
+  });
+
+  it("refuses bytes whose link type or lag differs", () => {
+    const g = convert();
+    const links = new Map([...g.plan.links].map(([k, l]) => [k, l.lag === 2 ? { ...l, lag: 3 } : l.type === "SF" ? { ...l, type: "FS" as const } : l]));
+    expect(() => readBack(g.bytes, OUT, { ...g, plan: { ...g.plan, links } })).toThrow(
+      /link Task 3 Build → Task 7 Parallel reads back as SS\+2, not SS\+3[\s\S]*link Task 8 Late → Task 9 Back reads back as SF, not FS/,
+    );
+  });
+
+  it("refuses bytes whose calendar differs", () => {
+    const g = convert();
+    expect(() => readBack(g.bytes, OUT, { ...g, plan: { ...g.plan, calendar: { ...g.plan.calendar, workdays: [1, 2, 3, 4] } } })).toThrow(/calendar reads back as/);
+  });
+
+  it("refuses bytes whose baseline differs", () => {
+    const g = convert();
+    const baselines = new Map([...g.plan.baselines].map(([k, b]) => [k, { ...b, at: "2026-09-02" }]));
+    expect(() => readBack(g.bytes, OUT, { ...g, plan: { ...g.plan, baselines } })).toThrow(/baseline Imported plan reads back as/);
+  });
+
+  it("refuses bytes whose note text differs", () => {
+    const g = convert();
+    const notes = new Map([...g.notes].map(([k, t]): [ItemId, string] => [k, `${t}!`]));
+    expect(() => readBack(g.bytes, OUT, { ...g, notes })).toThrow(/Task 7 Parallel: note reads back as "plain text note", not "plain text note!"/);
+  });
+
+  it("runs the fidelity check on the imported plan", () => {
+    const g = convert();
+    const sources = g.check.sources.map((s) => (s.id === 3 && s.leaf !== null ? { ...s, leaf: { ...s.leaf, end: "2026-09-17" } } : s));
+    expect(() => readBack(g.bytes, OUT, { ...g, check: { ...g.check, sources } })).toThrow(
+      "WebBoard would show different dates than the .gantt file:\n- Task 3 Build: source 2026-09-14 → 2026-09-17, WebBoard 2026-09-14 → 2026-09-18",
+    );
   });
 });

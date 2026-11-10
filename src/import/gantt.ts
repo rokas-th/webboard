@@ -26,32 +26,19 @@ export interface GanttCounts {
   notes: number;
 }
 
-export interface GanttPlan {
-  plan: PlanState;
-  action: Action;
-  newNotes: readonly ItemId[];
-  notes: ReadonlyMap<ItemId, string>;
-  bytes: Uint8Array;
-  counts: GanttCounts;
-  dropped: readonly string[];
-}
-
-export const BASELINE_NAME = "Imported plan";
-
-type Raw = Record<string, unknown>;
-
-interface Resource {
+export interface Resource {
   name: string;
+  id: boolean;
   unit: boolean;
 }
 
-interface Pred {
+export interface Pred {
   id: number;
   type: LinkType;
   lag: number;
 }
 
-interface Leaf {
+export interface Leaf {
   kind: "task" | "milestone";
   start: IsoDate;
   end: IsoDate;
@@ -60,7 +47,7 @@ interface Leaf {
   preds: readonly Pred[];
 }
 
-interface Source {
+export interface Source {
   id: number;
   name: string;
   note: string;
@@ -70,22 +57,66 @@ interface Source {
   leaf: Leaf | null;
 }
 
+export interface GanttCheck {
+  sources: readonly Source[];
+  ids: ReadonlyMap<number, ItemId>;
+  today: IsoDate;
+}
+
+export interface GanttPlan {
+  plan: PlanState;
+  action: Action;
+  newNotes: readonly ItemId[];
+  notes: ReadonlyMap<ItemId, string>;
+  bytes: Uint8Array;
+  counts: GanttCounts;
+  dropped: readonly string[];
+  check: GanttCheck;
+}
+
+export const BASELINE_NAME = "Imported plan";
+
+type Raw = Record<string, unknown>;
+
 const TOP_KEYS = ["data", "resources", "projectStartDate", "projectEndDate", "advanced"];
 const TASK_KEYS = ["TaskID", "TaskName", "StartDate", "EndDate", "Duration", "DurationUnit", "Progress", "Predecessor", "resources", "color", "info", "subtasks"];
 const RESOURCE_KEYS = ["resourceId", "resourceName", "unit"];
-const DISPLAY_KEYS = ["columns", "zoomLevel", "timezoneOffset", "dependencyConflict", "dateFormat", "timeFormat", "firstDayOfWeek"];
-const ADVANCED_KEYS = ["timezone", "workWeek", "workTime", "holidays", ...DISPLAY_KEYS];
+const DISPLAY_KEYS = ["columns", "zoomLevel", "dateFormat", "timeFormat", "firstDayOfWeek"];
+const ADVANCED_KEYS = ["timezone", "timezoneOffset", "dependencyConflict", "workWeek", "workTime", "holidays", ...DISPLAY_KEYS];
 const LINK_TYPES: readonly LinkType[] = ["FS", "SS", "FF", "SF"];
 const LAG_UNITS = ["day", "days"];
 const DAYS: Readonly<Record<string, Weekday>> = { Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6, Sunday: 7 };
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/;
 const ENTRY = /^(\d+)\s*([A-Za-z]+)(?:\s*([+-])\s*(\S+)\s+([A-Za-z]+))?$/;
 const STAMP = / (\d{4})(\d{2})(\d{2})$/;
-const ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
-const BREAK = /<br\s*\/?>/gi;
-const BLOCK_END = /<\/(?:p|div|li|ul|ol|h[1-6]|tr|table|blockquote|pre)\s*>/gi;
-const TAG = /<\/?[A-Za-z][^>]*>/g;
+const LATIN1 = (
+  "nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo " +
+  "frac14 frac12 frac34 iquest Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ETH Ntilde Ograve " +
+  "Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc " +
+  "euml igrave iacute icirc iuml eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml"
+).split(" ");
+const ENTITIES: Readonly<Record<string, string>> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  ...Object.fromEntries(LATIN1.map((n, i) => [n, String.fromCodePoint(0xa0 + i)])),
+  ndash: "–",
+  mdash: "—",
+  lsquo: "‘",
+  rsquo: "’",
+  ldquo: "“",
+  rdquo: "”",
+  hellip: "…",
+  euro: "€",
+};
 const ENTITY = /&(#[xX][0-9A-Fa-f]+|#[0-9]+|[A-Za-z][A-Za-z0-9]*);/g;
+const TAGS = ["p", "br", "div", "span", "b", "strong", "i", "em", "u", "ul", "ol", "li"];
+const BLOCKS = ["p", "div", "ul", "ol", "li"];
+const ATTRIBUTES = ["style", "class"];
+const ATTRIBUTE = /([^\s"'=<>/]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g;
+const TOKEN = /<!--|<(\/?)([A-Za-z][A-Za-z0-9]*)((?:\s+[^\s"'=<>/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*\/?>|</g;
 
 const fail = (where: string, message: string): GanttError => new GanttError(`${where}: ${message}`);
 
@@ -93,7 +124,15 @@ const show = (v: unknown): string => (v === undefined ? "nothing" : JSON.stringi
 
 const isRecord = (v: unknown): v is Raw => typeof v === "object" && v !== null && !Array.isArray(v);
 
+const isLinkType = (v: string): v is LinkType => (LINK_TYPES as readonly string[]).includes(v);
+
 const plural = (n: number, one: string, many: string = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+
+const lookup = <K, V>(map: ReadonlyMap<K, V>, key: K, what: string): V => {
+  const v = map.get(key);
+  if (v === undefined) throw new Error(`The converter has no ${what} for ${String(key)}`);
+  return v;
+};
 
 const recordOf = (where: string, v: unknown): Raw => {
   if (!isRecord(v)) throw fail(where, `is not an object: ${show(v)}`);
@@ -106,7 +145,6 @@ const onlyKeys = (r: Raw, keys: readonly string[], unknown: (k: string) => Gantt
 };
 
 const listOf = (where: string, field: string, v: unknown): readonly unknown[] => {
-  if (v === undefined || v === null) return [];
   if (!Array.isArray(v)) throw fail(where, `${field} is not a list: ${show(v)}`);
   return v;
 };
@@ -141,17 +179,38 @@ const formatter = (tz: string): Intl.DateTimeFormat => {
   }
 };
 
+const partOf = (parts: readonly Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes, where: string): string => {
+  const p = parts.find((x) => x.type === type);
+  if (p === undefined) throw new GanttError(`${where} has no ${type}`);
+  return p.value;
+};
+
 export function localDate(instant: unknown, tz: string, where: string): IsoDate {
   if (typeof instant !== "string" || !INSTANT.test(instant)) throw new GanttError(`${where} is not a UTC instant like 2026-09-01T06:00:00.000Z: ${show(instant)}`);
   const at = new Date(instant);
   if (Number.isNaN(at.getTime()) || at.toISOString().slice(0, 19) !== instant.slice(0, 19)) throw new GanttError(`${where} is not a real date and time: ${show(instant)}`);
   const parts = formatter(tz).formatToParts(at);
-  const part = (type: Intl.DateTimeFormatPartTypes): string => {
-    const p = parts.find((x) => x.type === type);
-    if (p === undefined) throw new GanttError(`${where} has no ${type} in ${tz}`);
-    return p.value;
-  };
-  return `${part("year")}-${part("month")}-${part("day")}`;
+  const zoned = `${where} in ${tz}`;
+  return `${partOf(parts, "year", zoned)}-${partOf(parts, "month", zoned)}-${partOf(parts, "day", zoned)}`;
+}
+
+const offsetAt = (tz: string, at: number): number => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+  }).formatToParts(new Date(at));
+  const n = (type: Intl.DateTimeFormatPartTypes): number => Number(partOf(parts, type, `The time in ${tz}`));
+  return (at - Date.UTC(n("year"), n("month") - 1, n("day"), n("hour"), n("minute"), n("second"))) / 60000;
+};
+
+export function standardOffset(tz: string, year: number): number {
+  return Math.max(...Array.from({ length: 12 }, (_, month) => offsetAt(tz, Date.UTC(year, month, 1, 12))));
 }
 
 const decodeEntity = (where: string, whole: string, body: string): string => {
@@ -165,14 +224,39 @@ const decodeEntity = (where: string, whole: string, body: string): string => {
   return named;
 };
 
+const decodeText = (text: string, where: string): string => text.replace(ENTITY, (whole, body: string) => decodeEntity(where, whole, body));
+
+const indexOf = (m: RegExpMatchArray): number => {
+  if (m.index === undefined) throw new Error(`The match ${m[0]} has no index`);
+  return m.index;
+};
+
+const endLine = (out: string): string => (out === "" || out.endsWith("\n") ? out : `${out}\n`);
+
+const readTag = (out: string, m: RegExpMatchArray, html: string, where: string): string => {
+  const at = indexOf(m);
+  if (m[0] === "<!--") throw fail(where, `holds a comment (<!--); the converter keeps no hidden text`);
+  if (m[2] === undefined) throw fail(where, `holds a < that starts no allow-listed tag: ${show(html.slice(at, at + 20))}`);
+  const tag = m[2].toLowerCase();
+  if (!TAGS.includes(tag)) throw fail(where, `holds the tag ${m[0]}, which the converter does not read (it reads ${TAGS.join(", ")})`);
+  const odd = [...m[3].matchAll(ATTRIBUTE)].map((a) => a[1]).find((a) => !ATTRIBUTES.includes(a.toLowerCase()));
+  if (odd !== undefined) throw fail(where, `holds the attribute ${odd} in ${m[0]}; only ${ATTRIBUTES.join(" and ")} are allowed`);
+  if (tag === "br") return `${out}\n`;
+  if (!BLOCKS.includes(tag)) return out;
+  if (m[1] === "/") return endLine(out);
+  return tag === "li" ? `${endLine(out)}• ` : endLine(out);
+};
+
 export function htmlToText(html: string, where: string): string {
-  return html
-    .replace(BREAK, "\n")
-    .replace(BLOCK_END, "\n")
-    .replace(TAG, "")
-    .replace(ENTITY, (whole, body: string) => decodeEntity(where, whole, body))
-    .replace(/\r\n?/g, "\n")
-    .trim();
+  const tokens = [...html.matchAll(TOKEN)];
+  const ends = [0, ...tokens.map((m) => indexOf(m) + m[0].length)];
+  const out = tokens.reduce((acc, m, i) => readTag(acc + decodeText(html.slice(ends[i], indexOf(m)), where), m, html, where), "");
+  return (out + decodeText(html.slice(ends[tokens.length]), where)).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export function infoToText(info: string, where: string): string {
+  const text = info.trim();
+  return text.startsWith("<") ? htmlToText(text, where) : text;
 }
 
 const baseName = (fileName: string): string => {
@@ -207,12 +291,12 @@ const parsePreds = (where: string, v: unknown): Pred[] => {
     const m = ENTRY.exec(entry);
     if (m === null) throw fail(where, `Predecessor entry ${show(entry)} is not <TaskID><type>[+|-<n> days]`);
     const [, id, type, sign, amount, unit] = m;
-    if (!(LINK_TYPES as readonly string[]).includes(type)) throw fail(where, `Predecessor entry ${show(entry)} has link type ${show(type)}, not one of ${LINK_TYPES.join(", ")}`);
-    if (sign === undefined) return { id: Number(id), type: type as LinkType, lag: 0 };
+    if (!isLinkType(type)) throw fail(where, `Predecessor entry ${show(entry)} has link type ${show(type)}, not one of ${LINK_TYPES.join(", ")}`);
+    if (sign === undefined) return { id: Number(id), type, lag: 0 };
     if (!LAG_UNITS.includes(unit)) throw fail(where, `Predecessor entry ${show(entry)} has lag unit ${show(unit)}, not day or days`);
     if (!/^\d+$/.test(amount)) throw fail(where, `Predecessor entry ${show(entry)} has lag ${show(amount)}, not a whole number of days`);
     const n = Number(amount);
-    return { id: Number(id), type: type as LinkType, lag: sign === "-" ? -n : n };
+    return { id: Number(id), type, lag: sign === "-" ? -n : n };
   });
 };
 
@@ -221,11 +305,13 @@ const parseResources = (where: string, v: unknown): Resource[] =>
     const field = `resources[${i}]`;
     const r = recordOf(`${where} ${field}`, x);
     onlyKeys(r, RESOURCE_KEYS, (k) => fail(where, `unknown field ${field}.${k}`));
-    return { name: textOf(where, `${field}.resourceName`, r.resourceName), unit: "unit" in r };
+    const name = textOf(where, `${field}.resourceName`, r.resourceName);
+    if (name.trim() === "") throw fail(where, `${field}.resourceName is blank`);
+    return { name, id: "resourceId" in r, unit: "unit" in r };
   });
 
 const noteOf = (where: string, info: unknown, resources: readonly Resource[]): string => {
-  const text = info === undefined || info === null ? "" : htmlToText(textOf(where, "info", info), `${where} info`);
+  const text = info === undefined || info === null ? "" : infoToText(textOf(where, "info", info), `${where} info`);
   const line = resources.length === 0 ? "" : `Resources: ${resources.map((r) => r.name).join(", ")}`;
   return [text, line].filter((s) => s !== "").join("\n");
 };
@@ -251,7 +337,7 @@ const flatten = (data: readonly unknown[], parent: number | null, tz: string, se
     seen.add(id);
     const where = `Task ${id}`;
     onlyKeys(t, TASK_KEYS, (k) => fail(where, `unknown field ${k}`));
-    const subtasks = listOf(where, "subtasks", t.subtasks);
+    const subtasks = t.subtasks === undefined ? [] : listOf(where, "subtasks", t.subtasks);
     const resources = parseResources(where, t.resources);
     const node: Source = {
       id,
@@ -279,6 +365,12 @@ const parseWorkWeek = (v: unknown): Weekday[] => {
   return [...days].sort((a, b) => a - b);
 };
 
+const checkOffset = (adv: Raw, tz: string, year: number): void => {
+  if (!("timezoneOffset" in adv)) return;
+  const want = standardOffset(tz, year);
+  if (adv.timezoneOffset !== want) throw new GanttError(`advanced.timezoneOffset is ${show(adv.timezoneOffset)}, but ${tz}'s standard-time offset is ${want}`);
+};
+
 interface Parsed {
   tz: string;
   workdays: Weekday[];
@@ -286,9 +378,10 @@ interface Parsed {
   topResources: number;
   workTime: boolean;
   display: string[];
+  dependencyConflict: string | null;
 }
 
-const parseSource = (text: string): Parsed => {
+const parseSource = (text: string, year: number): Parsed => {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -305,7 +398,9 @@ const parseSource = (text: string): Parsed => {
   if (listOf("advanced", "holidays", adv.holidays).length > 0) throw fail("advanced.holidays", `is not empty (${show(adv.holidays)}); the converter maps no holidays`);
   const tz = textOf("advanced", "timezone", adv.timezone);
   formatter(tz);
+  checkOffset(adv, tz, year);
   const workdays = parseWorkWeek(adv.workWeek);
+  const dependencyConflict = "dependencyConflict" in adv ? textOf("advanced", "dependencyConflict", adv.dependencyConflict) : null;
   const data = listOf("The .gantt file", "data", top.data);
   if (data.length === 0) throw new GanttError("The .gantt file has no tasks in data");
   return {
@@ -315,6 +410,7 @@ const parseSource = (text: string): Parsed => {
     topResources: listOf("The .gantt file", "resources", top.resources).length,
     workTime: adv.workTime !== undefined,
     display: DISPLAY_KEYS.filter((k) => k in adv),
+    dependencyConflict,
   };
 };
 
@@ -334,51 +430,68 @@ export function countsOf(plan: PlanState, notes: ReadonlyMap<ItemId, string>): G
 const droppedOf = (p: Parsed): string[] => {
   const groups = p.sources.filter((s) => s.leaf === null).length;
   const coloured = p.sources.filter((s) => s.coloured).length;
-  const units = p.sources.flatMap((s) => s.resources).filter((r) => r.unit).length;
+  const resources = p.sources.flatMap((s) => s.resources);
+  const ids = resources.filter((r) => r.id).length;
+  const units = resources.filter((r) => r.unit).length;
   return [
     `TaskID on ${plural(p.sources.length, "item")}`,
     ...(coloured === 0 ? [] : [`color on ${plural(coloured, "item")}`]),
     ...(groups === 0 ? [] : [`group dates, duration and progress on ${plural(groups, "group")} (WebBoard derives group spans)`]),
+    ...(ids === 0 ? [] : [`resources[].resourceId on ${plural(ids, "resource")}`]),
     ...(units === 0 ? [] : [`resources[].unit on ${plural(units, "resource")}`]),
     ...(p.topResources === 0 ? [] : [`the top-level resources list (${plural(p.topResources, "entry", "entries")})`]),
     ...(p.workTime ? ["advanced.workTime"] : []),
     ...(p.display.length === 0 ? [] : [`advanced display settings: ${p.display.join(", ")}`]),
+    ...(p.dependencyConflict === null
+      ? []
+      : [`dependencyConflict ${show(p.dependencyConflict)} (a scheduling option of the source tool; WebBoard keeps its own link rules)`]),
   ];
+};
+
+const lagText = (l: { type: LinkType; lag: number }): string => `${l.type}${l.lag === 0 ? "" : l.lag > 0 ? `+${l.lag}` : l.lag}`;
+
+const labeller = (sources: readonly Source[], ids: ReadonlyMap<number, ItemId>): ((item: ItemId) => string) => {
+  const taskOf = new Map(sources.map((s): [ItemId, Source] => [lookup(ids, s.id, "item id"), s]));
+  return (item) => {
+    const s = lookup(taskOf, item, "source task");
+    return `Task ${s.id} ${s.name}`;
+  };
 };
 
 const describeConflict = (c: Conflict, label: (id: ItemId) => string, plan: PlanState): string => {
   if (c.kind === "dayoff") return `${label(c.item)} starts on a day off and shows from ${toIso(c.shownFrom)}`;
   const { from, to } = linkEnds(`l:${c.link}`);
   const l = plan.links.get(c.link);
-  const kind = l === undefined ? "" : ` (${l.type}${l.lag === 0 ? "" : l.lag > 0 ? `+${l.lag}` : l.lag})`;
+  const kind = l === undefined ? "" : ` (${lagText(l)})`;
   return c.kind === "loop"
     ? `the link ${label(from)} → ${label(to)}${kind} is part of a loop`
     : `the link ${label(from)} → ${label(to)}${kind} needs ${label(to)} to start on ${toIso(c.need)} or later`;
 };
 
-const checkFidelity = (built: PlanState, action: Action, sources: readonly Source[], ids: ReadonlyMap<number, ItemId>, today: IsoDate): void => {
+const logOf = (action: Action, what: string): LogState => {
   const log = new LogState(planRules);
   const delta = log.add([action]);
-  if (delta.refused.length > 0) throw new GanttError(`WebBoard refuses the plan: ${delta.refused.map((r) => r.message).join("; ")}`);
-  const plan = projectPlan(built.id, log);
+  if (delta.refused.length > 0) throw new GanttError(`${what}: ${delta.refused.map((r) => r.message).join("; ")}`);
+  return log;
+};
+
+const checkFidelity = (log: LogState, plan: PlanState, check: GanttCheck): void => {
+  const { sources, ids, today } = check;
   const cs = choices(log, plan, new Map());
   const held = heldItems(cs, plan);
   const derived = derive(plan, held, today);
-  const taskOf = new Map([...ids].map(([task, item]): [ItemId, Source] => [item, sources.find((s) => s.id === task) as Source]));
-  const label = (item: ItemId): string => {
-    const s = taskOf.get(item);
-    if (s === undefined) throw new Error(`No source task for item ${item}`);
-    return `Task ${s.id} ${s.name}`;
-  };
-  const idOf = (s: Source): ItemId => ids.get(s.id) as ItemId;
-  const leaves = sources.filter((s): s is Source & { leaf: Leaf } => s.leaf !== null);
-  const dates = leaves.flatMap((s) => {
-    const start = derived.start.get(idOf(s));
-    const end = derived.end.get(idOf(s));
-    if (start === undefined || end === undefined) return [`- ${label(idOf(s))}: source ${s.leaf.start} → ${s.leaf.end}, WebBoard leaves it unscheduled`];
-    return toIso(start) === s.leaf.start && toIso(end) === s.leaf.end
-      ? []
-      : [`- ${label(idOf(s))}: source ${s.leaf.start} → ${s.leaf.end}, WebBoard ${toIso(start)} → ${toIso(end)}`];
+  const label = labeller(sources, ids);
+  const leaves = sources.flatMap((s) => (s.leaf === null ? [] : [{ item: lookup(ids, s.id, "item id"), leaf: s.leaf }]));
+  const dates = leaves.flatMap(({ item, leaf }) => {
+    const start = derived.start.get(item);
+    const end = derived.end.get(item);
+    if (start === undefined || end === undefined) return [`- ${label(item)}: source ${leaf.start} → ${leaf.end}, WebBoard leaves it unscheduled`];
+    return toIso(start) === leaf.start && toIso(end) === leaf.end ? [] : [`- ${label(item)}: source ${leaf.start} → ${leaf.end}, WebBoard ${toIso(start)} → ${toIso(end)}`];
+  });
+  const statuses = leaves.flatMap(({ item, leaf }) => {
+    const mapped = statusOf(leaf.progress);
+    const shown = derived.status.get(item);
+    return shown === mapped ? [] : [`- ${label(item)}: the .gantt file gives ${mapped}, WebBoard derives ${shown ?? "no status"}`];
   });
   const states = [
     ...[...held].map((item) => `- ${label(item)} is held by an open choice`),
@@ -387,6 +500,7 @@ const checkFidelity = (built: PlanState, action: Action, sources: readonly Sourc
   ];
   const parts = [
     ...(dates.length === 0 ? [] : [`WebBoard would show different dates than the .gantt file:\n${dates.join("\n")}`]),
+    ...(statuses.length === 0 ? [] : [`WebBoard would show a different status than the .gantt file:\n${statuses.join("\n")}`]),
     ...(states.length === 0 ? [] : [`WebBoard would show the plan in conflict or held:\n${states.join("\n")}`]),
   ];
   if (parts.length > 0) throw new GanttError(parts.join("\n"));
@@ -404,12 +518,12 @@ const encode = (plan: PlanState, action: Action, newNotes: readonly ItemId[], no
 };
 
 export function convertGantt(a: { text: string; fileName: string; name?: string; dev: DeviceId; ses: SessionId; now: number }): GanttPlan {
-  const parsed = parseSource(a.text);
+  const parsed = parseSource(a.text, new Date(a.now).getUTCFullYear());
   const { sources } = parsed;
   const planName = checkedName("The plan name", "plan name", a.name ?? defaultPlanName(a.fileName));
   const ids = new Map(sources.map((s): [number, ItemId] => [s.id, newId()]));
   const byTask = new Map(sources.map((s): [number, Source] => [s.id, s]));
-  const idOf = (task: number): ItemId => ids.get(task) as ItemId;
+  const idOf = (task: number): ItemId => lookup(ids, task, "item id");
   const parents = [...new Set(sources.map((s) => s.parent))];
   const orders = new Map(
     parents.flatMap((p) => {
@@ -438,7 +552,7 @@ export function convertGantt(a: { text: string; fileName: string; name?: string;
   const items = new Map(
     sources.map((s): [ItemId, Item] => {
       const id = idOf(s.id);
-      const place = { parent: s.parent === null ? null : idOf(s.parent), order: orders.get(s.id) as string };
+      const place = { parent: s.parent === null ? null : idOf(s.parent), order: lookup(orders, s.id, "order key") };
       if (s.leaf === null) return [id, { id, kind: "group", name: s.name, trashed: false, schedule: null, place, refs: {} }];
       const status = statusOf(s.leaf.progress);
       return [
@@ -468,7 +582,9 @@ export function convertGantt(a: { text: string; fileName: string; name?: string;
   const calendar: Calendar = { region: null, workdays: parsed.workdays, closures: new Map(), tuning: new Map(), holidays: new Map() };
   const plan: PlanState = { id: newPlanId(), name: planName, items, links, calendar, baselines: new Map([[baseline.id, baseline]]) };
   const action: Action = { id: newId(), dev: a.dev, ses: a.ses, at: a.now, par: [], lbl: `Converted from ${a.fileName}`, w: stateWrites(plan, "own", () => false) };
-  checkFidelity(plan, action, sources, ids, at);
+  const check: GanttCheck = { sources, ids, today: at };
+  const log = logOf(action, "WebBoard refuses the plan");
+  checkFidelity(log, projectPlan(plan.id, log), check);
   const notes = new Map(sources.flatMap((s): [ItemId, string][] => (s.note === "" ? [] : [[idOf(s.id), s.note]])));
   const newNotes = [...items.keys()];
   return {
@@ -479,13 +595,60 @@ export function convertGantt(a: { text: string; fileName: string; name?: string;
     bytes: encode(plan, action, newNotes, notes, a.now),
     counts: countsOf(plan, notes),
     dropped: droppedOf(parsed),
+    check,
   };
 }
 
-export function readBack(bytes: Uint8Array, fileName: string): GanttCounts {
+const canonical = (v: unknown): unknown => {
+  if (v instanceof Map) return [...v].map(([k, x]): [string, unknown] => [String(k), canonical(x)]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (Array.isArray(v)) return v.map(canonical);
+  if (isRecord(v)) return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])]));
+  return v;
+};
+
+const canonText = (v: unknown): string => JSON.stringify(canonical(v));
+
+const differs = (what: string, got: unknown, want: unknown): string[] => (canonText(got) === canonText(want) ? [] : [`- ${what} reads back as ${canonText(got)}, not ${canonText(want)}`]);
+
+export function readBack(bytes: Uint8Array, fileName: string, g: GanttPlan): GanttCounts {
   const r = buildImport(bytes, fileName, newId(), newId(), Date.now());
-  const log = new LogState(planRules);
-  const delta = log.add([r.action]);
-  if (delta.refused.length > 0) throw new GanttError(`The written plan does not read back: ${delta.refused.map((x) => x.message).join("; ")}`);
-  return countsOf(projectPlan(r.planId, log), r.notes);
+  const log = logOf(r.action, "The written plan does not read back");
+  const back = projectPlan(r.planId, log);
+  const to = (id: string): string => lookup(r.idMap, id, "read-back id");
+  const label = labeller(g.check.sources, g.check.ids);
+  const items = [...g.plan.items.values()].flatMap((i) => {
+    const b = back.items.get(to(i.id));
+    if (b === undefined) return [`- ${label(i.id)} does not read back`];
+    return [
+      ...differs(`${label(i.id)}: kind`, b.kind, i.kind),
+      ...differs(`${label(i.id)}: name`, b.name, i.name),
+      ...differs(`${label(i.id)}: parent`, b.place.parent, i.place.parent === null ? null : to(i.place.parent)),
+      ...differs(`${label(i.id)}: order`, b.place.order, i.place.order),
+      ...differs(`${label(i.id)}: schedule`, b.schedule, i.schedule),
+      ...differs(`${label(i.id)}: note`, r.notes.get(to(i.id)) ?? "", g.notes.get(i.id) ?? ""),
+    ];
+  });
+  const links = [...g.plan.links.values()].flatMap((l) => {
+    const b = back.links.get(linkKey(to(l.from), to(l.to)));
+    const what = `link ${label(l.from)} → ${label(l.to)}`;
+    if (b === undefined) return [`- ${what} does not read back`];
+    return lagText(b) === lagText(l) ? [] : [`- ${what} reads back as ${lagText(b)}, not ${lagText(l)}`];
+  });
+  const baselines = [...g.plan.baselines.values()].flatMap((b) => {
+    const want = { id: to(b.id), name: b.name, at: b.at, dates: Object.fromEntries(Object.entries(b.dates).map(([k, d]) => [to(k), d])) };
+    return differs(`baseline ${b.name}`, back.baselines.get(to(b.id)) ?? null, want);
+  });
+  const mismatches = [
+    ...differs("plan name", back.name, g.plan.name),
+    ...differs("the number of items", back.items.size, g.plan.items.size),
+    ...items,
+    ...differs("the number of links", back.links.size, g.plan.links.size),
+    ...links,
+    ...differs("calendar", back.calendar, g.plan.calendar),
+    ...differs("the number of baselines", back.baselines.size, g.plan.baselines.size),
+    ...baselines,
+  ];
+  if (mismatches.length > 0) throw new GanttError(`The written plan does not read back as the converted plan:\n${mismatches.join("\n")}`);
+  checkFidelity(log, back, { ...g.check, ids: new Map([...g.check.ids].map(([task, item]): [number, ItemId] => [task, to(item)])) });
+  return countsOf(back, r.notes);
 }
