@@ -1,6 +1,6 @@
 import { useId } from "react";
 import type { Choice } from "../../plan/choices";
-import { bannerText } from "../choices/describe";
+import { bannerText } from "./describe";
 
 export function ChoiceBanner(p: { choice: Choice; local: string; onChoose: () => void }) {
   const textId = useId();

@@ -1,47 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { Built } from "../../actions/intents";
-import type { Pick, ResolveOptions } from "../../actions/resolve";
+import type { ResolveOptions } from "../../actions/resolve";
 import type { PlanState } from "../../domain/model";
 import type { UnitKey } from "../../log/types";
 import { sideText, type Choice } from "../../plan/choices";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { Dialog } from "../common/Dialog";
-import { toast } from "../common/Toast";
 import { useExec } from "../run";
 import { unitSubject } from "./describe";
 import { groupRows, outcomeLine } from "./outcome";
 import { orderedSides } from "./order";
+import { CHOICE_TITLE, DEFAULTS, pickOf, usePicks, useSettledClose, type Picks } from "./pick";
 import { sideContent, type SideContent } from "./side";
 import { UndoOffer } from "./UndoOffer";
 
-export const SETTLED = "This choice was settled meanwhile.";
-export const CHOICE_TITLE = "Choose which to keep";
-
-export const DEFAULTS: ResolveOptions = { pushFromPredecessors: true, returnPushed: true };
-
-const NO_PICKS: ReadonlyMap<UnitKey, string> = new Map();
-
-export const pickOf = (side: string, perUnit: ReadonlyMap<UnitKey, string>): Pick => (perUnit.size === 0 ? { side } : { side, perUnit });
-
-export const livePicks = (choice: Choice, perUnit: ReadonlyMap<UnitKey, string>): ReadonlyMap<UnitKey, string> => {
-  const live = [...perUnit].filter(([u, side]) => choice.units.includes(u) && choice.sides.some((s) => s.key === side && s.values.has(u)));
-  return live.length === perUnit.size ? perUnit : new Map(live);
-};
-
-export function useSettledClose(gone: boolean, onClose: () => void): void {
-  const seen = useRef(false);
-  useEffect(() => {
-    if (!gone) {
-      seen.current = true;
-      return;
-    }
-    if (seen.current) {
-      seen.current = false;
-      toast(SETTLED);
-    }
-    onClose();
-  }, [gone, onClose]);
-}
+const NO_PICKS: Picks = new Map();
 
 function Column(p: { plan: PlanState; choice: Choice; side: string; label: string; content: SideContent; picked: boolean; readOnly: boolean; onKeep(): void }) {
   const plan = p.plan;
@@ -93,9 +66,8 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
   const sides = useMemo(() => orderedSides(choice, p.local), [choice, p.local]);
   const [opts, setOpts] = useState<ResolveOptions>(DEFAULTS);
   const [perItem, setPerItem] = useState(false);
-  const [perUnit, setPerUnit] = useState<ReadonlyMap<UnitKey, string>>(new Map());
-  const live = livePicks(choice, perUnit);
-  if (live !== perUnit) setPerUnit(live);
+  const [live, setPerUnit] = usePicks(choice, plan);
+  const base = useId();
   const picks = perItem ? live : NO_PICKS;
   const contents = useMemo(
     () => sides.map((s) => sideContent(p.session, choice, pickOf(s.key, picks), opts)),
@@ -129,12 +101,14 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
       </div>
       {perItem && (
         <ul className="pick-rows">
-          {choice.units.map((u) => {
-            const subject = unitSubject(u, plan);
+          {choice.units.map((u, i) => {
+            const subjectId = `${base}-pick-${i}`;
             return (
               <li key={u} className="pick-row">
-                <span className="pick-subject">{subject}</span>
-                <select aria-label={subject} value={live.get(u) ?? ""} onChange={(e) => pickUnit(u, e.target.value)}>
+                <span id={subjectId} className="pick-subject">
+                  {unitSubject(u, plan)}
+                </span>
+                <select aria-labelledby={subjectId} value={live.get(u) ?? ""} onChange={(e) => pickUnit(u, e.target.value)}>
                   <option value="">As the kept side</option>
                   {sides
                     .filter((s) => s.values.has(u))
@@ -173,10 +147,10 @@ export function ChoiceDialog(p: { session: PlanSession; id: string; side?: strin
   const exec = useExec(p.session);
   const choice = view.choices.find((c) => c.id === p.id) ?? null;
   const onClose = p.onClose;
-  useSettledClose(choice === null, onClose);
+  const watched = useSettledClose(choice === null, onClose);
   if (choice === null) return null;
   const keep = (write: () => Built): void => {
-    if (exec(write) !== null) onClose();
+    if (exec(watched(write)) !== null) onClose();
   };
   return (
     <Dialog label={CHOICE_TITLE} wide onClose={onClose}>

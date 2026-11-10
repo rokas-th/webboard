@@ -6,7 +6,7 @@ import type { HistoryEntry, PlanSession } from "../../store/session";
 import { deleteClash } from "../../test/fixtures/deleteClash";
 import { fs, MESA_SEED, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { shellFor } from "../../test/shell";
-import { CHOICE_TITLE } from "../choices/ChoiceDialog";
+import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
 import { READ_ONLY } from "../run";
 import { useUi, type UiState } from "../state";

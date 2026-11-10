@@ -2,23 +2,49 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Refused, type Built, type Intent } from "../../actions/intents";
 import type { ItemId } from "../../domain/model";
+import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
+import { phoneRegistry } from "../../test/phone";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
+import { setScreen } from "../../test/setup";
 import { bannerText } from "../choices/describe";
 import { clearToasts, Toasts } from "../common/Toast";
 import { OpenChoice } from "../run";
+import { useUi, type UiState } from "../state";
 import { ItemSheet } from "./ItemSheet";
+import { PhoneShell } from "./PhoneShell";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("../state", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../state")>();
+  return { ...m, useUi: vi.fn(m.useUi) };
+});
 
 const sessions: PlanSession[] = [];
+const registries: Registry[] = [];
 
 afterEach(async () => {
   cleanup();
   clearToasts();
   vi.restoreAllMocks();
+  vi.mocked(useUi).mockClear();
   await Promise.all(sessions.splice(0).map((s) => s.close()));
+  await Promise.all(registries.splice(0).map((r) => r.close()));
 });
+
+const settle = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise<void>((r) => setTimeout(r, 0));
+    await new Promise<void>((r) => setTimeout(r, 0));
+  });
+};
+
+const uiNow = (): [UiState, (patch: Partial<UiState>) => void] => {
+  const results = vi.mocked(useUi).mock.results;
+  const r = results[results.length - 1];
+  if (r === undefined || r.type !== "return") throw new Error("useUi has not returned");
+  return r.value;
+};
 
 const made = async (seed: readonly SeedItem[], opts?: TestSessionOpts): Promise<TestSession> => {
   const t = await testSession(seed, opts);
@@ -332,22 +358,34 @@ describe("ItemSheet", () => {
       { name: "B", start: "2026-11-12", dur: 2 },
       { name: "C", start: "2026-11-16", dur: 2 },
     ];
-    const banners = (): HTMLElement[] => [...sheet().querySelectorAll(".choice-banner")].filter((e): e is HTMLElement => e instanceof HTMLElement);
+    const bannersIn = (root: HTMLElement): HTMLElement[] =>
+      [...root.querySelectorAll(".choice-banner")].filter((e): e is HTMLElement => e instanceof HTMLElement);
+    const banners = (): HTMLElement[] => bannersIn(sheet());
     const linked = await made(ABC, { clashes: [{ unit: "l:B>A", mac: ["FS", 0], iphone: ["SS", 1] }] });
     const choices = linked.session.view().choices;
     expect(choices).toHaveLength(1);
     const c3 = choices[0];
     expect(bannerText(c3, "Mac")).toBe("Changed on Mac and iPhone. Choose which to keep.");
+    setScreen(390, 844);
+    const registry = await phoneRegistry(linked);
+    registries.push(registry);
+    render(<PhoneShell registry={registry} clock={linked.clock} />);
+    await settle();
+    const setUi = (patch: Partial<UiState>): void => act(() => uiNow()[1](patch));
     for (const item of ["A", "B"]) {
-      const { onChoice } = shown(linked, item);
-      expect(banners().map((b) => b.querySelector(".banner-text")?.textContent)).toEqual([bannerText(c3, "Mac")]);
-      fireEvent.click(within(banners()[0]).getByRole("button", { name: "Choose" }));
-      expect(onChoice.mock.calls).toEqual([[c3.id]]);
-      cleanup();
+      setUi({ selected: item, dialog: null });
+      const itemSheet = screen.getByRole("dialog", { name: item });
+      expect(bannersIn(itemSheet).map((b) => b.querySelector(".banner-text")?.textContent)).toEqual([bannerText(c3, registry.device.name)]);
+      fireEvent.click(within(bannersIn(itemSheet)[0]).getByRole("button", { name: "Choose" }));
+      expect(uiNow()[0].dialog).toEqual({ t: "choice", id: c3.id });
+      expect(screen.getAllByRole("dialog")).toHaveLength(1);
+      expect(screen.getByRole("dialog", { name: "Choose which to keep" })).toBeTruthy();
     }
-    shown(linked, "C");
-    expect(banners()).toEqual([]);
+    setUi({ selected: "C", dialog: null });
+    expect(bannersIn(screen.getByRole("dialog", { name: "C" }))).toEqual([]);
     cleanup();
+    await Promise.all(sessions.splice(0).map((s) => s.close()));
+    await Promise.all(registries.splice(0).map((r) => r.close()));
     const calendar = await made(ABC, { clashes: [{ unit: "ct:2026-11-17", mac: { kind: "add", name: "Away" }, iphone: null }] });
     expect(calendar.session.view().choices).toHaveLength(1);
     shown(calendar, "A");

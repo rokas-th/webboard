@@ -557,6 +557,12 @@ describe("choice dialog", () => {
     click(within(dialog()).getByRole("checkbox", { name: "Pick per item" }));
     const rows = all(".pick-row", dialog());
     expect(rows.map((r) => one(".pick-subject", r).textContent)).toEqual([`“${a}”`, `“${b}”`]);
+    rows.forEach((r) => {
+      expect(one(".pick-subject", r).id).not.toBe("");
+      expect(one("select", r).getAttribute("aria-labelledby")).toBe(one(".pick-subject", r).id);
+      expect(one("select", r).hasAttribute("aria-label")).toBe(false);
+    });
+    expect(within(dialog()).getByRole("combobox", { name: `“${b}”` })).toBe(one("select", rows[1]));
     preview.mockClear();
     const pickA = rows[0].querySelector("select");
     if (!(pickA instanceof HTMLSelectElement)) throw new Error("no pick for A");
@@ -604,7 +610,7 @@ describe("choice dialog", () => {
     expect(errors).not.toHaveBeenCalled();
   });
 
-  it("drops a per-item pick whose unit left the open choice", async () => {
+  it("drops a per-item pick whose unit left the open choice, and says so", async () => {
     const t = await made(AB, { clashes: [{ unit: ["n:A", "n:B"], mac: ["North", "East"], iphone: ["South", "West"] }] });
     const c = only(t);
     await shown(t);
@@ -612,6 +618,7 @@ describe("choice dialog", () => {
     click(within(dialog()).getByRole("checkbox", { name: "Pick per item" }));
     const pickB = all(".pick-row select", dialog())[1];
     fireEvent.change(pickB, { target: { value: keyOf(c, "iPhone") } });
+    expect(toastTexts()).toEqual([]);
     const preview = vi.spyOn(t.session, "previewResolve");
     const shrunk: Choice = {
       ...c,
@@ -622,6 +629,8 @@ describe("choice dialog", () => {
     act(() => t.session.setReadOnly(false));
     expect(all(".pick-row", dialog())).toHaveLength(1);
     expect(preview.mock.calls.map((x) => x[1])).toEqual([{ side: keyOf(c, "Mac") }, { side: keyOf(c, "iPhone") }]);
+    expect(toastTexts()).toEqual([`Your pick for “${nameOf(t, "B")}” no longer applies.`]);
+    expect(badToasts()).toEqual([]);
     preview.mockClear();
     setUi({ dialog: { t: "choice", id: c.id } });
     setUi({ dialog: { t: "choice", id: c.id } });
@@ -631,6 +640,7 @@ describe("choice dialog", () => {
     const rejoined = all(".pick-row select", dialog());
     expect(rejoined).toHaveLength(2);
     expect(rejoined.map((s) => (s instanceof HTMLSelectElement ? s.value : null))).toEqual(["", ""]);
+    expect(toastTexts()).toHaveLength(1);
   });
 
   it("offers the other version on Undo, and resolves only when it is pressed", async () => {
@@ -739,14 +749,37 @@ describe("a choice settled meanwhile", () => {
     expect(toastTexts()).toEqual(["“One” was moved to the Trash on another device. Restore it from the Trash."]);
   });
 
-  it("says nothing when a dialog opens on a choice that is already gone", async () => {
+  it("closes a dialog opened on a choice that is already gone, and says it was settled", async () => {
     const t = await made(AB);
     await shown(t);
     setUi({ dialog: { t: "choice", id: "gone" } });
     await settle();
     expect(uiNow()[0].dialog).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(toastTexts()).toEqual([]);
+    expect(toastTexts()).toEqual(["This choice was settled meanwhile."]);
+    expect(badToasts()).toEqual([]);
+  });
+
+  it("says it once when a Keep loses the race with the sync that settled it", async () => {
+    const t = await made(AB, { clashes: [NAME] });
+    const p = await peerOf(t);
+    const c = only(t);
+    await shown(t);
+    openChoiceFromHead(t, c);
+    const real = t.session.resolve.bind(t.session);
+    const resolve = vi.spyOn(t.session, "resolve").mockImplementation((...args) => {
+      p.session.resolve(c.id, { side: keyOf(c, "iPhone") }, DEFAULTS);
+      p.sync();
+      return real(...args);
+    });
+    click(buttonIn(dialog(), "Keep Mac"));
+    await settle();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(badToasts()).toEqual(["This choice was settled meanwhile."]);
+    expect(toastTexts()).toEqual(["This choice was settled meanwhile."]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(uiNow()[0].dialog).toBeNull();
+    expect(nameOf(t, "A")).toBe("Beta");
   });
 
   const offered = async (): Promise<{ t: TestSession; p: { session: PlanSession; sync(): void }; c: Choice; offer: { choice: string; side: string } }> => {

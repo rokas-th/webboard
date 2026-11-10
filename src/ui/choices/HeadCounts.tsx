@@ -3,7 +3,7 @@ import type { ItemId, PlanState } from "../../domain/model";
 import type { Conflict } from "../../domain/schedule";
 import type { PlanView } from "../../store/doc";
 import { UiContext, type UiState } from "../state";
-import { heldChoice } from "./describe";
+import { HeldChip } from "./HeldChip";
 
 export type Broken = Exclude<Conflict, { kind: "dayoff" }>;
 
@@ -51,19 +51,9 @@ export function HeadCounts(p: { view: PlanView; onChoose(choice: string): void }
     uiValue.setUi(goToFirstPatch(view, uiValue.ui.collapsed));
   };
 
-  const openHeld = (): void => {
-    const c = heldChoice(view);
-    if (c === null) throw new Error("No open choice holds the held items");
-    p.onChoose(c.id);
-  };
-
   return (
     <>
-      {view.held.size > 0 && (
-        <button type="button" className="chip chip-amber" onClick={openHeld}>
-          {view.held.size} held
-        </button>
-      )}
+      <HeldChip view={view} onChoose={p.onChoose} />
       {conflicts.length > 0 && (
         <span className="chip chip-magenta">
           {conflicts.length} {conflicts.length === 1 ? "conflict" : "conflicts"} ·{" "}

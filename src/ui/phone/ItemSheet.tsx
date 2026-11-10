@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { toDay } from "../../domain/dates";
 import type { Item, ItemId, Link, LinkType, Status } from "../../domain/model";
 import { linkKey } from "../../domain/model";
@@ -6,6 +6,7 @@ import { wouldLoop } from "../../domain/schedule";
 import { childrenOf, liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
+import { ChoiceBanner } from "../choices/ChoiceBanner";
 import { itemChoices } from "../choices/describe";
 import { FixActions } from "../choices/FixActions";
 import { Sheet } from "../common/Sheet";
@@ -15,7 +16,7 @@ import { bindTextarea } from "../panel/noteBinding";
 import { OpenChoice, useRun, type Run } from "../run";
 import { derivedStatus } from "../status";
 import { dayLabel } from "../timeline/dayText";
-import { ChoiceBanner } from "./ChoiceBanner";
+import { useReadOnly } from "./readOnly";
 
 const STATUSES: readonly { v: Status; label: string }[] = [
   { v: "todo", label: "Not started" },
@@ -46,11 +47,6 @@ const nameOf = (view: PlanView, id: ItemId): string => {
   if (it === undefined) throw new Error(`ItemSheet: no item ${id}`);
   return it.name;
 };
-
-export function useReadOnly(session: PlanSession): boolean {
-  const subscribe = useCallback((cb: () => void) => session.subscribe(cb), [session]);
-  return useSyncExternalStore(subscribe, () => session.readOnly);
-}
 
 function Stepper(p: { label: string; value: string; valueClass: string; readOnly: boolean; less: (() => void) | null; more: () => void }) {
   return (

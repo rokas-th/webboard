@@ -1,19 +1,20 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
+import type { Built } from "../../actions/intents";
 import type { ResolveOptions } from "../../actions/resolve";
 import type { PlanState } from "../../domain/model";
 import type { UnitKey } from "../../log/types";
 import { sideText, type Choice } from "../../plan/choices";
 import { usePlanView, type PlanSession } from "../../store/session";
-import { CHOICE_TITLE, DEFAULTS, livePicks, pickOf, useSettledClose } from "../choices/ChoiceDialog";
 import { unitSubject } from "../choices/describe";
 import { orderedSides } from "../choices/order";
 import { groupRows, outcomeLine } from "../choices/outcome";
+import { CHOICE_TITLE, DEFAULTS, pickOf, usePicks, useSettledClose, type Picks } from "../choices/pick";
 import { sideContent, type SideContent } from "../choices/side";
 import { Sheet } from "../common/Sheet";
 import { useExec } from "../run";
-import { useReadOnly } from "./ItemSheet";
+import { useReadOnly } from "./readOnly";
 
-const othersThan = (side: string, picks: ReadonlyMap<UnitKey, string>): ReadonlyMap<UnitKey, string> => {
+const othersThan = (side: string, picks: Picks): Picks => {
   const rest = [...picks].filter(([, key]) => key !== side);
   return rest.length === picks.size ? picks : new Map(rest);
 };
@@ -37,6 +38,7 @@ function Card(p: { plan: PlanState; choice: Choice; side: string; content: SideC
       ) : (
         <button type="button" className="choice-summary" aria-expanded={open} onClick={() => setOpen(!open)}>
           {c.summary}
+          {!open && <span className="dim"> · show what moves</span>}
         </button>
       )}
       {c.stopped.map((s, i) => (
@@ -65,7 +67,14 @@ function Card(p: { plan: PlanState; choice: Choice; side: string; content: SideC
   );
 }
 
-function Body(p: { session: PlanSession; choice: Choice; side: string | undefined; local: string; onClose(): void }) {
+function Body(p: {
+  session: PlanSession;
+  choice: Choice;
+  side: string | undefined;
+  local: string;
+  watched(write: () => Built): () => Built;
+  onClose(): void;
+}) {
   const view = usePlanView(p.session);
   const exec = useExec(p.session);
   const readOnly = useReadOnly(p.session);
@@ -77,9 +86,8 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
   const [kept, setKept] = useState(p.side ?? first.key);
   if (!sides.some((s) => s.key === kept)) throw new Error(`Choice ${choice.id} has no side ${kept}`);
   const [opts, setOpts] = useState<ResolveOptions>(DEFAULTS);
-  const [picks, setPicks] = useState<ReadonlyMap<UnitKey, string>>(new Map());
-  const live = livePicks(choice, picks);
-  if (live !== picks) setPicks(live);
+  const [live, setPicks] = usePicks(choice, plan);
+  const base = useId();
   const contents = useMemo(
     () => sides.map((s) => sideContent(p.session, choice, pickOf(s.key, othersThan(s.key, live)), opts)),
     [p.session, choice, sides, live, opts, view],
@@ -91,7 +99,7 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
     setPicks(next);
   };
   const apply = (): void => {
-    if (exec(() => p.session.resolve(choice.id, pickOf(kept, othersThan(kept, live)), opts)) !== null) p.onClose();
+    if (exec(p.watched(() => p.session.resolve(choice.id, pickOf(kept, othersThan(kept, live)), opts))) !== null) p.onClose();
   };
   return (
     <div className="panel csheet">
@@ -117,12 +125,14 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
       </div>
       <h2>Pick per item</h2>
       <ul className="pick-rows">
-        {choice.units.map((u) => {
-          const subject = unitSubject(u, plan);
+        {choice.units.map((u, i) => {
+          const subjectId = `${base}-pick-${i}`;
           return (
             <li key={u} className="pick-row">
-              <span className="pick-subject">{subject}</span>
-              <select aria-label={subject} value={live.get(u) ?? ""} onChange={(e) => pickUnit(u, e.target.value)}>
+              <span id={subjectId} className="pick-subject">
+                {unitSubject(u, plan)}
+              </span>
+              <select aria-labelledby={subjectId} value={live.get(u) ?? ""} onChange={(e) => pickUnit(u, e.target.value)}>
                 <option value="">As the kept side</option>
                 {sides
                   .filter((s) => s.values.has(u))
@@ -146,11 +156,11 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
 export function ChoiceSheet(p: { session: PlanSession; id: string; side?: string; local: string; onClose(): void }) {
   const view = usePlanView(p.session);
   const choice = view.choices.find((c) => c.id === p.id) ?? null;
-  useSettledClose(choice === null, p.onClose);
+  const watched = useSettledClose(choice === null, p.onClose);
   if (choice === null) return null;
   return (
     <Sheet open title={CHOICE_TITLE} onClose={p.onClose}>
-      <Body session={p.session} choice={choice} side={p.side} local={p.local} onClose={p.onClose} />
+      <Body session={p.session} choice={choice} side={p.side} local={p.local} watched={watched} onClose={p.onClose} />
     </Sheet>
   );
 }

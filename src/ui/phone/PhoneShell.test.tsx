@@ -11,7 +11,7 @@ import { shellFor } from "../../test/shell";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { OpenChoice } from "../run";
-import { useUi } from "../state";
+import { useUi, type UiState } from "../state";
 import { PhoneShell } from "./PhoneShell";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -97,6 +97,14 @@ const lastUi = () => {
   return r.value[0];
 };
 
+const setUiNow = (patch: Partial<UiState>): void => {
+  const results = vi.mocked(useUi).mock.results;
+  const r = results[results.length - 1];
+  if (r === undefined || r.type !== "return") throw new Error("useUi has not returned");
+  const set = r.value[1];
+  act(() => set(patch));
+};
+
 const rowOf = (name: string): HTMLElement => {
   const b = screen.getByText(name).closest("button");
   if (b === null) throw new Error("no row button for " + name);
@@ -170,7 +178,14 @@ describe('PhoneShell, data-form="phone"', () => {
     await settle();
     expect(lastUi().dialog).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.queryByText("This choice was settled meanwhile.")).toBeNull();
+    expect(screen.queryAllByText("This choice was settled meanwhile.")).toHaveLength(1);
+  });
+
+  it("throws on a dialog kind the phone does not show yet", async () => {
+    const t = await made();
+    await shown(t);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() => setUiNow({ dialog: { t: "about" } })).toThrow(new Error("PhoneShell cannot show dialog about"));
   });
 
   it("the read-only Timeline zooms by pinch, and a hold opens the item's sheet", async () => {

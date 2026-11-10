@@ -4,7 +4,8 @@ import type { Item, ItemId, PlanState, Schedule, Status } from "../../domain/mod
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
-import { bannerText, itemChoices } from "../choices/describe";
+import { ChoiceBanner } from "../choices/ChoiceBanner";
+import { itemChoices } from "../choices/describe";
 import { FixActions } from "../choices/FixActions";
 import { toast } from "../common/Toast";
 import { planGroupPath } from "../list/groups";
@@ -279,19 +280,12 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean; mac: b
   return <textarea ref={ref} aria-label="Notes" placeholder="Anything worth knowing about this item" readOnly={p.readOnly} onKeyDown={onKeyDown} />;
 }
 
-function ChoiceBanner(p: { view: PlanView; item: ItemId; local: string }) {
+function FirstChoice(p: { view: PlanView; item: ItemId; local: string }) {
   const open = useContext(OpenChoice);
   if (open === null) throw new Error("ItemPanel needs an OpenChoice provider");
   const c = itemChoices(p.view, p.item)[0];
   if (c === undefined) return null;
-  return (
-    <div className="choice-banner">
-      <span className="banner-text">{bannerText(c, p.local)}</span>
-      <button type="button" className="button-small" onClick={() => open(c.id)}>
-        Choose
-      </button>
-    </div>
-  );
+  return <ChoiceBanner choice={c} local={p.local} onChoose={() => open(c.id)} />;
 }
 
 export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string; mac: boolean; readOnly?: boolean; naming: boolean; onNamed(): void }) {
@@ -313,7 +307,7 @@ export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string
   return (
     <div className="panel" ref={root}>
       <span className="kind">{KIND[it.kind]}</span>
-      <ChoiceBanner view={view} item={it.id} local={p.local} />
+      <FirstChoice view={view} item={it.id} local={p.local} />
       <TextField
         className="title-input"
         label="Name"

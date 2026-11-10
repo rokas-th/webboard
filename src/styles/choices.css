@@ -210,8 +210,7 @@
   border-radius: 0;
 }
 
-.sheet .choice-col button.choice-summary[aria-expanded="false"]::after {
-  content: " · show what moves";
+.sheet .choice-col button.choice-summary .dim {
   color: var(--cyan-dim);
 }
 

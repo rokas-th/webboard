@@ -1,13 +1,13 @@
-import { useCallback, useId, useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useState, type ReactElement } from "react";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
 import { usePlanView, type PlanSession } from "../../store/session";
-import { heldChoice } from "../choices/describe";
+import { HeldChip } from "../choices/HeldChip";
 import { Toasts } from "../common/Toast";
 import { OpenChoice } from "../run";
 import { NewPlanButton } from "../shell/Sidebar";
 import { usePlanFiles, usePlanSelection, type PlanMain } from "../shell/selection";
-import { UiContext, useUi, useUiValue } from "../state";
+import { UiContext, useUi, useUiValue, type DialogState } from "../state";
 import { Timeline } from "../timeline/Timeline";
 import { ChoiceSheet } from "./ChoiceSheet";
 import { ItemSheet } from "./ItemSheet";
@@ -24,18 +24,34 @@ function HeldCount(p: { session: PlanSession }) {
   const view = usePlanView(p.session);
   const { setUi } = useUiValue();
   if (view.held.size === 0) return null;
-  const open = (): void => {
-    const c = heldChoice(view);
-    if (c === null) throw new Error("No open choice holds the held items");
-    setUi({ dialog: { t: "choice", id: c.id } });
-  };
   return (
     <div className="phone-head">
-      <button type="button" className="chip chip-amber" onClick={open}>
-        {view.held.size} held
-      </button>
+      <HeldChip view={view} onChoose={(id) => setUi({ dialog: { t: "choice", id } })} />
     </div>
   );
+}
+
+function PlanDialog(p: { session: PlanSession; dialog: DialogState; local: string; onClose(): void }): ReactElement {
+  const d = p.dialog;
+  switch (d.t) {
+    case "choice":
+      return (
+        <ChoiceSheet
+          key={`${p.session.view().plan.id}:${d.id}:${d.side ?? ""}`}
+          session={p.session}
+          id={d.id}
+          side={d.side}
+          local={p.local}
+          onClose={p.onClose}
+        />
+      );
+    case "sync":
+    case "calendar":
+    case "palette":
+    case "revert":
+    case "about":
+      throw new Error(`PhoneShell cannot show dialog ${d.t}`);
+  }
 }
 
 function OpenPlan(p: { session: PlanSession; local: string }) {
@@ -69,15 +85,8 @@ function OpenPlan(p: { session: PlanSession; local: string }) {
           </button>
         ))}
       </div>
-      {dialog !== null && dialog.t === "choice" ? (
-        <ChoiceSheet
-          key={`${p.session.view().plan.id}:${dialog.id}:${dialog.side ?? ""}`}
-          session={p.session}
-          id={dialog.id}
-          side={dialog.side}
-          local={p.local}
-          onClose={closeDialog}
-        />
+      {dialog !== null ? (
+        <PlanDialog session={p.session} dialog={dialog} local={p.local} onClose={closeDialog} />
       ) : (
         selected !== null && <ItemSheet key={selected} session={p.session} item={selected} local={p.local} onClose={() => setUi({ selected: null })} />
       )}

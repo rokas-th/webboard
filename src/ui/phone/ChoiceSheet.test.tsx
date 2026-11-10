@@ -1,8 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Refused } from "../../actions/intents";
 import type { ResolveOptions } from "../../actions/resolve";
 import { newId } from "../../log/ids";
-import { sideText, type Choice } from "../../plan/choices";
+import type { UnitKey } from "../../log/types";
+import { sideText, type Choice, type ChoiceSide } from "../../plan/choices";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { phoneRegistry } from "../../test/phone";
@@ -15,7 +17,7 @@ import { groupRows, outcomeLine } from "../choices/outcome";
 import { sideContent, type SideContent } from "../choices/side";
 import { clearToasts } from "../common/Toast";
 import { useUi, type UiState } from "../state";
-import { ChoiceBanner } from "./ChoiceBanner";
+import { ChoiceBanner } from "../choices/ChoiceBanner";
 import { PhoneShell } from "./PhoneShell";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -48,6 +50,10 @@ afterEach(async () => {
 });
 
 const DEFAULTS: ResolveOptions = { pushFromPredecessors: true, returnPushed: true };
+
+const SETTLED = "This choice was settled meanwhile.";
+
+const CUE = " · show what moves";
 
 const REVIEW: readonly SeedItem[] = [{ name: "Review", start: "2026-11-10", dur: 2 }];
 
@@ -105,6 +111,7 @@ const one = (sel: string, root: ParentNode = document): HTMLElement => {
 
 const sheet = (): HTMLElement => screen.getByRole("dialog", { name: "Choose which to keep" });
 const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+const badToasts = (): (string | null)[] => all(".toast.bad").map((e) => e.textContent);
 
 const only = (t: TestSession): Choice => {
   const cs = t.session.view().choices;
@@ -128,7 +135,14 @@ const cardOf = (t: TestSession, c: Choice, key: string): HTMLElement => {
 };
 
 const textOf = (t: TestSession, c: Choice, key: string, content: SideContent): string =>
-  [sideText(c, key, t.session.view().plan), ...content.values, content.summary, ...content.stopped, ...content.kept, ...(content.impact === null ? [] : [content.impact])].join("");
+  [
+    sideText(c, key, t.session.view().plan),
+    ...content.values,
+    content.rows.length === 0 ? content.summary : content.summary + CUE,
+    ...content.stopped,
+    ...content.kept,
+    ...(content.impact === null ? [] : [content.impact]),
+  ].join("");
 
 const labelsOf = (t: TestSession): ReadonlyMap<string, string> => new Map(t.session.history().map((e) => [e.id, e.label]));
 
@@ -187,12 +201,14 @@ describe("ChoiceSheet: Step 2's fixture", () => {
     expect(cards()).toHaveLength(2);
     const mac = cardOf(t, c, "a1");
     const phone = cardOf(t, c, "a2");
-    expect(one(".choice-summary", mac).textContent).toBe("moves 3");
-    expect(one(".choice-summary", phone).textContent).toBe("moves 0");
-    expect(one(".choice-summary", mac).textContent).toBe(sideContent(t.session, c, { side: "a1" }, DEFAULTS).summary);
-    expect(one(".choice-summary", phone).textContent).toBe(sideContent(t.session, c, { side: "a2" }, DEFAULTS).summary);
+    expect(one(".choice-summary", mac).textContent).toBe("moves 3 · show what moves");
+    expect(one(".choice-summary", phone).textContent).toBe("moves 0 · show what moves");
+    expect(one(".choice-summary", mac).textContent).toBe(sideContent(t.session, c, { side: "a1" }, DEFAULTS).summary + CUE);
+    expect(one(".choice-summary", phone).textContent).toBe(sideContent(t.session, c, { side: "a2" }, DEFAULTS).summary + CUE);
+    expect(one(".choice-summary .dim", mac).textContent).toBe(CUE);
     expect([switchOf("Push from predecessors").checked, switchOf("Return the items the other side's push moved").checked]).toEqual([true, true]);
     fireEvent.click(one(".choice-summary", mac));
+    expect(one(".choice-summary", mac).textContent).toBe("moves 3");
     expect(all(".moves-title", mac).map((e) => e.textContent)).toEqual(["Sprint 4"]);
     expect(all(".moves-line", mac).map((e) => e.textContent)).toEqual([
       "Review  Thu 19 Nov → Mon 16 Nov · −3 working days",
@@ -250,8 +266,8 @@ describe("ChoiceSheet: Step 2's fixture", () => {
     expect(new Set(preview.mock.calls.map((x) => JSON.stringify([x[0], x[1], x[2]])))).toEqual(
       new Set(["a1", "a2"].map((side) => JSON.stringify([c.id, { side }, off]))),
     );
-    expect(one(".choice-summary", cardOf(t, c, "a1")).textContent).toBe("moves 2");
-    expect(one(".choice-summary", cardOf(t, c, "a1")).textContent).toBe(sideContent(t.session, c, { side: "a1" }, off).summary);
+    expect(one(".choice-summary", cardOf(t, c, "a1")).textContent).toBe("moves 2 · show what moves");
+    expect(one(".choice-summary", cardOf(t, c, "a1")).textContent).toBe(sideContent(t.session, c, { side: "a1" }, off).summary + CUE);
     fireEvent.click(within(sheet()).getByRole("radio", { name: "Mac" }));
     fireEvent.click(apply());
     expect(resolve.mock.calls).toEqual([[c.id, { side: "a1" }, off]]);
@@ -271,6 +287,39 @@ describe("ChoiceSheet: Step 2's fixture", () => {
     expect(uiNow()[0].dialog).toBeNull();
     expect(toastTexts()).toEqual(["This choice was settled meanwhile."]);
     expect(resolve).toHaveBeenCalledTimes(0);
+    expect(t.session.view().choices).toEqual([]);
+  });
+
+  it("shows an Apply that resolve refuses as one bad toast", async () => {
+    const { t, c } = await sprint();
+    await shown(t);
+    setUi({ dialog: { t: "choice", id: c.id } });
+    vi.spyOn(t.session, "resolve").mockImplementation(() => {
+      throw new Refused(SETTLED);
+    });
+    fireEvent.click(apply());
+    await settle();
+    expect(badToasts()).toEqual([SETTLED]);
+    expect(toastTexts()).toEqual([SETTLED]);
+  });
+
+  it("says it once when an Apply loses the race with the sync that settled it", async () => {
+    const { t, peer, c } = await sprint();
+    await shown(t);
+    setUi({ dialog: { t: "choice", id: c.id } });
+    const real = t.session.resolve.bind(t.session);
+    const resolve = vi.spyOn(t.session, "resolve").mockImplementation((...args) => {
+      peer.session.resolve(c.id, { side: "a2" }, DEFAULTS);
+      peer.sync();
+      return real(...args);
+    });
+    fireEvent.click(apply());
+    await settle();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(badToasts()).toEqual([SETTLED]);
+    expect(toastTexts()).toEqual([SETTLED]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(uiNow()[0].dialog).toBeNull();
     expect(t.session.view().choices).toEqual([]);
   });
 
@@ -376,12 +425,50 @@ describe("ChoiceSheet: cards match the desktop column", () => {
     expect(all(".choice-value", cardOf(t, c, mk)).map((e) => e.textContent)).toEqual([`“${r}”: “Review A”`, `“${s}”: “Ship A”`]);
     expect(all(".choice-value", cardOf(t, c, ik)).map((e) => e.textContent)).toEqual([`“${r}”: “Review B”`, `“${s}”: “Ship B”`]);
     expect(all(".pick-subject", sheet()).map((e) => e.textContent)).toEqual([`“${r}”`, `“${s}”`]);
+    all(".pick-row", sheet()).forEach((row) => {
+      const subject = one(".pick-subject", row);
+      const select = one("select", row);
+      expect(subject.id).not.toBe("");
+      expect(select.getAttribute("aria-labelledby")).toBe(subject.id);
+      expect(select.hasAttribute("aria-label")).toBe(false);
+    });
+    expect(pickOf(`“${r}”`)).toBe(one("select", all(".pick-row", sheet())[0]));
     fireEvent.click(within(sheet()).getByRole("radio", { name: "Mac" }));
     fireEvent.change(pickOf(`“${s}”`), { target: { value: ik } });
     fireEvent.click(apply());
     expect(resolve.mock.calls).toEqual([[c.id, { side: mk, perUnit: new Map([["n:Ship", ik]]) }, DEFAULTS]]);
     expect(within(one(".phone-list")).getByText("Review A")).toBeTruthy();
     expect(within(one(".phone-list")).getByText("Ship B")).toBeTruthy();
+  });
+
+  it("says so when a sync drops a per-item pick", async () => {
+    const t = await made(
+      [
+        { name: "Review", start: "2026-11-10", dur: 2 },
+        { name: "Ship", start: "2026-11-12", dur: 1 },
+      ],
+      { clashes: [{ unit: ["n:Review", "n:Ship"], mac: ["Review A", "Ship A"], iphone: ["Review B", "Ship B"] }] },
+    );
+    const c = only(t);
+    const peer = await peerOf(t);
+    await shown(t);
+    setUi({ dialog: { t: "choice", id: c.id } });
+    fireEvent.change(pickOf(`“${nameOf(t, "Ship")}”`), { target: { value: keyOf(c, "iPhone") } });
+    expect(toastTexts()).toEqual([]);
+    act(() => {
+      peer.session.apply({ t: "rename", item: "Ship", name: "Ship C" });
+      peer.sync();
+    });
+    await settle();
+    const after = only(t);
+    expect([after.id, after.units]).toEqual([c.id, ["n:Review"]]);
+    expect(toastTexts()).toEqual(["Your pick for “Ship C” no longer applies."]);
+    expect(badToasts()).toEqual([]);
+    expect(all(".pick-subject", sheet()).map((e) => e.textContent)).toEqual([`“${nameOf(t, "Review")}”`]);
+    const resolve = vi.spyOn(t.session, "resolve");
+    fireEvent.click(within(sheet()).getByRole("radio", { name: "Mac" }));
+    fireEvent.click(apply());
+    expect(resolve.mock.calls).toEqual([[c.id, { side: keyOf(c, "Mac") }, DEFAULTS]]);
   });
 
   it("delete choice cards open with the side's sentence", async () => {
@@ -434,7 +521,7 @@ describe("ChoiceSheet: cards match the desktop column", () => {
 
 describe("ChoiceBanner", () => {
   it("renders bannerText and a Choose button", () => {
-    const side = (key: string, label: string) => ({ key, label, actions: [], values: new Map() });
+    const side = (key: string, label: string): ChoiceSide => ({ key, label, actions: [], values: new Map<UnitKey, unknown>() });
     const choice: Choice = {
       id: "c1",
       kind: "items",
