@@ -14,17 +14,6 @@ settingGroups:
       PRODUCT_NAME: WebBoard
       PRODUCT_BUNDLE_IDENTIFIER: org.rokass.webboard
       DEVELOPMENT_TEAM: 8UQXKX376Z
-targetTemplates:
-  app:
-    type: application
-    sources:
-      - path: Sources
-    scheme:
-      environmentVariables:
-        RUST_BACKTRACE: full
-        RUST_LOG: info
-    settings:
-      groups: [app]
 targets:
   webboard_iOS:
     type: application

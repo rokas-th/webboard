@@ -77,7 +77,13 @@ const SITES = [
   ...["ShortVersionString", "Version"].map((suffix) => ({
     path: "src-tauri/gen/apple/project.yml",
     key: `CFBundle${suffix}`,
-    re: new RegExp(String.raw`(^[ \t]*CFBundle${suffix}:[ \t]*"?)([0-9.]+)("?)(?=[ \t]*$)`, "m"),
+    re: new RegExp(String.raw`(^[ \t]*CFBundle${suffix}:[ \t]*"?)(${V})("?)(?=[ \t]*$)`, "m"),
+    write: true,
+  })),
+  ...["ShortVersionString", "Version"].map((suffix) => ({
+    path: "src-tauri/gen/apple/webboard_iOS/Info.plist",
+    key: `CFBundle${suffix}`,
+    re: new RegExp(String.raw`(<key>CFBundle${suffix}</key>\s*<string>)(${V})(</string>)`),
     write: true,
   })),
 ];

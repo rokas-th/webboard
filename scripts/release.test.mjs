@@ -33,6 +33,7 @@ const VERSION_FILES = [
   "server/package.json",
   "server/package-lock.json",
   "src-tauri/gen/apple/project.yml",
+  "src-tauri/gen/apple/webboard_iOS/Info.plist",
 ];
 
 function run(cmd, args, opts = {}) {
