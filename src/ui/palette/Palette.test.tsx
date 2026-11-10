@@ -12,6 +12,7 @@ import { geometry, LEAD, ROW } from "../timeline/geometry";
 import { timelineRows } from "../timeline/rows";
 import type { Command } from "./commands";
 import { shownCommands } from "./Palette";
+import { withSync } from "../../test/withSync";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -49,7 +50,7 @@ const made = async (seed: readonly SeedItem[], opts?: TestSessionOpts): Promise<
 
 const shown = async (t: TestSession, over?: Parameters<typeof shellFor>[1]) => {
   const s = shellFor(t, over);
-  render(s.ui);
+  render(withSync(s.ui));
   await settle();
   return s;
 };
@@ -171,7 +172,7 @@ describe("opening the palette", () => {
     press("k", { metaKey: true });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(document.activeElement).toBe(query());
-    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileImport plan…", "HelpCommand palette", "HelpAbout WebBoard"]);
+    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "HelpCommand palette", "HelpAbout WebBoard"]);
     press("Escape", {}, query());
     fireEvent.click(button(bar(), "⌘K"));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);

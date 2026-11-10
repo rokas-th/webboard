@@ -18,6 +18,7 @@ import type { ImportResult } from "./file";
 import { IndexDoc } from "./index-doc";
 import { openPersisted, type PersistedDoc } from "./persist";
 import { readActions } from "./read-actions";
+import { movePlan } from "../sync/move";
 import { PlanSession, type SessionDeps } from "./session";
 
 export interface Settings {
@@ -42,6 +43,7 @@ export interface PlanListing {
 }
 
 const READ_ONLY = "This device was removed from the space; its plans are read-only.";
+const MOVE_READ_ONLY = "This device was removed from the space. Join again to move plans there.";
 const INCOMPLETE = "This plan has not arrived yet; it opens once it syncs.";
 const INDEX_REPAIRED = "The last change to the plan list before WebBoard closed was not saved.";
 const LOCAL_INDEX = "local";
@@ -608,6 +610,14 @@ export class Registry {
   restorePlan(id: PlanId): void {
     this.usable();
     this.planIndex(id).restorePlan(id);
+  }
+
+  movePlanToSpace(id: PlanId): void {
+    this.usable();
+    if (this.readOnlySpace) throw new Refused(MOVE_READ_ONLY);
+    const ix = this.spaceIndex();
+    if (ix === null) throw new Error("No space is attached.");
+    movePlan(id, this.local, ix);
   }
 
   async setLastRegion(r: RegionRef): Promise<void> {

@@ -12,6 +12,7 @@ import { READ_ONLY } from "../run";
 import { useUi, type UiState } from "../state";
 import { historyTime, revertText } from "./historyText";
 import { groupOptions } from "./ItemPanel";
+import { withSync } from "../../test/withSync";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -48,7 +49,7 @@ const made = async (seed: readonly SeedItem[], opts?: TestSessionOpts): Promise<
 };
 
 const shown = async (t: TestSession): Promise<void> => {
-  render(shellFor(t).ui);
+  render(withSync(shellFor(t).ui));
   await settle();
 };
 
@@ -393,7 +394,7 @@ describe("the note", () => {
     ["macos", "abc"],
   ] as const)("on %s, Ctrl+Y in the focused note leaves the note at %s", async (platform, after) => {
     const t = await made([{ name: "A", start: "2026-11-10", note: "abc" }]);
-    render(shellFor(t, { device: { deviceId: "mac", name: "Mac", platform } }).ui);
+    render(withSync(shellFor(t, { device: { deviceId: "mac", name: "Mac", platform } }).ui));
     await settle();
     select("A");
     const note = inPanel().getByLabelText("Notes");

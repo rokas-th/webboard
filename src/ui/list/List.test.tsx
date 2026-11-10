@@ -7,6 +7,7 @@ import { shellFor } from "../../test/shell";
 import { clearToasts } from "../common/Toast";
 import { useUi, type UiState } from "../state";
 import { statusLabel } from "./groups";
+import { withSync } from "../../test/withSync";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -43,7 +44,7 @@ const made = async (seed: readonly SeedItem[], opts?: TestSessionOpts): Promise<
 };
 
 const list = async (t: TestSession): Promise<void> => {
-  render(shellFor(t).ui);
+  render(withSync(shellFor(t).ui));
   await settle();
   fireEvent.click(screen.getByRole("tab", { name: "List" }));
 };

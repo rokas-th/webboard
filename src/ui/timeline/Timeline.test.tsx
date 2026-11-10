@@ -13,6 +13,7 @@ import { OpenChoice } from "../run";
 import { UiContext, useUi, type UiState } from "../state";
 import { geometry } from "./geometry";
 import { Timeline } from "./Timeline";
+import { withSync } from "../../test/withSync";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -61,7 +62,7 @@ const made = async (seed: readonly SeedItem[], opts?: TestSessionOpts): Promise<
 
 const shown = async (seed: readonly SeedItem[], opts?: TestSessionOpts): Promise<TestSession> => {
   const t = await made(seed, opts);
-  render(shellFor(t).ui);
+  render(withSync(shellFor(t).ui));
   await settle();
   return t;
 };
@@ -232,7 +233,7 @@ describe("links and marks", () => {
     t.session.apply({ t: "trash", items: ["old"] });
     p.session.apply({ t: "rename", item: "old", name: "Older" });
     p.sync();
-    render(shellFor(t).ui);
+    render(withSync(shellFor(t).ui));
     await settle();
     expect(one('[data-row="old"]').className).toBe("tl-row ghost-row");
     expect(document.querySelector('[data-bar="old"]')).toBeNull();
@@ -407,7 +408,7 @@ describe("today and baselines", () => {
     t.session.apply({ t: "baseline", op: "save", name: "B1" });
     const p = await t.peer("iphone");
     sessions.push(p.session);
-    render(shellFor(t).ui);
+    render(withSync(shellFor(t).ui));
     await settle();
     const [id] = [...t.session.view().plan.baselines.keys()];
     act(() => uiNow()[1]({ baseline: id }));
@@ -430,7 +431,7 @@ describe("today and baselines", () => {
     ]);
     t.session.apply({ t: "baseline", op: "save", name: "B1" });
     t.session.apply({ t: "move", items: ["A"], days: 3 });
-    render(shellFor(t).ui);
+    render(withSync(shellFor(t).ui));
     await settle();
     expect(all(".ghost")).toHaveLength(0);
     const [id] = [...t.session.view().plan.baselines.keys()];
@@ -643,7 +644,7 @@ describe("gestures", () => {
   it("offers no gesture when read-only, and a click still selects", async () => {
     const t = await made(SEED);
     act(() => t.session.setReadOnly(true));
-    render(shellFor(t).ui);
+    render(withSync(shellFor(t).ui));
     await settle();
     const apply = vi.spyOn(t.session, "apply");
     expect(all(".nub")).toHaveLength(0);
@@ -692,7 +693,7 @@ describe("tray", () => {
   it("drops nothing while read-only", async () => {
     const t = await made(SEED);
     act(() => t.session.setReadOnly(true));
-    render(shellFor(t).ui);
+    render(withSync(shellFor(t).ui));
     await settle();
     const apply = vi.spyOn(t.session, "apply");
     vi.spyOn(document, "elementFromPoint").mockReturnValue(one(".tl-chart"));
@@ -707,7 +708,7 @@ describe("tray", () => {
   it.each([false, true])("selects a clicked chip and issues nothing (refinement 48, read-only %s)", async (readOnly) => {
     const t = await made(SEED);
     act(() => t.session.setReadOnly(readOnly));
-    render(shellFor(t).ui);
+    render(withSync(shellFor(t).ui));
     await settle();
     const apply = vi.spyOn(t.session, "apply");
     pointer(chip(), "down", 100);
@@ -805,7 +806,7 @@ describe("the render path", () => {
     ]);
     t.session.apply({ t: "baseline", op: "save", name: "B1" });
     t.session.apply({ t: "create", kind: "task", name: "Late", parent: "h", after: null, start: "2026-11-11", dur: 1 });
-    render(shellFor(t).ui);
+    render(withSync(shellFor(t).ui));
     await settle();
     const [id] = [...t.session.view().plan.baselines.keys()];
     act(() => uiNow()[1]({ baseline: id }));

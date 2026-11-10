@@ -18,6 +18,7 @@ import { useUi, type UiState } from "../state";
 import CONSUMER_HOSTS from "../../../crates/webboard-core/tests/fixtures/holidays/consumer-hosts.json";
 import { impactText } from "./impact";
 import { consumerHost, divisionOf } from "./RegionPicker";
+import { withSync } from "../../test/withSync";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -137,7 +138,7 @@ const made = async (seed: readonly SeedItem[], opts: TestSessionOpts = {}): Prom
 
 const shown = async (t: TestSession, over: Partial<Registry> = {}, clock: Clock = t.clock): Promise<Registry> => {
   const registry = testRegistry(t, { setLastRegion: vi.fn(async () => undefined), ...over });
-  render(<Shell registry={registry} clock={clock} />);
+  render(withSync(<Shell registry={registry} clock={clock} />));
   await settle();
   return registry;
 };
@@ -786,7 +787,7 @@ describe("last region", () => {
     const clock = fixedClock("2026-11-09");
     const registry = await RealRegistry.open({ clock });
     registries.push(registry);
-    render(<Shell registry={registry} clock={clock} />);
+    render(withSync(<Shell registry={registry} clock={clock} />));
     await settle();
     const session = await registry.session(s.ids[0]);
     return { registry, session };

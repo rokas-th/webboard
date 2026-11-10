@@ -1879,6 +1879,87 @@ describe("Registry: spaces", () => {
     expect(seen).toContain(1);
   });
 
+  it("movePlanToSpace adds to the space, then trashes in local", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("Q"));
+    seedPlan(e.mem, "Q", "Queue");
+    const r = await open();
+    await r.attachSpace(SP);
+    await flush();
+    const from = tauri.calls.length;
+    r.movePlanToSpace("Q");
+    await flush();
+    const moved = tauri.calls.slice(from).filter((c) => c.cmd === "store_append").map((c) => [xdoc(c), writesOf(c)]);
+    expect(moved).toEqual([
+      [IX, [ip("Q", false)]],
+      ["local", [ip("Q", true)]],
+    ]);
+    expect(r.plans().filter((p) => p.id === "Q").map((p) => [p.space, p.trashed])).toEqual([[SP, false]]);
+  });
+
+  it("moving twice adds no action", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("Q"));
+    seedPlan(e.mem, "Q", "Queue");
+    const r = await open();
+    await r.attachSpace(SP);
+    r.movePlanToSpace("Q");
+    await flush();
+    const from = tauri.calls.length;
+    r.movePlanToSpace("Q");
+    await flush();
+    expect(callsOf(from, "store_append")).toEqual([]);
+  });
+
+  it("finishes a move interrupted between the steps", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("Q"));
+    seedIndex(e.mem, IX, [ixAct("s1", [], [ip("Q", false)])]);
+    seedPlan(e.mem, "Q", "Queue");
+    const r = await open();
+    await r.attachSpace(SP);
+    await flush();
+    const from = tauri.calls.length;
+    r.movePlanToSpace("Q");
+    await flush();
+    expect(appendsTo(from, IX)).toEqual([]);
+    expect(appendsTo(from, "local").map(writesOf)).toEqual([[ip("Q", true)]]);
+  });
+
+  it("refuses while read-only", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("Q"));
+    seedPlan(e.mem, "Q", "Queue");
+    const r = await open();
+    await r.attachSpace(SP);
+    r.setSpaceReadOnly(true);
+    await flush();
+    const from = tauri.calls.length;
+    let thrown: unknown = null;
+    try {
+      r.movePlanToSpace("Q");
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Refused);
+    expect((thrown as Refused).message).toBe("This device was removed from the space. Join again to move plans there.");
+    await flush();
+    expect(callsOf(from, "store_append")).toEqual([]);
+  });
+
+  it("movePlanToSpace with no space throws", async () => {
+    const e = spaceEnv();
+    seedIndex(e.mem, "local", listing("Q"));
+    seedPlan(e.mem, "Q", "Queue");
+    const r = await open();
+    await flush();
+    const from = tauri.calls.length;
+    expect(() => r.movePlanToSpace("Q")).toThrow(new Error("No space is attached."));
+    await flush();
+    expect(callsOf(from, "store_append")).toEqual([]);
+    expect(r.plans().filter((p) => p.id === "Q").map((p) => [p.space, p.trashed])).toEqual([[null, false]]);
+  });
+
   it("synced heads are kept in settings", async () => {
     const e = spaceEnv();
     const r = await open();

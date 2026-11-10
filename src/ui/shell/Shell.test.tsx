@@ -23,6 +23,7 @@ import { PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../s
 import { exportFlow, importFlow } from "./fileFlows";
 import { PlanHead } from "./PlanHead";
 import { Shell } from "./Shell";
+import { connectedStubs, withSync } from "../../test/withSync";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
@@ -171,7 +172,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("renders the toolbar", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     const bar = document.querySelector("header.toolbar[data-tauri-drag-region]");
     if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
@@ -185,9 +186,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     ]);
     expect(["W", "M", "Q"].map((z) => within(bar).getByRole("button", { name: z }).getAttribute("aria-pressed"))).toEqual(["true", "false", "false"]);
     expect(within(bar).getByRole("button", { name: "⌘K" })).toBeTruthy();
-    const chip = within(bar).getByText("Local only");
-    expect(chip.tagName).not.toBe("BUTTON");
-    expect(chip.closest("button")).toBeNull();
+    expect(within(bar).getByRole("button", { name: "Local only" })).toBeTruthy();
     const undo = within(bar).getByRole("button", { name: "Undo" });
     const redo = within(bar).getByRole("button", { name: "Redo" });
     expect([undo.hasAttribute("disabled"), redo.hasAttribute("disabled")]).toEqual([true, true]);
@@ -205,7 +204,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     const t = await made(MESA_SEED);
     t.session.setReadOnly(true);
     const { ui, registry } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     const head = document.querySelector(".plan-head");
     if (!(head instanceof HTMLElement)) throw new Error("no plan head");
@@ -235,7 +234,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("closes the ⋯ menu on Esc without touching the selection, and a second Esc on ⋯ deselects", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     setUiNow({ selected: "t3" });
     expect(lastUi().selected).toBe("t3");
@@ -257,7 +256,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("moves focus through the ⋯ menu with the arrow keys, Home and End, wrapping", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     setUiNow({ selected: "t3" });
     fireEvent.click(menuToggle());
@@ -287,7 +286,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("closes the ⋯ menu when focus leaves it, and keeps it while focus moves between its items", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     fireEvent.click(menuToggle());
     const [exportItem, importItem] = menuItems();
@@ -311,7 +310,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("reads Ctrl K off macOS", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(screen.getByRole("button", { name: "Ctrl K" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "⌘K" })).toBeNull();
@@ -320,12 +319,12 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("keeps the traffic-light inset to macOS", async () => {
     const t = await made(MESA_SEED);
     const linux = shellFor(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
-    const first = render(linux.ui);
+    const first = render(withSync(linux.ui));
     await settle();
     expect(document.querySelector("header.toolbar")?.classList.contains("toolbar-mac")).toBe(false);
     first.unmount();
     const mac = shellFor(t, { device: { deviceId: "mac", name: "Mac", platform: "macos" } });
-    render(mac.ui);
+    render(withSync(mac.ui));
     await settle();
     expect(document.querySelector("header.toolbar")?.classList.contains("toolbar-mac")).toBe(true);
   });
@@ -333,7 +332,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("mounts the slots for the view", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     expectTimeline();
     expect(slot("panel")).not.toBeNull();
@@ -358,7 +357,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
         { id: "other000000", name: null, trashed: false, loaded: false, space: null },
       ],
     });
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(within(screen.getByRole("navigation", { name: "Plans" })).getByText("Loading…")).toBeTruthy();
     expect(currentName()).toBe("Plan");
@@ -367,7 +366,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("shows the tray count and legend", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(screen.getByText("Unscheduled · 5")).toBeTruthy();
     expect(document.querySelector(".legend")?.textContent).toBe("taskmilestonelateconflictheld");
@@ -377,7 +376,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     const t = await made(MESA_SEED);
     const take = vi.spyOn(t.session, "takeRepairNotice").mockReturnValueOnce("The last change before WebBoard stopped was cut off while saving and was not kept.").mockReturnValue(null);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     act(() => {
       t.session.apply({ t: "move", items: ["t3"], days: 1 });
@@ -389,7 +388,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("puts a store error in one banner, and Try again retries it", async () => {
     const t = await made(MESA_SEED);
     const { ui, registry } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     const real = tauri.answers.store_append;
     const fails: { code: string; message: string }[] = [{ code: "store.io", message: "Disk full." }];
@@ -422,7 +421,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("keeps the banner when the retry fails too", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     const real = tauri.answers.store_append;
     const fails: { code: string; message: string }[] = [{ code: "store.io", message: "Disk full." }];
@@ -446,7 +445,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("toasts a window error and an unhandled rejection until unmounted", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    const view = render(ui);
+    const view = render(withSync(ui));
     await settle();
     act(() => {
       window.dispatchEvent(Object.assign(new Event("unhandledrejection"), { reason: new Error("Holiday warm for plan p failed: boom") }));
@@ -473,7 +472,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("toasts only error events that carry an error", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     act(() => {
       window.dispatchEvent(new ErrorEvent("error", { message: "ResizeObserver loop completed with undelivered notifications." }));
@@ -494,7 +493,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     window.localStorage.setItem(PLACE_KEY, "{");
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(toastTexts().filter((x) => x === PLACE_UNREADABLE)).toHaveLength(1);
     expect(toastNodes().find((n) => n.textContent === PLACE_UNREADABLE)?.className).toBe("toast bad");
@@ -508,7 +507,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   it("does not toast a missing webboard.place", async () => {
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(toastTexts()).toEqual([]);
   });
@@ -628,7 +627,7 @@ describe("PlanHead", () => {
   it("keeps one head popover open: ⋯ closes the choice list and Choose… closes the menu", async () => {
     const t = await made(A, { clashes: [NAME_CLASH] });
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     const choose = screen.getByRole("button", { name: "Choose…" });
     fireEvent.click(choose);
@@ -651,7 +650,7 @@ describe("PlanHead", () => {
     expect(onChoose.mock.calls).toEqual([[t.session.view().choices[0].id]]);
     view.unmount();
     const { ui } = shellFor(t);
-    render(ui);
+    render(withSync(ui));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "1 held" }));
     expect(lastUi().dialog).toEqual({ t: "choice", id: t.session.view().choices[0].id });
@@ -664,7 +663,7 @@ describe("Shell banners on a stub registry", () => {
     let error: AppError | null = new AppError("store.io", "Could not save the plan list: disk full.");
     const retryIndex = vi.fn(async () => undefined);
     const { ui, registry } = shellFor(t, { indexError: () => error, indexErrorDoc: () => (error === null ? null : "local"), retryIndex });
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(screen.getByText("Could not save the plan list: disk full.").closest(".banner")?.classList.contains("bad")).toBe(true);
     expect(screen.queryByRole("button", { name: RELOAD })).toBeNull();
@@ -679,12 +678,13 @@ describe("Shell banners on a stub registry", () => {
     const t = await made(MESA_SEED);
     const reloadFromServer = vi.fn(async () => undefined);
     const { ui } = shellFor(t, {
+      ...connectedStubs(t),
       indexError: () => new AppError("store.corrupt", "The space plan list is damaged at record 4."),
       indexErrorDoc: () => "ix-sp000000000",
       retryIndex: vi.fn(async () => undefined),
       reloadFromServer,
     });
-    render(ui);
+    render(withSync(ui, { connected: true }));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: RELOAD }));
     const dialog = screen.getByRole("dialog", { name: RELOAD });
@@ -704,12 +704,13 @@ describe("Shell banners on a stub registry", () => {
     const held = deferred<void>();
     const reloadFromServer = vi.fn<(docId: string) => Promise<void>>().mockReturnValueOnce(held.promise).mockResolvedValue(undefined);
     const { ui } = shellFor(t, {
+      ...connectedStubs(t),
       indexError: () => new AppError("store.corrupt", "The space plan list is damaged at record 4."),
       indexErrorDoc: () => "ix-sp000000000",
       retryIndex: vi.fn(async () => undefined),
       reloadFromServer,
     });
-    render(ui);
+    render(withSync(ui, { connected: true }));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: RELOAD }));
     const load = within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" });
@@ -736,7 +737,7 @@ describe("Shell banners on a stub registry", () => {
       spaceReadOnly: () => true,
       reloadFromServer,
     });
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(screen.getByText("The space plan list is damaged at record 4.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
@@ -750,7 +751,7 @@ describe("Shell banners on a stub registry", () => {
     const line = "A change to the plan list from iPhone could not be read: Action x9 has a malformed w. Update WebBoard on this device.";
     let lines: string[] = [line];
     const { ui, registry } = shellFor(t, { indexUnreadable: () => lines });
-    render(ui);
+    render(withSync(ui));
     await settle();
     const el = screen.getByText(line);
     expect(el.classList.contains("bad")).toBe(true);
@@ -767,7 +768,7 @@ describe("Shell banners on a stub registry", () => {
     const retrySettings = vi.fn(async () => undefined);
     const retryIndex = vi.fn(async () => undefined);
     const { ui, registry } = shellFor(t, { settingsError: () => error, retrySettings, retryIndex });
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(screen.getByText("Could not save settings: disk full.").closest(".banner")?.classList.contains("bad")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -783,10 +784,10 @@ describe("Shell banners on a stub registry", () => {
     const text = "The last change to the plan list before WebBoard closed was not saved.";
     const take = vi.fn<() => string | null>().mockReturnValueOnce(text).mockReturnValue(null);
     const { ui, registry } = shellFor(t, { takeIndexRepairNotice: take });
-    const view = render(ui);
+    const view = render(withSync(ui));
     await settle();
     expect(toastTexts().filter((x) => x === text)).toHaveLength(1);
-    view.rerender(ui);
+    view.rerender(withSync(ui));
     act(() => registry.notify());
     expect(take).toHaveBeenCalledTimes(2);
     expect(toastTexts().filter((x) => x === text)).toHaveLength(1);
@@ -797,7 +798,7 @@ describe("Shell banners on a stub registry", () => {
     const text = "The last change to the plan list before WebBoard closed was not saved.";
     const take = vi.fn<() => string | null>().mockReturnValueOnce(null).mockReturnValueOnce(text).mockReturnValue(null);
     const { ui, registry } = shellFor(t, { takeIndexRepairNotice: take });
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(toastTexts()).toEqual([]);
     act(() => registry.notify());
@@ -817,7 +818,7 @@ describe("Shell banners on a stub registry", () => {
       plans: () => [{ id, name: "Beta", trashed: false, loaded: false, space: null }],
       session,
     });
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(currentName()).toBe("Beta");
     expect(screen.getByText(INCOMPLETE)).toBeTruthy();
@@ -842,7 +843,7 @@ describe("Shell banners on a stub registry", () => {
       plans: () => [{ id, name: "Beta", trashed: false, loaded: false, space: null }],
       session,
     });
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(screen.getByText(INCOMPLETE)).toBeTruthy();
     act(() => registry.notify());
@@ -878,7 +879,7 @@ describe("Shell banners on a stub registry", () => {
       return calls.length === 1 ? failing() : Promise.resolve(t.session);
     };
     const { ui } = shellFor(t, { session });
-    render(ui);
+    render(withSync(ui));
     await settle();
     expect(screen.getByText("boom").closest(".banner")?.classList.contains("bad")).toBe(true);
     expectNoTimeline();
@@ -896,7 +897,7 @@ describe("Shell banners on a stub registry", () => {
     const failure = new AppError("store.io", "Could not read the plan: disk error.");
     const retryPlan = vi.fn(async () => undefined);
     const { ui } = shellFor(t, { failures: () => new Map([[id, failure]]), session: () => Promise.reject(failure), retryPlan });
-    render(ui);
+    render(withSync(ui));
     await settle();
     const failed = document.querySelector(".plan-failed");
     if (!(failed instanceof HTMLElement)) throw new Error("no PlanFailed");
@@ -913,7 +914,7 @@ describe("Shell on Registry.open", () => {
     s.mem.fail("store_load", s.ids[1], { code: "store.io", message: "Could not read the plan: disk error." });
     const registry = await opened();
     await registry.warm();
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     const beta = entry("Beta");
     expect(within(beta).getByText("Could not read the plan: disk error.").className).toBe("entry-bad");
@@ -941,7 +942,7 @@ describe("Shell on Registry.open", () => {
     s.mem.fail("store_load", s.ids[1], { code, message });
     const registry = await opened();
     await registry.warm();
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     fireEvent.click(within(entry("Beta")).getByRole("button", { name: "Beta" }));
     await settle();
@@ -960,7 +961,7 @@ describe("Shell on Registry.open", () => {
     s.mem.fail("store_load", s.ids[1], { code: "store.corrupt", message: "The plan file is damaged at record 12." });
     const registry = await opened();
     await registry.warm();
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     fireEvent.click(within(entry("Beta")).getByRole("button", { name: "Beta" }));
     await settle();
@@ -985,7 +986,7 @@ describe("Shell on Registry.open", () => {
     vi.spyOn(registry, "plans").mockImplementation(() => real().map((l) => (l.id === p3 ? { ...l, space: "sp000000000" } : l)));
     const reload = vi.spyOn(registry, "reloadFromServer").mockResolvedValue(undefined);
     const trashPlan = vi.spyOn(registry, "trashPlan");
-    render(shellOn(registry));
+    render(withSync(shellOn(registry), { connected: true }));
     await settle();
     fireEvent.click(within(entry("Gamma")).getByRole("button", { name: "Gamma" }));
     await settle();
@@ -1018,7 +1019,7 @@ describe("Shell on Registry.open", () => {
       .spyOn(registry, "reloadFromServer")
       .mockRejectedValueOnce(new AppError("store.io", "Could not set the plan aside: disk full."))
       .mockResolvedValue(undefined);
-    render(shellOn(registry));
+    render(withSync(shellOn(registry), { connected: true }));
     await settle();
     fireEvent.click(within(entry("Gamma")).getByRole("button", { name: "Gamma" }));
     await settle();
@@ -1047,7 +1048,7 @@ describe("Shell on Registry.open", () => {
     vi.spyOn(registry, "spaceReadOnly").mockReturnValue(true);
     const reload = vi.spyOn(registry, "reloadFromServer");
     const trashPlan = vi.spyOn(registry, "trashPlan");
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     fireEvent.click(within(entry("Gamma")).getByRole("button", { name: "Gamma" }));
     await settle();
@@ -1068,7 +1069,7 @@ describe("Shell on Registry.open", () => {
     vi.spyOn(registry, "plans").mockImplementation(() => real().map((l) => (l.id === p3 || l.id === p4 ? { ...l, space: "sp000000000" } : l)));
     vi.spyOn(registry, "spaceReadOnly").mockReturnValue(true);
     const trashPlan = vi.spyOn(registry, "trashPlan");
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     const gamma = within(entry("Gamma")).getByRole("button", { name: "Move to Trash" });
     expect(gamma.hasAttribute("disabled")).toBe(true);
@@ -1091,7 +1092,7 @@ describe("Shell on Registry.open", () => {
     vi.spyOn(registry, "failures").mockImplementation(() => failures);
     const retryPlan = vi.spyOn(registry, "retryPlan").mockResolvedValue(undefined);
     const notify = notifier(registry);
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     expect(currentName()).toBe("Beta");
     const alpha = entry("Alpha");
@@ -1113,7 +1114,7 @@ describe("Shell on Registry.open", () => {
     resetTauri({ ...memoryStore().answers, settings_read: () => null, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
     const registry = await opened();
     const createPlan = vi.spyOn(registry, "createPlan");
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     expectNoTimeline();
     expect(screen.queryAllByRole("tab")).toEqual([]);
@@ -1137,12 +1138,12 @@ describe("Shell on Registry.open", () => {
     resetTauri({ ...memoryStore().answers, settings_read: () => null, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
     const registry = await opened();
     vi.mocked(importPlan).mockImplementationOnce(async (r) => r.createPlan("MESA 2027"));
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     expectNoTimeline();
     const main = document.querySelector("main.main");
     if (!(main instanceof HTMLElement)) throw new Error("no main");
-    expect(within(main).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…"]);
+    expect(within(main).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…", "Join with a code", "Set up sync"]);
     if (from === "the palette") {
       act(() => {
         fireEvent.keyDown(document.body, { key: "k", metaKey: true });
@@ -1173,7 +1174,7 @@ describe("Shell on Registry.open", () => {
     const registry = await opened();
     const pending = deferred<PlanId | null>();
     vi.mocked(importPlan).mockReturnValueOnce(pending.promise);
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     const main = document.querySelector("main.main");
     if (!(main instanceof HTMLElement)) throw new Error("no main");
@@ -1198,7 +1199,7 @@ describe("Shell on Registry.open", () => {
   it("opens the plan the ⋯ menu's import names through the rail's selection", async () => {
     const s = await store(["Alpha", "Beta"], { lastRegion: ZH });
     const registry = await opened();
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     expect(currentName()).toBe("Alpha");
     vi.mocked(importFlow).mockResolvedValueOnce(undefined);
@@ -1216,7 +1217,7 @@ describe("Shell on Registry.open", () => {
     await store(from === "sidebar" ? ["Alpha"] : [], { lastRegion: ZH });
     const registry = await opened();
     const createPlan = vi.spyOn(registry, "createPlan");
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     const held = hold("holidays_year");
     const nav = screen.getByRole("navigation", { name: "Plans" });
@@ -1244,7 +1245,7 @@ describe("Shell on Registry.open", () => {
     const s = await store(["Alpha", "Beta"], { lastRegion: ZH });
     const registry = await opened();
     const from = tauri.calls.length;
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     expect(currentName()).toBe("Alpha");
     const nav = screen.getByRole("navigation", { name: "Plans" });
@@ -1290,7 +1291,7 @@ describe("Shell on Registry.open", () => {
   it("falls to the empty state when the last plan is trashed", async () => {
     await store(["Alpha"]);
     const registry = await opened();
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     fireEvent.click(within(entry("Alpha")).getByRole("button", { name: "Move to Trash" }));
     await settle();
@@ -1306,7 +1307,7 @@ describe("Shell on Registry.open", () => {
     const s = await store(names);
     const registry = await opened();
     const trashPlan = vi.spyOn(registry, "trashPlan");
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     expect(currentName()).toBe("Alpha");
     const local = await registry.doc("local");
@@ -1345,7 +1346,7 @@ describe("Shell on Registry.open", () => {
   it("toasts only its own message for a local trash", async () => {
     await store(["Alpha", "Beta"]);
     const registry = await opened();
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     fireEvent.click(within(entry("Alpha")).getByRole("button", { name: "Move to Trash" }));
     await settle();
@@ -1369,7 +1370,7 @@ describe("selection rule", () => {
     const s = await store(["Alpha", "Beta", "Gamma"], { trash: [0] });
     window.localStorage.setItem(PLACE_KEY, JSON.stringify(place.plan === "first" ? { ...place, plan: s.ids[0] } : place));
     const registry = await opened();
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     expect(currentName()).toBe("Beta");
     expect(slot("list")).not.toBeNull();
@@ -1380,7 +1381,7 @@ describe("selection rule", () => {
     window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: s.ids[1] }));
     const registry = await opened();
     const session = vi.spyOn(registry, "session");
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     expect(session).not.toHaveBeenCalled();
     const main = document.querySelector("main.main");
@@ -1392,7 +1393,7 @@ describe("selection rule", () => {
     const s = await store(["Alpha", "Beta", "Gamma"], { trash: [0] });
     const registry = await opened();
     const notify = notifier(registry);
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     expect(currentName()).toBe("Beta");
     const real = registry.plans.bind(registry);
@@ -1408,7 +1409,7 @@ describe("selection rule", () => {
     const registry = await opened();
     vi.spyOn(registry, "session").mockRejectedValue(new AppError("plan.incomplete", INCOMPLETE));
     const notify = notifier(registry);
-    render(shellOn(registry));
+    render(withSync(shellOn(registry)));
     await settle();
     act(() => notify());
     await settle();
@@ -1421,7 +1422,7 @@ describe("selection rule", () => {
 
 describe("the panel slot", () => {
   const shown = async (t: TestSession): Promise<void> => {
-    render(shellFor(t).ui);
+    render(withSync(shellFor(t).ui));
     await settle();
   };
   const uiNow = (): [UiState, (patch: Partial<UiState>) => void] => {
@@ -1505,7 +1506,7 @@ describe("the panel slot", () => {
         { id: "other", name: "Other", trashed: false, loaded: true, space: null },
       ];
       const session = (x: string): Promise<PlanSession> => (x === id ? Promise.resolve(t.session) : new Promise<PlanSession>(() => undefined));
-      render(shellFor(t, { plans, session }).ui);
+      render(withSync(shellFor(t, { plans, session }).ui));
       await settle();
       expect(uiNow()[0].plan).toBe(id);
       select("A");
@@ -1606,7 +1607,7 @@ describe("calendar dialog in the shell", () => {
 
   it("opens from PlanPanel's Change calendar… and closes with Esc", async () => {
     const t = await made(MESA_SEED);
-    render(shellFor(t).ui);
+    render(withSync(shellFor(t).ui));
     await settle();
     const panel = slot("panel");
     if (!(panel instanceof HTMLElement)) throw new Error("no panel");
@@ -1624,7 +1625,7 @@ describe("calendar dialog in the shell", () => {
   it("opens the same dialog from Choose region on a plan with no region", async () => {
     const t = await made(MESA_SEED);
     expect(t.session.view().plan.calendar.region).toBeNull();
-    render(shellFor(t).ui);
+    render(withSync(shellFor(t).ui));
     await settle();
     const head = document.querySelector(".plan-head");
     if (!(head instanceof HTMLElement)) throw new Error("no plan head");

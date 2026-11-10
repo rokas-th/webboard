@@ -1,5 +1,6 @@
 import type { PlanId } from "../../domain/model";
 import type { PlanListing, Registry } from "../../store/registry";
+import { useSyncState } from "../../sync/SyncProvider";
 
 export function NewPlanButton(p: { creating: boolean; onNew(): void }) {
   return (
@@ -18,11 +19,15 @@ interface SidebarProps {
   onSelect(id: PlanId): void;
   onTrash(id: PlanId): void;
   onRestore(id: PlanId): void;
+  onMove(id: PlanId): void;
 }
 
 export function Sidebar(p: SidebarProps) {
+  const { state } = useSyncState();
   const failures = p.registry.failures();
   const readOnly = p.registry.spaceReadOnly();
+  const movable = (l: PlanListing): boolean =>
+    l.space === null && p.registry.attachedSpace() !== null && !readOnly && state.kind !== "off" && !(state.kind === "error" && state.code === "local-failed");
   const locked = (l: PlanListing): boolean => l.space !== null && readOnly;
   const live = p.plans.filter((l) => !l.trashed);
   const trashed = p.plans.filter((l) => l.trashed);
@@ -46,6 +51,11 @@ export function Sidebar(p: SidebarProps) {
                 {shown && l.loaded && (
                   <button type="button" className="button-small" onClick={() => void p.registry.retryPlan(l.id)}>
                     Try again
+                  </button>
+                )}
+                {movable(l) && (
+                  <button type="button" className="button-small" onClick={() => p.onMove(l.id)}>
+                    Move to space
                   </button>
                 )}
                 <button type="button" className="button-small" disabled={locked(l)} onClick={() => p.onTrash(l.id)}>

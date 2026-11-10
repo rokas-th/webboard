@@ -8,9 +8,13 @@ export interface Call {
 
 export type Answer = (args: InvokeArgs | undefined, options?: InvokeOptions) => unknown;
 
+export const DEFAULT_ANSWERS: Readonly<Record<string, Answer>> = {
+  sync_status: () => ({ space: null, revoked: false }),
+};
+
 export const tauri = {
   calls: [] as Call[],
-  answers: {} as Record<string, Answer>,
+  answers: { ...DEFAULT_ANSWERS } as Record<string, Answer>,
 };
 
 interface Held {
@@ -139,7 +143,7 @@ export function resetTauri(answers: Record<string, Answer>): void {
   holds.clear();
   tauri.calls.length = 0;
   for (const k of Object.keys(tauri.answers)) delete tauri.answers[k];
-  Object.assign(tauri.answers, answers);
+  Object.assign(tauri.answers, DEFAULT_ANSWERS, answers);
 }
 
 export function commandsSince(from: number): string[] {

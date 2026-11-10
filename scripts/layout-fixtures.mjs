@@ -453,9 +453,28 @@ const mesa = (log) => ({ id: PLAN_IDS.mesa, name: "MESA 1.0", log });
 
 const onLinux = (f) => ({ ...f, ipc: { ...f.ipc, device_info: { deviceId: "linux", platform: "linux" } } });
 
+const PROBE_SPACE = { server: "https://probe.invalid", spaceId: "sp000000000", deviceId: "mac", deviceName: "Mac" };
+const SPACE_INDEX = "ix-sp000000000";
+const SYNC_OFF = { space: null, revoked: false };
+
+function spaceIndex() {
+  const log = new Log("ixSpc", START);
+  log.act({ lbl: "Name device", w: [own("dn:mac", "Mac"), own("dn:iphone", "iPhone")] });
+  return log.doc();
+}
+
+function inSpace(f, revoked) {
+  const docs = { ...f.docs, [SPACE_INDEX]: frame(spaceIndex()) };
+  return {
+    docs,
+    ipc: { ...f.ipc, store_list: Object.keys(docs), sync_status: { space: { ...PROBE_SPACE }, revoked }, sync_ticket: { ticket: "tk_probe", expiresAt: 0 } },
+  };
+}
+
 export function buildFixtures() {
   const mesaOnMac = fixtureOf([mesa(mesaLog("mesaM"))]);
-  return {
+  const unreadable = fixtureOf([mesa(unreadableLog())]);
+  const fixtures = {
     empty: fixtureOf([]),
     "blank-plan": fixtureOf([{ id: PLAN_IDS.blank, name: "Blank plan", log: blankLog() }]),
     mesa: mesaOnMac,
@@ -466,7 +485,15 @@ export function buildFixtures() {
       { id: PLAN_IDS.long, name: LONG.plan, log: longLog() },
       { id: PLAN_IDS.longRtl, name: LONG.rtlPlan, log: rtlLog() },
     ]),
-    unreadable: fixtureOf([mesa(unreadableLog())]),
+    unreadable,
     "two-choices": fixtureOf([mesa(twoChoicesLog())]),
+    "sync-dialog": mesaOnMac,
+    "sync-space": inSpace(mesaOnMac, false),
+    "sync-receiving": inSpace(unreadable, false),
+    "sync-removed": inSpace(mesaOnMac, true),
   };
+  Object.values(fixtures).forEach((f) => {
+    f.ipc.sync_status ??= { ...SYNC_OFF };
+  });
+  return fixtures;
 }

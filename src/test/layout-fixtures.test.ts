@@ -98,8 +98,10 @@ const DEVICES: ReadonlyMap<DeviceId, string> = new Map([
 ]);
 
 function planDocs(f: Fixture): string[] {
-  return Object.keys(f.docs).filter((d) => d !== "local");
+  return Object.keys(f.docs).filter((d) => d !== "local" && !d.startsWith("ix-"));
 }
+
+const UNREADABLE_FIXTURES: ReadonlySet<string> = new Set(["unreadable", "sync-receiving"]);
 
 function only<T>(xs: readonly T[]): T {
   expect(xs).toHaveLength(1);
@@ -174,7 +176,46 @@ const linksOf = (plan: ReturnType<typeof projectPlan>): string[] => [...plan.lin
 
 describe("layout fixtures", () => {
   it("names the fixtures the probe states use", () => {
-    expect(Object.keys(FIXTURES).sort()).toEqual(["blank-plan", "choices", "empty", "long-names", "mesa", "mesa-linux", "scale", "two-choices", "unreadable"]);
+    expect(Object.keys(FIXTURES).sort()).toEqual([
+      "blank-plan",
+      "choices",
+      "empty",
+      "long-names",
+      "mesa",
+      "mesa-linux",
+      "scale",
+      "sync-dialog",
+      "sync-receiving",
+      "sync-removed",
+      "sync-space",
+      "two-choices",
+      "unreadable",
+    ]);
+  });
+
+  it("answers sync_status in every state, local only unless the state joins a space", () => {
+    const joined = { space: { server: "https://probe.invalid", spaceId: "sp000000000", deviceId: "mac", deviceName: "Mac" }, revoked: false };
+    const expected: Record<string, unknown> = { "sync-space": joined, "sync-receiving": joined, "sync-removed": { ...joined, revoked: true } };
+    Object.entries(FIXTURES).forEach(([name, f]) => expect(f.ipc.sync_status, name).toEqual(expected[name] ?? { space: null, revoked: false }));
+  });
+
+  it("gives every space state its index doc and a ticket, and no other state either", () => {
+    Object.entries(FIXTURES).forEach(([name, f]) => {
+      const space = name === "sync-space" || name === "sync-receiving" || name === "sync-removed";
+      expect("ix-sp000000000" in f.docs, name).toBe(space);
+      expect(f.ipc.sync_ticket, name).toEqual(space ? { ticket: "tk_probe", expiresAt: 0 } : undefined);
+    });
+  });
+
+  it("sync-dialog is the mesa plan, local only", () => {
+    expect(fixture("sync-dialog")).toEqual(fixture("mesa"));
+  });
+
+  it("the space states are their plain fixtures plus the space index", () => {
+    const plain = (f: Fixture) => ({ ...f, docs: Object.fromEntries(Object.entries(f.docs).filter(([d]) => !d.startsWith("ix-"))) });
+    expect(plain(fixture("sync-space")).docs).toEqual(fixture("mesa").docs);
+    expect(plain(fixture("sync-removed")).docs).toEqual(fixture("mesa").docs);
+    expect(plain(fixture("sync-receiving")).docs).toEqual(fixture("unreadable").docs);
   });
 
   it("mesa-linux is the mesa plan on a Linux device", () => {
@@ -203,7 +244,7 @@ describe("layout fixtures", () => {
     Object.entries(FIXTURES).forEach(([name, f]) =>
       planDocs(f).forEach((doc) =>
         rawActions(ydocOf(f, doc)).forEach(([id, raw]) => {
-          if (name === "unreadable" && id === UNREADABLE_ID) return;
+          if (UNREADABLE_FIXTURES.has(name) && id === UNREADABLE_ID) return;
           decodeAction(id, raw).w.forEach((w) => {
             expect(() => parseKey(w.u)).not.toThrow();
             validateWrite(w);
@@ -226,8 +267,8 @@ describe("layout fixtures", () => {
     Object.entries(FIXTURES).forEach(([name, f]) =>
       planDocs(f).forEach((doc) => {
         const { raws, log } = readable(f, doc);
-        expect(raws.some(([id]) => id === UNREADABLE_ID)).toBe(name === "unreadable");
-        if (name !== "unreadable") expect(log.pending).toEqual([]);
+        expect(raws.some(([id]) => id === UNREADABLE_ID)).toBe(UNREADABLE_FIXTURES.has(name));
+        if (!UNREADABLE_FIXTURES.has(name)) expect(log.pending).toEqual([]);
       }),
     );
   });

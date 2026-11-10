@@ -151,7 +151,7 @@ const styled = new Set(sheet.rules.flatMap((r) => (r.selector.match(/\.[A-Za-z][
 
 describe("every class the stylesheets style", () => {
   it("reads the sources and sheets it is asserting against", () => {
-    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./list.css", "./palette.css", "./panel.css", "./shell.css", "./timeline.css", "./tokens.css"]);
+    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./list.css", "./palette.css", "./panel.css", "./shell.css", "./sync.css", "./timeline.css", "./tokens.css"]);
     expect(Object.keys(SOURCES).length).toBeGreaterThan(40);
     expect(CODE.length).toBeGreaterThan(100000);
     expect(styled.size).toBeGreaterThan(60);

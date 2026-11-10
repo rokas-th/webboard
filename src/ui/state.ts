@@ -6,7 +6,10 @@ import { toast } from "./common/Toast";
 export type ViewKind = "timeline" | "board" | "list";
 export type Zoom = "W" | "M" | "Q";
 
+export type SyncPane = "setup" | "join" | "pair" | "devices";
+
 export type DialogState =
+  | { t: "sync"; pane: SyncPane | null }
   | { t: "calendar" }
   | { t: "choice"; id: string; side?: string }
   | { t: "palette" }

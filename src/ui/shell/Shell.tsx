@@ -23,11 +23,15 @@ import { ItemPanel } from "../panel/ItemPanel";
 import { PlanPanel } from "../panel/PlanPanel";
 import { Timeline } from "../timeline/Timeline";
 import { HolidayState } from "./HolidayState";
-import { FILES_STAY, PlanFailed } from "./PlanFailed";
+import { stopsArrival } from "../../sync/reload";
+import { docName, useSyncState } from "../../sync/SyncProvider";
+import { RemovedBanner } from "../sync/RemovedBanner";
+import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
+import { FILES_STAY, PlanFailed, ReloadButton } from "./PlanFailed";
 import { importFlow } from "./fileFlows";
 import { PlanHead } from "./PlanHead";
 import { PlanMenu } from "./PlanMenu";
-import { RELOAD_LABEL, ReloadConfirm } from "./ReloadConfirm";
+import { ReloadConfirm } from "./ReloadConfirm";
 import { NewPlanButton, Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 import { Tray } from "./Tray";
@@ -88,11 +92,7 @@ function IndexBanner(p: { registry: Registry; error: AppError }) {
       <button type="button" className="button-small" onClick={() => void p.registry.retryIndex()}>
         Try again
       </button>
-      {space !== null && !readOnly && (
-        <button type="button" className="button-small" onClick={() => setConfirm(space)}>
-          {RELOAD_LABEL}
-        </button>
-      )}
+      {space !== null && !readOnly && <ReloadButton small onOpen={() => setConfirm(space)} />}
       {space !== null && readOnly && <span className="banner-note">{FILES_STAY}</span>}
       {confirm !== null && <ReloadConfirm registry={p.registry} docId={confirm} onClose={() => setConfirm(null)} />}
     </Banner>
@@ -101,6 +101,7 @@ function IndexBanner(p: { registry: Registry; error: AppError }) {
 
 export function Shell(p: ShellProps) {
   const registry = p.registry;
+  const { state: syncState } = useSyncState();
   const [ui, setUi] = useUi();
   const uiValue = useMemo(() => ({ ui, setUi }), [ui, setUi]);
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
@@ -305,6 +306,17 @@ export function Shell(p: ShellProps) {
     toast(`Moved ${quoted(listing)} to the Trash. Restore it from the Trash.`);
   };
 
+  const moveToSpace = (id: PlanId): void => {
+    try {
+      registry.movePlanToSpace(id);
+    } catch (e) {
+      if (!(e instanceof Refused)) throw e;
+      toast(e.message, "bad");
+      return;
+    }
+    toast("Moved to the space");
+  };
+
   const restore = (id: PlanId): void => {
     const listing = listingOf(id);
     try {
@@ -392,6 +404,12 @@ export function Shell(p: ShellProps) {
             <button type="button" disabled={importing} onClick={importPlan}>
               {importing ? <span className="dim">Importing…</span> : "Import plan…"}
             </button>
+            <button type="button" onClick={() => setUi({ dialog: { t: "sync", pane: "join" } })}>
+              Join with a code
+            </button>
+            <button type="button" onClick={() => setUi({ dialog: { t: "sync", pane: "setup" } })}>
+              Set up sync
+            </button>
           </div>
         </div>
       );
@@ -399,7 +417,19 @@ export function Shell(p: ShellProps) {
     if (failure !== undefined && (session === null || (listing !== undefined && !listing.loaded))) {
       return <PlanFailed registry={registry} id={sel} error={failure} onTrash={trash} />;
     }
-    if (main.k === "incomplete" && main.id === sel) return <p className="main-note">{main.message}</p>;
+    if (main.k === "incomplete" && main.id === sel) {
+      if (!stopsArrival(syncState, sel)) return <p className="main-note">{main.message}</p>;
+      return (
+        <div className="plan-stopped">
+          <p className="sync-message bad">{syncMessage(syncState, docName(registry))}</p>
+          <SyncActionButtons holds={false}>
+            <button type="button" onClick={() => setUi({ dialog: { t: "sync", pane: null } })}>
+              Open sync
+            </button>
+          </SyncActionButtons>
+        </div>
+      );
+    }
     if (main.k === "error" && main.id === sel) {
       return (
         <Banner message={main.message}>
@@ -456,8 +486,10 @@ export function Shell(p: ShellProps) {
               onSelect={(id) => select(id)}
               onTrash={trash}
               onRestore={restore}
+              onMove={moveToSpace}
             />
             <main className="main">
+              <RemovedBanner session={session} />
               {indexError !== null && <IndexBanner registry={registry} error={indexError} />}
               {registry.indexUnreadable().map((line) => (
                 <p key={line} className="banner bad">
@@ -510,6 +542,7 @@ export function Shell(p: ShellProps) {
           )}
           {ui.dialog !== null && ui.dialog.t === "palette" && <Palette commands={commands(ctx)} onClose={closeDialog} />}
           {ui.dialog !== null && ui.dialog.t === "about" && <About onClose={closeDialog} />}
+          {ui.dialog !== null && ui.dialog.t === "sync" && <SyncDialog pane={ui.dialog.pane} onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />}
           <Toasts />
         </div>
       </OpenChoice.Provider>

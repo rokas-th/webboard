@@ -14,6 +14,7 @@ import "./styles/panel.css";
 import "./styles/calendar.css";
 import "./styles/choices.css";
 import "./styles/palette.css";
+import "./styles/sync.css";
 import App from "./App";
 
 const root = document.getElementById("root");

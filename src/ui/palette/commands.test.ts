@@ -130,11 +130,11 @@ describe("commands()", () => {
     expect(all.filter((x) => x.startsWith("nudge") || x.startsWith("resize") || x === "trash" || x === "go-first-conflict")).toEqual([]);
   });
 
-  it("holds exactly new-plan, import, open-plan, palette and about with no session", async () => {
+  it("holds exactly new-plan, import, the sync commands, open-plan, palette and about with no session", async () => {
     const t = await made(SMALL);
     const h = harness(t, { plan: null }, ["p2"]);
     const ctx: CommandCtx = { ...h.ctx, session: null, run: null, undo: null, redo: null };
-    expect(ids(ctx)).toEqual(["new-plan", "import", `open-plan:${t.session.view().plan.id}`, "open-plan:p2", "palette", "about"]);
+    expect(ids(ctx)).toEqual(["new-plan", "import", "sync-setup", "sync-join", "sync-devices", `open-plan:${t.session.view().plan.id}`, "open-plan:p2", "palette", "about"]);
   });
 
   it("holds export and import in the File group with an open plan", async () => {
@@ -146,19 +146,39 @@ describe("commands()", () => {
     ]);
   });
 
-  it("lists the File commands together: New plan, Export plan…, Import plan…", async () => {
+  it("lists the File commands together: New plan, Export plan…, Import plan…, then sync", async () => {
     const t = await made(SMALL);
     const h = harness(t, { selected: "a" }, ["p2"]);
     const all = commands(h.ctx);
     const at = all.findIndex((c) => c.group === "File");
-    expect(all.slice(at, at + 3).map((c) => [c.id, c.group])).toEqual([
+    expect(all.slice(at, at + 6).map((c) => [c.id, c.group])).toEqual([
       ["new-plan", "File"],
       ["export", "File"],
       ["import", "File"],
+      ["sync-setup", "File"],
+      ["sync-join", "File"],
+      ["sync-devices", "File"],
     ]);
-    expect(all.filter((c) => c.group === "File")).toHaveLength(3);
+    expect(all.filter((c) => c.group === "File")).toHaveLength(6);
     const none: CommandCtx = { ...h.ctx, session: null, run: null, undo: null, redo: null };
-    expect(commands(none).filter((c) => c.group === "File").map((c) => c.id)).toEqual(["new-plan", "import"]);
+    expect(commands(none).filter((c) => c.group === "File").map((c) => c.id)).toEqual(["new-plan", "import", "sync-setup", "sync-join", "sync-devices"]);
+  });
+
+  it.each([
+    ["with", "sync-setup", "setup", "Set up sync"],
+    ["with", "sync-join", "join", "Join with a code"],
+    ["with", "sync-devices", "devices", "Sync devices"],
+    ["without", "sync-setup", "setup", "Set up sync"],
+    ["without", "sync-join", "join", "Join with a code"],
+    ["without", "sync-devices", "devices", "Sync devices"],
+  ])("a plan open %s: %s opens the %s pane", async (mode, id, pane, label) => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    const ctx: CommandCtx = mode === "with" ? h.ctx : { ...h.ctx, session: null, run: null, undo: null, redo: null };
+    const cmd = find(ctx, id);
+    expect([cmd.label, cmd.group]).toEqual([label, "File"]);
+    cmd.run();
+    expect(h.setUi.mock.calls).toEqual([[{ dialog: { t: "sync", pane } }]]);
   });
 
   it("runs export through exportFlow once, on the open session", async () => {

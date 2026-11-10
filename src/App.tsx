@@ -4,6 +4,7 @@ import { AppError, call } from "./services/ipc";
 import { guardWindowClose } from "./services/window";
 import { Registry } from "./store/registry";
 import { toast } from "./ui/common/Toast";
+import { stopSync, SyncProvider } from "./sync/SyncProvider";
 import { Shell } from "./ui/shell/Shell";
 
 export const RESET_SETTINGS_LINE = "Plan names and the last region are rebuilt; the old file is kept.";
@@ -30,12 +31,19 @@ export default function App() {
   const started = useRef(false);
   const warmed = useRef<Registry | null>(null);
   const live = useRef<Registry | null>(null);
+  const closable = useRef<{ close(): Promise<void> } | null>(null);
 
   const open = (): void => {
     setStart({ k: "opening" });
     Registry.open({ clock: systemClock }).then(
       (registry) => {
         live.current = registry;
+        closable.current = {
+          close: () => {
+            stopSync(registry);
+            return registry.close();
+          },
+        };
         setStart({ k: "open", registry });
       },
       (e: unknown) => {
@@ -75,7 +83,7 @@ export default function App() {
     };
     let off: (() => void) | null = null;
     let gone = false;
-    guardWindowClose(() => live.current, closeFailed).then((unlisten) => {
+    guardWindowClose(() => (live.current === null ? null : closable.current), closeFailed).then((unlisten) => {
       if (gone) unlisten();
       else off = unlisten;
     }, unguarded);
@@ -86,7 +94,13 @@ export default function App() {
   }, []);
 
   if (start.k === "opening") return null;
-  if (start.k === "open") return <Shell registry={start.registry} clock={systemClock} />;
+  if (start.k === "open") {
+    return (
+      <SyncProvider registry={start.registry}>
+        <Shell registry={start.registry} clock={systemClock} />
+      </SyncProvider>
+    );
+  }
 
   const recovery = start.recovery;
   const recover = (cmd: "settings_reset" | "store_set_aside"): void => {

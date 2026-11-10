@@ -19,6 +19,7 @@ import { timelineRows } from "../timeline/rows";
 import { bannerText, heldChoice, itemChoices, unitSubject } from "./describe";
 import { conflictSuccessor } from "./HeadCounts";
 import { groupRows, outcomeLine } from "./outcome";
+import { withSync } from "../../test/withSync";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -68,7 +69,7 @@ const peerOf = async (t: TestSession): Promise<{ session: PlanSession; sync(): v
 };
 
 const shown = async (t: TestSession): Promise<void> => {
-  render(shellFor(t).ui);
+  render(withSync(shellFor(t).ui));
   await settle();
 };
 
@@ -725,7 +726,7 @@ describe("a choice settled meanwhile", () => {
       session: (x) => pick(x, t.session, other.session),
       doc: (x) => pick(x, t.doc, other.doc),
     });
-    render(ui);
+    render(withSync(ui));
     await settle();
     openChoiceFromHead(t, c);
     expect(screen.getByRole("dialog")).toBeTruthy();

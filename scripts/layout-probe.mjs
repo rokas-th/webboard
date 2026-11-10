@@ -80,11 +80,18 @@ function states() {
       sizes: o.sizes ?? "desktop",
       dialog: o.dialog === true,
       clip: o.clip === true,
+      net: { ws: o.net?.ws ?? "none", online: o.net?.online ?? true },
     });
 
   add("empty", "empty", {
     place: null,
-    actions: [expect(".empty-state button", "New plan"), expect(".empty-state button", "Import plan…"), expect(".toolbar .sync-chip", "Local only")],
+    actions: [
+      expect(".empty-state button", "New plan"),
+      expect(".empty-state button", "Import plan…"),
+      expect(".empty-state button", "Join with a code"),
+      expect(".empty-state button", "Set up sync"),
+      expect(".toolbar .sync-chip", "Local only"),
+    ],
   });
   add("blank-plan", "blank-plan", { actions: [expect(".tl-empty", EMPTY_PLAN)] });
   VIEWS.forEach(([slug, place, names]) => {
@@ -141,6 +148,28 @@ function states() {
   add("linux-toolbar", "mesa-linux", {
     sizes: "smallest",
     actions: [viewExpect("timeline"), expect("header.toolbar .wordmark", "WebBoard"), count(".toolbar-mac", 0)],
+  });
+  add("sync-chip/off", "mesa", { actions: [viewExpect("timeline"), expect(".toolbar button.sync-chip.chip-cyan", "Local only")] });
+  add("sync-chip/syncing", "sync-space", { net: { ws: "silent" }, actions: [viewExpect("timeline"), expect(".toolbar button.sync-chip.chip-cyan", "Syncing")] });
+  add("sync-chip/synced", "sync-space", {
+    net: { ws: "sync" },
+    actions: [viewExpect("timeline"), count(".toolbar .sync-chip .dot-live", 1), expect(".toolbar button.sync-chip.chip-cyan", "Synced")],
+  });
+  add("sync-chip/receiving", "sync-receiving", { net: { ws: "sync" }, actions: [viewExpect("timeline"), expect(".toolbar button.sync-chip.chip-cyan", "Receiving…")] });
+  add("sync-chip/offline", "sync-space", { net: { ws: "silent", online: false }, actions: [viewExpect("timeline"), expect(".toolbar button.sync-chip.chip-amber", "Offline — 1 change waiting")] });
+  add("sync-chip/error", "sync-removed", { actions: [viewExpect("timeline"), expect(".toolbar button.sync-chip.chip-magenta", "Device removed")] });
+  add("removed-banner", "sync-removed", {
+    actions: [
+      viewExpect("timeline"),
+      expect(".removed-banner button", "Join with a code"),
+      expect(".removed-banner button", "Set up sync"),
+      count(".removed-banner button", 2),
+    ],
+  });
+  add("sync-dialog", "sync-dialog", {
+    sizes: "dialog",
+    dialog: true,
+    actions: [click(".toolbar .sync-chip", "Local only"), expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"), expect('[role="dialog"] button', "Create or join space")],
   });
   add("history", "mesa", { actions: [reveal(".slot-panel .panel h2", "History"), count(".slot-panel .history li", 40)] });
   add("revert-preview", "mesa", {
@@ -218,6 +247,42 @@ const SHIM = String.raw`
     }
     return Promise.resolve(JSON.parse(JSON.stringify(a)));
   }
+  var SYNCED = [0, 1, 2, 0, 0];
+  class ProbeSocket extends EventTarget {
+    constructor(url) {
+      super();
+      this.url = String(url);
+      this.readyState = 0;
+      this.binaryType = "blob";
+      if (P.net.ws === "none") {
+        window.__PROBE_MISSING__.push("WebSocket: the state opened " + this.url + " but allows no socket");
+        return;
+      }
+      setTimeout(() => {
+        if (this.readyState !== 0) return;
+        this.readyState = 1;
+        this.dispatchEvent(new Event("open"));
+      }, 0);
+    }
+    send(data) {
+      var b = new Uint8Array(data);
+      if (P.net.ws !== "sync" || b[0] !== 0 || b[1] !== 0) return;
+      setTimeout(() => {
+        if (this.readyState === 1) this.dispatchEvent(new MessageEvent("message", { data: new Uint8Array(SYNCED).buffer }));
+      }, 0);
+    }
+    close(code) {
+      if (this.readyState === 3) return;
+      this.readyState = 3;
+      this.dispatchEvent(new CloseEvent("close", { code: code === undefined ? 1000 : code, reason: "" }));
+    }
+  }
+  [["CONNECTING", 0], ["OPEN", 1], ["CLOSING", 2], ["CLOSED", 3]].forEach(function (c) {
+    ProbeSocket[c[0]] = c[1];
+    ProbeSocket.prototype[c[0]] = c[1];
+  });
+  window.WebSocket = ProbeSocket;
+  if (!P.net.online) Object.defineProperty(Navigator.prototype, "onLine", { configurable: true, get: function () { return false; } });
   var nextId = 1;
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
@@ -1311,6 +1376,7 @@ async function main() {
       fixture: fixtures.get(state.fixture),
       clip: state.clip ? LONG_NAMES : [],
       dialog: state.dialog,
+      net: state.net,
       fullMinWidth: FULL_MIN_WIDTH,
       fonts: FONTS,
     }).replace(/</g, "\\u003c");
