@@ -848,6 +848,24 @@ describe("removal and the space", () => {
       expect(r.plans().filter((l) => !l.trashed && l.space === SP).map((l) => l.id).sort()).toEqual(["L", "M", "P"]);
     });
 
+    it("says it in the singular for one plan and moves it", async () => {
+      const w = await spaceWorld();
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await settle();
+      const shown = line();
+      if (shown === null) throw new Error("no local line");
+      expect([shown.querySelector("p")?.textContent, within(shown).getByRole("button").textContent]).toEqual([
+        "1 plan is on this device only. Move it to the space to see it on other devices.",
+        "Move it",
+      ]);
+      const move = vi.spyOn(r, "movePlansToSpace");
+      await click(within(shown).getByRole("button", { name: "Move it" }));
+      expect(move.mock.calls).toEqual([[["L"]]]);
+      expect(toasts()).toEqual(["Moved to the space"]);
+      expect([line(), tagged("tag-local")]).toEqual([null, []]);
+    });
+
     it("toasts a move that stopped half-way, and the line stays", async () => {
       const w = await spaceWorld({ local: true });
       const { r, f } = await mounted(w);

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Refused, type Built, type Intent } from "../../actions/intents";
 import { CLOSURE_TOO_LONG, closureTooLong, MAX_CLOSURE_DAYS, regionKey, type Calendar, type HolidayYear, type RegionRef, type Tuning } from "../../domain/calendar";
 import { FIRST_PLAN_DATE, isCalendarDate, LAST_PLAN_DATE, toDay, toIso, yearOf, type Day, type IsoDate, type Weekday } from "../../domain/dates";
@@ -13,6 +13,7 @@ import { usePlanView, type PlanSession } from "../../store/session";
 import { HOLIDAY_ATTRIBUTION } from "../common/About";
 import { Dialog } from "../common/Dialog";
 import { toast } from "../common/Toast";
+import { DATE_UNREADABLE } from "../copy";
 import { historyTime } from "../panel/historyText";
 import { useExec, useRun } from "../run";
 import { DayList, type DraftYear } from "./DayList";
@@ -59,6 +60,11 @@ const lastDayMax = (from: string): IsoDate => {
   const longest = toIso(toDay(from) + MAX_CLOSURE_DAYS - 1);
   return longest < LAST_PLAN_DATE ? longest : LAST_PLAN_DATE;
 };
+
+function unreadable(el: HTMLInputElement | null): boolean {
+  if (el === null) throw new Error("The day-off date field is not mounted");
+  return el.validity.badInput;
+}
 
 const yearsOf = (from: Day, to: Day): number[] => Array.from({ length: yearOf(to) - yearOf(from) + 1 }, (_, i) => yearOf(from) + i);
 
@@ -137,6 +143,8 @@ export function CalendarBody(p: CalendarProps) {
   const [dayName, setDayName] = useState("");
   const [dayFrom, setDayFrom] = useState("");
   const [dayTo, setDayTo] = useState("");
+  const firstDayRef = useRef<HTMLInputElement>(null);
+  const lastDayRef = useRef<HTMLInputElement>(null);
   const clock = p.clock;
   const planCal = view.plan.calendar;
   if (seen !== planCal.holidays) {
@@ -210,6 +218,10 @@ export function CalendarBody(p: CalendarProps) {
   const onTune = (date: IsoDate, t: Tuning | null): void => change((c) => tune(c, date, t));
 
   const addDay = (): void => {
+    if (unreadable(firstDayRef.current) || unreadable(lastDayRef.current)) {
+      toast(DATE_UNREADABLE, "bad");
+      return;
+    }
     const name = dayName.trim();
     if (name === "" || !isCalendarDate(dayFrom)) {
       toast("A day off needs a name and a first day.", "bad");
@@ -318,8 +330,8 @@ export function CalendarBody(p: CalendarProps) {
           </div>
           <div className="closure-add">
             <input type="text" aria-label="Day off name" placeholder="Name, e.g. Team offsite" value={dayName} onChange={(e) => setDayName(e.target.value)} />
-            <input type="date" aria-label="First day" value={dayFrom} min={FIRST_PLAN_DATE} max={LAST_PLAN_DATE} onChange={(e) => setDayFrom(e.target.value)} />
-            <input type="date" aria-label="Last day" value={dayTo} min={FIRST_PLAN_DATE} max={lastDayMax(dayFrom)} onChange={(e) => setDayTo(e.target.value)} />
+            <input ref={firstDayRef} type="date" aria-label="First day" value={dayFrom} min={FIRST_PLAN_DATE} max={LAST_PLAN_DATE} onChange={(e) => setDayFrom(e.target.value)} />
+            <input ref={lastDayRef} type="date" aria-label="Last day" value={dayTo} min={FIRST_PLAN_DATE} max={lastDayMax(dayFrom)} onChange={(e) => setDayTo(e.target.value)} />
             <button type="button" className="button-small" onClick={addDay}>
               Add a day off
             </button>

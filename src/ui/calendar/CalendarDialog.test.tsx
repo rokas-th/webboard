@@ -13,6 +13,7 @@ import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts 
 import { emptyYear, seededStore, testRegistry } from "../../test/shell";
 import { tauri, type Answer } from "../../test/tauriMock";
 import { clearToasts } from "../common/Toast";
+import { DATE_UNREADABLE } from "../copy";
 import { Shell } from "../shell/Shell";
 import { useUi, type UiState } from "../state";
 import CONSUMER_HOSTS from "../../../crates/webboard-core/tests/fixtures/holidays/consumer-hosts.json";
@@ -679,6 +680,24 @@ describe("weekdays, days off and closures", () => {
     fireEvent.click(inDialog().getByRole("button", { name: "Add a day off" }));
     expect(toastTexts()).toEqual(["A day off needs a name and a first day.", "A day off needs a name and a first day.", "The last day is before the first day."]);
     expect(applyButton().disabled).toBe(true);
+  });
+
+  it("says so when the browser cannot read a typed first or last day, and adds nothing", async () => {
+    const t = await made([]);
+    await shown(t);
+    await openDialog();
+    type("Day off name", "Away");
+    type("First day", "2026-11-17");
+    Object.defineProperty(field("Last day"), "validity", { configurable: true, value: { badInput: true } });
+    fireEvent.click(inDialog().getByRole("button", { name: "Add a day off" }));
+    Object.defineProperty(field("Last day"), "validity", { configurable: true, value: { badInput: false } });
+    type("First day", "");
+    Object.defineProperty(field("First day"), "validity", { configurable: true, value: { badInput: true } });
+    fireEvent.click(inDialog().getByRole("button", { name: "Add a day off" }));
+    await settle();
+    expect(toastTexts()).toEqual([DATE_UNREADABLE, DATE_UNREADABLE]);
+    const list = inDialog().getByRole("list", { name: "Days off and holidays" });
+    expect([[...list.querySelectorAll(".day-name")].filter((n) => n.textContent === "Away").length, inDialog().queryByRole("button", { name: "Remove Away" }), applyButton().disabled]).toEqual([0, null, true]);
   });
 
   it("caps the last day at 366 days from the first, and refuses a longer range typed past the cap", async () => {
