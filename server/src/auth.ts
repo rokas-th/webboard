@@ -119,7 +119,7 @@ const TOO_MANY_PLANS: Failure = {
   ok: false,
   status: 409,
   error: 'too_many_plans',
-  message: `This device has joined ${MAX_PLANS_PER_DEVICE} plans, the most one device may join.`,
+  message: `This device has joined ${MAX_PLANS_PER_DEVICE} plans, the most one device may join. Delete a plan forever from the Trash to free a place.`,
 };
 const GONE: Failure = { ok: false, status: 410, error: 'gone', message: 'This plan was deleted forever on another device.' };
 const UNKNOWN_PLAN: Failure = {

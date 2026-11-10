@@ -401,7 +401,13 @@ describe('auth', () => {
     });
   });
 
-  it('refuses a ticket for a 501st plan, and keeps the joined plans and the index open', async () => {
+  it('refuses a ticket for a 501st plan, keeps the joined plans and the index open, and a purge frees a place', async () => {
+    const tooMany = {
+      ok: false,
+      status: 409,
+      error: 'too_many_plans',
+      message: 'This device has joined 500 plans, the most one device may join. Delete a plan forever from the Trash to free a place.',
+    };
     await inSpace('join-cap', async (storage) => {
       const { spaceId, token } = await enrolled(storage, DEV_A);
       const plans = Array.from({ length: 500 }, (_, i) => 'p' + String(i).padStart(10, '0'));
@@ -409,12 +415,7 @@ describe('auth', () => {
         value(await ticket(storage, T, token, doc));
       }
       const tickets = count(storage, 'tickets');
-      expect(await ticket(storage, T, token, 'pX000000000')).toEqual({
-        ok: false,
-        status: 409,
-        error: 'too_many_plans',
-        message: 'This device has joined 500 plans, the most one device may join.',
-      });
+      expect(await ticket(storage, T, token, 'pX000000000')).toEqual(tooMany);
       expect(count(storage, 'tickets')).toBe(tickets);
       expect(count(storage, 'joins')).toBe(500);
       expect(await ticket(storage, T, token, plans[0])).toMatchObject({ ok: true });
@@ -422,6 +423,11 @@ describe('auth', () => {
       expect(count(storage, 'joins')).toBe(501);
       const other = await enrolled(storage, DEV_B);
       expect(await ticket(storage, T, other.token, 'pX000000000')).toMatchObject({ ok: true });
+      expect(await ticket(storage, T, other.token, plans[1])).toMatchObject({ ok: true });
+      expect(await purgePlan(storage, T + 1, other.token, plans[1])).toEqual({ ok: true, value: { device: DEV_B } });
+      expect(storage.sql.exec('SELECT COUNT(*) AS n FROM joins WHERE doc = ?', plans[1]).one()).toEqual({ n: 0 });
+      expect(await ticket(storage, T + 2, token, 'pX000000000')).toMatchObject({ ok: true });
+      expect(await ticket(storage, T + 2, token, 'pY000000000')).toEqual(tooMany);
     });
   });
 

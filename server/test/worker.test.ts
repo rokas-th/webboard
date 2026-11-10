@@ -316,7 +316,7 @@ describe('the worker', () => {
     });
     await refused(await send('/ticket', { method: 'POST', token, body: { doc: newDoc() } }), 409, {
       error: 'too_many_plans',
-      message: 'This device has joined 500 plans, the most one device may join.',
+      message: 'This device has joined 500 plans, the most one device may join. Delete a plan forever from the Trash to free a place.',
     });
   });
 
