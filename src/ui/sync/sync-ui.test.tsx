@@ -983,6 +983,44 @@ describe("loading again from the server", () => {
     expect(inDialog().queryByRole("button", { name: RELOAD })).toBeNull();
   });
 
+  it("the index reload confirmation keeps the Sync dialog and its opener", async () => {
+    const w = await spaceWorld();
+    w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+    const { r } = await mounted(w);
+    const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+    const opener = chip();
+    const escape = async (): Promise<void> => {
+      act(() => {
+        fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      });
+      await settle();
+    };
+    act(() => opener.focus());
+    await openChip();
+    const frame = dialog();
+    const load = within(frame).getByRole("button", { name: RELOAD });
+    act(() => load.focus());
+    await click(load);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    const confirmation = screen.getByRole("dialog", { name: RELOAD });
+    expect(confirmation.contains(document.activeElement)).toBe(true);
+    await click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    expect(document.activeElement).toBe(within(dialog()).getByRole("button", { name: RELOAD }));
+    expect(screen.getAllByRole("dialog")).toEqual([frame]);
+    await click(within(frame).getByRole("button", { name: RELOAD }));
+    expect(screen.getAllByRole("dialog")).toEqual([frame]);
+    expect(frame.getAttribute("aria-label")).toBe(RELOAD);
+    await escape();
+    expect(screen.getAllByRole("dialog")).toEqual([frame]);
+    expect(frame.getAttribute("aria-label")).toBe("Sync");
+    expect(document.activeElement).toBe(within(frame).getByRole("button", { name: RELOAD }));
+    await escape();
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    expect(document.activeElement).toBe(opener);
+    expect(opener.isConnected).toBe(true);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["store.io", "Disk full."],
     ["store.locked", "The plan list is open in another WebBoard process; close it there first."],
@@ -1310,6 +1348,31 @@ describe("sync on the phone", () => {
     expect(dialogs()).toEqual([RELOAD]);
     await click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
     expect(reload.mock.calls).toEqual([[IX]]);
+  });
+
+  it("the index reload confirmation keeps the Sync sheet and its opener on the phone", async () => {
+    const w = await spaceWorld();
+    w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+    const { r } = await mounted(w);
+    const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+    const opener = within(topBar()).getByRole("button", { name: "The space’s plan list on this device is damaged" });
+    act(() => opener.focus());
+    await click(opener);
+    const frame = syncSheet();
+    const load = within(frame).getByRole("button", { name: RELOAD });
+    act(() => load.focus());
+    await click(load);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    const confirmation = screen.getByRole("dialog", { name: RELOAD });
+    expect(confirmation.contains(document.activeElement)).toBe(true);
+    await click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    expect(document.activeElement).toBe(within(syncSheet()).getByRole("button", { name: RELOAD }));
+    expect(screen.getAllByRole("dialog")).toEqual([frame]);
+    await click(within(frame).getByRole("button", { name: "Close" }));
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    expect(document.activeElement).toBe(opener);
+    expect(opener.isConnected).toBe(true);
+    expect(reload).not.toHaveBeenCalled();
   });
 
   it("a remote plan shows in the phone list", async () => {

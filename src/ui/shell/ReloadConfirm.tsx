@@ -9,7 +9,7 @@ import { toast } from "../common/Toast";
 export const RELOAD_LABEL = "Load again from the server";
 export const RELOAD_TEXT = "Changes this device had not sent to the server are not loaded again; the damaged files stay on this device.";
 
-export function ReloadConfirm(p: { registry: Registry; docId: string; frame?: "dialog" | "sheet"; onClose(): void }) {
+export function ReloadConfirmBody(p: { registry: Registry; docId: string; onClose(): void }) {
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const settle = (): void => {
@@ -32,7 +32,7 @@ export function ReloadConfirm(p: { registry: Registry; docId: string; frame?: "d
       },
     );
   };
-  const body: ReactNode = (
+  return (
     <>
       <p>{RELOAD_TEXT}</p>
       <div className="modal-actions">
@@ -45,6 +45,10 @@ export function ReloadConfirm(p: { registry: Registry; docId: string; frame?: "d
       </div>
     </>
   );
+}
+
+export function ReloadConfirm(p: { registry: Registry; docId: string; frame?: "dialog" | "sheet"; onClose(): void }) {
+  const body: ReactNode = <ReloadConfirmBody registry={p.registry} docId={p.docId} onClose={p.onClose} />;
   if (p.frame === "sheet") {
     return (
       <Sheet open title={RELOAD_LABEL} onClose={p.onClose}>

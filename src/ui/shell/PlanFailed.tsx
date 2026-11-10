@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type Ref } from "react";
 import type { PlanId } from "../../domain/model";
 import type { AppError } from "../../services/ipc";
 import type { Registry } from "../../store/registry";
@@ -10,10 +10,10 @@ import { RELOAD_LABEL, ReloadConfirm } from "./ReloadConfirm";
 export const FILES_STAY = "The plan’s files stay on this device.";
 export const NEEDS_CONNECTION = "Needs a connection to the server.";
 
-export function ReloadButton(p: { enabled: boolean; small?: boolean; onOpen(): void }) {
+export function ReloadButton(p: { enabled: boolean; small?: boolean; buttonRef?: Ref<HTMLButtonElement>; onOpen(): void }) {
   return (
     <span className="reload-gate">
-      <button type="button" className={p.small === true ? "button-small" : undefined} disabled={!p.enabled} onClick={p.onOpen}>
+      <button ref={p.buttonRef} type="button" className={p.small === true ? "button-small" : undefined} disabled={!p.enabled} onClick={p.onOpen}>
         {RELOAD_LABEL}
       </button>
       {!p.enabled && <span className="dim">{NEEDS_CONNECTION}</span>}
