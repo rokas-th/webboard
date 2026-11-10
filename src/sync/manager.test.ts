@@ -477,20 +477,42 @@ describe("SyncManager: closes", () => {
     expect(prov(f, "P2").calls).not.toContain("disconnect");
   });
 
-  it("1007 and 1011 closes show rejected", async () => {
-    for (const code of [1007, 1011]) {
-      const { r, f, m } = await syncedStart();
-      prov(f, "P").closeWith(code, "Refused");
+  it("a 1007 close shows rejected", async () => {
+    const { r, f, m } = await syncedStart();
+    prov(f, "P").closeWith(1007, "Malformed update");
+    expect(errorOf(m.state())).toMatchObject({
+      code: "rejected",
+      doc: "P",
+      message: "The server refused a change to “Launch” from this device. Update WebBoard, then try again.",
+      cause: null,
+    });
+    expect(chipText(m.state(), NAME(r))).toBe("The server refused a change from this device — export this plan and check for an update");
+    await stopped(f, "P");
+    expect(prov(f, IX).calls).not.toContain("disconnect");
+    expect(errorOf(m.state()).code).toBe("rejected");
+  });
+
+  it("a 1011 close is a server fault with Try again, before open and after", async () => {
+    for (const start of [started, syncedStart]) {
+      const { r, f, m } = await start();
+      prov(f, "P").closeWith(1011, "Uncaught exception during session setup");
       expect(errorOf(m.state())).toMatchObject({
-        code: "rejected",
+        code: "store-failed",
         doc: "P",
-        message: "The server refused a change to “Launch” from this device. Update WebBoard, then try again.",
+        since: NOW,
+        message: "The server could not store a change to “Launch”. Try again; if it repeats, export it.",
         cause: null,
       });
-      expect(chipText(m.state(), NAME(r))).toBe("The server refused a change from this device — export this plan and check for an update");
+      expect(chipText(m.state(), NAME(r))).toBe("Server could not store changes to “Launch” since 14:02");
       await stopped(f, "P");
       expect(prov(f, IX).calls).not.toContain("disconnect");
-      expect(errorOf(m.state()).code).toBe("rejected");
+      const from = tauri.calls.length;
+      await m.restart();
+      await advance(60_000);
+      expect(prov(f, "P").connects()).toBe(1);
+      expect(tickets(from, "P")).toBe(1);
+      syncAll(f);
+      expect(m.state()).toEqual({ kind: "synced" });
       m.stop();
       await settle();
       await Promise.all(registries.splice(0).map((x) => x.close()));
@@ -1373,6 +1395,58 @@ describe("SyncManager: fault handling", () => {
     ok.resolve(null);
     await marked;
     expect(two.r.spaceReadOnly()).toBe(true);
+  });
+
+  it("a revoke that lands while start reads the status keeps the space read-only", async () => {
+    const w = world();
+    seedBase(w);
+    const r = await openRegistry();
+    const f = fakeFactory();
+    const m = managerOf(w, r, f);
+    const status = hold("sync_status");
+    const starting = m.start();
+    await settle();
+    await m.markRevoked();
+    expect(r.spaceReadOnly()).toBe(true);
+    const from = tauri.calls.length;
+    status.resolve({ space: SPACE, revoked: false });
+    await starting;
+    await settle();
+    expect(r.spaceReadOnly()).toBe(true);
+    expect(errorOf(m.state())).toMatchObject({ code: "revoked", message: null });
+    expect(chipText(m.state(), NAME(r))).toBe("Device removed");
+    expect(f.all).toHaveLength(0);
+    expect(tickets(from, IX) + tickets(from, "P")).toBe(0);
+    expect(appendsTo(from, IX)).toHaveLength(0);
+    expect(r.plans().find((p) => p.id === "P")?.space).toBe(SP);
+    const p = await r.session("P");
+    expect(p.readOnly).toBe(true);
+  });
+
+  it("a revoke that lands while start attaches names nothing in the space", async () => {
+    const w = world();
+    seedBase(w);
+    const r = await openRegistry();
+    const m = managerOf(w, r, fakeFactory());
+    const attach = r.attachSpace.bind(r);
+    let open = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    vi.spyOn(r, "attachSpace").mockImplementation(async (spaceId) => {
+      await gate;
+      return attach(spaceId);
+    });
+    const starting = m.start();
+    await settle();
+    await m.markRevoked();
+    const from = tauri.calls.length;
+    open();
+    await starting;
+    await settle();
+    expect(appendsTo(from, IX)).toHaveLength(0);
+    expect(r.spaceReadOnly()).toBe(true);
+    expect(errorOf(m.state()).code).toBe("revoked");
   });
 
   it("an attach error the registry did not record is not swallowed", async () => {

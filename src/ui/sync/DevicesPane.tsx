@@ -14,10 +14,13 @@ export function DevicesPane() {
   }, []);
   const remove = (d: DeviceEntry): void =>
     cmd.run(async () => {
-      await syncRemoveDevice(d.id);
-      setAsking(null);
-      toast(`${d.name} removed`);
-      setDevices(await syncDevices());
+      try {
+        await syncRemoveDevice(d.id);
+        toast(`${d.name} removed`);
+      } finally {
+        setAsking(null);
+        setDevices(await syncDevices());
+      }
     });
   return (
     <div className="sync-form">

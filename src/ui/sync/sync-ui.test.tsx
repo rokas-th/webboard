@@ -495,6 +495,34 @@ describe("the sync panes", () => {
     expect(toasts()).toEqual(["iPad removed"]);
   });
 
+  it("a failed removal closes the question, refreshes the list and keeps the error", async () => {
+    const internal = "Server answered 500 internal: The device was removed, but one of its open connections could not be closed; it stops syncing when that connection drops.";
+    let list = [
+      { id: "dev-A", name: "Mac", createdAt: 0, lastSeenAt: NOW, current: true },
+      { id: "dev-I", name: "iPad", createdAt: 0, lastSeenAt: NOW, current: false },
+    ];
+    const w = await spaceWorld({
+      answers: {
+        sync_devices: () => list,
+        sync_remove_device: () => {
+          list = list.filter((d) => d.id !== "dev-I");
+          throw { code: "sync.http", message: internal };
+        },
+      },
+    });
+    const { f } = await mounted(w);
+    syncAll(f);
+    const p = await openPane("Devices");
+    await click(within(p).getByRole("button", { name: "Remove" }));
+    await click(within(pane("Devices")).getByRole("button", { name: "Remove device" }));
+    expect(calls("sync_remove_device")).toBe(1);
+    expect(calls("sync_devices")).toBe(2);
+    expect(within(pane("Devices")).queryByText("iPad")).toBeNull();
+    expect(within(pane("Devices")).queryByRole("button", { name: "Remove device" })).toBeNull();
+    expect(errorText(pane("Devices"))).toEqual([internal]);
+    expect(toasts()).toEqual([]);
+  });
+
   it("removing asks first", async () => {
     const w = await spaceWorld({
       answers: {

@@ -13,6 +13,7 @@ const DEVICE_ID = /^[A-Za-z0-9_-]{11}$/;
 
 type Frame =
   | { kind: 'step1'; decoder: decoding.Decoder }
+  | { kind: 'step2'; update: Uint8Array }
   | { kind: 'update'; update: Uint8Array }
   | { kind: 'awareness' }
   | { kind: 'unknown' };
@@ -59,7 +60,10 @@ function readFrame(bytes: Uint8Array): Frame {
   if (subtype === syncProtocol.messageYjsSyncStep1) {
     return { kind: 'step1', decoder };
   }
-  if (subtype === syncProtocol.messageYjsSyncStep2 || subtype === syncProtocol.messageYjsUpdate) {
+  if (subtype === syncProtocol.messageYjsSyncStep2) {
+    return { kind: 'step2', update: decoding.readVarUint8Array(decoder) };
+  }
+  if (subtype === syncProtocol.messageYjsUpdate) {
     return { kind: 'update', update: decoding.readVarUint8Array(decoder) };
   }
   return { kind: 'unknown' };
@@ -142,7 +146,7 @@ export class Room extends YServer {
       return;
     }
     if (!isEmptyUpdate(frame.update)) {
-      await this.store(conn, frame.update);
+      await this.store(conn, frame);
     }
   }
 
@@ -159,12 +163,16 @@ export class Room extends YServer {
     conn.send(encoding.toUint8Array(reply));
   }
 
-  private async store(conn: Connection, update: Uint8Array): Promise<void> {
+  private async store(conn: Connection, frame: { kind: 'step2' | 'update'; update: Uint8Array }): Promise<void> {
+    const update = frame.update;
     try {
       Y.decodeUpdate(update);
     } catch (error) {
       console.error(`Room ${this.name} refused a malformed update:`, error);
       conn.close(1007, 'Malformed update');
+      return;
+    }
+    if (frame.kind === 'step2' && Y.snapshotContainsUpdate(Y.snapshot(this.document), update)) {
       return;
     }
     let id: number;
@@ -209,6 +217,19 @@ export class Room extends YServer {
   }
 
   onConnect(conn: Connection, ctx: ConnectionContext): void {
+    try {
+      this.admit(conn, ctx);
+    } catch (error) {
+      console.error(`Room ${this.name} failed while opening a connection:`, error);
+      try {
+        conn.close(4500, 'Server error');
+      } catch (closing) {
+        console.error(`Room ${this.name} could not close the socket after that failure:`, closing);
+      }
+    }
+  }
+
+  private admit(conn: Connection, ctx: ConnectionContext): void {
     const device = ctx.request.headers.get(DEVICE_HEADER);
     const revoked = this.ctx.storage.sql.exec('SELECT 1 FROM revoked WHERE device = ?', device).toArray().length > 0;
     if (revoked) {

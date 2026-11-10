@@ -328,17 +328,19 @@ export class SyncManager {
     }
     this.space = space;
     this.host = new URL(space.server).host;
-    if (status.revoked) {
-      this.registry.setSpaceReadOnly(true);
-      this.revokedLatch = true;
-      this.global = this.fault("revoked", null, null, null);
+    if (status.revoked || this.revokedLatch) {
+      if (status.revoked) {
+        this.registry.setSpaceReadOnly(true);
+        this.revokedLatch = true;
+        this.global = this.fault("revoked", null, null, null);
+      }
       await this.attachRecorded(space.spaceId);
       if (gen === this.gen) this.emit();
       return;
     }
     this.registry.setSpaceReadOnly(false);
     await this.attach(gen);
-    if (gen !== this.gen) return;
+    if (gen !== this.gen || this.revokedLatch) return;
     this.registry.nameThisDevice(space.deviceName);
     this.emit();
   }
@@ -711,9 +713,9 @@ export class SyncManager {
         this.stopDoc(link, this.fault("too-large", link.doc, this.tooLargeText(link.doc), null));
         return;
       case 1007:
-      case 1011:
         this.stopDoc(link, this.fault("rejected", link.doc, this.rejectedText(link.doc), null));
         return;
+      case 1011:
       case 4500:
         this.stopDoc(link, this.fault("store-failed", link.doc, this.storeText(link.doc), null));
         return;

@@ -78,6 +78,10 @@ function emptyStep1(): Uint8Array {
   return encoding.toUint8Array(encoder);
 }
 
+function isStep2(frame: Uint8Array): boolean {
+  return frame[0] === 0 && frame[1] === syncProtocol.messageYjsSyncStep2;
+}
+
 function isEmptyStep2(frame: Uint8Array): boolean {
   return frame.length === 5 && [0, 1, 2, 0, 0].every((byte, i) => frame[i] === byte);
 }
@@ -225,6 +229,37 @@ describe('Room', () => {
     logged.mockRestore();
   });
 
+  it.each([
+    [
+      'the revoked read',
+      (_room: Room, state: DurableObjectState): void => {
+        state.storage.sql.exec('DROP TABLE revoked');
+      },
+    ],
+    [
+      'the compaction',
+      (room: Room, state: DurableObjectState): void => {
+        room.stateBytes = MAX_MESSAGE_BYTES + 1;
+        state.storage.sql.exec('DROP TABLE snapshot');
+      },
+    ],
+  ])('closes with 4500 and logs when %s fails at connect', async (what, breakRoom) => {
+    const doc = 'connect-fault-' + what.replaceAll(' ', '-');
+    const a = await join(doc, DEV_A);
+    await runInDurableObject(stubOf(doc), breakRoom);
+    const logged = vi.spyOn(console, 'error');
+    const c = await connectDoc(opener(doc, DEV_C));
+    expect(await c.closed).toEqual({ code: 4500, reason: 'Server error' });
+    expect(c.errors).toEqual([]);
+    expect(
+      logged.mock.calls.some(
+        (call) => String(call[0]).startsWith(`Room ${doc} failed while opening a connection`) && call.some((arg) => arg instanceof Error),
+      ),
+    ).toBe(true);
+    logged.mockRestore();
+    await closeAll(a);
+  });
+
   it('drops the stored row and refuses with 1007 when an update cannot be applied', async () => {
     const doc = 'unapplied';
     const a = await join(doc, DEV_A);
@@ -279,6 +314,40 @@ describe('Room', () => {
     await evictDurableObject(stubOf(doc), { webSockets: 'close' });
     const c = await join(doc, DEV_C);
     expect(actions(c).get('b1')).toEqual({ lbl: 'offline' });
+    await closeAll(c);
+  });
+
+  it('stores nothing and schedules no alarm for a sync step 2 the room already holds', async () => {
+    const doc = 'up-to-date';
+    const a = await join(doc, DEV_A);
+    actions(a).set('k', { lbl: 'one' });
+    actions(a).set('k', { lbl: 'two' });
+    await until(async () => (await count(doc, 'updates')) === 2, 'both writes to be stored');
+    expect(await runDurableObjectAlarm(stubOf(doc))).toBe(true);
+    expect(await count(doc, 'updates')).toBe(0);
+    await closeAll(a);
+    const back = await join(doc, DEV_A, a.ydoc);
+    await until(() => back.sent.some(isStep2), 'A to send its sync step 2');
+    expect(back.sent.filter(isStep2).some((frame) => !isEmptyStep2(frame))).toBe(true);
+    await sleep(200);
+    expect(await count(doc, 'updates')).toBe(0);
+    expect(await runInDurableObject(stubOf(doc), (_room, state) => state.storage.getAlarm())).toBeNull();
+    await closeAll(back);
+  });
+
+  it('stores a sync step 2 that only deletes', async () => {
+    const doc = 'offline-delete';
+    const a = await join(doc, DEV_A);
+    actions(a).set('k', { lbl: 'one' });
+    await until(async () => (await count(doc, 'updates')) === 1, 'the write to be stored');
+    await closeAll(a);
+    actions(a).delete('k');
+    const back = await join(doc, DEV_A, a.ydoc);
+    await until(async () => (await count(doc, 'updates')) === 2, 'the offline delete to be stored');
+    await closeAll(back);
+    await evictDurableObject(stubOf(doc), { webSockets: 'close' });
+    const c = await join(doc, DEV_C);
+    expect(actions(c).has('k')).toBe(false);
     await closeAll(c);
   });
 
