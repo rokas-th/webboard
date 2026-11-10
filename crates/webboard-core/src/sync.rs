@@ -595,6 +595,9 @@ impl SyncClient {
                 body.error, body.message
             )),
             (404, Caller::Claim) => SyncError::new("sync.bad_code", body.message),
+            (409, _) if body.error == "too_many_plans" => {
+                SyncError::new("sync.too_many_plans", body.message)
+            }
             (410, _) if body.error == "gone" => SyncError::new("sync.gone", body.message),
             (500, _) if body.error == "purge_pending" => {
                 SyncError::new("sync.purge_pending", body.message)
@@ -2483,6 +2486,38 @@ mod tests {
         assert_eq!(
             client.ticket("pl0000000001").await.map(|_| ()),
             Err(err("sync.http", "Server answered 410 other: elsewhere"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_409_too_many_plans_is_its_own_code_with_the_servers_message() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        let cap = "This device has joined 500 plans, the most one device may join.";
+        let ticket = f
+            .server
+            .mock("POST", "/ticket")
+            .with_status(409)
+            .with_header("content-type", "application/json")
+            .with_body(json!({ "error": "too_many_plans", "message": cap }).to_string())
+            .expect(1)
+            .create_async()
+            .await;
+        assert_eq!(
+            f.client().ticket("pl0000000501").await.map(|_| ()),
+            Err(err("sync.too_many_plans", cap))
+        );
+        ticket.assert_async().await;
+        f.answer(
+            "POST",
+            "/ticket",
+            409,
+            json!({ "error": "conflict", "message": "other" }),
+        )
+        .await;
+        assert_eq!(
+            f.client().ticket("pl0000000501").await.map(|_| ()),
+            Err(err("sync.http", "Server answered 409 conflict: other"))
         );
     }
 
