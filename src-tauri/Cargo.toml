@@ -40,7 +40,11 @@ keyring = { version = "=3.6.3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "=3.6.3", features = ["sync-secret-service", "crypto-rust"] }
+dbus-secret-service = "=4.1.0"
 tauri-plugin-updater = { version = "~2.10.1", default-features = false, features = ["rustls-tls"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+dbus = "=0.9.12"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2 = "0.6"

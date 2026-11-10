@@ -286,17 +286,21 @@ fn unexpected(status: StatusCode) -> SyncError {
 
 const SHOWN_BODY_CHARS: usize = 300;
 
+fn forbidden(message: impl Into<String>) -> SyncError {
+    SyncError::new("sync.forbidden", message)
+}
+
 fn forbidden_text(bytes: &[u8]) -> SyncError {
     let text = String::from_utf8_lossy(bytes);
     let text = text.trim();
     if text.is_empty() {
-        return unexpected(StatusCode::FORBIDDEN);
+        return forbidden("Server answered 403 with an unexpected response.");
     }
     let shown = match text.char_indices().nth(SHOWN_BODY_CHARS) {
         Some((cut, _)) => format!("{}…", &text[..cut]),
         None => text.to_string(),
     };
-    http(format!("Server answered 403: {shown}"))
+    forbidden(format!("Server answered 403: {shown}"))
 }
 
 fn retry_after(headers: &HeaderMap) -> Option<u64> {
@@ -586,6 +590,10 @@ impl SyncClient {
                     Err(e) => e,
                 }
             }
+            (403, _) => forbidden(format!(
+                "Server answered 403 {}: {}",
+                body.error, body.message
+            )),
             (404, Caller::Claim) => SyncError::new("sync.bad_code", body.message),
             (503, _) if body.error == "not_configured" => {
                 SyncError::new("sync.not_configured", NOT_CONFIGURED)
@@ -1286,7 +1294,7 @@ mod tests {
         assert_eq!(
             client.ticket("ix-sp000000000").await.map(|_| ()),
             Err(err(
-                "sync.http",
+                "sync.forbidden",
                 "Server answered 403 forbidden: Not for you."
             ))
         );
@@ -1314,7 +1322,7 @@ mod tests {
         assert_eq!(
             client.ticket("ix-sp000000000").await.map(|_| ()),
             Err(err(
-                "sync.http",
+                "sync.forbidden",
                 "Server answered 403: <h1>Blocked by the proxy</h1>"
             ))
         );
@@ -1328,14 +1336,14 @@ mod tests {
         assert_eq!(
             forbidden_text(long.as_bytes()),
             err(
-                "sync.http",
+                "sync.forbidden",
                 &format!("Server answered 403: {}…", "é".repeat(SHOWN_BODY_CHARS))
             )
         );
         assert_eq!(
             forbidden_text(b" \n"),
             err(
-                "sync.http",
+                "sync.forbidden",
                 "Server answered 403 with an unexpected response."
             )
         );

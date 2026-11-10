@@ -16,23 +16,51 @@ fn io(e: &keyring::Error) -> SyncError {
 }
 
 #[cfg(any(target_os = "linux", test))]
-fn secret_service_error(e: &keyring::Error) -> Option<SyncError> {
+const MISSING_SERVICE: [&str; 4] = [
+    "org.freedesktop.DBus.Error.ServiceUnknown",
+    "org.freedesktop.DBus.Error.NameHasNoOwner",
+    "org.freedesktop.DBus.Error.NoServer",
+    "org.freedesktop.DBus.Error.FileNotFound",
+];
+
+#[cfg(any(target_os = "linux", test))]
+fn names_a_missing_service(name: &str) -> bool {
+    MISSING_SERVICE.contains(&name) || name.starts_with("org.freedesktop.DBus.Error.Spawn.")
+}
+
+#[cfg(target_os = "linux")]
+fn no_secret_service(source: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
+    match source.downcast_ref::<dbus_secret_service::Error>() {
+        Some(dbus_secret_service::Error::Unavailable) => true,
+        Some(dbus_secret_service::Error::Dbus(e)) => e.name().is_some_and(names_a_missing_service),
+        _ => false,
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn secret_service_error(
+    e: &keyring::Error,
+    missing: impl FnOnce(&(dyn std::error::Error + Send + Sync + 'static)) -> bool,
+) -> SyncError {
     match e {
-        keyring::Error::NoStorageAccess(_) => Some(SyncError::new(
+        keyring::Error::NoStorageAccess(_) => SyncError::new(
             "keychain.unavailable",
             format!("The keyring is locked or refused access: {e}. Unlock it and try again."),
-        )),
-        keyring::Error::PlatformFailure(_) => Some(SyncError::new(
+        ),
+        keyring::Error::PlatformFailure(source) if missing(source.as_ref()) => SyncError::new(
             "keychain.unavailable",
             format!("{UNAVAILABLE} The keyring said: {e}"),
-        )),
-        _ => None,
+        ),
+        keyring::Error::PlatformFailure(_) => {
+            SyncError::new("keychain.io", format!("The keyring failed: {e}"))
+        }
+        _ => io(e),
     }
 }
 
 #[cfg(target_os = "linux")]
 fn classify(e: keyring::Error) -> SyncError {
-    secret_service_error(&e).unwrap_or_else(|| io(&e))
+    secret_service_error(&e, no_secret_service)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -135,34 +163,30 @@ mod tests {
         let failure = || keyring::Error::PlatformFailure("dbus said no".into());
         let no_access = || keyring::Error::NoStorageAccess("locked".into());
         assert_eq!(
-            secret_service_error(&failure()),
-            Some(SyncError::new(
+            secret_service_error(&failure(), |_| true),
+            SyncError::new(
                 "keychain.unavailable",
                 format!("{UNAVAILABLE} The keyring said: {}", failure())
-            ))
+            )
         );
         assert_eq!(
-            secret_service_error(&no_access()),
-            Some(SyncError::new(
+            secret_service_error(&failure(), |_| false),
+            SyncError::new("keychain.io", format!("The keyring failed: {}", failure()))
+        );
+        assert_eq!(
+            secret_service_error(&no_access(), |_| panic!("a locked keyring is not asked")),
+            SyncError::new(
                 "keychain.unavailable",
                 format!(
                     "The keyring is locked or refused access: {}. Unlock it and try again.",
                     no_access()
                 )
-            ))
+            )
         );
-        assert_eq!(secret_service_error(&keyring::Error::NoEntry), None);
-        if cfg!(target_os = "linux") {
-            let makers: [fn() -> keyring::Error; 2] = [failure, no_access];
-            makers
-                .into_iter()
-                .for_each(|make| assert_eq!(Some(classify(make())), secret_service_error(&make())));
-        } else {
-            let e = classify(failure());
-            assert_eq!(e.code, "keychain.io");
-            assert!(e.message.contains("dbus said no"), "{}", e.message);
-            assert_eq!(classify(no_access()).code, "keychain.io");
-        }
+        assert_eq!(
+            secret_service_error(&keyring::Error::NoEntry, |_| true),
+            io(&keyring::Error::NoEntry)
+        );
         let e = classify(keyring::Error::TooLong("user".into(), 3));
         assert_eq!(e.code, "keychain.io");
         assert!(
@@ -170,6 +194,78 @@ mod tests {
             "{}",
             e.message
         );
+        if cfg!(not(target_os = "linux")) {
+            let e = classify(failure());
+            assert_eq!(e.code, "keychain.io");
+            assert!(e.message.contains("dbus said no"), "{}", e.message);
+            assert_eq!(classify(no_access()).code, "keychain.io");
+        }
+    }
+
+    #[test]
+    fn only_a_missing_bus_or_service_reads_as_no_secret_service() {
+        [
+            "org.freedesktop.DBus.Error.ServiceUnknown",
+            "org.freedesktop.DBus.Error.NameHasNoOwner",
+            "org.freedesktop.DBus.Error.NoServer",
+            "org.freedesktop.DBus.Error.FileNotFound",
+            "org.freedesktop.DBus.Error.Spawn.ExecFailed",
+            "org.freedesktop.DBus.Error.Spawn.ChildExited",
+        ]
+        .into_iter()
+        .for_each(|name| assert!(names_a_missing_service(name), "{name}"));
+        [
+            "org.freedesktop.DBus.Error.Failed",
+            "org.freedesktop.DBus.Error.UnknownMethod",
+            "org.freedesktop.DBus.Error.AccessDenied",
+            "org.freedesktop.DBus.Error.NoReply",
+            "org.freedesktop.DBus.Error.NotSupported",
+            "org.freedesktop.Secret.Error.IsLocked",
+            "org.freedesktop.Secret.Error.NoSuchObject",
+        ]
+        .into_iter()
+        .for_each(|name| assert!(!names_a_missing_service(name), "{name}"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn secret_service_variants_are_told_apart() {
+        use dbus_secret_service::Error as Ss;
+        let platform = |e: Ss| keyring::Error::PlatformFailure(Box::new(e));
+        let dbus = |name: &str| Ss::Dbus(dbus::Error::new_custom(name, "said so"));
+        [
+            platform(Ss::Unavailable),
+            platform(dbus("org.freedesktop.DBus.Error.ServiceUnknown")),
+            platform(dbus("org.freedesktop.DBus.Error.NoServer")),
+            platform(dbus("org.freedesktop.DBus.Error.Spawn.ExecFailed")),
+        ]
+        .into_iter()
+        .for_each(|e| assert_eq!(classify(e).code, "keychain.unavailable"));
+        [
+            platform(Ss::Crypto("bad padding".into())),
+            platform(Ss::Path("/bad".to_string())),
+            platform(Ss::Parse),
+            platform(Ss::UnsupportedSecretFormat),
+            platform(dbus("org.freedesktop.DBus.Error.Failed")),
+            platform(dbus("org.freedesktop.DBus.Error.UnknownMethod")),
+            keyring::Error::PlatformFailure("not from the secret service".into()),
+        ]
+        .into_iter()
+        .for_each(|e| {
+            let shown = e.to_string();
+            assert_eq!(
+                classify(e),
+                SyncError::new("keychain.io", format!("The keyring failed: {shown}"))
+            );
+        });
+        [Ss::Locked, Ss::NoResult, Ss::Prompt]
+            .into_iter()
+            .for_each(|e| {
+                assert_eq!(
+                    classify(keyring::Error::NoStorageAccess(Box::new(e))).code,
+                    "keychain.unavailable"
+                )
+            });
     }
 
     #[test]
