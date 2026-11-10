@@ -23,16 +23,19 @@ export function PlanMenu(p: {
   open: boolean;
   onOpenChange(open: boolean): void;
   onOpen(id: PlanId): void;
+  onPrint?: () => void;
 }) {
   const { open, onOpenChange } = p;
   const toggle = useRef<HTMLButtonElement>(null);
   const exportItem = useRef<HTMLButtonElement>(null);
   const importItem = useRef<HTMLButtonElement>(null);
+  const printItem = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
 
   const items = (): HTMLButtonElement[] => [
     mounted(exportItem.current, "PlanMenu opened without its first item"),
-    mounted(importItem.current, "PlanMenu opened without its last item"),
+    mounted(importItem.current, "PlanMenu opened without its Import item"),
+    ...(p.onPrint === undefined ? [] : [mounted(printItem.current, "PlanMenu opened without its Print item")]),
   ];
 
   useEffect(() => {
@@ -85,6 +88,15 @@ export function PlanMenu(p: {
     void importFlow(p.registry, p.onOpen);
   };
 
+  const onPrint = p.onPrint;
+  const printPlan =
+    onPrint === undefined
+      ? null
+      : (): void => {
+          onOpenChange(false);
+          onPrint();
+        };
+
   return (
     <div className="plan-menu" ref={box} onKeyDown={onKey} onBlur={onLeave} onMouseDown={(e) => e.preventDefault()}>
       <button
@@ -106,6 +118,11 @@ export function PlanMenu(p: {
           <button type="button" role="menuitem" ref={importItem} className="choice-row" onClick={importPlan}>
             Import plan…
           </button>
+          {printPlan !== null && (
+            <button type="button" role="menuitem" ref={printItem} className="choice-row" onClick={printPlan}>
+              Print…
+            </button>
+          )}
         </div>
       )}
     </div>

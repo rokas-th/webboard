@@ -38,6 +38,7 @@ export interface CommandCtx {
   newPlan(): void;
   newExample(): void;
   reveal(target: ItemId | "today"): void;
+  print(): void;
   updates: Updates | null;
 }
 
@@ -298,12 +299,16 @@ export function commands(ctx: CommandCtx): Command[] {
       }),
     );
   const session = ctx.session;
-  const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session, ctx.registry.device.platform) }];
+  const platform = ctx.registry.device.platform;
+  const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session, platform) }];
+  const printCommand: Command[] =
+    session === null || platform === "ios" ? [] : [{ id: "print", group: "File", label: "Print…", keys: ctx.mac ? "⌘P" : "Ctrl P", run: () => ctx.print() }];
   const always: Command[] = [
     { id: "new-plan", group: "File", label: "New plan", run: () => ctx.newPlan() },
     { id: "example-plan", group: "File", label: "Create the example plan", run: () => ctx.newExample() },
     ...exportCommand,
     { id: "import", group: "File", label: "Import plan…", run: () => void importFlow(ctx.registry, (id) => ctx.select(id)) },
+    ...printCommand,
     { id: "sync-setup", group: "File", label: "Set up sync", run: () => ctx.setUi({ dialog: { t: "sync", pane: "setup" } }) },
     { id: "sync-join", group: "File", label: "Join with a code", run: () => ctx.setUi({ dialog: { t: "sync", pane: "join" } }) },
     { id: "sync-devices", group: "File", label: "Sync devices", run: () => ctx.setUi({ dialog: { t: "sync", pane: "devices" } }) },

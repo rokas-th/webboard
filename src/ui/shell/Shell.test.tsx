@@ -23,6 +23,7 @@ import { clearToasts } from "../common/Toast";
 import { forgetLastPlan, NO_PLAN_KEY, PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
 import { closeConverted, CONVERTED_TITLE, OPEN_PLAN, showConverted, shownConverted } from "./ConvertedReport";
 import { exportFlow, importFlow } from "./fileFlows";
+import { printNow } from "../print/print";
 import { OpenChoice } from "../run";
 import { PlanHead } from "./PlanHead";
 import { Shell } from "./Shell";
@@ -37,6 +38,7 @@ vi.mock("./fileFlows", async (importOriginal) => {
   const m = await importOriginal<typeof import("./fileFlows")>();
   return { ...m, exportFlow: vi.fn(m.exportFlow), importFlow: vi.fn(m.importFlow) };
 });
+vi.mock("../print/print", () => ({ printNow: vi.fn(async () => undefined) }));
 vi.mock("../state", async (importOriginal) => {
   const m = await importOriginal<typeof import("../state")>();
   return { ...m, useUi: vi.fn(m.useUi) };
@@ -66,6 +68,8 @@ afterEach(async () => {
   vi.mocked(importPlan).mockClear();
   vi.mocked(exportFlow).mockClear();
   vi.mocked(importFlow).mockClear();
+  vi.mocked(printNow).mockReset();
+  vi.mocked(printNow).mockResolvedValue(undefined);
   await Promise.all(sessions.splice(0).map((s) => s.close()));
   await Promise.all(registries.splice(0).map((r) => r.close()));
   window.localStorage.clear();
@@ -215,7 +219,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect([undo.hasAttribute("disabled"), redo.hasAttribute("disabled")]).toEqual([true, true]);
   });
 
-  it("lists Export plan… and Import plan… under ⋯, both enabled while read-only, and runs each flow", async () => {
+  it("lists Export plan…, Import plan… and Print… under ⋯, all enabled while read-only, and runs each flow", async () => {
     const t = await made(MESA_SEED);
     t.session.setReadOnly(true);
     const { ui, registry } = shellFor(t);
@@ -233,6 +237,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect(items.map((b) => [b.textContent, b.hasAttribute("disabled")])).toEqual([
       ["Export plan…", false],
       ["Import plan…", false],
+      ["Print…", false],
     ]);
     vi.mocked(exportFlow).mockResolvedValueOnce(undefined);
     fireEvent.click(items[0]);
@@ -275,7 +280,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     await settle();
     setUiNow({ selected: "t3" });
     fireEvent.click(menuToggle());
-    const [exportItem, importItem] = menuItems();
+    const [exportItem, importItem, printItem] = menuItems();
     expect(document.activeElement).toBe(exportItem);
     const press = (key: string): boolean => {
       let kept = true;
@@ -287,13 +292,15 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect(press("ArrowDown")).toBe(false);
     expect(document.activeElement).toBe(importItem);
     expect(press("ArrowDown")).toBe(false);
+    expect(document.activeElement).toBe(printItem);
+    expect(press("ArrowDown")).toBe(false);
     expect(document.activeElement).toBe(exportItem);
     expect(press("ArrowUp")).toBe(false);
-    expect(document.activeElement).toBe(importItem);
+    expect(document.activeElement).toBe(printItem);
     expect(press("Home")).toBe(false);
     expect(document.activeElement).toBe(exportItem);
     expect(press("End")).toBe(false);
-    expect(document.activeElement).toBe(importItem);
+    expect(document.activeElement).toBe(printItem);
     expect(screen.getByRole("menu", { name: "Plan" })).toBeTruthy();
     expect(lastUi().selected).toBe("t3");
   });
@@ -1922,5 +1929,85 @@ describe("calendar dialog in the shell", () => {
     await settle();
     expect(lastUi().dialog).toEqual({ t: "calendar" });
     expect(calendarDialogs()).toHaveLength(1);
+  });
+});
+
+describe("Shell: print (product-8)", () => {
+  const printSheet = (): Element | null => document.body.querySelector(":scope > .print-sheet");
+  const pressPrint = (): void => {
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "p", metaKey: true });
+    });
+  };
+
+  it("mounts the sheet before printNow runs, keeps it while printing, and unmounts it on afterprint", async () => {
+    const t = await made(MESA_SEED);
+    const { ui } = shellFor(t);
+    render(withSync(ui));
+    await settle();
+    expect(printSheet()).toBeNull();
+    const mountedAtCall: boolean[] = [];
+    vi.mocked(printNow).mockImplementation(async () => {
+      mountedAtCall.push(printSheet() !== null);
+    });
+    pressPrint();
+    await settle();
+    expect(vi.mocked(printNow).mock.calls).toEqual([["macos"]]);
+    expect(mountedAtCall).toEqual([true]);
+    expect(printSheet()?.querySelector("h1")?.textContent).toBe(t.session.view().plan.name);
+    act(() => {
+      window.dispatchEvent(new Event("afterprint"));
+    });
+    expect(printSheet()).toBeNull();
+  });
+
+  it("prints again on a second Print when afterprint never came", async () => {
+    const t = await made(MESA_SEED);
+    const { ui } = shellFor(t);
+    render(withSync(ui));
+    await settle();
+    pressPrint();
+    await settle();
+    pressPrint();
+    await settle();
+    expect(vi.mocked(printNow)).toHaveBeenCalledTimes(2);
+    expect(document.body.querySelectorAll(":scope > .print-sheet")).toHaveLength(1);
+  });
+
+  it("toasts a refused print and unmounts the sheet", async () => {
+    const t = await made(MESA_SEED);
+    const { ui } = shellFor(t);
+    render(withSync(ui));
+    await settle();
+    vi.mocked(printNow).mockRejectedValueOnce(new AppError("print.failed", "Could not open the print dialog: the window did not answer."));
+    pressPrint();
+    await settle();
+    expect(printSheet()).toBeNull();
+    expect(toastTexts()).toContain("Could not open the print dialog: the window did not answer.");
+  });
+
+  it("prints from the ⋯ menu", async () => {
+    const t = await made(MESA_SEED);
+    const { ui } = shellFor(t, { device: { deviceId: "pc", name: "pop-os", platform: "linux" } });
+    render(withSync(ui));
+    await settle();
+    fireEvent.click(menuToggle());
+    fireEvent.click(within(screen.getByRole("menu", { name: "Plan" })).getByRole("menuitem", { name: "Print…" }));
+    await settle();
+    expect(vi.mocked(printNow).mock.calls).toEqual([["linux"]]);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("offers no Print… on iOS, in the menu or on ⌘P", async () => {
+    const t = await made(MESA_SEED);
+    const { ui } = shellFor(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } });
+    render(withSync(ui));
+    await settle();
+    fireEvent.click(menuToggle());
+    expect(menuItems().map((b) => b.textContent)).toEqual(["Export plan…", "Import plan…"]);
+    pressPrint();
+    await settle();
+    expect(printNow).not.toHaveBeenCalled();
+    expect(printSheet()).toBeNull();
   });
 });

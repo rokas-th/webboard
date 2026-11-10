@@ -151,7 +151,7 @@ const styled = new Set(sheet.rules.flatMap((r) => (r.selector.match(/\.[A-Za-z][
 
 describe("every class the stylesheets style", () => {
   it("reads the sources and sheets it is asserting against", () => {
-    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./list.css", "./palette.css", "./panel.css", "./phone.css", "./sheet.css", "./shell.css", "./sync.css", "./timeline.css", "./tokens.css"]);
+    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./list.css", "./palette.css", "./panel.css", "./phone.css", "./print.css", "./sheet.css", "./shell.css", "./sync.css", "./timeline.css", "./tokens.css"]);
     expect(Object.keys(SOURCES).length).toBeGreaterThan(40);
     expect(CODE.length).toBeGreaterThan(100000);
     expect(styled.size).toBeGreaterThan(60);
@@ -334,5 +334,31 @@ describe("the Cyberdeck look", () => {
   it("lets a swipe that starts on a tray chip scroll the tray", () => {
     const chip = sheet.rules.filter((r) => r.selector === ".tray-chip" && r.decls["touch-action"] !== undefined).map((r) => [r.conditions.length, r.decls["touch-action"]]);
     expect(chip).toEqual([[0, "pan-x pan-y"]]);
+  });
+
+  it("hides the print sheet on screen and only the app when printing, on a landscape page (product-8)", () => {
+    const under = (sel: string, media: string): Decls =>
+      Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 1 && r.conditions[0] === media).map((r) => r.decls));
+    expect(under(".print-sheet", "@media screen")["display"]).toBe("none");
+    expect(under("#root", "@media print")["display"]).toBe("none");
+    expect(under(".print-sheet", "@media print")["display"]).toBe("block");
+    expect(under(".print-sheet", "@media print")["print-color-adjust"]).toBe("exact");
+    const page = under("html", "@media print");
+    expect([page["height"], page["overflow"], page["background"]]).toEqual(["auto", "visible", "#FFFFFF"]);
+    expect(under("body", "@media print")).toEqual(page);
+    expect(under(".print-table thead", "@media print")["display"]).toBe("table-header-group");
+    expect(under(".print-table tr", "@media print")["break-inside"]).toBe("avoid");
+    expect(under(".print-table tr.print-group", "@media print")["break-after"]).toBe("avoid");
+    expect(SHEETS["./print.css"].replace(/\s+/g, " ")).toContain("@page { size: landscape; margin: 12mm; }");
+    expect(sheet.rules.filter((r) => r.selector.includes("print-") && !r.conditions.some((c) => c === "@media print" || c === "@media screen"))).toEqual([]);
+  });
+
+  it("draws print bars and the today line as borders, so they print with backgrounds off (product-8)", () => {
+    const under = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.includes("@media print")).map((r) => r.decls));
+    expect([under(".print-bar")["height"], under(".print-bar")["border-top"]]).toEqual(["0", "2.6mm solid #2B6E80"]);
+    expect(under(".print-bar.done")["border-top-color"]).toBe("#9DBFC7");
+    expect(under(".print-today")["width"]).toBe("0");
+    expect(under(".print-today")["border-left"]).toMatch(/^0\.3mm solid #/);
+    expect(sheet.rules.filter((r) => r.selector.startsWith(".print-") && r.decls["background"] !== undefined && r.decls["background"] !== "#FFFFFF")).toEqual([]);
   });
 });

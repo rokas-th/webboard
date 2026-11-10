@@ -24,6 +24,8 @@ import { List } from "../list/List";
 import { RevertDialog } from "../panel/History";
 import { ItemPanel } from "../panel/ItemPanel";
 import { PlanPanel } from "../panel/PlanPanel";
+import { PrintSheet } from "../print/PrintSheet";
+import { startPrint } from "../print/start";
 import { Timeline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { HolidayState } from "./HolidayState";
@@ -99,6 +101,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   const newExample = (): void => files.newExample((message) => toast(message, "bad"));
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
   const [sheet, setSheet] = useState<CompactSheet>(null);
+  const [printing, setPrinting] = useState(false);
   const selectedItem = useRef<ItemId | null>(ui.selected);
 
   const session = main.k === "open" && main.id === ui.plan ? main.session : null;
@@ -164,7 +167,11 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   const indexError = registry.indexError();
   const settingsError = registry.settingsError();
   const readOnly = session?.readOnly ?? false;
-  const mac = registry.device.platform === "macos";
+  const platform = registry.device.platform;
+  const mac = platform === "macos";
+  const print = (): void => {
+    void startPrint(platform, setPrinting);
+  };
 
   const runner = useMemo(() => (session === null ? null : runWith(session, openChoice)), [session, openChoice]);
 
@@ -192,6 +199,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     newPlan,
     newExample,
     reveal,
+    print,
     updates,
   };
   const ctxRef = useRef(ctx);
@@ -290,7 +298,14 @@ function WideBody(p: ShellProps & { compact: boolean }) {
           onNamed={clearPlanNaming}
           onChoose={(choice) => openChoice(choice)}
           menu={(open, setOpen) => (
-            <PlanMenu session={session} registry={registry} open={open} onOpenChange={setOpen} onOpen={(id) => openPlan(id)} />
+            <PlanMenu
+              session={session}
+              registry={registry}
+              open={open}
+              onOpenChange={setOpen}
+              onOpen={(id) => openPlan(id)}
+              {...(platform === "ios" ? {} : { onPrint: print })}
+            />
           )}
         >
           <HolidayState session={session} registry={registry} clock={p.clock} />
@@ -419,6 +434,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         {ui.dialog !== null && ui.dialog.t === "about" && <About onClose={closeDialog} />}
         {ui.dialog !== null && ui.dialog.t === "sync" && <SyncDialog pane={ui.dialog.pane} onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />}
         <ConvertedReport />
+        {printing && session !== null && <PrintSheet view={session.view()} onDone={() => setPrinting(false)} />}
         <Toasts />
       </div>
     </OpenChoice.Provider>

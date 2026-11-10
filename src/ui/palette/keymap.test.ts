@@ -214,3 +214,18 @@ describe("keyToCommand: duplicate (product-7)", () => {
     expect(keyToCommand(k("d", { ctrlKey: true }), sel)).toBeNull();
   });
 });
+
+describe("keyToCommand: print (product-8)", () => {
+  it("prints on ⌘P, also while typing, never in a dialog or with Shift", () => {
+    expect(keyToCommand(k("p", { metaKey: true }), MAC)).toBe("print");
+    expect(keyToCommand(k("P", { metaKey: true }), { ...MAC, typing: true })).toBe("print");
+    expect(keyToCommand(k("p", { metaKey: true }), { ...MAC, dialog: true })).toBeNull();
+    expect(keyToCommand(k("p", { metaKey: true, shiftKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("p", { ctrlKey: true }), MAC)).toBeNull();
+  });
+
+  it("prints on Ctrl+P off macOS", () => {
+    expect(keyToCommand(k("p", { ctrlKey: true }), PC)).toBe("print");
+    expect(keyToCommand(k("p", { metaKey: true }), PC)).toBeNull();
+  });
+});

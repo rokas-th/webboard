@@ -77,6 +77,7 @@ const ellipsed = (selector) => ({ ellipsed: selector });
 const within_ = (selector, box, n) => ({ within: [selector, box, n] });
 const fitLabels = () => ({ fitLabels: true });
 const raise = (message) => ({ raise: message });
+const media = (kind) => ({ media: kind });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -103,6 +104,7 @@ function states() {
       clipIn: o.clipIn ?? [],
       logs: o.logs ?? [],
       net: { ws: o.net?.ws ?? "none", online: o.net?.online ?? true },
+      shotMedia: o.shotMedia ?? null,
     });
 
   add("empty", "empty", {
@@ -134,6 +136,26 @@ function states() {
   });
   add("fit/labels", "mesa", { place: { view: "timeline", zoom: "F" }, actions: [viewExpect("timeline"), fitLabels()] });
   add("scale", "scale", { actions: [expect(".tl-row .name", "WS01 task 01"), valued(".plan-head h1 input", "Scale: 1,000 items")] });
+  add("print/scale", "scale-print", {
+    sizes: "standard",
+    shotMedia: "print",
+    actions: [
+      expect(".tl-row .name", "WS01 task 01"),
+      key("p", "KeyP", 4),
+      count("body > .print-sheet", 1),
+      style("body > .print-sheet", "display", "none"),
+      media("print"),
+      expect(".print-sheet h1", "Scale: 1,000 items"),
+      count(".print-sheet tbody tr", 1000),
+      style("#root", "display", "none"),
+      style("body > .print-sheet", "display", "block"),
+      style("body", "background-color", "rgb(255, 255, 255)"),
+      style(".print-sheet .print-bar:not(.group)", "border-top-color", "rgb(43, 110, 128)"),
+      style(".print-sheet .print-bar:not(.group)", "border-top-style", "solid"),
+      media("screen"),
+      style("body > .print-sheet", "display", "none"),
+    ],
+  });
   VIEWS.forEach(([slug, place]) =>
     add(`long-names/${slug}`, "long-names", {
       place,
@@ -1728,6 +1750,7 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
   const checked = () => {
     if (traffic.current.crash !== null) throw traffic.current.crash;
   };
+  await cdp.send("Emulation.setEmulatedMedia", { media: "" }, sessionId);
   const nav = await cdp.send("Page.navigate", { url: `${origin}/?state=${encodeURIComponent(state.name)}` }, sessionId);
   checked();
   if (typeof nav.errorText === "string" && nav.errorText !== "") return unreached(`navigation to ${state.name} failed: ${nav.errorText}`);
@@ -1739,6 +1762,8 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
   for (const action of state.actions) {
     if (action.key !== undefined) {
       await press(cdp, sessionId, action.key);
+    } else if (action.media !== undefined) {
+      await cdp.send("Emulation.setEmulatedMedia", { media: action.media }, sessionId);
     } else {
       const got = await evaluate(cdp, sessionId, `window.__probeAct(${JSON.stringify(action)})`, true);
       if (got.fail !== undefined) return unreached(`${describeAction(action)}: ${got.fail}`);
@@ -1933,7 +1958,9 @@ async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffi
       rows.push({ state: state.name, viewport, ...verdict, reading: r });
       if (verbose || !verdict.ok) report(state.name, viewport, verdict, r);
       if (shotDir !== null) {
+        if (state.shotMedia !== null) await cdp.send("Emulation.setEmulatedMedia", { media: state.shotMedia }, sessionId);
         const { data } = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
+        if (state.shotMedia !== null) await cdp.send("Emulation.setEmulatedMedia", { media: "" }, sessionId);
         const file = join(shotDir, `${state.name.replace(/\//g, "-")}-${viewport}.png`);
         await writeFile(file, Buffer.from(data, "base64"));
         process.stdout.write(`shot: ${file}\n`);

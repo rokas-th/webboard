@@ -61,6 +61,7 @@ interface Harness {
   newPlan: ReturnType<typeof vi.fn<() => void>>;
   newExample: ReturnType<typeof vi.fn<() => void>>;
   reveal: ReturnType<typeof vi.fn<(target: string) => void>>;
+  print: ReturnType<typeof vi.fn<() => void>>;
   open: ReturnType<typeof vi.fn<(choice: string, side?: string) => void>>;
 }
 
@@ -70,6 +71,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
   const newPlan = vi.fn<() => void>();
   const newExample = vi.fn<() => void>();
   const reveal = vi.fn<(target: string) => void>();
+  const print = vi.fn<() => void>();
   const open = vi.fn<(choice: string, side?: string) => void>();
   const id = t.session.view().plan.id;
   const registry = testRegistry(t, {
@@ -96,9 +98,10 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     newPlan,
     newExample,
     reveal,
+    print,
     updates: null,
   };
-  return { ctx, setUi, select, newPlan, newExample, reveal, open };
+  return { ctx, setUi, select, newPlan, newExample, reveal, print, open };
 }
 
 const find = (ctx: CommandCtx, id: string) => {
@@ -118,7 +121,7 @@ describe("commands()", () => {
     const baseline = [...t.session.view().plan.baselines.keys()][0];
     const h = harness(t, { selected: "a" }, ["p2"]);
     const all = ids(h.ctx);
-    const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash", "today", "select-next", "select-prev", "duplicate"];
+    const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash", "today", "select-next", "select-prev", "duplicate", "print"];
     const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", "zoom-F", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "about"];
     const goTo = ["g1", "a", "b", "one", "m", "u"].map((x) => `goto:${x}`);
     expect([...keyed, ...more, ...goTo].filter((x) => !all.includes(x))).toEqual([]);
@@ -153,21 +156,22 @@ describe("commands()", () => {
     ]);
   });
 
-  it("lists the File commands together: New plan, Create the example plan, Export plan…, Import plan…, then sync", async () => {
+  it("lists the File commands together: New plan, Create the example plan, Export plan…, Import plan…, Print…, then sync", async () => {
     const t = await made(SMALL);
     const h = harness(t, { selected: "a" }, ["p2"]);
     const all = commands(h.ctx);
     const at = all.findIndex((c) => c.group === "File");
-    expect(all.slice(at, at + 7).map((c) => [c.id, c.group])).toEqual([
+    expect(all.slice(at, at + 8).map((c) => [c.id, c.group])).toEqual([
       ["new-plan", "File"],
       ["example-plan", "File"],
       ["export", "File"],
       ["import", "File"],
+      ["print", "File"],
       ["sync-setup", "File"],
       ["sync-join", "File"],
       ["sync-devices", "File"],
     ]);
-    expect(all.filter((c) => c.group === "File")).toHaveLength(7);
+    expect(all.filter((c) => c.group === "File")).toHaveLength(8);
     const none: CommandCtx = { ...h.ctx, session: null, run: null, undo: null, redo: null };
     expect(commands(none).filter((c) => c.group === "File").map((c) => c.id)).toEqual(["new-plan", "example-plan", "import", "sync-setup", "sync-join", "sync-devices"]);
   });
@@ -616,5 +620,26 @@ describe("duplicate (product-7)", () => {
     const copy = childrenOf(t.session.view().plan, null).find((i) => i.name === "One day copy");
     if (copy === undefined) throw new Error("no copy");
     expect(h.setUi.mock.calls).toEqual([[{ selected: copy.id, follow: copy.id }]]);
+  });
+});
+
+describe("print (product-8)", () => {
+  it("prints the open plan from the File group with ⌘P on macOS and Ctrl P on Linux", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    const p = find(h.ctx, "print");
+    expect([p.label, p.group, p.keys]).toEqual(["Print…", "File", "⌘P"]);
+    p.run();
+    expect(h.print).toHaveBeenCalledTimes(1);
+    const linux = harness(t, {}, [], { device: { deviceId: "pc", name: "pop-os", platform: "linux" } });
+    expect(find({ ...linux.ctx, mac: false }, "print").keys).toBe("Ctrl P");
+  });
+
+  it("is not offered without a plan, or on iOS", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    expect(ids({ ...h.ctx, session: null, run: null, undo: null, redo: null })).not.toContain("print");
+    const ipad = harness(t, {}, [], { device: { deviceId: "ipad", name: "iPad", platform: "ios" } });
+    expect(ids(ipad.ctx)).not.toContain("print");
   });
 });

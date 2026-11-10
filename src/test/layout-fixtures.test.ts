@@ -203,6 +203,7 @@ describe("layout fixtures", () => {
       "phone-status",
       "phone-sync-sheet",
       "scale",
+      "scale-print",
       "sync-dialog",
       "sync-local",
       "sync-receiving",
@@ -214,6 +215,12 @@ describe("layout fixtures", () => {
       "update-check-failed",
       "update-downloading",
     ]);
+  });
+
+  it("answers print_window only in the print state, on the scale plan", () => {
+    expect(Object.entries(FIXTURES).filter(([, f]) => "print_window" in f.ipc).map(([name]) => name)).toEqual(["scale-print"]);
+    expect(fixture("scale-print").ipc.print_window).toBeNull();
+    expect(fixture("scale-print").docs).toEqual(fixture("scale").docs);
   });
 
   it("answers sync_status in every state, local only unless the state joins a space", () => {

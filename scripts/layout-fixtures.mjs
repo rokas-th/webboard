@@ -639,6 +639,7 @@ function inSpace(f, revoked, plans = []) {
 export function buildFixtures() {
   const mesaOnMac = fixtureOf([mesa(mesaLog("mesaM"))]);
   const unreadable = fixtureOf([mesa(unreadableLog())]);
+  const scale = fixtureOf([{ id: PLAN_IDS.scale, name: "Scale: 1,000 items", log: scaleLog() }]);
   const fixtures = {
     empty: fixtureOf([]),
     example: firstStart(),
@@ -646,7 +647,8 @@ export function buildFixtures() {
     "blank-plan": fixtureOf([{ id: PLAN_IDS.blank, name: "Blank plan", log: blankLog() }]),
     mesa: mesaOnMac,
     "mesa-linux": onLinux(mesaOnMac),
-    scale: fixtureOf([{ id: PLAN_IDS.scale, name: "Scale: 1,000 items", log: scaleLog() }]),
+    scale,
+    "scale-print": { ...scale, ipc: { ...scale.ipc, print_window: null } },
     choices: fixtureOf([mesa(choicesLog())]),
     "long-names": fixtureOf([
       { id: PLAN_IDS.long, name: LONG.plan, log: longLog() },

@@ -35,7 +35,7 @@ const dateOf = (m: ReadonlyMap<ItemId, Day>, id: ItemId, what: string): string =
 
 const lagText = (lag: number): string => (lag === 0 ? "" : `${lag > 0 ? "+" : ""}${lag}d`);
 
-const depsOf = (view: PlanView, links: readonly Link[], id: ItemId): string =>
+export const depsOf = (view: PlanView, links: readonly Link[], id: ItemId): string =>
   links
     .filter((l) => l.to === id)
     .map((l) => `${itemOf(view, l.from).name} ${l.type}${lagText(l.lag)}`)
