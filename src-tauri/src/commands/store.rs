@@ -426,6 +426,20 @@ mod tests {
             .unwrap_err(),
             error("store.io", "invalid document id: \"a b\"")
         );
-        assert_eq!(list(&h), ["p2"]);
+        append(&h, "local", "1", b"list").unwrap();
+        assert_eq!(
+            invoke(
+                &h,
+                "store_delete",
+                InvokeBody::Json(json!({ "doc": "local" })),
+                &[],
+            )
+            .unwrap_err(),
+            error(
+                "store.not_a_plan",
+                "Only a plan can be deleted; the plan lists stay."
+            )
+        );
+        assert_eq!(list(&h), ["local", "p2"]);
     }
 }

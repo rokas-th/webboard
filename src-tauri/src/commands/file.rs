@@ -106,16 +106,26 @@ fn with_extension(path: PathBuf) -> PathBuf {
     if has {
         return path;
     }
+    let dotted = path.as_os_str().as_encoded_bytes().ends_with(b".");
     let mut text = path.into_os_string();
-    text.push(format!(".{EXTENSION}"));
+    text.push(if dotted {
+        EXTENSION.to_string()
+    } else {
+        format!(".{EXTENSION}")
+    });
     PathBuf::from(text)
+}
+
+#[cfg(any(desktop, test))]
+fn replace_question(file: &str) -> String {
+    format!("{file} already exists. Replace it?")
 }
 
 fn picked_path(file: FilePath) -> Result<PathBuf> {
     let shown = file.to_string();
-    file.into_path().map_err(|_| {
+    file.into_path().map_err(|e| {
         io(format!(
-            "The dialog answered {shown}, which is not a file on this device."
+            "The dialog answered {shown}, which is not a file on this device ({e})."
         ))
     })
 }
@@ -214,7 +224,7 @@ pub async fn plan_export<R: Runtime>(
             |file| {
                 window
                     .dialog()
-                    .message(format!("{file} already exists. Replace it?"))
+                    .message(replace_question(file))
                     .buttons(tauri_plugin_dialog::MessageDialogButtons::OkCancel)
                     .parent(&window)
                     .blocking_show()
@@ -708,6 +718,7 @@ mod tests {
             ("/x/Plan.v2", "/x/Plan.v2.webboard"),
             ("/x/Plan.WEBBOARD", "/x/Plan.WEBBOARD"),
             ("/x/Plan.webboard", "/x/Plan.webboard"),
+            ("/x/Plan.", "/x/Plan.webboard"),
         ]
         .iter()
         .for_each(|(picked, written)| {
@@ -887,7 +898,7 @@ mod tests {
         .unwrap_err();
         fs::set_permissions(documents.path(), fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(e.code, "file.io");
-        let dialog = "The dialog answered https://x/y, which is not a file on this device.";
+        let dialog = "The dialog answered https://x/y, which is not a file on this device (URL is not a valid path).";
         let removal = format!(" Could not remove {}: ", staged.display());
         assert!(
             e.message.starts_with(dialog) && e.message[dialog.len()..].starts_with(&removal),
@@ -955,8 +966,16 @@ mod tests {
             picked_path(url("https://x/y")),
             Err(CommandError::new(
                 "file.io",
-                "The dialog answered https://x/y, which is not a file on this device."
+                "The dialog answered https://x/y, which is not a file on this device (URL is not a valid path)."
             ))
+        );
+    }
+
+    #[test]
+    fn the_replace_question_names_the_file() {
+        assert_eq!(
+            replace_question("Bridge.webboard"),
+            "Bridge.webboard already exists. Replace it?"
         );
     }
 

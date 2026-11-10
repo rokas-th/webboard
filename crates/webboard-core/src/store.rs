@@ -22,6 +22,7 @@ const TRAILER: usize = 4;
 const PLAN_LIST_LOCKED: &str =
     "The plan list is open in another WebBoard process; close it there first.";
 const PLAN_LOCKED: &str = "This plan is open in another WebBoard process; close it there first.";
+const NOT_A_PLAN: &str = "Only a plan can be deleted; the plan lists stay.";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Loaded {
@@ -86,8 +87,12 @@ pub struct DocStore {
     fail_next_append: bool,
 }
 
+fn is_plan_list(id: &str) -> bool {
+    id == "local" || id.starts_with("ix-")
+}
+
 pub(crate) fn locked_error(id: &str) -> CommandError {
-    let message = if id == "local" || id.starts_with("ix-") {
+    let message = if is_plan_list(id) {
         PLAN_LIST_LOCKED
     } else {
         PLAN_LOCKED
@@ -748,6 +753,9 @@ impl Store {
 
     pub fn delete(&self, id: &str) -> Result<()> {
         check_id(id)?;
+        if is_plan_list(id) {
+            return Err(CommandError::new("store.not_a_plan", NOT_A_PLAN));
+        }
         let mut docs = self.table()?;
         if docs.get(id).is_some_and(|d| Arc::strong_count(d) > 1) {
             return Err(CommandError::new(
@@ -761,42 +769,36 @@ impl Store {
             None if dir.is_dir() => Some(Held::File(lock_dir(&dir, id)?)),
             None => None,
         };
-        let rooted = match self.remove_copies(id) {
-            Ok(rooted) => rooted,
-            Err(e) => {
-                if let Some(Held::Doc(doc)) = held {
-                    docs.insert(id.to_string(), doc);
-                }
-                return Err(e);
-            }
-        };
-        if !rooted {
+        let Some(copies) = self.copies(id)? else {
             return Ok(());
-        }
-        if held.is_none() {
-            return sync_dir(&self.root);
-        }
-        let removed = match fs::remove_dir_all(&dir) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            other => other.map_err(|e| io_error("Could not remove", &dir, e)),
         };
+        let whole = held.is_some();
+        let targets: Vec<PathBuf> = copies
+            .into_iter()
+            .chain(whole.then_some(dir.clone()))
+            .collect();
+        let removed = remove_in_order(&targets);
         drop(held);
         removed?;
         sync_dir(&self.root).map_err(|e| {
-            CommandError::new(
-                "store.io",
-                format!("{} was removed, but {}", dir.display(), e.message),
-            )
+            if whole {
+                CommandError::new(
+                    "store.io",
+                    format!("{} was removed, but {}", dir.display(), e.message),
+                )
+            } else {
+                e
+            }
         })
     }
 
-    fn remove_copies(&self, id: &str) -> Result<bool> {
+    fn copies(&self, id: &str) -> Result<Option<Vec<PathBuf>>> {
         let entries = match fs::read_dir(&self.root) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(io_error("Could not list", &self.root, e)),
             Ok(entries) => entries,
         };
-        entries
+        let mut copies: Vec<PathBuf> = entries
             .map(|entry| {
                 entry
                     .map(|e| e.file_name())
@@ -810,10 +812,9 @@ impl Store {
                 })
             })
             .map(|name| self.root.join(name))
-            .try_for_each(|path| {
-                fs::remove_dir_all(&path).map_err(|e| io_error("Could not remove", &path, e))
-            })?;
-        Ok(true)
+            .collect();
+        copies.sort();
+        Ok(Some(copies))
     }
 
     pub fn list(&self) -> Result<Vec<String>> {
@@ -848,6 +849,37 @@ impl Store {
             )),
         }
     }
+}
+
+fn shown(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn remove_in_order(targets: &[PathBuf]) -> Result<()> {
+    targets
+        .iter()
+        .enumerate()
+        .try_for_each(|(i, path)| match fs::remove_dir_all(path) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => {
+                let removed = match &targets[..i] {
+                    [] => "Nothing was removed.".to_string(),
+                    done => format!("Removed {}.", shown(done)),
+                };
+                Err(CommandError::new(
+                    "store.io",
+                    format!(
+                        "Could not remove {}: {e}. {removed} Still on disk: {}.",
+                        path.display(),
+                        shown(&targets[i..])
+                    ),
+                ))
+            }
+            _ => Ok(()),
+        })
 }
 
 enum Held {
@@ -1594,14 +1626,16 @@ mod tests {
     }
 
     #[test]
-    fn delete_keeps_the_plan_when_a_copy_cannot_be_removed() {
+    fn delete_forgets_the_plan_when_a_copy_cannot_be_removed() {
         use std::os::unix::fs::PermissionsExt;
         let tmp = TempDir::new().unwrap();
         let docs = tmp.path().join("docs");
         let store = Store::new(docs.clone());
         append_range(&mut store.doc("P").unwrap().lock().unwrap(), 1..=2);
         let entry = Arc::downgrade(store.table().unwrap().get("P").unwrap());
-        let copy = docs.join("P.bad-1");
+        let gone = docs.join("P.bad-1");
+        fs::create_dir(&gone).unwrap();
+        let copy = docs.join("P.bad-2");
         fs::create_dir(&copy).unwrap();
         fs::write(copy.join("seg-1.log"), b"old").unwrap();
         fs::set_permissions(&copy, fs::Permissions::from_mode(0o555)).unwrap();
@@ -1614,10 +1648,20 @@ mod tests {
             "{}",
             e.message
         );
+        assert!(
+            e.message.ends_with(&format!(
+                ". Removed {}. Still on disk: {}, {}.",
+                gone.display(),
+                copy.display(),
+                docs.join("P").display()
+            )),
+            "{}",
+            e.message
+        );
+        assert!(!gone.exists());
         assert!(docs.join("P").join("seg-1.log").is_file());
-        let kept = entry.upgrade().expect("the table entry was dropped");
-        assert!(Arc::ptr_eq(&store.doc("P").unwrap(), &kept));
-        drop(kept);
+        assert!(entry.upgrade().is_none(), "the cached entry was kept");
+        assert!(!store.table().unwrap().contains_key("P"));
         assert_eq!(
             seqs(&store.doc("P").unwrap().lock().unwrap().load().unwrap()),
             [1, 2]
@@ -1625,6 +1669,94 @@ mod tests {
         store.delete("P").unwrap();
         assert!(!docs.join("P").exists());
         assert!(!copy.exists());
+    }
+
+    #[test]
+    fn delete_forgets_the_plan_when_its_folder_cannot_be_removed() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let store = Store::new(docs.clone());
+        append_range(&mut store.doc("P").unwrap().lock().unwrap(), 1..=2);
+        let entry = Arc::downgrade(store.table().unwrap().get("P").unwrap());
+        let copy = docs.join("P.bad-1");
+        fs::create_dir(&copy).unwrap();
+        let dir = docs.join("P");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+        let e = store.delete("P").unwrap_err();
+        assert_eq!(e.code, "store.io");
+        assert!(
+            e.message
+                .starts_with(&format!("Could not remove {}: ", dir.display())),
+            "{}",
+            e.message
+        );
+        assert!(
+            e.message.ends_with(&format!(
+                ". Removed {}. Still on disk: {}.",
+                copy.display(),
+                dir.display()
+            )),
+            "{}",
+            e.message
+        );
+        assert!(!copy.exists());
+        assert!(entry.upgrade().is_none(), "the cached entry was kept");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::remove_file(dir.join("seg-1.log")).unwrap();
+        assert_eq!(
+            store
+                .doc("P")
+                .unwrap()
+                .lock()
+                .unwrap()
+                .load()
+                .unwrap()
+                .last_seq,
+            0
+        );
+        store.delete("P").unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn delete_of_a_plan_never_opened_in_this_store_removes_it() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        append_range(
+            &mut Store::new(docs.clone()).doc("P").unwrap().lock().unwrap(),
+            1..=2,
+        );
+        fs::create_dir(docs.join("P.bad-1")).unwrap();
+        let store = Store::new(docs.clone());
+        assert!(!store.table().unwrap().contains_key("P"));
+        store.delete("P").unwrap();
+        assert!(!docs.join("P").exists());
+        assert!(!docs.join("P.bad-1").exists());
+        assert_eq!(store.list().unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn delete_refuses_the_plan_lists() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let store = Store::new(docs.clone());
+        append_range(&mut store.doc("local").unwrap().lock().unwrap(), 1..=1);
+        append_range(
+            &mut store.doc("ix-sp000000000").unwrap().lock().unwrap(),
+            1..=1,
+        );
+        assert_eq!(
+            store.delete("local").unwrap_err(),
+            CommandError::new("store.not_a_plan", NOT_A_PLAN)
+        );
+        assert_eq!(
+            store.delete("ix-sp000000000").unwrap_err(),
+            CommandError::new("store.not_a_plan", NOT_A_PLAN)
+        );
+        assert!(docs.join("local").join("seg-1.log").is_file());
+        assert!(docs.join("ix-sp000000000").join("seg-1.log").is_file());
+        assert_eq!(store.list().unwrap(), ["ix-sp000000000", "local"]);
     }
 
     #[test]

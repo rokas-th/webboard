@@ -595,6 +595,9 @@ impl SyncClient {
                 body.error, body.message
             )),
             (404, Caller::Claim) => SyncError::new("sync.bad_code", body.message),
+            (404, _) if body.error == "unknown_plan" => {
+                SyncError::new("sync.unknown_plan", body.message)
+            }
             (409, _) if body.error == "too_many_plans" => {
                 SyncError::new("sync.too_many_plans", body.message)
             }
@@ -2518,6 +2521,38 @@ mod tests {
         assert_eq!(
             f.client().ticket("pl0000000501").await.map(|_| ()),
             Err(err("sync.http", "Server answered 409 conflict: other"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_404_unknown_plan_is_its_own_code_with_the_servers_message() {
+        let mut f = Fixture::new().await;
+        f.join_with_token();
+        let unknown = "The server does not know this plan yet. Let it sync, then delete it again.";
+        let purge = f
+            .server
+            .mock("DELETE", "/plans/pl0000000001")
+            .with_status(404)
+            .with_header("content-type", "application/json")
+            .with_body(json!({ "error": "unknown_plan", "message": unknown }).to_string())
+            .expect(1)
+            .create_async()
+            .await;
+        assert_eq!(
+            f.client().purge_plan("pl0000000001").await,
+            Err(err("sync.unknown_plan", unknown))
+        );
+        purge.assert_async().await;
+        f.answer(
+            "DELETE",
+            "/plans/pl0000000001",
+            404,
+            json!({ "error": "not_found", "message": "other" }),
+        )
+        .await;
+        assert_eq!(
+            f.client().purge_plan("pl0000000001").await,
+            Err(err("sync.http", "Server answered 404 not_found: other"))
         );
     }
 
