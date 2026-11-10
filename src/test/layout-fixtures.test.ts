@@ -1,7 +1,7 @@
 import * as Y from "yjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InvokeArgs } from "@tauri-apps/api/core";
-import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, UNREADABLE_ID, UNREADABLE_LINE } from "../../scripts/layout-fixtures.mjs";
+import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, UNREADABLE_ID, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "../../scripts/layout-fixtures.mjs";
 import { normalizeName } from "../actions/build";
 import { LogState } from "../log/state";
 import type { Action, Cause, DeviceId } from "../log/types";
@@ -190,6 +190,9 @@ describe("layout fixtures", () => {
       "sync-space",
       "two-choices",
       "unreadable",
+      "update-available",
+      "update-check-failed",
+      "update-downloading",
     ]);
   });
 
@@ -197,6 +200,31 @@ describe("layout fixtures", () => {
     const joined = { space: { server: "https://probe.invalid", spaceId: "sp000000000", deviceId: "mac", deviceName: "Mac" }, revoked: false };
     const expected: Record<string, unknown> = { "sync-space": joined, "sync-receiving": joined, "sync-removed": { ...joined, revoked: true } };
     Object.entries(FIXTURES).forEach(([name, f]) => expect(f.ipc.sync_status, name).toEqual(expected[name] ?? { space: null, revoked: false }));
+  });
+
+  it("answers the update check in every state with no update, except the update states, which are the mesa plan", () => {
+    const UPDATE_STATES = ["update-available", "update-check-failed", "update-downloading"];
+    Object.entries(FIXTURES)
+      .filter(([name]) => !UPDATE_STATES.includes(name))
+      .forEach(([name, f]) => {
+        expect(f.ipc["plugin:updater|check"], name).toBeNull();
+        expect("plugin:updater|download_and_install" in f.ipc, name).toBe(false);
+      });
+    const found = { rid: 1, currentVersion: "0.1.0", version: UPDATE_VERSION, date: "2026-11-09 08:00:00.0 +00:00:00", body: "", rawJson: {} };
+    expect(fixture("update-available").ipc["plugin:updater|check"]).toEqual(found);
+    expect(fixture("update-downloading").ipc["plugin:updater|check"]).toEqual(found);
+    expect(fixture("update-check-failed").ipc["plugin:updater|check"]).toEqual({ __reject: UPDATE_CHECK_FAILED });
+    expect(fixture("update-downloading").ipc["plugin:updater|download_and_install"]).toEqual({
+      __channel: "onEvent",
+      messages: [
+        { event: "Started", data: { contentLength: 24 * 1024 * 1024 } },
+        { event: "Progress", data: { chunkLength: 12 * 1024 * 1024 } },
+      ],
+    });
+    UPDATE_STATES.forEach((name) => {
+      expect(fixture(name).docs, name).toEqual(fixture("mesa").docs);
+      expect(fixture(name).ipc, name).not.toBe(fixture("mesa").ipc);
+    });
   });
 
   it("gives every space state its index doc and a ticket, and no other state either", () => {

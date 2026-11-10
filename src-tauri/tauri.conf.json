@@ -34,6 +34,14 @@
       "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost wss://webboard.rokass.org; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'"
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://webboard.rokass.org/releases/latest.json"
+      ],
+      "pubkey": ""
+    }
+  },
   "bundle": {
     "active": true,
     "category": "Productivity",

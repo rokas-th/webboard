@@ -6,6 +6,7 @@ import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
 import { childrenOf } from "../../plan/project";
 import type { PlanSession } from "../../store/session";
+import type { Updates } from "../../store/updates";
 import { countedConflicts, goToFirstPatch } from "../choices/HeadCounts";
 import { baselineDefault } from "../panel/Baselines";
 import { exportFlow, importFlow } from "../shell/fileFlows";
@@ -33,6 +34,7 @@ export interface CommandCtx {
   select(id: PlanId): void;
   newPlan(): void;
   reveal(target: ItemId | "today"): void;
+  updates: Updates | null;
 }
 
 const NEW_NAME: Readonly<Record<ItemKind, string>> = { task: "New task", milestone: "New milestone", group: "New group" };
@@ -225,6 +227,14 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
   ];
 }
 
+function updateCommands(updates: Updates | null): Command[] {
+  if (updates === null) return [];
+  const k = updates.state().k;
+  const check: Command = { id: "update-check", group: "Help", label: "Check for updates", run: () => void updates.check() };
+  const install: Command = { id: "update-install", group: "Help", label: "Install update and restart", run: () => void updates.install() };
+  return k === "available" || k === "installFailed" ? [check, install] : [check];
+}
+
 export function commands(ctx: CommandCtx): Command[] {
   const current = ctx.ui.plan;
   const failed = ctx.registry.failures();
@@ -251,6 +261,7 @@ export function commands(ctx: CommandCtx): Command[] {
     ...openPlans,
     { id: "palette", group: "Help", label: "Command palette", keys: ctx.mac ? "⌘K" : "Ctrl K", run: () => ctx.setUi({ dialog: { t: "palette" } }) },
     { id: "about", group: "Help", label: "About WebBoard", run: () => ctx.setUi({ dialog: { t: "about" } }) },
+    ...updateCommands(ctx.updates),
   ];
   return session === null ? always : [...planCommands(ctx, session), ...always];
 }

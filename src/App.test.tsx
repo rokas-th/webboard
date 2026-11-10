@@ -3,6 +3,9 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App, { REBUILD_LIST_LINE, RESET_SETTINGS_LINE } from "./App";
 import { AppError } from "./services/ipc";
+import { check as checkUpdate, restart, type FoundUpdate } from "./services/updates";
+import type { InstallProgress } from "./store/updates";
+import { SyncManager } from "./sync/manager";
 import { Registry } from "./store/registry";
 import { seededStore } from "./test/shell";
 import { closeListenerCount, requestWindowClose, resetTauri, tauri, windowState } from "./test/tauriMock";
@@ -12,10 +15,16 @@ import { PLACE_KEY } from "./ui/state";
 
 vi.mock("@tauri-apps/api/core", () => import("./test/tauriMock"));
 vi.mock("@tauri-apps/api/window", () => import("./test/tauriMock"));
+vi.mock("./services/updates", () => ({
+  check: vi.fn(async () => null),
+  restart: vi.fn(async () => undefined),
+}));
 
 beforeEach(() => {
   window.localStorage.clear();
   resetTauri({});
+  vi.mocked(checkUpdate).mockReset().mockResolvedValue(null);
+  vi.mocked(restart).mockReset().mockResolvedValue(undefined);
 });
 
 const opened: Promise<Registry>[] = [];
@@ -290,6 +299,114 @@ it("restores the view from webboard.place after a remount", async () => {
   await settle();
   expect(screen.getByRole("tab", { name: "List" }).getAttribute("aria-selected")).toBe("true");
   expect(document.querySelector('[data-slot="list"]')).not.toBeNull();
+});
+
+describe("updates", () => {
+  const requestClose = async (): Promise<void> => {
+    await act(async () => {
+      await requestWindowClose();
+    });
+  };
+
+  const offer = (order: string[], install?: (onProgress: (p: InstallProgress) => void) => Promise<void>): FoundUpdate => ({
+    version: "0.2.0",
+    install:
+      install ??
+      (async (onProgress) => {
+        order.push("install");
+        onProgress({ t: "downloading", downloaded: 0, total: 10 });
+        onProgress({ t: "installing" });
+      }),
+  });
+
+  it("checks once when the shell opens on the desktop and shows the line at the bottom of the sidebar", async () => {
+    await seededStore(["Alpha"]);
+    spyOpen();
+    render(<App />);
+    await settle();
+    expect(checkUpdate).toHaveBeenCalledTimes(1);
+    const line = document.querySelector("nav.sidebar")?.lastElementChild;
+    expect(line?.className).toBe("update-line");
+    expect(line?.querySelector(".update-status")?.textContent).toMatch(/^Up to date · checked \d\d:\d\d$/);
+    fireEvent.keyDown(window, { key: "k", code: "KeyK", metaKey: true });
+    await settle();
+    expect(document.querySelector(".palette")?.textContent).toContain("Check for updates");
+  });
+
+  it("neither checks nor shows the line or the commands on a phone or iPad", async () => {
+    const seeded = await seededStore(["Alpha"]);
+    resetTauri({ ...seeded.answers, device_info: () => ({ deviceId: "mac", platform: "ios" }) });
+    spyOpen();
+    render(<App />);
+    await settle();
+    expect(toolbar()).not.toBeNull();
+    expect(checkUpdate).not.toHaveBeenCalled();
+    expect(document.querySelector(".update-line")).toBeNull();
+    fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
+    await settle();
+    const palette = document.querySelector(".palette");
+    expect(palette).not.toBeNull();
+    expect(palette?.textContent).toContain("About WebBoard");
+    expect(palette?.textContent).not.toContain("Check for updates");
+  });
+
+  it("Install and restart installs, then stops sync and closes the registry, then restarts", async () => {
+    await seededStore(["Alpha"]);
+    const order: string[] = [];
+    vi.mocked(checkUpdate).mockResolvedValueOnce(offer(order));
+    vi.mocked(restart).mockImplementationOnce(async () => {
+      order.push("restart");
+    });
+    vi.spyOn(SyncManager.prototype, "stop").mockImplementation(() => {
+      order.push("stopSync");
+    });
+    const real = Registry.prototype.close;
+    vi.spyOn(Registry.prototype, "close").mockImplementation(async function (this: Registry) {
+      order.push("registry.close");
+      await real.call(this);
+    });
+    spyOpen();
+    render(<App />);
+    await settle();
+    expect(screen.getByText("WebBoard 0.2.0 is available")).toBeTruthy();
+    order.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
+    await settle();
+    expect(order).toEqual(["install", "stopSync", "registry.close", "restart"]);
+  });
+
+  it("a failed install closes nothing and shows the failure on the line", async () => {
+    await seededStore(["Alpha"]);
+    vi.mocked(checkUpdate).mockResolvedValueOnce(offer([], async () => Promise.reject("signature verification failed")));
+    const close = vi.spyOn(Registry.prototype, "close");
+    spyOpen();
+    render(<App />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
+    await settle();
+    expect(screen.getByText("Could not install 0.2.0: signature verification failed")).toBeTruthy();
+    expect(close).not.toHaveBeenCalled();
+    expect(restart).not.toHaveBeenCalled();
+    expect(toolbar()).not.toBeNull();
+  });
+
+  it("a failed close after the install shows the installed-but-not-saved screen, never restarts, and lets the next close through", async () => {
+    await seededStore(["Alpha"]);
+    vi.mocked(checkUpdate).mockResolvedValueOnce(offer([]));
+    spyOpen();
+    render(<App />);
+    await settle();
+    const close = vi.spyOn(Registry.prototype, "close").mockRejectedValueOnce(new AppError("store.io", "Could not save “Alpha”: disk full."));
+    fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
+    await settle();
+    const line = "WebBoard 0.2.0 is installed, but WebBoard could not save everything before restarting: Could not save “Alpha”: disk full. Close the window again to quit, then start WebBoard.";
+    expect(screen.getByText(line).className).toBe("start-bad");
+    expect(toolbar()).toBeNull();
+    expect(restart).not.toHaveBeenCalled();
+    await requestClose();
+    expect(windowState.destroyed).toBe(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Dialog", () => {

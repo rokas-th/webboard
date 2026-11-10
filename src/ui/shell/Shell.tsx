@@ -35,6 +35,7 @@ import { ReloadConfirm } from "./ReloadConfirm";
 import { NewPlanButton, Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 import { Tray } from "./Tray";
+import { useUpdates, useUpdateState } from "./UpdateLine";
 
 export interface ShellProps {
   registry: Registry;
@@ -103,6 +104,8 @@ function IndexBanner(p: { registry: Registry; error: AppError }) {
 export function Shell(p: ShellProps) {
   const registry = p.registry;
   const { state: syncState } = useSyncState();
+  const updates = useUpdates();
+  useUpdateState(updates);
   const [ui, setUi] = useUi();
   const uiValue = useMemo(() => ({ ui, setUi }), [ui, setUi]);
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
@@ -362,6 +365,7 @@ export function Shell(p: ShellProps) {
     select,
     newPlan,
     reveal,
+    updates,
   };
   const ctxRef = useRef(ctx);
   useLayoutEffect(() => {

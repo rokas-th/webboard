@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
-import { buildFixtures, LONG_NAMES, UNREADABLE_LINE } from "./layout-fixtures.mjs";
+import { buildFixtures, LONG_NAMES, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "./layout-fixtures.mjs";
 
 const DIST = fileURLToPath(new URL("../dist", import.meta.url));
 
@@ -79,7 +79,7 @@ function states() {
       actions: o.actions ?? [],
       sizes: o.sizes ?? "desktop",
       dialog: o.dialog === true,
-      clip: o.clip === true,
+      clip: o.clip === true ? LONG_NAMES : o.clip ?? [],
       net: { ws: o.net?.ws ?? "none", online: o.net?.online ?? true },
     });
 
@@ -171,6 +171,22 @@ function states() {
     dialog: true,
     actions: [click(".toolbar .sync-chip", "Local only"), expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"), expect('[role="dialog"] button', "Create or join space")],
   });
+  const UPDATE_AVAILABLE = `WebBoard ${UPDATE_VERSION} is available`;
+  const UPDATE_FAILED = `Could not check for updates: ${UPDATE_CHECK_FAILED}`;
+  const UPDATE_DOWNLOADING = `Downloading ${UPDATE_VERSION}… 50%`;
+  add("update/current", "mesa", { actions: [viewExpect("timeline"), expect(".sidebar .update-line .update-status", "Up to date · checked 09:00")] });
+  add("update/available", "update-available", {
+    clip: [UPDATE_AVAILABLE],
+    actions: [viewExpect("timeline"), expect(".sidebar .update-line button", "Install and restart"), expect(".sidebar .update-line .update-status.amber", UPDATE_AVAILABLE)],
+  });
+  add("update/check-failed", "update-check-failed", {
+    clip: [UPDATE_FAILED],
+    actions: [viewExpect("timeline"), expect(".sidebar .update-line button", "Try again"), expect(".sidebar .update-line .update-status.bad", UPDATE_FAILED)],
+  });
+  add("update/downloading", "update-downloading", {
+    clip: [UPDATE_DOWNLOADING],
+    actions: [viewExpect("timeline"), click(".sidebar .update-line button", "Install and restart"), expect(".sidebar .update-line .update-status", UPDATE_DOWNLOADING)],
+  });
   add("history", "mesa", { actions: [reveal(".slot-panel .panel h2", "History"), count(".slot-panel .history li", 40)] });
   add("revert-preview", "mesa", {
     dialog: true,
@@ -247,6 +263,15 @@ const SHIM = String.raw`
     }
     if (!(cmd in ipc)) return missing(cmd, "no fixture");
     var a = ipc[cmd];
+    if (a !== null && typeof a === "object" && "__reject" in a) return Promise.reject(a.__reject);
+    if (a !== null && typeof a === "object" && typeof a.__channel === "string") {
+      var channel = args ? args[a.__channel] : undefined;
+      if (channel === undefined || channel === null || typeof channel.id !== "number") return missing(cmd, "no channel in " + a.__channel);
+      a.messages.forEach(function (m, i) {
+        window["_" + channel.id]({ index: i, message: JSON.parse(JSON.stringify(m)) });
+      });
+      return new Promise(function () {});
+    }
     if (a !== null && typeof a === "object" && !Array.isArray(a) && typeof a.__byArg === "string") {
       var k = String(args ? args[a.__byArg] : undefined);
       if (!(k in a.map)) return missing(cmd, a.__byArg + " " + k);
@@ -1193,7 +1218,7 @@ function judge(state, r, errors, notFound) {
     problems.push(`${o.a} paints ${o.overY}x${o.overX}px over ${o.b}, both children of ${o.parent} — by ${by}`);
   });
   r.covered.forEach((c) => problems.push(`${c.path} is not the topmost thing at its own centre (${c.at}): ${c.on} is, over ${c.stack.join(" / ")}`));
-  if (state.clip) {
+  if (state.clip.length > 0) {
     if (r.names.checked === 0) problems.push("no element shows one of the long names");
     r.names.faults.forEach((f) => problems.push(f));
   }
@@ -1384,7 +1409,7 @@ async function main() {
     const payload = JSON.stringify({
       place: state.place,
       fixture: fixtures.get(state.fixture),
-      clip: state.clip ? LONG_NAMES : [],
+      clip: state.clip,
       dialog: state.dialog,
       net: state.net,
       fullMinWidth: FULL_MIN_WIDTH,

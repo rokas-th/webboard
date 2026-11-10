@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { systemClock } from "./services/clock";
 import { AppError, call } from "./services/ipc";
+import * as updater from "./services/updates";
 import { guardWindowClose } from "./services/window";
 import { Registry } from "./store/registry";
+import { createUpdates, type Updates } from "./store/updates";
 import { toast } from "./ui/common/Toast";
 import { stopSync, syncPending, SyncProvider } from "./sync/SyncProvider";
 import { Shell } from "./ui/shell/Shell";
+import { UpdatesContext } from "./ui/shell/UpdateLine";
 
 export const RESET_SETTINGS_LINE = "Plan names and the last region are rebuilt; the old file is kept.";
 export const REBUILD_LIST_LINE = "Plans on this device are listed again; trashed plans come back; the old list is kept.";
@@ -32,6 +35,26 @@ export default function App() {
   const warmed = useRef<Registry | null>(null);
   const live = useRef<Registry | null>(null);
   const closable = useRef<{ close(): Promise<void> } | null>(null);
+  const [updates, setUpdates] = useState<Updates | null>(null);
+  const made = useRef(false);
+
+  const makeUpdates = (): Updates =>
+    createUpdates({
+      check: updater.check,
+      install: (update, onProgress) => update.install(onProgress),
+      closeRegistry: async () => {
+        const target = live.current === null ? null : closable.current;
+        if (target === null) throw new Error("WebBoard is not open, so there is nothing to save before restarting.");
+        await target.close();
+        live.current = null;
+      },
+      restart: updater.restart,
+      now: Date.now,
+      setTimer: (cb, ms) => {
+        const id = window.setInterval(cb, ms);
+        return () => window.clearInterval(id);
+      },
+    });
 
   const open = (): void => {
     setStart({ k: "opening" });
@@ -45,6 +68,10 @@ export default function App() {
             return registry.close();
           },
         };
+        if (!made.current && registry.device.platform !== "ios") {
+          made.current = true;
+          setUpdates(makeUpdates());
+        }
         setStart({ k: "open", registry });
       },
       (e: unknown) => {
@@ -72,6 +99,21 @@ export default function App() {
   }, [registry]);
 
   useEffect(() => {
+    if (updates === null) return;
+    const off = updates.subscribe(() => {
+      const s = updates.state();
+      if (s.k !== "closeFailed") return;
+      live.current = null;
+      setStart({ k: "failed", message: s.line, recovery: null });
+    });
+    updates.start();
+    return () => {
+      updates.stop();
+      off();
+    };
+  }, [updates]);
+
+  useEffect(() => {
     const unguarded = (e: unknown): void => {
       console.error(e);
       toast(messageOf(e), "bad");
@@ -97,9 +139,11 @@ export default function App() {
   if (start.k === "opening") return null;
   if (start.k === "open") {
     return (
-      <SyncProvider registry={start.registry}>
-        <Shell registry={start.registry} clock={systemClock} />
-      </SyncProvider>
+      <UpdatesContext.Provider value={updates}>
+        <SyncProvider registry={start.registry}>
+          <Shell registry={start.registry} clock={systemClock} />
+        </SyncProvider>
+      </UpdatesContext.Provider>
     );
   }
 

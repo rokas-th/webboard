@@ -59,6 +59,11 @@ pub fn run() {
         .menu(menu::app_menu)
         .on_menu_event(menu::on_menu_event);
 
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
     builder
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -272,6 +277,84 @@ mod tests {
             Some("-"),
             "bundle.macOS.signingIdentity is not \"-\", so the bundle is only linker-signed \
              and `codesign --verify --deep --strict` reports a broken seal"
+        );
+    }
+
+    #[test]
+    fn the_updater_asks_webboard_only_and_ordinary_builds_need_no_signing_key() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("tauri.conf.json is JSON");
+        assert_eq!(
+            conf["plugins"]["updater"]["endpoints"],
+            serde_json::json!(["https://webboard.rokass.org/releases/latest.json"]),
+            "plugins.updater.endpoints is not exactly the one release manifest on webboard.rokass.org"
+        );
+        assert!(
+            conf["plugins"]["updater"]["pubkey"].is_string(),
+            "plugins.updater.pubkey is missing or not a string, so the updater plugin cannot start"
+        );
+        assert_ne!(
+            conf["bundle"]["createUpdaterArtifacts"].as_bool(),
+            Some(true),
+            "bundle.createUpdaterArtifacts is true, so every build (and every gate) needs the \
+             private signing key; signing is the owner's step R2 on the finished artifacts"
+        );
+    }
+
+    #[test]
+    fn the_update_plugins_are_registered_and_permitted_on_the_desktops_only() {
+        let body = run_body();
+        let updater = body
+            .find(".plugin(tauri_plugin_updater::Builder::new().build())")
+            .expect("run() does not register the updater plugin");
+        let process = body
+            .find(".plugin(tauri_plugin_process::init())")
+            .expect("run() does not register the process plugin");
+        let attr = body[..updater]
+            .lines()
+            .rev()
+            .find(|line| line.trim_start().starts_with("#["))
+            .expect("the updater is registered without a cfg");
+        assert_eq!(
+            attr.trim(),
+            "#[cfg(desktop)]",
+            "the update plugins are registered under {attr}, not #[cfg(desktop)]"
+        );
+        let statement = body[updater..].split_once(';').map_or("", |(head, _)| head);
+        assert!(
+            updater < process && statement.contains(".plugin(tauri_plugin_process::init())"),
+            "the process plugin is not registered in the same #[cfg(desktop)] statement as the updater"
+        );
+
+        let caps: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json"))
+                .expect("capabilities/default.json is JSON");
+        assert_eq!(caps["platforms"], serde_json::json!(["macOS", "linux"]));
+        let permissions: Vec<&str> = caps["permissions"]
+            .as_array()
+            .expect("capabilities/default.json has a permissions array")
+            .iter()
+            .filter_map(|p| p.as_str())
+            .collect();
+        assert!(
+            permissions.contains(&"updater:default") && permissions.contains(&"process:allow-restart"),
+            "the desktop capability lacks updater:default or process:allow-restart: {permissions:?}"
+        );
+
+        const MANIFEST: &str = include_str!("../Cargo.toml");
+        let headers: Vec<&str> = MANIFEST
+            .split("\n[")
+            .filter(|s| s.contains("tauri-plugin-updater") || s.contains("tauri-plugin-process"))
+            .map(|s| s.lines().next().unwrap_or_default())
+            .collect();
+        assert_eq!(
+            headers,
+            [
+                "target.'cfg(any(target_os = \"macos\", target_os = \"linux\"))'.dependencies]",
+                "target.'cfg(target_os = \"macos\")'.dependencies]",
+                "target.'cfg(target_os = \"linux\")'.dependencies]",
+            ],
+            "the update plugins are declared outside the macOS and Linux dependency sections"
         );
     }
 

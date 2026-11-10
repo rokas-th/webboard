@@ -4,3 +4,5 @@ export function orderKey(n: number): string;
 export const LONG_NAMES: readonly string[];
 export const UNREADABLE_ID: string;
 export const UNREADABLE_LINE: string;
+export const UPDATE_VERSION: string;
+export const UPDATE_CHECK_FAILED: string;

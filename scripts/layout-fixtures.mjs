@@ -460,6 +460,21 @@ const SPACE_INDEX = "ix-sp000000000";
 const SYNC_OFF = { space: null, revoked: false };
 const PROBE_TICKET = { ticket: "tk_probe", expiresAt: new Date(2026, 10, 9, 10, 0, 0, 0).getTime() };
 
+export const UPDATE_VERSION = "0.1.1";
+export const UPDATE_CHECK_FAILED =
+  "error sending request for url (https://webboard.rokass.org/releases/latest.json): client error (Connect): dns error: failed to lookup address information: nodename nor servname provided, or not known";
+const UPDATE_SIZE = 24 * 1024 * 1024;
+const UPDATE_FOUND = {
+  rid: 1,
+  currentVersion: "0.1.0",
+  version: UPDATE_VERSION,
+  date: "2026-11-09 08:00:00.0 +00:00:00",
+  body: "",
+  rawJson: {},
+};
+
+const withUpdate = (f, answers) => ({ docs: copyOf(f).docs, ipc: { ...copyOf(f).ipc, ...answers } });
+
 function spaceIndex() {
   const log = new Log("ixSpc", START);
   log.act({ lbl: "Name device", w: [own("dn:mac", "Mac"), own("dn:iphone", "iPhone")] });
@@ -494,6 +509,20 @@ export function buildFixtures() {
     "sync-space": inSpace(mesaOnMac, false),
     "sync-receiving": inSpace(unreadable, false),
     "sync-removed": inSpace(mesaOnMac, true),
+    "update-available": withUpdate(mesaOnMac, { "plugin:updater|check": { ...UPDATE_FOUND } }),
+    "update-check-failed": withUpdate(mesaOnMac, { "plugin:updater|check": { __reject: UPDATE_CHECK_FAILED } }),
+    "update-downloading": withUpdate(mesaOnMac, {
+      "plugin:updater|check": { ...UPDATE_FOUND },
+      "plugin:updater|download_and_install": {
+        __channel: "onEvent",
+        messages: [
+          { event: "Started", data: { contentLength: UPDATE_SIZE } },
+          { event: "Progress", data: { chunkLength: UPDATE_SIZE / 2 } },
+        ],
+      },
+    }),
   };
-  return Object.fromEntries(Object.entries(fixtures).map(([name, f]) => [name, { ...f, ipc: { sync_status: { ...SYNC_OFF }, ...f.ipc } }]));
+  return Object.fromEntries(
+    Object.entries(fixtures).map(([name, f]) => [name, { ...f, ipc: { sync_status: { ...SYNC_OFF }, "plugin:updater|check": null, ...f.ipc } }]),
+  );
 }

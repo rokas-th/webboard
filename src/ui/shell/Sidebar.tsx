@@ -1,6 +1,7 @@
 import type { PlanId } from "../../domain/model";
 import type { PlanListing, Registry } from "../../store/registry";
 import { useSyncState } from "../../sync/SyncProvider";
+import { UpdateLine, useUpdates } from "./UpdateLine";
 
 export function NewPlanButton(p: { creating: boolean; onNew(): void }) {
   return (
@@ -24,6 +25,7 @@ interface SidebarProps {
 
 export function Sidebar(p: SidebarProps) {
   const { state } = useSyncState();
+  const updates = useUpdates();
   const failures = p.registry.failures();
   const readOnly = p.registry.spaceReadOnly();
   const movable = (l: PlanListing): boolean =>
@@ -83,6 +85,7 @@ export function Sidebar(p: SidebarProps) {
           </ul>
         </section>
       )}
+      {updates !== null && <UpdateLine updates={updates} />}
     </nav>
   );
 }

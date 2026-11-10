@@ -9,6 +9,7 @@ import { clearToasts } from "../common/Toast";
 import { runWith } from "../run";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { UiState } from "../state";
+import type { UpdateState, Updates } from "../../store/updates";
 import { commands, createdItem, type CommandCtx } from "./commands";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -90,6 +91,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     select,
     newPlan,
     reveal,
+    updates: null,
   };
   return { ctx, setUi, select, newPlan, reveal, open };
 }
@@ -426,5 +428,58 @@ describe("new items", () => {
     ["new-task", "new-milestone", "new-group"].forEach((id) => find(h.ctx, id).run());
     expect(apply).not.toHaveBeenCalled();
     expect(h.setUi).not.toHaveBeenCalled();
+  });
+});
+
+describe("update commands", () => {
+  const updatesIn = (state: UpdateState): Updates & { check: ReturnType<typeof vi.fn>; install: ReturnType<typeof vi.fn> } => ({
+    state: () => state,
+    subscribe: () => () => undefined,
+    start: () => undefined,
+    stop: () => undefined,
+    check: vi.fn(async () => undefined),
+    install: vi.fn(async () => undefined),
+  });
+
+  const STATES: readonly (readonly [UpdateState, boolean])[] = [
+    [{ k: "idle" }, false],
+    [{ k: "checking" }, false],
+    [{ k: "current", at: 0 }, false],
+    [{ k: "available", version: "0.2.0" }, true],
+    [{ k: "downloading", version: "0.2.0", percent: 10 }, false],
+    [{ k: "installing", version: "0.2.0" }, false],
+    [{ k: "checkFailed", message: "offline" }, false],
+    [{ k: "installFailed", version: "0.2.0", message: "x" }, true],
+    [{ k: "closeFailed", version: "0.2.0", line: "x" }, false],
+  ];
+
+  it.each(STATES)("in %j lists Check for updates always and Install update and restart only when it can install (%s)", async (state, installable) => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    const u = updatesIn(state);
+    const ctx: CommandCtx = { ...h.ctx, updates: u };
+    const update = commands(ctx).filter((c) => c.id === "update-check" || c.id === "update-install");
+    expect(update.map((c) => [c.id, c.group, c.label])).toEqual([
+      ["update-check", "Help", "Check for updates"],
+      ...(installable ? [["update-install", "Help", "Install update and restart"]] : []),
+    ]);
+    const none: CommandCtx = { ...ctx, session: null, run: null, undo: null, redo: null };
+    expect(ids(none).filter((x) => x.startsWith("update-"))).toEqual(installable ? ["update-check", "update-install"] : ["update-check"]);
+  });
+
+  it("Check for updates checks and Install update and restart installs", async () => {
+    const t = await made(SMALL);
+    const u = updatesIn({ k: "available", version: "0.2.0" });
+    const ctx: CommandCtx = { ...harness(t).ctx, updates: u };
+    find(ctx, "update-check").run();
+    expect(u.check).toHaveBeenCalledTimes(1);
+    expect(u.install).not.toHaveBeenCalled();
+    find(ctx, "update-install").run();
+    expect(u.install).toHaveBeenCalledTimes(1);
+  });
+
+  it("without updates (a phone or iPad) neither command is listed", async () => {
+    const t = await made(SMALL);
+    expect(ids(harness(t).ctx).filter((x) => x.startsWith("update-"))).toEqual([]);
   });
 });
