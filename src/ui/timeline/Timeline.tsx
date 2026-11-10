@@ -6,7 +6,7 @@ import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { EMPTY_PLAN } from "../copy";
 import { useRun } from "../run";
-import { useUiValue } from "../state";
+import { useUiValue, type Zoom } from "../state";
 import { Chart, itemOf, rowAt, type DropGhost, type Point, type TempLink, type TouchHost } from "./Chart";
 import { fitSpan, geometry, leadFor, ROW, type Geometry } from "./geometry";
 import { gestureIntent, isClick, startIntent } from "./gesture";
@@ -66,6 +66,7 @@ const openingDay = (view: PlanView, today: Day): Day => {
 
 interface Place {
   plan: PlanId;
+  zoom: Zoom;
   origin: Day;
   ppd: number;
   left: number;
@@ -148,13 +149,13 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     const prev = place.current;
     const lead = leadIn(el);
     if (prev === null || prev.plan !== planId) el.scrollLeft = Math.max(0, fit ? geo.x(fitFirst) : geo.x(opening) - lead);
-    else if (fit && (prev.origin !== geo.origin || prev.ppd !== geo.ppd)) el.scrollLeft = Math.max(0, geo.x(fitFirst));
+    else if (fit && (prev.zoom !== "F" || prev.origin !== geo.origin || prev.ppd !== geo.ppd)) el.scrollLeft = Math.max(0, geo.x(fitFirst));
     else if (prev.origin !== geo.origin || prev.ppd !== geo.ppd) {
       const day = prev.origin + (prev.left + lead) / prev.ppd;
       el.scrollLeft = Math.max(0, Math.round((day - geo.origin) * geo.ppd - lead));
     }
-    place.current = { plan: planId, origin: geo.origin, ppd: geo.ppd, left: el.scrollLeft };
-  }, [planId, empty, geo, opening, fit, fitFirst]);
+    place.current = { plan: planId, zoom: ui.zoom, origin: geo.origin, ppd: geo.ppd, left: el.scrollLeft };
+  }, [planId, empty, geo, opening, fit, fitFirst, ui.zoom]);
 
   const index = useMemo(() => new Map(rows.map((r, i) => [r.id, i] as const)), [rows]);
 

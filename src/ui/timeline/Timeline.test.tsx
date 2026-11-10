@@ -1191,7 +1191,7 @@ describe("fit zoom", () => {
 
   it("hides the label of a bar narrower than it, at fit only", async () => {
     widths.scroll = 300 + 640;
-    widths.label = 60;
+    widths.label = 90;
     await shown(SEED, { today: "2026-11-10" });
     const label = (id: string): HTMLElement => {
       const next = barOf(id).nextElementSibling;
@@ -1201,6 +1201,20 @@ describe("fit zoom", () => {
     expect([label("a").classList.contains("hidden"), label("b").classList.contains("hidden")]).toEqual([false, false]);
     fit();
     expect([label("a").classList.contains("hidden"), label("b").classList.contains("hidden")]).toEqual([true, false]);
+  });
+
+  it("scrolls to a week before the first start on switching to fit when the fit's px a day equal the previous zoom's", async () => {
+    widths.scroll = 300 + 1140;
+    const t = await shown([{ id: "a", name: "A", start: "2026-12-01", dur: 5 }], { today: "2026-11-10" });
+    const g = geometry(t.session.view(), "F", 1140);
+    expect(g.ppd).toBe(40);
+    expect(g.ppd).toBe(geometry(t.session.view(), "W").ppd);
+    const el = one(".tl-scroll");
+    el.scrollLeft = g.x(FIRST) + 333;
+    fireEvent.scroll(el);
+    fit();
+    expect(uiNow()[0].zoom).toBe("F");
+    expect(el.scrollLeft).toBe(g.x(FIRST));
   });
 
   it("schedules a tray chip at the fit day under the pointer", async () => {
