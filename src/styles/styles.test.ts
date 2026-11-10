@@ -276,7 +276,7 @@ describe("the Cyberdeck look", () => {
       [".card-meta .card-group", "hidden", "ellipsis", "nowrap"],
       [".tl-month", "clip", "ellipsis", "nowrap"],
     ]);
-    expect([plain(".tl-month-text")["position"], plain(".tl-month-text")["left"]]).toEqual(["sticky", "calc(var(--grid-w) + 8px)"]);
+    expect([plain(".tl-month-text")["display"], plain(".tl-month-text")["position"], plain(".tl-month-text")["left"]]).toEqual(["inline-block", "sticky", "calc(var(--grid-w) + 8px)"]);
   });
 
   it("keeps the TODAY pill under the pinned corner and fades the chart in from the task column", () => {
