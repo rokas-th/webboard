@@ -26,8 +26,9 @@ function modified(e: KeyInput, s: KeyState): string | null {
   const mod = s.mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
   if (!mod || e.altKey) return null;
   const key = e.key.toLowerCase();
+  if (s.dialog) return null;
   if (key === "k" && !e.shiftKey) return "palette";
-  if (s.typing || s.dialog) return null;
+  if (s.typing) return null;
   if (key === "z") return e.shiftKey ? "redo" : "undo";
   if (key === "y" && !s.mac && !e.shiftKey) return "redo";
   return null;

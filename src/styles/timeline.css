@@ -308,6 +308,19 @@
   stroke-width: 1.6;
 }
 
+.tl-links marker path {
+  fill: var(--cyan-dim);
+  stroke: none;
+}
+
+.tl-links marker.hot path {
+  fill: var(--cyan);
+}
+
+.tl-links marker.bad path {
+  fill: var(--magenta);
+}
+
 .tl-links .temp {
   stroke: var(--cyan);
   stroke-dasharray: 4 3;

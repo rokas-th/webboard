@@ -645,3 +645,83 @@ describe("every open choice is reachable (Step 2)", () => {
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Status"]);
   });
 });
+
+describe("chained sheets give focus back to what opened the first (m25)", () => {
+  const press = (el: HTMLElement): void => {
+    act(() => el.focus());
+    fireEvent.click(el);
+  };
+  const closeOf = (sheet: HTMLElement): HTMLElement => {
+    const el = sheet.querySelector(".sheet-head button");
+    if (!(el instanceof HTMLElement)) throw new Error("no sheet Close button");
+    return el;
+  };
+
+  it("Status → Choose region → Calendar → Close focuses the strip", async () => {
+    const t = await made(SEED, { calendar: { region: null } });
+    await shown(t);
+    press(strip());
+    press(within(lineOf(NO_REGION)).getByRole("button", { name: "Choose region" }));
+    press(closeOf(screen.getByRole("dialog", { name: "Calendar" })));
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    expect(document.activeElement).toBe(strip());
+  });
+
+  it("Status → Go to first conflict → item sheet → Close focuses the strip", async () => {
+    const t = await made(CONFLICT_SEED);
+    await shown(t);
+    press(strip());
+    press(within(lineOf("1 conflict")).getByRole("button", { name: "Go to first conflict" }));
+    press(closeOf(screen.getByRole("dialog", { name: "B" })));
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    expect(document.activeElement).toBe(strip());
+  });
+
+  it("Status → a calendar choice's Choose… → choice sheet → Close focuses the strip", async () => {
+    const t = await made(SEED, { clashes: [AWAY] });
+    await shown(t);
+    press(strip());
+    press(within(lineOf(CALENDAR_BANNER)).getByRole("button", { name: "Choose…" }));
+    press(closeOf(screen.getByRole("dialog", { name: CHOICE_TITLE })));
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    expect(document.activeElement).toBe(strip());
+  });
+
+  it("Status → Open choices → a choice → choice sheet → Close focuses the strip", async () => {
+    const t = await made(SEED, { clashes: [AWAY] });
+    await shown(t);
+    press(strip());
+    press(within(statusSheet()).getByRole("button", { name: "1 open choice · Choose…" }));
+    press(within(screen.getByRole("dialog", { name: "Open choices" })).getByRole("button", { name: "Mac or iPhone" }));
+    press(closeOf(screen.getByRole("dialog", { name: CHOICE_TITLE })));
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    expect(document.activeElement).toBe(strip());
+  });
+
+  it("Status → Open choices → Close shows Status again, whose Close focuses the strip", async () => {
+    const t = await made(SEED, { clashes: [AWAY] });
+    await shown(t);
+    press(strip());
+    press(within(statusSheet()).getByRole("button", { name: "1 open choice · Choose…" }));
+    press(closeOf(screen.getByRole("dialog", { name: "Open choices" })));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Status"]);
+    expect(statusSheet().contains(document.activeElement)).toBe(true);
+    press(closeOf(statusSheet()));
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    expect(document.activeElement).toBe(strip());
+  });
+
+  it("⋯ → Change calendar… → Calendar → Close shows the Plan sheet again, whose Close focuses ⋯", async () => {
+    const t = await made(SEED);
+    await shown(t);
+    const more = screen.getByRole("button", { name: "Plan" });
+    press(more);
+    press(within(screen.getByRole("dialog", { name: "Plan" })).getByRole("button", { name: "Change calendar…" }));
+    press(closeOf(screen.getByRole("dialog", { name: "Calendar" })));
+    const plan = screen.getByRole("dialog", { name: "Plan" });
+    expect(plan.contains(document.activeElement)).toBe(true);
+    press(closeOf(plan));
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+    expect(document.activeElement).toBe(more);
+  });
+});

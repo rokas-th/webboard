@@ -179,6 +179,36 @@ describe("opening the palette", () => {
     expect(document.activeElement).toBe(query());
   });
 
+  it("does nothing on ⌘K while another dialog is open, and the dialog keeps its draft", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    fireEvent.click(button(panel(), "Change calendar…"));
+    await settle();
+    const calendar = screen.getByRole("dialog", { name: "Calendar · Plan" });
+    const days = within(calendar).getByRole("group", { name: "Working days" });
+    const dayOff = within(days).getAllByRole("button").find((b) => b.getAttribute("aria-pressed") === "false");
+    if (dayOff === undefined) throw new Error("no day off to switch on");
+    fireEvent.click(dayOff);
+    expect(dayOff.getAttribute("aria-pressed")).toBe("true");
+    press("k", { metaKey: true }, dayOff);
+    press("k", { metaKey: true });
+    expect(uiNow()[0].dialog).toEqual({ t: "calendar" });
+    expect(screen.getAllByRole("dialog")).toEqual([calendar]);
+    expect(dayOff.isConnected).toBe(true);
+    expect(dayOff.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+  });
+
+  it("does nothing on Ctrl K off macOS while another dialog is open", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
+    setUi({ dialog: { t: "about" } });
+    const about = screen.getByRole("dialog");
+    press("k", { ctrlKey: true }, about);
+    expect(uiNow()[0].dialog).toEqual({ t: "about" });
+    expect(screen.getAllByRole("dialog")).toEqual([about]);
+  });
+
   it("does nothing for a key whose command is absent in the empty state", async () => {
     const t = await made(MESA_SEED);
     await shown(t, { plans: () => [] });

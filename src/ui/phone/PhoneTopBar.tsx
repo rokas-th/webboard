@@ -24,6 +24,15 @@ function NewItemMenu(p: { disabled: boolean; onPick(kind: ItemKind): void }) {
     if (first.current === null) throw new Error("NewItemMenu: open without its first item");
     first.current.focus();
   }, [shown]);
+  useEffect(() => {
+    if (!shown) return;
+    const away = (e: PointerEvent): void => {
+      if (e.target instanceof Node && box.current !== null && box.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [shown]);
   const close = (): void => {
     setOpen(false);
     toggle.current?.focus();
@@ -40,7 +49,7 @@ function NewItemMenu(p: { disabled: boolean; onPick(kind: ItemKind): void }) {
     setOpen(false);
   };
   return (
-    <div className="plan-menu" ref={box} onKeyDown={onKey} onBlur={onLeave}>
+    <div className="plan-menu" ref={box} onKeyDown={onKey} onBlur={onLeave} onMouseDown={(e) => e.preventDefault()}>
       <button
         ref={toggle}
         type="button"
@@ -48,7 +57,7 @@ function NewItemMenu(p: { disabled: boolean; onPick(kind: ItemKind): void }) {
         aria-haspopup="menu"
         aria-expanded={shown}
         disabled={p.disabled}
-        onClick={() => setOpen(!open)}
+        onClick={() => (shown ? close() : setOpen(true))}
       >
         +
       </button>

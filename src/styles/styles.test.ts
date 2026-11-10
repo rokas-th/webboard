@@ -287,6 +287,13 @@ describe("the Cyberdeck look", () => {
     expect(narrow(".seg-modes button")["padding"]).toBe("4px 8px");
   });
 
+  it("fills each link arrowhead from the token its path is stroked with", () => {
+    const plain = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect([".tl-links path", ".tl-links path.hot", ".tl-links path.bad"].map((sel) => plain(sel)["stroke"])).toEqual(["var(--cyan-dim)", "var(--cyan)", "var(--magenta)"]);
+    expect([".tl-links marker path", ".tl-links marker.hot path", ".tl-links marker.bad path"].map((sel) => plain(sel)["fill"])).toEqual(["var(--cyan-dim)", "var(--cyan)", "var(--magenta)"]);
+    expect(plain(".tl-links marker path")["stroke"]).toBe("none");
+  });
+
   it("lets a swipe that starts on a tray chip scroll the tray", () => {
     const chip = sheet.rules.filter((r) => r.selector === ".tray-chip" && r.decls["touch-action"] !== undefined).map((r) => [r.conditions.length, r.decls["touch-action"]]);
     expect(chip).toEqual([[0, "pan-x pan-y"]]);

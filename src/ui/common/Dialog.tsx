@@ -4,16 +4,27 @@ const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), select:not(:disa
 
 export const focusables = (root: HTMLElement): HTMLElement[] => [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.closest("[hidden]") === null);
 
+const openers = new WeakMap<Element, readonly Element[]>();
+
+const openersFrom = (el: Element | null): readonly Element[] => {
+  if (el === null) return [];
+  const modal = el.closest('[aria-modal="true"]');
+  const outer = modal === null ? undefined : openers.get(modal);
+  return outer === undefined ? [el] : [el, ...outer];
+};
+
 export function useModalFocus(ref: RefObject<HTMLElement | null>, what: string): void {
-  const [opener] = useState(() => document.activeElement);
+  const [back] = useState(() => openersFrom(document.activeElement));
   useEffect(() => {
     const root = ref.current;
     if (root === null) throw new Error(`${what} rendered without its element`);
+    openers.set(root, back);
     if (!root.contains(document.activeElement)) (focusables(root)[0] ?? root).focus();
     return () => {
-      if (opener instanceof HTMLElement && opener.isConnected && !root.contains(opener)) opener.focus();
+      openers.delete(root);
+      back.find((el): el is HTMLElement => el instanceof HTMLElement && el.isConnected && !root.contains(el))?.focus();
     };
-  }, [ref, what, opener]);
+  }, [ref, what, back]);
 }
 
 export function modalKeyDown(e: KeyboardEvent<HTMLElement>, onClose: () => void): void {

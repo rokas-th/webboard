@@ -314,17 +314,17 @@ function Links(p: ChartProps & { height: number }) {
       />,
     ];
   });
-  const marker = (id: string, fill: string) => (
-    <marker id={id} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0,0 L8,4 L0,8 z" fill={fill} stroke="none" />
+  const marker = (id: string, tone: "hot" | "bad" | undefined) => (
+    <marker id={id} className={tone} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" />
     </marker>
   );
   return (
     <svg className="tl-links" width={geo.width} height={p.height} aria-hidden="true">
       <defs>
-        {marker("arr", "#158CA6")}
-        {marker("arrHot", "#24E0FF")}
-        {marker("arrBad", "#FF3B6B")}
+        {marker("arr", undefined)}
+        {marker("arrHot", "hot")}
+        {marker("arrBad", "bad")}
       </defs>
       {paths}
       {p.temp !== null && <path className="temp" d={`M${p.temp.x0},${p.temp.y0} L${p.temp.x1},${p.temp.y1}`} />}

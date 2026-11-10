@@ -10,9 +10,15 @@ export function TextField(p: {
 }) {
   const [draft, setDraft] = useState(p.value);
   const sent = useRef<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const base = useRef(p.value);
   useEffect(() => {
-    setDraft(p.value);
+    const was = base.current;
+    const own = sent.current;
+    base.current = p.value;
     sent.current = null;
+    const editing = input.current !== null && input.current === document.activeElement;
+    setDraft((d) => (editing && d !== was && d.trim() !== own ? d : p.value));
   }, [p.value]);
   if (p.readOnly) {
     return (
@@ -33,6 +39,7 @@ export function TextField(p: {
   };
   return (
     <input
+      ref={input}
       type={p.type ?? "text"}
       className={p.className}
       aria-label={p.label}

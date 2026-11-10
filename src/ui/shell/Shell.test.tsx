@@ -18,6 +18,7 @@ import { MESA_SEED, memoryDoc, testSession, type SeedItem, type TestSession } fr
 import { seededStore as store, shellFor } from "../../test/shell";
 import { hold, resetTauri, tauri, type Call } from "../../test/tauriMock";
 import { orderedSides } from "../choices/order";
+import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
 import { PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
 import { exportFlow, importFlow } from "./fileFlows";
@@ -1643,6 +1644,37 @@ describe("the panel slot", () => {
       });
       expect(uiNow()[0].selected).toBeNull();
       expect(toastTexts()).toEqual(["“G” was moved to the Trash on iPhone. Restore it from the Trash."]);
+    });
+
+    it("keeping a ghost in the Trash from its own panel toasts only the resolve", async () => {
+      const t = await made(SEED);
+      const p = await t.peer("iphone");
+      sessions.push(p.session);
+      await shown(t);
+      select("A");
+      act(() => {
+        p.session.apply({ t: "trash", items: ["A"] });
+      });
+      act(() => {
+        t.session.apply({ t: "rename", item: "A", name: "A2" });
+      });
+      act(() => p.sync());
+      await settle();
+      expect(t.session.view().choices.filter((x) => x.kind === "delete")).toHaveLength(1);
+      expect(uiNow()[0].selected).toBe("A");
+      expect(toastTexts()).toEqual([]);
+      click(button("Choose"));
+      const dialog = screen.getByRole("dialog", { name: CHOICE_TITLE });
+      const resolve = vi.spyOn(t.session, "resolve");
+      click(within(dialog).getByRole("button", { name: "Keep iPhone" }));
+      await settle();
+      const done = resolve.mock.results[0];
+      if (done === undefined || done.type !== "return") throw new Error("resolve did not return");
+      expect(t.session.view().plan.items.get("A")?.trashed).toBe(true);
+      expect(t.session.trashAuthorOf("A").dev).toBe("mac");
+      expect(uiNow()[0].selected).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(toastTexts()).toEqual([done.value.toast]);
     });
 
     it("keeps the ghost row of an open delete choice selected", async () => {

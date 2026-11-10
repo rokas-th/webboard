@@ -7,10 +7,11 @@ const MAC: KeyState = { mac: true, typing: false, dialog: false, selected: false
 const PC: KeyState = { ...MAC, mac: false };
 
 describe("keyToCommand on macOS", () => {
-  it("opens the palette on ⌘K even while typing or in a dialog", () => {
+  it("opens the palette on ⌘K even while typing, and not while a dialog is open", () => {
     expect(keyToCommand(k("k", { metaKey: true }), MAC)).toBe("palette");
     expect(keyToCommand(k("K", { metaKey: true }), { ...MAC, typing: true })).toBe("palette");
-    expect(keyToCommand(k("k", { metaKey: true }), { ...MAC, dialog: true, typing: true })).toBe("palette");
+    expect(keyToCommand(k("k", { metaKey: true }), { ...MAC, dialog: true })).toBeNull();
+    expect(keyToCommand(k("k", { metaKey: true }), { ...MAC, dialog: true, typing: true })).toBeNull();
     expect(keyToCommand(k("k", { ctrlKey: true }), MAC)).toBeNull();
   });
 
@@ -99,6 +100,12 @@ describe("keyToCommand in a dialog or a text field", () => {
     expect(keyToCommand(k("z", { ctrlKey: true }), { ...PC, dialog: true })).toBeNull();
     expect(keyToCommand(k("z", { ctrlKey: true, shiftKey: true }), { ...PC, dialog: true })).toBeNull();
     expect(keyToCommand(k("y", { ctrlKey: true }), { ...PC, dialog: true })).toBeNull();
+  });
+
+  it("does nothing on Ctrl K off macOS while a dialog is open", () => {
+    expect(keyToCommand(k("k", { ctrlKey: true }), { ...PC, dialog: true })).toBeNull();
+    expect(keyToCommand(k("k", { ctrlKey: true }), { ...PC, dialog: true, typing: true })).toBeNull();
+    expect(keyToCommand(k("k", { ctrlKey: true }), { ...PC, typing: true })).toBe("palette");
   });
 
   it("leaves Esc to the text field outside a dialog", () => {

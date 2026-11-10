@@ -1182,6 +1182,55 @@ describe("PhoneShell new items (Step 3)", () => {
   });
 });
 
+describe("PhoneShell + menu under a WebKit tap (C9)", () => {
+  const tap = (el: HTMLElement): void => {
+    if (fireEvent.mouseDown(el)) {
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && focused !== document.body) act(() => focused.blur());
+    }
+    if (el.isConnected) fireEvent.click(el);
+  };
+  const plus = (): HTMLElement => within(topBar()).getByRole("button", { name: "+" });
+  const item = (name: string): HTMLElement => within(screen.getByRole("menu")).getByRole("menuitem", { name });
+
+  it.each(["New task", "New milestone", "New group"])("a tap on %s after the focused first item blurs creates it once", async (label) => {
+    const t = await made();
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    tap(plus());
+    expect(document.activeElement).toBe(item("New task"));
+    tap(item(label));
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply.mock.calls[0]?.[0]).toMatchObject({ t: "create", name: label });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("dialog", { name: label })).toBeTruthy();
+  });
+
+  it("a tap on + dismisses its own menu and leaves focus on +", async () => {
+    const t = await made();
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    tap(plus());
+    expect(screen.getByRole("menu")).toBeTruthy();
+    tap(plus());
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(plus());
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("a touch outside the menu closes it without creating anything", async () => {
+    const t = await made();
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    tap(plus());
+    const list = document.querySelector(".phone-list");
+    if (!(list instanceof HTMLElement)) throw new Error("no phone list");
+    fireEvent.pointerDown(list);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(apply).not.toHaveBeenCalled();
+  });
+});
+
 describe("PhoneShell item sheet (Step 4)", () => {
   const EDIT_SEED: readonly SeedItem[] = [
     { id: "S4", name: "Sprint 4", kind: "group" },
@@ -1339,6 +1388,36 @@ describe("PhoneShell item sheet (Step 4)", () => {
     const sheet = screen.getByRole("dialog");
     expect(sheet.querySelector(".isheet")?.firstElementChild?.classList.contains("choice-banner")).toBe(true);
     expect(toastTexts()).toEqual([]);
+  });
+
+  it("keeping a ghost in the Trash from its own sheet toasts only the resolve", async () => {
+    const { t, peer } = await withPeer();
+    act(() => {
+      peer.session.apply({ t: "trash", items: ["Notes"] });
+    });
+    act(() => {
+      t.session.apply({ t: "rename", item: "Notes", name: "Notes 2" });
+    });
+    act(() => peer.sync());
+    await settle();
+    const [c] = t.session.view().choices.filter((x) => x.kind === "delete");
+    if (c === undefined) throw new Error("no delete choice");
+    const trashed = c.sides.find((s) => s.label === "iPhone");
+    if (trashed === undefined) throw new Error("no iPhone side");
+    const keep = sideText(c, trashed.key, t.session.view().plan);
+    expect(keep).toBe("“Notes 2” stays in the Trash");
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Notes 2" })).getByRole("button", { name: "Choose" }));
+    const choice = screen.getByRole("dialog", { name: CHOICE_TITLE });
+    const resolve = vi.spyOn(t.session, "resolve");
+    fireEvent.click(within(choice).getByRole("radio", { name: keep }));
+    fireEvent.click(within(choice).getByRole("button", { name: "Apply" }));
+    await settle();
+    const done = builtOf(resolve);
+    expect(t.session.view().plan.items.get("Notes")?.trashed).toBe(true);
+    expect(t.session.trashAuthorOf("Notes").dev).toBe("mac");
+    expect(lastUi().selected).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toastTexts()).toEqual([done.toast]);
   });
 });
 

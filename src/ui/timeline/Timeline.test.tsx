@@ -214,6 +214,16 @@ describe("links and marks", () => {
     expect(one('[data-row="ship"]').classList.contains("selected")).toBe(true);
   });
 
+  it("leaves each arrowhead's colour to the stylesheet", async () => {
+    await shown(SEED, HELD);
+    const heads = paths(".tl-links marker").map((m) => [m.id, m.getAttribute("class"), m.querySelector("path")?.getAttribute("fill") ?? null]);
+    expect(heads).toEqual([
+      ["arr", null, null],
+      ["arrHot", "hot", null],
+      ["arrBad", "bad", null],
+    ]);
+  });
+
   it("marks an early successor, a late task and a held item", async () => {
     await shown(SEED, HELD);
     expect(barOf("review").classList.contains("conflict")).toBe(true);
