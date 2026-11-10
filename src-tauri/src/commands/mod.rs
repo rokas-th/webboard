@@ -1,6 +1,8 @@
 pub mod device;
 pub mod file;
 pub mod holidays;
+#[cfg(target_os = "macos")]
+pub mod print;
 #[cfg(feature = "probe")]
 pub mod probe;
 pub mod settings;

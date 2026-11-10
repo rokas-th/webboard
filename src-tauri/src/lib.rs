@@ -164,6 +164,8 @@ pub fn run() {
             commands::file::file_read,
             commands::file::plan_export,
             commands::file::plan_import,
+            #[cfg(target_os = "macos")]
+            commands::print::print_window,
             #[cfg(target_os = "ios")]
             commands::file::file_stage,
             #[cfg(target_os = "ios")]
@@ -412,6 +414,30 @@ mod tests {
         assert!(
             statement.contains(".on_menu_event(menu::on_menu_event)"),
             "run() sets the app menu without routing its events to menu::on_menu_event"
+        );
+    }
+
+    #[test]
+    fn run_offers_the_print_command_on_the_mac_only() {
+        let body = run_body();
+        let handler = body
+            .find("commands::print::print_window")
+            .expect("run() does not register print_window, so Print on the Mac finds no command");
+        let attr = body[..handler]
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or_default();
+        assert_eq!(
+            attr.trim(),
+            "#[cfg(target_os = \"macos\")]",
+            "print_window is registered under {attr}, not the macOS cfg: WebviewWindow::print works only on the Mac"
+        );
+        assert_eq!(body.matches("commands::print::print_window").count(), 1);
+        let modules = include_str!("commands/mod.rs");
+        assert!(
+            modules.contains("#[cfg(target_os = \"macos\")]\npub mod print;"),
+            "commands/mod.rs does not declare the print module under the macOS cfg"
         );
     }
 
