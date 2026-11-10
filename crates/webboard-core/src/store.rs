@@ -761,24 +761,42 @@ impl Store {
             None if dir.is_dir() => Some(Held::File(lock_dir(&dir, id)?)),
             None => None,
         };
-        match self.remove_files(id, &dir, held.is_some()) {
-            Ok(()) => Ok(()),
+        let rooted = match self.remove_copies(id) {
+            Ok(rooted) => rooted,
             Err(e) => {
                 if let Some(Held::Doc(doc)) = held {
                     docs.insert(id.to_string(), doc);
                 }
-                Err(e)
+                return Err(e);
             }
+        };
+        if !rooted {
+            return Ok(());
         }
+        if held.is_none() {
+            return sync_dir(&self.root);
+        }
+        let removed = match fs::remove_dir_all(&dir) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            other => other.map_err(|e| io_error("Could not remove", &dir, e)),
+        };
+        drop(held);
+        removed?;
+        sync_dir(&self.root).map_err(|e| {
+            CommandError::new(
+                "store.io",
+                format!("{} was removed, but {}", dir.display(), e.message),
+            )
+        })
     }
 
-    fn remove_files(&self, id: &str, dir: &Path, present: bool) -> Result<()> {
+    fn remove_copies(&self, id: &str) -> Result<bool> {
         let entries = match fs::read_dir(&self.root) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
             Err(e) => return Err(io_error("Could not list", &self.root, e)),
             Ok(entries) => entries,
         };
-        let copies = entries
+        entries
             .map(|entry| {
                 entry
                     .map(|e| e.file_name())
@@ -791,14 +809,11 @@ impl Store {
                     is_set_aside(name) && name.rsplit_once(".bad-").is_some_and(|(of, _)| of == id)
                 })
             })
-            .map(|name| self.root.join(name));
-        copies
-            .into_iter()
-            .chain(present.then(|| dir.to_path_buf()))
+            .map(|name| self.root.join(name))
             .try_for_each(|path| {
                 fs::remove_dir_all(&path).map_err(|e| io_error("Could not remove", &path, e))
             })?;
-        sync_dir(&self.root)
+        Ok(true)
     }
 
     pub fn list(&self) -> Result<Vec<String>> {
@@ -1541,6 +1556,20 @@ mod tests {
         assert!(!docs.join("P.bad-1").exists());
         assert_eq!(store.delete("P"), Ok(()));
         assert_eq!(store.delete("a b").unwrap_err().code, "store.io");
+    }
+
+    #[test]
+    fn delete_of_a_held_plan_whose_folder_went_missing_is_ok() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        let store = Store::new(docs.clone());
+        append_range(&mut store.doc("P").unwrap().lock().unwrap(), 1..=2);
+        fs::create_dir(docs.join("P.bad-1")).unwrap();
+        fs::remove_dir_all(docs.join("P")).unwrap();
+        assert_eq!(store.delete("P"), Ok(()));
+        assert!(!docs.join("P.bad-1").exists());
+        assert!(!store.table().unwrap().contains_key("P"));
+        assert_eq!(store.delete("P"), Ok(()));
     }
 
     #[test]
