@@ -39,8 +39,11 @@ export const LAST_PLAN_DATE: IsoDate = "2199-12-31";
 
 export const inPlanWindow = (d: string): boolean => isCalendarDate(d) && d >= FIRST_PLAN_DATE && d <= LAST_PLAN_DATE;
 
+export const WEEKDAYS: readonly Weekday[] = [1, 2, 3, 4, 5, 6, 7];
+
 export function weekday(d: Day): Weekday {
-  return ((((checkDay(d) + 3) % 7) + 7) % 7 + 1) as Weekday;
+  return WEEKDAYS[(((checkDay(d) + 3) % 7) + 7) % 7];
+
 }
 
 export function yearOf(d: Day): number {

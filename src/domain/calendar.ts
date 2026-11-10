@@ -154,8 +154,13 @@ export function workCalendar(cal: Calendar): WorkCalendar {
   const named = new Map<IsoDate, { entry: Entry; off: OffDay }>(
     [...byDate].flatMap(([date, entries]) => {
       if (!workdays.has(weekday(toDay(date)))) return [];
-      const hit = entries.map((entry) => ({ entry, off: offOf(entry) })).find((x) => x.off !== null);
-      return hit === undefined ? [] : [[date, { entry: hit.entry, off: hit.off as OffDay }] as const];
+      return entries
+        .flatMap((entry) => {
+          const off = offOf(entry);
+          return off === null ? [] : [{ entry, off }];
+        })
+        .slice(0, 1)
+        .map((hit) => [date, hit] as const);
     }),
   );
   const offDays = new Map<Day, OffDay>([...named.values()].map(({ off }) => [toDay(off.date), off]));
@@ -177,10 +182,11 @@ export function workCalendar(cal: Calendar): WorkCalendar {
 
   const listed = (from: Day, to: Day): readonly ListedDay[] => {
     const lo = toIso(from), hi = toIso(to);
-    return [...byDate.keys()]
-      .filter((date) => date >= lo && date <= hi)
-      .sort()
-      .flatMap((date) => (byDate.get(date) as Entry[]).map(listedOf));
+    return [...byDate]
+      .filter(([date]) => date >= lo && date <= hi)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .flatMap(([, entries]) => entries.map(listedOf));
+
   };
 
   const missingYears = (from: Day, to: Day): number[] => {

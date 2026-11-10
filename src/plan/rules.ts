@@ -2,17 +2,19 @@ import { toDay } from "../domain/dates";
 import type { Rules, UnitKey, Write } from "../log/types";
 import { decodeAs, parseKey } from "./units";
 
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+
 const deepEqual = (a: unknown, b: unknown): boolean => {
   if (a === b) return true;
   if (Array.isArray(a) || Array.isArray(b)) {
     return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => deepEqual(x, b[i]));
   }
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (!isObject(a) || !isObject(b)) return false;
   const ka = Object.keys(a);
   const kb = Object.keys(b);
-  const rb = b as Record<string, unknown>;
-  return ka.length === kb.length && ka.every((k) => k in rb && deepEqual((a as Record<string, unknown>)[k], rb[k]));
+  return ka.length === kb.length && ka.every((k) => k in b && deepEqual(a[k], b[k]));
 };
+
 
 const sameYear = (u: UnitKey, a: unknown, b: unknown): boolean => {
   const ya = decodeAs("holidayYear", u, a);

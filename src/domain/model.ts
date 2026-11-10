@@ -56,7 +56,12 @@ export interface PlanState {
   baselines: ReadonlyMap<BaselineId, Baseline>;
 }
 
-export const linkKey = (from: ItemId, to: ItemId): LinkKey => `${from}>${to}`;
+export const scheduleOf = (it: Item): Schedule => {
+  if (it.schedule === null) throw new Error(`no schedule for item ${it.id}`);
+  return it.schedule;
+};
+
+export const linkKey =(from: ItemId, to: ItemId): LinkKey => `${from}>${to}`;
 
 export const MAX_TASK_DUR = 3650;
 export const MAX_LAG = 1000;

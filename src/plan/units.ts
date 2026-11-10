@@ -1,5 +1,5 @@
 import type { HolidayDay, HolidayKind, HolidayYear, RegionRef, Tuning } from "../domain/calendar";
-import { FIRST_PLAN_DATE, inPlanWindow, LAST_PLAN_DATE, toDay, type IsoDate, type Weekday } from "../domain/dates";
+import { FIRST_PLAN_DATE, inPlanWindow, LAST_PLAN_DATE, toDay, WEEKDAYS, type IsoDate, type Weekday } from "../domain/dates";
 import { MAX_LAG, MAX_TASK_DUR, type BaselineId, type Horizon, type ItemId, type ItemKind, type LinkType, type PlanState, type Place, type Schedule, type Status } from "../domain/model";
 import type { ActionId, Cause, UnitKey, Write } from "../log/types";
 
@@ -103,9 +103,11 @@ const int = (unit: string, field: string, v: unknown, min = -Infinity, max = Inf
   return v;
 };
 
+const isOneOf = <T extends string>(options: readonly T[], v: string): v is T => options.some((o) => o === v);
+
 const oneOf = <T extends string>(unit: string, field: string, v: unknown, options: readonly T[]): T => {
-  if (typeof v !== "string" || !(options as readonly string[]).includes(v)) throw fail(unit, `${field} is not one of ${options.join(", ")}: ${show(v)}`);
-  return v as T;
+  if (typeof v !== "string" || !isOneOf(options, v)) throw fail(unit, `${field} is not one of ${options.join(", ")}: ${show(v)}`);
+  return v;
 };
 
 const date = (unit: string, field: string, v: unknown): IsoDate => {
@@ -255,7 +257,12 @@ const weekdaysSpec: Spec<readonly Weekday[]> = {
   enc: (x) => [...x],
   dec: (v, unit) => {
     if (!Array.isArray(v) || v.length === 0) throw fail(unit, `weekdays is not a non-empty list: ${show(v)}`);
-    const days = v.map((d) => int(unit, "weekdays", d, 1, 7) as Weekday);
+    const days = v.map((d) => {
+      const n = int(unit, "weekdays", d, 1, 7);
+      const day = WEEKDAYS.find((w) => w === n);
+      if (day === undefined) throw fail(unit, `weekdays is not a whole number from 1 to 7: ${show(d)}`);
+      return day;
+    });
     if (new Set(days).size !== days.length) throw fail(unit, `weekdays repeats a day: ${show(v)}`);
     return days;
   },
@@ -387,19 +394,19 @@ export const baseline: Codec<BaselineValue | null> = codec(SPECS.baseline, "b");
 export const activity: Codec<boolean> = codec(SPECS.activity, "a");
 
 const NAMED: Readonly<Record<keyof Codecs, Codec<unknown>>> = {
-  name: name as Codec<unknown>,
-  existence: existence as Codec<unknown>,
-  sched: sched as Codec<unknown>,
-  place: place as Codec<unknown>,
-  refs: refs as Codec<unknown>,
-  link: link as Codec<unknown>,
-  region: region as Codec<unknown>,
-  weekdays: weekdays as Codec<unknown>,
-  closure: closure as Codec<unknown>,
-  tuning: tuning as Codec<unknown>,
-  holidayYear: holidayYear as Codec<unknown>,
-  baseline: baseline as Codec<unknown>,
-  activity: activity as Codec<unknown>,
+  name,
+  existence,
+  sched,
+  place,
+  refs,
+  link,
+  region,
+  weekdays,
+  closure,
+  tuning,
+  holidayYear,
+  baseline,
+  activity,
 };
 
 export function codecOf(kind: UnitKind): Codec<unknown> {
@@ -412,29 +419,28 @@ export function parseKey(u: UnitKey): { kind: UnitKind; arg: string; to?: string
   const colon = u.indexOf(":");
   const prefix = colon < 0 ? u : u.slice(0, colon);
   const arg = colon < 0 ? "" : u.slice(colon + 1);
-  const kind = prefix as UnitKind;
-  if ((BARE as readonly string[]).includes(prefix)) {
+  if (isOneOf(BARE, prefix)) {
     if (colon >= 0) throw malformed(u);
-    return { kind, arg };
+    return { kind: prefix, arg };
   }
   if (colon < 0) throw new Error(`Unknown unit key “${u}”`);
-  if ((BY_ID as readonly string[]).includes(prefix)) {
+  if (isOneOf(BY_ID, prefix)) {
     if (!ID.test(arg)) throw malformed(u);
-    return { kind, arg };
+    return { kind: prefix, arg };
   }
   if (prefix === "l") {
     const ends = arg.split(">");
     if (ends.length !== 2 || !ends.every((e) => ID.test(e))) throw malformed(u);
-    return { kind, arg: ends[0], to: ends[1] };
+    return { kind: prefix, arg: ends[0], to: ends[1] };
   }
   if (prefix === "ct") {
     if (!isDate(arg)) throw malformed(u);
     if (!inPlanWindow(arg)) throw new Error(`Unit key “${u}” names a date outside ${FIRST_PLAN_DATE} to ${LAST_PLAN_DATE}`);
-    return { kind, arg };
+    return { kind: prefix, arg };
   }
   if (prefix === "ch") {
     if (!YEAR.test(arg)) throw malformed(u);
-    return { kind, arg };
+    return { kind: prefix, arg };
   }
   throw new Error(`Unknown unit key “${u}”`);
 }
@@ -496,9 +502,10 @@ export function decodeUnit(u: UnitKey, v: unknown): unknown {
 }
 
 export function validateWrite(w: Write): void {
-  if (!(CAUSES as readonly string[]).includes(w.c)) throw fail(w.u, `cause is not one of ${CAUSES.join(", ")}: ${show(w.c)}`);
-  const value = decodeUnit(w.u, w.v);
-  if ((w.c === "push" || w.c === "recalendar") && (parseKey(w.u).kind !== "s" || (value as Schedule).start === null)) {
+  if (!isOneOf(CAUSES, w.c)) throw fail(w.u, `cause is not one of ${CAUSES.join(", ")}: ${show(w.c)}`);
+  decodeUnit(w.u, w.v);
+  if ((w.c === "push" || w.c === "recalendar") && (parseKey(w.u).kind !== "s" || decodeAs("sched", w.u, w.v).start === null)) {
+
     throw fail(w.u, `${w.c} cannot write this unit`);
   }
 }

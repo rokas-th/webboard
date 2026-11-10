@@ -1,6 +1,7 @@
 import type { WorkCalendar } from "./calendar";
 import type { Day } from "./dates";
 import { linkKey, type ItemId, type Link, type LinkKey } from "./model";
+import { need } from "./need";
 
 export type Lock = "done" | "doing" | "held";
 
@@ -73,27 +74,28 @@ export function loopLinks(links: readonly Link[]): ReadonlySet<LinkKey> {
   const sizes: number[] = [];
   const visit = (v: ItemId): void => {
     index.set(v, index.size);
-    low.set(v, index.get(v) as number);
+    low.set(v, need(index, v, "index"));
     stack.push(v);
     onStack.add(v);
     (succ.get(v) ?? []).forEach((w) => {
       if (!index.has(w)) {
         visit(w);
-        low.set(v, Math.min(low.get(v) as number, low.get(w) as number));
+        low.set(v, Math.min(need(low, v, "low link"), need(low, w, "low link")));
       } else if (onStack.has(w)) {
-        low.set(v, Math.min(low.get(v) as number, index.get(w) as number));
+        low.set(v, Math.min(need(low, v, "low link"), need(index, w, "index")));
       }
     });
     if (low.get(v) !== index.get(v)) return;
     const id = sizes.length;
     let size = 0;
-    let w: ItemId;
-    do {
-      w = stack.pop() as ItemId;
+    for (;;) {
+      const w = stack.pop();
+      if (w === undefined) throw new Error(`no stack entry for item ${v}`);
       onStack.delete(w);
       component.set(w, id);
       size += 1;
-    } while (w !== v);
+      if (w === v) break;
+    }
     sizes.push(size);
   };
   nodes.forEach((v) => {
@@ -101,7 +103,7 @@ export function loopLinks(links: readonly Link[]): ReadonlySet<LinkKey> {
   });
   return new Set(
     links
-      .filter((l) => l.from === l.to || (component.get(l.from) === component.get(l.to) && sizes[component.get(l.from) as number] >= 2))
+      .filter((l) => l.from === l.to || (component.get(l.from) === component.get(l.to) && sizes[need(component, l.from, "component")] >= 2))
       .map((l) => linkKey(l.from, l.to)),
   );
 }
@@ -116,7 +118,7 @@ export function wouldLoop(links: readonly Link[], candidate: Link): ItemId[] | n
     const v = queue[i];
     if (v === candidate.from) {
       const path: ItemId[] = [];
-      for (let p: ItemId | null = v; p !== null; p = parent.get(p) as ItemId | null) path.unshift(p);
+      for (let p: ItemId | null = v; p !== null; p = need(parent, p, "path parent")) path.unshift(p);
       return [candidate.from, ...path.slice(0, -1)];
     }
     [...(succ.get(v) ?? [])].sort(byId).filter((w) => !parent.has(w)).forEach((w) => {
@@ -137,9 +139,8 @@ export function push(view: SchedView, roots: readonly ItemId[]): PushResult {
   const rootSet = new Set(roots);
   const down = new Set<ItemId>();
   const frontier = [...roots];
-  while (frontier.length > 0) {
-    const v = frontier.pop() as ItemId;
-    if (!rootSet.has(v) && (view.items.get(v) as Sched).lock !== null) continue;
+  for (let v = frontier.pop(); v !== undefined; v = frontier.pop()) {
+    if (!rootSet.has(v) && need(view.items, v, "schedule").lock !== null) continue;
     (succ.get(v) ?? []).filter((w) => !rootSet.has(w) && !down.has(w)).forEach((w) => {
       down.add(w);
       frontier.push(w);
@@ -147,15 +148,14 @@ export function push(view: SchedView, roots: readonly ItemId[]): PushResult {
   }
   const inner = links.filter((l) => down.has(l.from) && down.has(l.to));
   const indeg = new Map<ItemId, number>([...down].map((v) => [v, 0]));
-  inner.forEach((l) => indeg.set(l.to, (indeg.get(l.to) as number) + 1));
+  inner.forEach((l) => indeg.set(l.to, need(indeg, l.to, "in-degree") + 1));
   const innerSucc = successorMap(inner);
   const ready = [...down].filter((v) => indeg.get(v) === 0).sort(byId);
   const order: ItemId[] = [];
-  while (ready.length > 0) {
-    const v = ready.shift() as ItemId;
+  for (let v = ready.shift(); v !== undefined; v = ready.shift()) {
     order.push(v);
     (innerSucc.get(v) ?? []).forEach((w) => {
-      indeg.set(w, (indeg.get(w) as number) - 1);
+      indeg.set(w, need(indeg, w, "in-degree") - 1);
       if (indeg.get(w) === 0) {
         ready.push(w);
         ready.sort(byId);
@@ -166,13 +166,13 @@ export function push(view: SchedView, roots: readonly ItemId[]): PushResult {
   const moves = new Map<ItemId, Day>();
   const stopped: Stop[] = [];
   const current = (id: ItemId): Sched => {
-    const s = view.items.get(id) as Sched;
+    const s = need(view.items, id, "schedule");
     const m = moves.get(id);
     return m === undefined ? s : { ...s, start: m };
   };
   order.forEach((id) => {
     const s = current(id);
-    const es = Math.max(...(preds.get(id) as Link[]).map((l) => earliest(s, l, current(l.from), view.cal)));
+    const es = Math.max(...need(preds, id, "predecessors").map((l) => earliest(s, l, current(l.from), view.cal)));
     if (startOf(s, view.cal) >= es) return;
     if (s.lock !== null) stopped.push({ id, reason: s.lock });
     else moves.set(id, es);
@@ -194,11 +194,11 @@ export function conflicts(view: SchedView, storedStarts: ReadonlyMap<ItemId, Day
   const early: Conflict[] = keyed
     .filter(({ l, key }) => !loops.has(key) && view.items.has(l.from) && view.items.has(l.to))
     .flatMap(({ l, key }) => {
-      const pred = view.items.get(l.from) as Sched;
-      const succ = view.items.get(l.to) as Sched;
-      const need = earliest(succ, l, pred, view.cal);
-      return startOf(succ, view.cal) < need
-        ? [{ kind: "early" as const, link: key, pred: l.from, succ: l.to, need, succLock: succ.lock }]
+      const pred = need(view.items, l.from, "schedule");
+      const succ = need(view.items, l.to, "schedule");
+      const required = earliest(succ, l, pred, view.cal);
+      return startOf(succ, view.cal) < required
+        ? [{ kind: "early" as const, link: key, pred: l.from, succ: l.to, need: required, succLock: succ.lock }]
         : [];
     });
   const dayoff: Conflict[] = [...view.items.keys()].sort(byId).flatMap((id) => {
@@ -242,13 +242,13 @@ export function recalendar(view: SchedView, next: WorkCalendar): RecalResult {
     items
       .filter((s) => s.kind === "task" && s.lock === "done")
       .map((s) => [s.id, Math.max(1, next.workBetween(next.snapF(s.start), endOf(s, view.cal)))] as const)
-      .filter(([id, dur]) => dur !== (view.items.get(id) as Sched).dur),
+      .filter(([id, dur]) => dur !== need(view.items, id, "schedule").dur),
   );
   const starts = new Map(
     items
       .filter((s) => s.lock === null)
       .map((s) => [s.id, next.snapF(s.start)] as const)
-      .filter(([id, start]) => start !== (view.items.get(id) as Sched).start),
+      .filter(([id, start]) => start !== need(view.items, id, "schedule").start),
   );
   const recal: SchedView = {
     items: new Map(
@@ -262,7 +262,8 @@ export function recalendar(view: SchedView, next: WorkCalendar): RecalResult {
   const led = new Set(live.map((l) => l.to));
   const preds = groupBy(live, (l) => l.to);
   const endMoved = (s: Sched, moves: ReadonlyMap<ItemId, Day>): boolean => {
-    const r = recal.items.get(s.id) as Sched;
+    const r = need(recal.items, s.id, "schedule");
+
     const m = moves.get(s.id);
     return endOf(m === undefined ? r : { ...r, start: m }, next) !== endOf(s, view.cal);
   };

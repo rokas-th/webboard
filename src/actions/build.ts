@@ -277,6 +277,8 @@ const fixDraft = (ctx: Ctx, conflict: Conflict, how: "push" | "shorten" | "remov
   };
 };
 
+const SCHEDULE_FIELDS: readonly (keyof Schedule)[] = ["start", "dur", "status", "progress", "horizon"];
+
 const scheduleDraft = (ctx: Ctx, id: ItemId, set: Partial<Schedule>): Draft => {
   const plan = ctx.view.plan;
   const it = live(plan, id);
@@ -301,7 +303,7 @@ const scheduleDraft = (ctx: Ctx, id: ItemId, set: Partial<Schedule>): Draft => {
     progress: set.progress ?? (status === "done" ? 100 : reopened ? 0 : sc.progress),
     horizon: set.horizon ?? sc.horizon,
   };
-  const fields = (Object.keys(set) as (keyof Schedule)[]).filter((k) => set[k] !== undefined);
+  const fields = SCHEDULE_FIELDS.filter((k) => set[k] !== undefined);
   const one = (d: Derivation): string => {
     switch (fields[0]) {
       case "start": {

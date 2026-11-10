@@ -1,6 +1,7 @@
 import { workCalendar } from "./calendar";
 import { toDay, type Day, type IsoDate } from "./dates";
-import { linkKey, type BaselineId, type Horizon, type Item, type ItemId, type PlanState, type Status } from "./model";
+import { linkKey, scheduleOf, type BaselineId, type Horizon, type Item, type ItemId, type PlanState, type Status } from "./model";
+import { need } from "./need";
 import { conflicts, endOf, loopLinks, startOf, type Conflict, type Lock, type Sched, type SchedView } from "./schedule";
 
 export interface Derived {
@@ -32,7 +33,7 @@ export const goneSet = (plan: PlanState): ReadonlySet<ItemId> => {
       if (seen >= 0) throw new Error(`parent cycle: ${path.slice(seen).sort().join(", ")}`);
       path.push(at);
       const child: ItemId = at;
-      at = (plan.items.get(child) as Item).place.parent;
+      at = need(plan.items, child, "plan entry").place.parent;
       if (at === null) break;
       const parent = plan.items.get(at);
       if (parent === undefined) throw new Error(`unknown parent ${at} of ${child}`);
@@ -40,7 +41,7 @@ export const goneSet = (plan: PlanState): ReadonlySet<ItemId> => {
     }
     const above = at !== null && gone.get(at) === true;
     path.reduceRight((acc, p) => {
-      const g = acc || (plan.items.get(p) as Item).trashed;
+      const g = acc || need(plan.items, p, "plan entry").trashed;
       gone.set(p, g);
       return g;
     }, above);
@@ -64,28 +65,29 @@ const basis = (plan: PlanState, held: ReadonlySet<ItemId>): Basis => {
   const statusOf = (id: ItemId): Status => {
     const known = status.get(id);
     if (known !== undefined) return known;
-    const i = live.get(id) as Item;
+    const i = need(live, id, "plan entry");
     const from = preds.get(id) ?? [];
     const s: Status =
       i.kind === "milestone" && from.length > 0
         ? from.every((p) => statusOf(p) === "done")
           ? "done"
           : "todo"
-        : (i.schedule as NonNullable<Item["schedule"]>).status;
+        : scheduleOf(i).status;
     status.set(id, s);
     return s;
   };
   live.forEach((_, id) => statusOf(id));
   const items = new Map(
     [...live.values()].flatMap((i) => {
-      const sc = i.schedule as NonNullable<Item["schedule"]>;
+      if (i.kind === "group") throw new Error(`group ${i.id} in the schedule view`);
+      const sc = scheduleOf(i);
       if (sc.start === null) return [];
       const s: Sched = {
         id: i.id,
-        kind: i.kind as Sched["kind"],
+        kind: i.kind,
         start: toDay(sc.start),
         dur: i.kind === "milestone" ? 0 : sc.dur,
-        lock: lockOf(status.get(i.id) as Status, held.has(i.id)),
+        lock: lockOf(need(status, i.id, "status"), held.has(i.id)),
       };
       return [[i.id, s] as const];
     }),
@@ -108,20 +110,23 @@ export function derive(plan: PlanState, held: ReadonlySet<ItemId>, today: IsoDat
   const end = new Map(scheds.map((s) => [s.id, endOf(s, cal)] as const));
 
   const children = new Map<ItemId, Item[]>();
-  [...plan.items.values()]
-    .filter((i) => !gone.has(i.id) && i.place.parent !== null)
-    .forEach((i) => children.set(i.place.parent as ItemId, [...(children.get(i.place.parent as ItemId) ?? []), i]));
+  [...plan.items.values()].forEach((i) => {
+    const parent = i.place.parent;
+    if (gone.has(i.id) || parent === null) return;
+    children.set(parent, [...(children.get(parent) ?? []), i]);
+  });
   const groups = [...plan.items.values()].filter((i) => i.kind === "group" && !gone.has(i.id));
 
   const spans = new Map<ItemId, readonly [Day, Day] | null>();
   const spanOf = (g: ItemId): readonly [Day, Day] | null => {
-    if (spans.has(g)) return spans.get(g) as readonly [Day, Day] | null;
+    const known = spans.get(g);
+    if (known !== undefined) return known;
     const parts = (children.get(g) ?? []).flatMap((c): (readonly [Day, Day])[] => {
       if (c.kind === "group") {
         const s = spanOf(c.id);
         return s === null ? [] : [s];
       }
-      return start.has(c.id) ? [[start.get(c.id) as Day, end.get(c.id) as Day]] : [];
+      return start.has(c.id) ? [[need(start, c.id, "start"), need(end, c.id, "end")]] : [];
     });
     const span = parts.length === 0 ? null : ([Math.min(...parts.map((p) => p[0])), Math.max(...parts.map((p) => p[1]))] as const);
     spans.set(g, span);
@@ -144,7 +149,7 @@ export function derive(plan: PlanState, held: ReadonlySet<ItemId>, today: IsoDat
         return [acc[0] + sum, acc[1] + dur];
       }
       if (c.kind !== "task") return acc;
-      const sc = c.schedule as NonNullable<Item["schedule"]>;
+      const sc = scheduleOf(c);
       const p = status.get(c.id) === "done" ? 100 : sc.progress;
       return [acc[0] + sc.dur * p, acc[1] + sc.dur];
     }, [0, 0]);
@@ -168,16 +173,16 @@ export function derive(plan: PlanState, held: ReadonlySet<ItemId>, today: IsoDat
       .filter((i) => status.get(i.id) !== "done")
       .map((i) => {
         const s = view.items.get(i.id);
-        if (s === undefined) return [i.id, (i.schedule as NonNullable<Item["schedule"]>).horizon] as const;
-        return [i.id, status.get(i.id) === "doing" ? "now" : horizonOf((start.get(i.id) as Day) - now)] as const;
+        if (s === undefined) return [i.id, scheduleOf(i).horizon] as const;
+        return [i.id, status.get(i.id) === "doing" ? "now" : horizonOf(need(start, i.id, "start") - now)] as const;
       }),
   );
 
-  const late = new Set(scheds.filter((s) => status.get(s.id) !== "done" && (end.get(s.id) as Day) < now).map((s) => s.id));
+  const late = new Set(scheds.filter((s) => status.get(s.id) !== "done" && need(end, s.id, "end") < now).map((s) => s.id));
 
   const stored = new Map(scheds.map((s) => [s.id, s.start] as const));
-  const lo = Math.min(now, ...scheds.map((s) => start.get(s.id) as Day));
-  const hi = Math.max(now, ...scheds.map((s) => end.get(s.id) as Day));
+  const lo = Math.min(now, ...scheds.map((s) => need(start, s.id, "start")));
+  const hi = Math.max(now, ...scheds.map((s) => need(end, s.id, "end")));
 
   const signedWork = (a: Day, b: Day): number =>
     a === b ? 0 : a < b ? cal.workBetween(cal.after(a), b) : -cal.workBetween(cal.after(b), a);
@@ -189,9 +194,8 @@ export function derive(plan: PlanState, held: ReadonlySet<ItemId>, today: IsoDat
       Object.entries(b.dates).flatMap(([item, d]) => {
         const current = view.items.get(item);
         if (current === undefined) return [];
-        const e = end.get(item);
-        if (e === undefined) throw new Error(`no end for item ${item}`);
-        return [[item, signedWork(endOf({ ...current, start: toDay(d.start), dur: d.dur }, cal), e)] as const];
+        return [[item, signedWork(endOf({ ...current, start: toDay(d.start), dur: d.dur }, cal), need(end, item, "end"))] as const];
+
       }),
     );
   };
