@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toDay } from "../../domain/dates";
 import type { Item, ItemId, Link, LinkType, Status } from "../../domain/model";
 import { linkKey } from "../../domain/model";
@@ -6,14 +6,16 @@ import { wouldLoop } from "../../domain/schedule";
 import { childrenOf, liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
+import { itemChoices } from "../choices/describe";
 import { FixActions } from "../choices/FixActions";
 import { Sheet } from "../common/Sheet";
 import { toast } from "../common/Toast";
 import { lagText } from "../panel/LinksEditor";
 import { bindTextarea } from "../panel/noteBinding";
-import { useRun, type Run } from "../run";
+import { OpenChoice, useRun, type Run } from "../run";
 import { derivedStatus } from "../status";
 import { dayLabel } from "../timeline/dayText";
+import { ChoiceBanner } from "./ChoiceBanner";
 
 const STATUSES: readonly { v: Status; label: string }[] = [
   { v: "todo", label: "Not started" },
@@ -45,7 +47,7 @@ const nameOf = (view: PlanView, id: ItemId): string => {
   return it.name;
 };
 
-function useReadOnly(session: PlanSession): boolean {
+export function useReadOnly(session: PlanSession): boolean {
   const subscribe = useCallback((cb: () => void) => session.subscribe(cb), [session]);
   return useSyncExternalStore(subscribe, () => session.readOnly);
 }
@@ -280,9 +282,11 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean }) {
   return <textarea ref={ref} aria-label="Notes" placeholder="Anything worth knowing about this item" readOnly={p.readOnly} />;
 }
 
-export function ItemSheet(p: { session: PlanSession; item: ItemId; onClose: () => void }) {
+export function ItemSheet(p: { session: PlanSession; item: ItemId; local: string; onClose: () => void }) {
   const view = usePlanView(p.session);
   const run = useRun(p.session);
+  const open = useContext(OpenChoice);
+  if (open === null) throw new Error("ItemSheet needs an OpenChoice provider");
   const sessionReadOnly = useReadOnly(p.session);
   const it = view.plan.items.get(p.item);
   if (it === undefined) throw new Error(`ItemSheet: no item ${p.item}`);
@@ -291,6 +295,9 @@ export function ItemSheet(p: { session: PlanSession; item: ItemId; onClose: () =
   return (
     <Sheet open title={it.name} onClose={p.onClose}>
       <div className="panel isheet">
+        {itemChoices(view, it.id).map((c) => (
+          <ChoiceBanner key={c.id} choice={c} local={p.local} onChoose={() => open(c.id)} />
+        ))}
         {it.kind === "group" ? (
           progress !== undefined && <p className="val-line">{`Progress ${progress} %`}</p>
         ) : (

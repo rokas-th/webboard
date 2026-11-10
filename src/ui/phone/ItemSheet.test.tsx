@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Refused, type Built, type Intent } from "../../actions/intents";
 import type { ItemId } from "../../domain/model";
 import type { PlanSession } from "../../store/session";
-import { fs, testSession, type SeedItem, type TestSession } from "../../test/session";
+import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
+import { bannerText } from "../choices/describe";
 import { clearToasts, Toasts } from "../common/Toast";
 import { OpenChoice } from "../run";
 import { ItemSheet } from "./ItemSheet";
@@ -19,8 +20,8 @@ afterEach(async () => {
   await Promise.all(sessions.splice(0).map((s) => s.close()));
 });
 
-const made = async (seed: readonly SeedItem[]): Promise<TestSession> => {
-  const t = await testSession(seed);
+const made = async (seed: readonly SeedItem[], opts?: TestSessionOpts): Promise<TestSession> => {
+  const t = await testSession(seed, opts);
   sessions.push(t.session);
   return t;
 };
@@ -33,7 +34,7 @@ const shown = (t: TestSession, item: ItemId) => {
   const onClose = vi.fn();
   render(
     <OpenChoice.Provider value={onChoice}>
-      <ItemSheet session={t.session} item={item} onClose={onClose} />
+      <ItemSheet session={t.session} item={item} local="Mac" onClose={onClose} />
       <Toasts />
     </OpenChoice.Provider>,
   );
@@ -203,7 +204,7 @@ describe("ItemSheet", () => {
     expect(() =>
       render(
         <OpenChoice.Provider value={vi.fn()}>
-          <ItemSheet session={t.session} item="Review" onClose={vi.fn()} />
+          <ItemSheet session={t.session} item="Review" local="Mac" onClose={vi.fn()} />
         </OpenChoice.Provider>,
       ),
     ).toThrow(new Error("ItemSheet: scheduled item Review has no derived start"));
@@ -323,5 +324,33 @@ describe("ItemSheet", () => {
     act(() => t.session.setReadOnly(false));
     expect(button("Push “Ship” to Wed 18 Nov")).toBeTruthy();
     expect([sat.apply.mock.calls.length, ship.apply.mock.calls.length]).toEqual([0, 0]);
+  });
+
+  it("a link clash shows on both ends", async () => {
+    const ABC: readonly SeedItem[] = [
+      { name: "A", start: "2026-11-10", dur: 2 },
+      { name: "B", start: "2026-11-12", dur: 2 },
+      { name: "C", start: "2026-11-16", dur: 2 },
+    ];
+    const banners = (): HTMLElement[] => [...sheet().querySelectorAll(".choice-banner")].filter((e): e is HTMLElement => e instanceof HTMLElement);
+    const linked = await made(ABC, { clashes: [{ unit: "l:B>A", mac: ["FS", 0], iphone: ["SS", 1] }] });
+    const choices = linked.session.view().choices;
+    expect(choices).toHaveLength(1);
+    const c3 = choices[0];
+    expect(bannerText(c3, "Mac")).toBe("Changed on Mac and iPhone. Choose which to keep.");
+    for (const item of ["A", "B"]) {
+      const { onChoice } = shown(linked, item);
+      expect(banners().map((b) => b.querySelector(".banner-text")?.textContent)).toEqual([bannerText(c3, "Mac")]);
+      fireEvent.click(within(banners()[0]).getByRole("button", { name: "Choose" }));
+      expect(onChoice.mock.calls).toEqual([[c3.id]]);
+      cleanup();
+    }
+    shown(linked, "C");
+    expect(banners()).toEqual([]);
+    cleanup();
+    const calendar = await made(ABC, { clashes: [{ unit: "ct:2026-11-17", mac: { kind: "add", name: "Away" }, iphone: null }] });
+    expect(calendar.session.view().choices).toHaveLength(1);
+    shown(calendar, "A");
+    expect(banners()).toEqual([]);
   });
 });

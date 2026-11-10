@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useContext } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { newId } from "../../log/ids";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { phoneRegistry } from "../../test/phone";
@@ -14,6 +15,10 @@ import { useUi } from "../state";
 import { PhoneShell } from "./PhoneShell";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("../../log/ids", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../../log/ids")>();
+  return { ...m, newId: vi.fn(m.newId) };
+});
 vi.mock("../state", async (importOriginal) => {
   const m = await importOriginal<typeof import("../state")>();
   return { ...m, useUi: vi.fn(m.useUi) };
@@ -54,6 +59,7 @@ afterEach(async () => {
   clearToasts();
   vi.restoreAllMocks();
   vi.mocked(useUi).mockClear();
+  vi.mocked(newId).mockReset();
   await Promise.all(sessions.splice(0).map((s) => s.close()));
   await Promise.all(registries.splice(0).map((r) => r.close()));
   window.localStorage.clear();
@@ -159,7 +165,12 @@ describe('PhoneShell, data-form="phone"', () => {
     expect(t.session.view().plan.items.get("Review")?.schedule?.dur).toBe(3);
     fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "Probe choice" }));
-    expect(lastUi().dialog).toEqual({ t: "choice", id: "c1", side: "a2" });
+    const dialogs = vi.mocked(useUi).mock.results.flatMap((r) => (r.type === "return" ? [r.value[0].dialog] : []));
+    expect(dialogs).toContainEqual({ t: "choice", id: "c1", side: "a2" });
+    await settle();
+    expect(lastUi().dialog).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByText("This choice was settled meanwhile.")).toBeNull();
   });
 
   it("the read-only Timeline zooms by pinch, and a hold opens the item's sheet", async () => {
@@ -204,6 +215,33 @@ describe('PhoneShell, data-form="phone"', () => {
     fire(bar, "up", x + 1, y, 1);
     expect(screen.getByRole("dialog", { name: "Review" })).toBeTruthy();
     expect(apply).toHaveBeenCalledTimes(0);
+  });
+
+  it("the held count opens the choice that holds the items", async () => {
+    const away = { unit: "ct:2026-11-17", mac: { kind: "add", name: "Away" }, iphone: null };
+    let n = 0;
+    vi.mocked(newId).mockImplementation(() => `id${String((n += 1)).padStart(9, "0")}`);
+    const t = await testSession([{ name: "Review", start: "2026-11-10", dur: 2 }], {
+      clashes: [away, { unit: "s:Review", mac: ["2026-11-10", 2, "todo", 0, "now"], iphone: ["2026-11-12", 2, "todo", 0, "now"] }],
+    });
+    sessions.push(t.session);
+    const view = t.session.view();
+    expect(view.choices[0].kind).toBe("calendar");
+    const held = view.choices.find((c) => c.units.includes("s:Review"));
+    if (held === undefined) throw new Error("fixture: no s:Review choice");
+    await shown(t);
+    const count = screen.getByRole("button", { name: "1 held" });
+    expect(count.classList.contains("chip-amber")).toBe(true);
+    fireEvent.click(count);
+    expect(lastUi().dialog).toEqual({ t: "choice", id: held.id });
+    expect(held.id).not.toBe(view.choices[0].id);
+    expect(screen.getByRole("dialog", { name: "Choose which to keep" })).toBeTruthy();
+    expect(document.querySelectorAll(".choice-col")).toHaveLength(2);
+    cleanup();
+    const only = await testSession([{ name: "Review", start: "2026-11-10", dur: 2 }], { clashes: [away] });
+    sessions.push(only.session);
+    await shown(only);
+    expect(screen.queryByRole("button", { name: /held/ })).toBeNull();
   });
 
   it("Shell renders the phone shell under phone, with no update line", async () => {

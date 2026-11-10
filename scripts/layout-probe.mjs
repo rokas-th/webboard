@@ -199,6 +199,17 @@ function states() {
     sizes: "phone",
     actions: [count(".sidebar", 0), expect('.phone-views [role="tab"][aria-selected="true"]', "List"), expect(".phone-list .prow .prow-name")],
   });
+  add("phone-choice", "phone-choice", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-head button.chip-amber", "2 held"),
+      count('.sheet[role="dialog"] .choice-col', 2),
+      count('.sheet[role="dialog"] [role="switch"]', 2),
+      count('.sheet[role="dialog"] .pick-row', 2),
+      expect('.sheet[role="dialog"] button.button-primary', "Apply"),
+    ],
+  });
   add("touch/full", "mesa", {
     sizes: "landscape",
     actions: [viewExpect("timeline"), expect(".sidebar"), expect(".slot-panel .panel h2", "Plan")],

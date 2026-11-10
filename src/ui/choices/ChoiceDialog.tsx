@@ -17,16 +17,31 @@ import { UndoOffer } from "./UndoOffer";
 export const SETTLED = "This choice was settled meanwhile.";
 export const CHOICE_TITLE = "Choose which to keep";
 
-const DEFAULTS: ResolveOptions = { pushFromPredecessors: true, returnPushed: true };
+export const DEFAULTS: ResolveOptions = { pushFromPredecessors: true, returnPushed: true };
 
 const NO_PICKS: ReadonlyMap<UnitKey, string> = new Map();
 
-const pickOf = (side: string, perUnit: ReadonlyMap<UnitKey, string>): Pick => (perUnit.size === 0 ? { side } : { side, perUnit });
+export const pickOf = (side: string, perUnit: ReadonlyMap<UnitKey, string>): Pick => (perUnit.size === 0 ? { side } : { side, perUnit });
 
-const livePicks = (choice: Choice, perUnit: ReadonlyMap<UnitKey, string>): ReadonlyMap<UnitKey, string> => {
+export const livePicks = (choice: Choice, perUnit: ReadonlyMap<UnitKey, string>): ReadonlyMap<UnitKey, string> => {
   const live = [...perUnit].filter(([u, side]) => choice.units.includes(u) && choice.sides.some((s) => s.key === side && s.values.has(u)));
   return live.length === perUnit.size ? perUnit : new Map(live);
 };
+
+export function useSettledClose(gone: boolean, onClose: () => void): void {
+  const seen = useRef(false);
+  useEffect(() => {
+    if (!gone) {
+      seen.current = true;
+      return;
+    }
+    if (seen.current) {
+      seen.current = false;
+      toast(SETTLED);
+    }
+    onClose();
+  }, [gone, onClose]);
+}
 
 function Column(p: { plan: PlanState; choice: Choice; side: string; label: string; content: SideContent; picked: boolean; readOnly: boolean; onKeep(): void }) {
   const plan = p.plan;
@@ -157,20 +172,8 @@ export function ChoiceDialog(p: { session: PlanSession; id: string; side?: strin
   const view = usePlanView(p.session);
   const exec = useExec(p.session);
   const choice = view.choices.find((c) => c.id === p.id) ?? null;
-  const gone = choice === null;
-  const seen = useRef(false);
   const onClose = p.onClose;
-  useEffect(() => {
-    if (!gone) {
-      seen.current = true;
-      return;
-    }
-    if (seen.current) {
-      seen.current = false;
-      toast(SETTLED);
-    }
-    onClose();
-  }, [gone, onClose]);
+  useSettledClose(choice === null, onClose);
   if (choice === null) return null;
   const keep = (write: () => Built): void => {
     if (exec(write) !== null) onClose();

@@ -1,13 +1,15 @@
 import { useCallback, useId, useMemo, useState } from "react";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
-import type { PlanSession } from "../../store/session";
+import { usePlanView, type PlanSession } from "../../store/session";
+import { heldChoice } from "../choices/describe";
 import { Toasts } from "../common/Toast";
 import { OpenChoice } from "../run";
 import { NewPlanButton } from "../shell/Sidebar";
 import { usePlanFiles, usePlanSelection, type PlanMain } from "../shell/selection";
 import { UiContext, useUi, useUiValue } from "../state";
 import { Timeline } from "../timeline/Timeline";
+import { ChoiceSheet } from "./ChoiceSheet";
 import { ItemSheet } from "./ItemSheet";
 import { PhoneList } from "./PhoneList";
 
@@ -18,15 +20,36 @@ const VIEWS: readonly (readonly [PhoneView, string])[] = [
   ["timeline", "Timeline"],
 ];
 
-function OpenPlan(p: { session: PlanSession }) {
+function HeldCount(p: { session: PlanSession }) {
+  const view = usePlanView(p.session);
+  const { setUi } = useUiValue();
+  if (view.held.size === 0) return null;
+  const open = (): void => {
+    const c = heldChoice(view);
+    if (c === null) throw new Error("No open choice holds the held items");
+    setUi({ dialog: { t: "choice", id: c.id } });
+  };
+  return (
+    <div className="phone-head">
+      <button type="button" className="chip chip-amber" onClick={open}>
+        {view.held.size} held
+      </button>
+    </div>
+  );
+}
+
+function OpenPlan(p: { session: PlanSession; local: string }) {
   const { ui, setUi } = useUiValue();
   const [view, setView] = useState<PhoneView>("list");
   const base = useId();
   const tabId = (v: PhoneView): string => `${base}-tab-${v}`;
   const panelId = `${base}-panel`;
   const selected = ui.selected !== null && p.session.view().plan.items.has(ui.selected) ? ui.selected : null;
+  const dialog = ui.dialog;
+  const closeDialog = useCallback(() => setUi({ dialog: null }), [setUi]);
   return (
     <>
+      <HeldCount session={p.session} />
       <div id={panelId} className="phone-main" role="tabpanel" aria-labelledby={tabId(view)}>
         {view === "list" ? <PhoneList session={p.session} onOpen={(id) => setUi({ selected: id })} /> : <Timeline session={p.session} readOnly />}
       </div>
@@ -46,7 +69,18 @@ function OpenPlan(p: { session: PlanSession }) {
           </button>
         ))}
       </div>
-      {selected !== null && <ItemSheet key={selected} session={p.session} item={selected} onClose={() => setUi({ selected: null })} />}
+      {dialog !== null && dialog.t === "choice" ? (
+        <ChoiceSheet
+          key={`${p.session.view().plan.id}:${dialog.id}:${dialog.side ?? ""}`}
+          session={p.session}
+          id={dialog.id}
+          side={dialog.side}
+          local={p.local}
+          onClose={closeDialog}
+        />
+      ) : (
+        selected !== null && <ItemSheet key={selected} session={p.session} item={selected} local={p.local} onClose={() => setUi({ selected: null })} />
+      )}
     </>
   );
 }
@@ -79,7 +113,7 @@ function Main(p: { registry: Registry; main: PlanMain; open(id: string): void })
       </div>
     );
   }
-  return <OpenPlan key={m.id} session={m.session} />;
+  return <OpenPlan key={m.id} session={m.session} local={p.registry.device.name} />;
 }
 
 function PhoneBody(p: { registry: Registry }) {

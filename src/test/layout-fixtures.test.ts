@@ -184,6 +184,7 @@ describe("layout fixtures", () => {
       "long-names",
       "mesa",
       "mesa-linux",
+      "phone-choice",
       "scale",
       "sync-dialog",
       "sync-receiving",
@@ -411,6 +412,32 @@ describe("layout fixtures", () => {
     expect(view.unreadable[0].message).toBe(UNREADABLE_LINE);
     expect(view.unreadable[0].message).toBe(`A change from iPhone could not be read: Action ${UNREADABLE_ID} has a malformed lbl. Update WebBoard on this device.`);
     expect(view.pending).toBe(1);
+  });
+
+  it("phone-choice is Step 2's fixture: one items choice over Review and Ship, holding both, nothing pending", async () => {
+    const f = fixture("phone-choice");
+    const doc = only(planDocs(f));
+    const d = decoded(f, doc);
+    const items = only(d.cs);
+    expect(items.kind).toBe("items");
+    expect([...items.units].sort()).toEqual(["s:Review", "s:Ship"]);
+    expect(new Set(items.sides.map((s) => s.label))).toEqual(new Set(["Mac", "iPhone"]));
+    expect([...d.held].sort()).toEqual(["Review", "Ship"]);
+    expect(d.log.pending).toEqual([]);
+    expect(d.plan.items.get("S")?.name).toBe("Sprint 4");
+    const start = (id: string): string | null | undefined => d.plan.items.get(id)?.schedule?.start;
+    expect([start("Review"), start("Ship"), start("Build")]).toEqual(["2026-11-19", "2026-11-19", "2026-11-23"]);
+    const { session } = await opened(f, doc);
+    expect(session.view().pending).toBe(0);
+    expect(session.view().held.size).toBe(2);
+    const mac = items.sides.find((s) => s.label === "Mac");
+    if (mac === undefined) throw new Error("no Mac side");
+    const rp = session.previewResolve(items.id, { side: mac.key }, { pushFromPredecessors: true, returnPushed: true });
+    expect(rp.rows.map((r) => [r.item, r.shift])).toEqual([
+      ["Review", -3],
+      ["Ship", -3],
+      ["Build", -3],
+    ]);
   });
 
   it("two-choices is mesa plus an n: clash and a ct: clash, holding nothing", async () => {

@@ -12,6 +12,7 @@ export const PLAN_IDS = {
   scale: "planScale01",
   long: "planLong001",
   longRtl: "planLongRtl",
+  phone: "planPhone01",
 };
 
 export const UNREADABLE_ID = "badIphone01";
@@ -289,6 +290,26 @@ function twoChoicesLog() {
   return log;
 }
 
+const SPRINT = [
+  T("S", "Sprint 4", { kind: "group" }),
+  T("Review", "Review", { parent: "S", start: "2026-11-12", dur: 2 }),
+  T("Ship", "Ship", { parent: "S", start: "2026-11-12", dur: 1 }),
+  T("Build", "Build", { parent: "S", start: "2026-11-16", dur: 1, deps: [fs("Review")] }),
+];
+
+const PHONE_MOVE_LABEL = (days) => `Moved 2 items later by ${days} working days; 1 dependent item moved`;
+
+function phoneChoiceLog() {
+  const log = new Log("phone", START);
+  log.act({ lbl: `Created the plan ${q("Sprint plan")}`, w: rootWrites("Sprint plan", null) });
+  addItems(log, SPRINT, new Set(["Build"]));
+  const head = log.head();
+  const moved = (start, build) => [own("s:Review", sched(start, 2)), own("s:Ship", sched(start, 1)), { u: "s:Build", v: sched(build, 1), c: "push" }];
+  log.act({ ses: "sesMacOne01", par: [head], lbl: PHONE_MOVE_LABEL(2), w: moved("2026-11-16", "2026-11-18") });
+  log.act({ dev: "iphone", ses: "sesIphone01", par: [head], lbl: PHONE_MOVE_LABEL(5), w: moved("2026-11-19", "2026-11-23") });
+  return log;
+}
+
 function unreadableLog() {
   const log = mesaLog("mesaU");
   const head = log.head();
@@ -507,6 +528,7 @@ export function buildFixtures() {
     ]),
     unreadable,
     "two-choices": fixtureOf([mesa(twoChoicesLog())]),
+    "phone-choice": fixtureOf([{ id: PLAN_IDS.phone, name: "Sprint plan", log: phoneChoiceLog() }]),
     "sync-dialog": copyOf(mesaOnMac),
     "sync-space": inSpace(mesaOnMac, false),
     "sync-receiving": inSpace(unreadable, false),
