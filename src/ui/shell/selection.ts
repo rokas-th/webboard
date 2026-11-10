@@ -6,7 +6,7 @@ import { AppError } from "../../services/ipc";
 import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { toast } from "../common/Toast";
-import { pickPlan, useUiValue } from "../state";
+import { holdsNoPlan, pickPlan, releaseNoPlan, useUiValue } from "../state";
 import { importFlow } from "./fileFlows";
 
 export type PlanMain =
@@ -44,6 +44,8 @@ export function usePlanSelection(registry: Registry): PlanSelection {
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const [main, setMainState] = useState<PlanMain>({ k: "empty" });
   const selected = useRef(ui.plan);
+  const [heldAtStart] = useState(() => ui.plan === null && holdsNoPlan());
+  const holding = useRef(heldAtStart);
   const mainRef = useRef<PlanMain>(main);
   const ownTrash = useRef(new Set<PlanId>());
   const lastTrashed = useRef(new Map<PlanId, boolean>());
@@ -55,6 +57,10 @@ export function usePlanSelection(registry: Registry): PlanSelection {
 
   const select = useCallback(
     (id: PlanId | null) => {
+      if (id !== null && holding.current) {
+        holding.current = false;
+        releaseNoPlan();
+      }
       if (id === selected.current) {
         setUi({ plan: id });
         return;
@@ -99,7 +105,7 @@ export function usePlanSelection(registry: Registry): PlanSelection {
       lastTrashed.current = new Map(plans.map((l) => [l.id, l.trashed]));
     };
     const reselect = (plans: readonly PlanListing[]): boolean => {
-      const next = pickPlan(plans, selected.current);
+      const next = holding.current && selected.current === null ? null : pickPlan(plans, selected.current);
       if (next === selected.current) return false;
       select(next);
       return true;

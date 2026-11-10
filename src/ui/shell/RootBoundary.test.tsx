@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PLACE_KEY } from "../state";
+import { NO_PLAN_KEY, PLACE_KEY } from "../state";
 import { OPEN_WITHOUT_PLAN, RELOAD, RootBoundary } from "./RootBoundary";
 
 function Broken(): never {
@@ -57,10 +57,11 @@ describe("RootBoundary", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: OPEN_WITHOUT_PLAN }));
     expect(JSON.parse(window.localStorage.getItem(PLACE_KEY) ?? "")).toEqual({ plan: null, view: "list", zoom: "M", collapsed: ["g1"] });
+    expect(window.localStorage.getItem(NO_PLAN_KEY)).not.toBeNull();
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it("Open without the last plan leaves an unreadable or missing place alone, since it opens no plan anyway", () => {
+  it("Open without the last plan leaves an unreadable or missing place alone and still asks the next start to open no plan", () => {
     quiet();
     window.localStorage.setItem(PLACE_KEY, "{not json");
     render(
@@ -70,9 +71,11 @@ describe("RootBoundary", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: OPEN_WITHOUT_PLAN }));
     expect(window.localStorage.getItem(PLACE_KEY)).toBe("{not json");
+    expect(window.localStorage.getItem(NO_PLAN_KEY)).not.toBeNull();
     window.localStorage.clear();
     fireEvent.click(screen.getByRole("button", { name: OPEN_WITHOUT_PLAN }));
     expect(window.localStorage.getItem(PLACE_KEY)).toBeNull();
+    expect(window.localStorage.getItem(NO_PLAN_KEY)).not.toBeNull();
     expect(reload).toHaveBeenCalledTimes(2);
   });
 });

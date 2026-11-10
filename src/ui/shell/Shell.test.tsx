@@ -20,7 +20,7 @@ import { hold, offeredSettings, resetTauri, tauri, type Call } from "../../test/
 import { orderedSides } from "../choices/order";
 import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
-import { PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
+import { forgetLastPlan, NO_PLAN_KEY, PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
 import { exportFlow, importFlow } from "./fileFlows";
 import { PlanHead } from "./PlanHead";
 import { Shell } from "./Shell";
@@ -58,6 +58,7 @@ afterEach(async () => {
   cleanup();
   clearToasts();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.mocked(useUi).mockClear();
   vi.mocked(importPlan).mockClear();
   vi.mocked(exportFlow).mockClear();
@@ -479,6 +480,27 @@ describe("Shell on testSession(MESA_SEED)", () => {
     });
     expect(toastTexts()).toEqual([]);
     probe.unmount();
+  });
+
+  it.each([
+    ["a WebKit stack of frames only", "render@http://localhost/src/ui/Shell.tsx:1:1\nfrom@http://localhost/src/main.tsx:2:2", "TypeError: boom here\nrender@http://localhost/src/ui/Shell.tsx:1:1\nfrom@http://localhost/src/main.tsx:2:2"],
+    ["a V8 stack that already names the error", "TypeError: boom here\n    at render (Shell.tsx:1:1)", "TypeError: boom here\n    at render (Shell.tsx:1:1)"],
+  ])("Copy details copies the error's name and message with %s", async (_, stack, copied) => {
+    const writeText = vi.fn((_: string) => Promise.resolve());
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const error = new TypeError("boom here");
+    error.stack = stack;
+    act(() => {
+      window.dispatchEvent(new ErrorEvent("error", { error, message: "Uncaught TypeError: boom here" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy details" }));
+      await Promise.resolve();
+    });
+    expect(writeText.mock.calls).toEqual([[copied]]);
   });
 
   it("toasts only error events that carry an error", async () => {
@@ -1489,6 +1511,31 @@ describe("selection rule", () => {
     const main = document.querySelector("main.main");
     if (!(main instanceof HTMLElement)) throw new Error("no main");
     expect(within(main).getByRole("button", { name: "New plan" })).toBeTruthy();
+  });
+
+  it("opens nothing after Open without the last plan, even when that plan is the only one, until a plan is picked", async () => {
+    const s = await store(["Alpha"]);
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: s.ids[0], view: "timeline", zoom: "W", collapsed: [] }));
+    forgetLastPlan();
+    const registry = await opened();
+    const notify = notifier(registry);
+    const session = vi.spyOn(registry, "session");
+    render(withSync(shellOn(registry)));
+    await settle();
+    act(() => notify());
+    await settle();
+    expect(session).not.toHaveBeenCalled();
+    expect(currentName()).toBeNull();
+    const main = document.querySelector("main.main");
+    if (!(main instanceof HTMLElement)) throw new Error("no main");
+    expect(within(main).getByRole("button", { name: "New plan" })).toBeTruthy();
+    const open = entry("Alpha").querySelector(".entry-open");
+    if (!(open instanceof HTMLElement)) throw new Error("no entry-open");
+    fireEvent.click(open);
+    await settle();
+    expect(currentName()).toBe("Alpha");
+    expect(session).toHaveBeenCalledWith(s.ids[0]);
+    expect(window.localStorage.getItem(NO_PLAN_KEY)).toBeNull();
   });
 
   it("moves on when the selected plan leaves the list", async () => {

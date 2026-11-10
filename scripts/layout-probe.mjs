@@ -45,6 +45,8 @@ const FONTS = [
 ];
 
 const PHONE_NAME_MIN = 90;
+const TOAST_TEXT_MIN = 240;
+const UNCAUGHT = "Holiday warm for plan p failed: the holiday service did not answer in time";
 const EMPTY_PLAN = "No items yet. Add one with + New.";
 const EXAMPLE_PLAN = "Example: Website relaunch";
 const CALENDAR_BANNER = "The calendar was changed on two devices. Nothing moves until you choose.";
@@ -67,6 +69,7 @@ const edges = () => ({ edges: true });
 const shown = (selector, n) => ({ shown: [selector, n] });
 const width = (selector, min, max) => ({ width: [selector, min, max] });
 const style = (selector, prop, value) => ({ style: [selector, prop, value] });
+const raise = (message) => ({ raise: message });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -258,6 +261,19 @@ function states() {
       width(".phone-head .phone-plan-name", PHONE_NAME_MIN, 390),
       expect(".tl-row .name", "Visual design"),
     ],
+  });
+  add("phone-toast/uncaught", "example", {
+    sizes: "phone",
+    actions: [
+      expect(".phone-head .phone-plan-name", EXAMPLE_PLAN),
+      raise(UNCAUGHT),
+      expect('.toast-bad [role="alert"]', UNCAUGHT),
+      expect(".toast-bad .toast-actions button", "Copy details"),
+      width(".toast-bad .toast", TOAST_TEXT_MIN, 390),
+    ],
+  });
+  add("toast/uncaught", "mesa", {
+    actions: [viewExpect("timeline"), raise(UNCAUGHT), expect('.toast-bad [role="alert"]', UNCAUGHT), width(".toast-bad .toast", TOAST_TEXT_MIN, 640)],
   });
   add("update/current", "mesa", { actions: [viewExpect("timeline"), expect(".sidebar .update-line .update-status", "Up to date · checked 09:00")] });
   add("update/available", "update-available", {
@@ -1229,6 +1245,10 @@ window.__probeAct = function (a) {
     var v = matching(a.reveal[0], a.reveal[1]);
     if (v.hit === undefined) return { fail: missed(a.reveal[0], a.reveal[1], v.nodes) };
     v.hit.scrollIntoView({ block: "start" });
+    return { ok: true };
+  }
+  if (a.raise !== undefined) {
+    window.dispatchEvent(new ErrorEvent("error", { error: new Error(a.raise), message: "Uncaught Error: " + a.raise }));
     return { ok: true };
   }
   if (a.expect !== undefined) {

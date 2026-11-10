@@ -31,6 +31,7 @@ export interface UiState {
 }
 
 export const PLACE_KEY = "webboard.place";
+export const NO_PLAN_KEY = "webboard.no-plan";
 export const PLACE_UNREADABLE = "Saved view settings could not be read; they were reset.";
 
 const VIEWS: readonly string[] = ["timeline", "board", "list"];
@@ -85,12 +86,17 @@ const savePlace = (s: UiState): void => {
 };
 
 export function forgetLastPlan(): void {
+  window.localStorage.setItem(NO_PLAN_KEY, "1");
   const raw = window.localStorage.getItem(PLACE_KEY);
   if (raw === null) return;
   const place = parsePlace(raw);
   if (place === null) return;
   savePlace({ ...DEFAULTS, ...place, plan: null });
 }
+
+export const holdsNoPlan = (): boolean => window.localStorage.getItem(NO_PLAN_KEY) !== null;
+
+export const releaseNoPlan = (): void => window.localStorage.removeItem(NO_PLAN_KEY);
 
 const placeChanged = (a: UiState, b: UiState): boolean =>
   a.plan !== b.plan || a.view !== b.view || a.zoom !== b.zoom || a.collapsed !== b.collapsed;

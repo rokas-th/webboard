@@ -12,6 +12,7 @@ afterEach(() => {
   clearToasts();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const texts = (): (string | null)[] => Array.from(document.querySelectorAll(".toasts .toast")).map((e) => e.textContent);
@@ -71,9 +72,11 @@ describe("Toasts", () => {
     expect(texts()).toEqual(["Plain failure", "Boom", DETAILS_COPIED]);
   });
 
-  it("shows a failed copy as its own bad toast", async () => {
-    const writeText = vi.fn((_: string) => Promise.reject(new Error("Clipboard refused")));
+  it("says a refused copy failed, what to do instead, and logs the cause", async () => {
+    const refused = new Error("Clipboard refused");
+    const writeText = vi.fn((_: string) => Promise.reject(refused));
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     render(<Toasts />);
     act(() => toast("Boom", "bad", "stack"));
     await act(async () => {
@@ -81,6 +84,22 @@ describe("Toasts", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(screen.getAllByRole("alert").map((e) => e.textContent)).toEqual(["Boom", "Clipboard refused"]);
+    expect(screen.getAllByRole("alert").map((e) => e.textContent)).toEqual(["Boom", "Could not copy the details: Clipboard refused. Select the text and copy it by hand."]);
+    expect(log.mock.calls).toEqual([[refused]]);
+  });
+
+  it("says the copy failed when the webview has no clipboard, and logs the cause", () => {
+    vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<Toasts />);
+    act(() => toast("Boom", "bad", "stack"));
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: COPY_DETAILS }));
+    });
+    const shown = screen.getAllByRole("alert").map((e) => e.textContent);
+    expect(shown[0]).toBe("Boom");
+    expect(shown[1]).toMatch(/^Could not copy the details: .+\. Select the text and copy it by hand\.$/);
+    expect(log.mock.calls.length).toBe(1);
+    expect(log.mock.calls[0][0]).toBeInstanceOf(TypeError);
   });
 });

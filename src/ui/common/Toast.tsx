@@ -45,11 +45,17 @@ const subscribe = (cb: () => void): (() => void) => {
 
 const snapshot = (): readonly Entry[] => entries;
 
+const copyFailed = (e: unknown): void => {
+  console.error(e);
+  toast(`Could not copy the details: ${e instanceof Error ? e.message : String(e)}. Select the text and copy it by hand.`, "bad");
+};
+
 const copy = (details: string): void => {
-  navigator.clipboard.writeText(details).then(
-    () => toast(DETAILS_COPIED, "ok"),
-    (e: unknown) => toast(e instanceof Error ? e.message : String(e), "bad"),
-  );
+  try {
+    navigator.clipboard.writeText(details).then(() => toast(DETAILS_COPIED, "ok"), copyFailed);
+  } catch (e) {
+    copyFailed(e);
+  }
 };
 
 function Held(p: { entry: Entry }) {
