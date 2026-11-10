@@ -164,7 +164,64 @@
 
 .phone-head {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
-  padding: 8px 16px 0;
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.phone-plan-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--heading);
+}
+
+.phone-head .chip,
+.phone-head .plan-menu,
+.phone-head > button {
+  flex-shrink: 0;
+}
+
+.phone-add {
+  min-width: 36px;
+  padding: 6px 10px;
+}
+
+.phone .empty-state > .entry-bad,
+.plans-new > .entry-bad {
+  font-size: 12px;
+}
+
+.plans-new {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plans-new input[type="text"] {
+  width: 100%;
+}
+
+.plans-sheet .failed-note {
+  text-align: left;
+}
+
+.reload-sheet {
+  padding: 18px 20px 24px;
+}
+
+.reload-sheet p {
+  margin: 0 0 16px;
+  font-family: var(--prose);
+  font-size: 12.5px;
 }

@@ -199,6 +199,17 @@ function states() {
     sizes: "phone",
     actions: [count(".sidebar", 0), expect('.phone-views [role="tab"][aria-selected="true"]', "List"), expect(".phone-list .prow .prow-name")],
   });
+  add("phone-plans", "phone-plans", {
+    sizes: "phone",
+    dialog: true,
+    clip: true,
+    actions: [
+      click(".phone-head button", "Plans"),
+      expect('.sheet[role="dialog"] .sheet-title', "Plans"),
+      count(".plans-sheet .entries .entry", 3),
+      expect(".plans-sheet section .entry-name", "Blank plan"),
+    ],
+  });
   add("phone-choice", "phone-choice", {
     sizes: "phone",
     dialog: true,

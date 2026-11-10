@@ -1,6 +1,8 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useId, useRef, useState } from "react";
+import { normalizeName } from "../../actions/build";
+import { Refused } from "../../actions/intents";
 import { toDay } from "../../domain/dates";
-import type { Item, ItemId, Link, LinkType, Status } from "../../domain/model";
+import type { Horizon, Item, ItemId, Link, LinkType, Status } from "../../domain/model";
 import { linkKey } from "../../domain/model";
 import { wouldLoop } from "../../domain/schedule";
 import { childrenOf, liveLinks } from "../../plan/project";
@@ -11,8 +13,10 @@ import { itemChoices } from "../choices/describe";
 import { FixActions } from "../choices/FixActions";
 import { Sheet } from "../common/Sheet";
 import { toast } from "../common/Toast";
+import { PlaceFields } from "../panel/ItemPanel";
 import { lagText } from "../panel/LinksEditor";
 import { bindTextarea } from "../panel/noteBinding";
+import { TextField } from "../panel/TextField";
 import { OpenChoice, useRun, type Run } from "../run";
 import { derivedStatus } from "../status";
 import { dayLabel } from "../timeline/dayText";
@@ -25,6 +29,24 @@ const STATUSES: readonly { v: Status; label: string }[] = [
 ];
 
 const TYPES: readonly LinkType[] = ["FS", "SS", "FF", "SF"];
+
+const HORIZONS: readonly { v: Horizon; label: string }[] = [
+  { v: "now", label: "Now" },
+  { v: "next", label: "Next" },
+  { v: "later", label: "Later" },
+];
+
+const horizonOf = (v: string): Horizon => {
+  const found = HORIZONS.find((h) => h.v === v);
+  if (found === undefined) throw new Error(`ItemSheet: no horizon ${v}`);
+  return found.v;
+};
+
+const horizonText = (h: Horizon): string => {
+  const found = HORIZONS.find((x) => x.v === h);
+  if (found === undefined) throw new Error(`ItemSheet: no horizon ${h}`);
+  return found.label;
+};
 
 const WHOLE = /^-?\d+$/;
 
@@ -66,6 +88,33 @@ function Stepper(p: { label: string; value: string; valueClass: string; readOnly
   );
 }
 
+function HorizonField(p: { item: Item; horizon: Horizon; readOnly: boolean; run: Run }) {
+  const id = useId();
+  return (
+    <>
+      <label htmlFor={id}>Horizon</label>
+      {p.readOnly ? (
+        <span className="val">{horizonText(p.horizon)}</span>
+      ) : (
+        <select
+          id={id}
+          value={p.horizon}
+          onChange={(e) => {
+            const next = horizonOf(e.target.value);
+            if (next !== p.horizon) p.run.run({ t: "schedule", item: p.item.id, set: { horizon: next } });
+          }}
+        >
+          {HORIZONS.map((h) => (
+            <option key={h.v} value={h.v}>
+              {h.label}
+            </option>
+          ))}
+        </select>
+      )}
+    </>
+  );
+}
+
 function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run: Run }) {
   const it = p.item;
   const sc = it.schedule;
@@ -99,6 +148,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
           )}
         </span>
       )}
+      {sc.start === null && <HorizonField item={it} horizon={sc.horizon} readOnly={p.readOnly} run={p.run} />}
       {!milestone && (
         <>
           <label>Duration</label>
@@ -278,33 +328,67 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean }) {
   return <textarea ref={ref} aria-label="Notes" placeholder="Anything worth knowing about this item" readOnly={p.readOnly} />;
 }
 
-export function ItemSheet(p: { session: PlanSession; item: ItemId; local: string; onClose: () => void }) {
+export function ItemSheet(p: { session: PlanSession; item: ItemId; local: string; naming?: boolean; onNamed?: () => void; onClose: () => void }) {
   const view = usePlanView(p.session);
   const run = useRun(p.session);
   const open = useContext(OpenChoice);
   if (open === null) throw new Error("ItemSheet needs an OpenChoice provider");
   const sessionReadOnly = useReadOnly(p.session);
+  const root = useRef<HTMLDivElement>(null);
+  const { naming, onNamed } = p;
+  useEffect(() => {
+    if (naming !== true) return;
+    const input = root.current?.querySelector(".title-input");
+    if (!(input instanceof HTMLInputElement)) throw new Error(`ItemSheet: no name field to focus for ${p.item}`);
+    input.focus();
+    input.select();
+    onNamed?.();
+  }, [naming, onNamed, p.item]);
   const it = view.plan.items.get(p.item);
   if (it === undefined) throw new Error(`ItemSheet: no item ${p.item}`);
   const readOnly = sessionReadOnly || it.trashed;
   const progress = view.derived.progress.get(it.id);
+  const rename = (next: string): boolean => {
+    let name: string;
+    try {
+      name = normalizeName(next);
+    } catch (e) {
+      if (!(e instanceof Refused)) throw e;
+      toast(e.message, "bad");
+      return false;
+    }
+    if (name === it.name) return false;
+    return run.run({ t: "rename", item: it.id, name }) !== null;
+  };
+  const trash = (): void => {
+    if (run.run({ t: "trash", items: [it.id] }) !== null) p.onClose();
+  };
   return (
     <Sheet open title={it.name} onClose={p.onClose}>
-      <div className="panel isheet">
+      <div className="panel isheet" ref={root}>
         {itemChoices(view, it.id).map((c) => (
           <ChoiceBanner key={c.id} choice={c} local={p.local} onChoose={() => open(c.id)} />
         ))}
+        <TextField className="title-input" label="Name" value={it.name} readOnly={readOnly} onCommit={rename} />
         {it.kind === "group" ? (
           progress !== undefined && <p className="val-line">{`Progress ${progress} %`}</p>
         ) : (
           <>
             <ScheduleFields view={view} item={it} readOnly={readOnly} run={run} />
             <FixActions view={view} item={it.id} readOnly={readOnly} run={run} />
-            <Links view={view} item={it} readOnly={readOnly} run={run} />
           </>
         )}
+        <PlaceFields plan={view.plan} item={it} readOnly={readOnly} run={run} />
+        {it.kind !== "group" && <Links view={view} item={it} readOnly={readOnly} run={run} />}
         <h2>Notes</h2>
         <Note session={p.session} item={it.id} readOnly={readOnly} />
+        {!readOnly && (
+          <div className="actions">
+            <button type="button" className="button-small button-danger" onClick={trash}>
+              Move to Trash
+            </button>
+          </div>
+        )}
       </div>
     </Sheet>
   );

@@ -4,6 +4,7 @@ import type { AppError } from "../../services/ipc";
 import type { Registry } from "../../store/registry";
 import { canReload } from "../../sync/reload";
 import { useSyncState } from "../../sync/SyncProvider";
+import { failureActions } from "./failure";
 import { RELOAD_LABEL, ReloadConfirm } from "./ReloadConfirm";
 
 export const FILES_STAY = "The plan’s files stay on this device.";
@@ -25,26 +26,24 @@ export function PlanFailed(p: { registry: Registry; id: PlanId; error: AppError;
   const [confirm, setConfirm] = useState(false);
   const listing = p.registry.plans().find((l) => l.id === p.id);
   if (listing === undefined) throw new Error(`Plan ${p.id} is not listed`);
-  const space = listing.space;
-  const corrupt = p.error.code === "store.corrupt";
-  const readOnly = p.registry.spaceReadOnly();
+  const { action, filesStay } = failureActions(p.error, listing.space, p.registry.spaceReadOnly());
   return (
     <div className="plan-failed">
       <p className="failed-message bad">{p.error.message}</p>
       <div className="failed-actions">
-        {!corrupt && (
+        {action === "retry" && (
           <button type="button" onClick={() => void p.registry.retryPlan(p.id)}>
             Try again
           </button>
         )}
-        {corrupt && space === null && (
+        {action === "trash" && (
           <button type="button" className="button-danger" onClick={() => p.onTrash(p.id)}>
             Move to Trash
           </button>
         )}
-        {corrupt && space !== null && !readOnly && <ReloadButton enabled={reloadable} onOpen={() => setConfirm(true)} />}
+        {action === "reload" && <ReloadButton enabled={reloadable} onOpen={() => setConfirm(true)} />}
       </div>
-      {corrupt && (space === null || readOnly) && <p className="failed-note">{FILES_STAY}</p>}
+      {filesStay && <p className="failed-note">{FILES_STAY}</p>}
       {confirm && <ReloadConfirm registry={p.registry} docId={p.id} onClose={() => setConfirm(false)} />}
     </div>
   );

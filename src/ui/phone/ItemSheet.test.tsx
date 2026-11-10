@@ -392,3 +392,160 @@ describe("ItemSheet", () => {
     expect(banners()).toEqual([]);
   });
 });
+
+describe("ItemSheet editing (Step 4)", () => {
+  const EDIT_SEED: readonly SeedItem[] = [
+    { id: "S4", name: "Sprint 4", kind: "group" },
+    { name: "QA", kind: "group", parent: "S4" },
+    { name: "Test", parent: "QA", start: "2026-11-10", dur: 1 },
+    { name: "Review", parent: "S4", start: "2026-11-10", dur: 2 },
+    { name: "Notes", horizon: "now" },
+  ];
+  const EMPTY_NAME = "The name is empty. Type at least one character.";
+  const nameField = (): HTMLInputElement => {
+    const el = within(sheet()).getByRole("textbox", { name: "Name" });
+    if (!(el instanceof HTMLInputElement)) throw new Error("no name input");
+    return el;
+  };
+  const select = (name: string): HTMLSelectElement => {
+    const el = within(sheet()).getByRole("combobox", { name });
+    if (!(el instanceof HTMLSelectElement)) throw new Error("no select " + name);
+    return el;
+  };
+  const newest = (t: TestSession): string | undefined => t.session.history()[0]?.label;
+
+  it("renames on Enter or blur, refuses an empty name and fires only on a change", async () => {
+    const t = await made(EDIT_SEED);
+    const { apply } = shown(t, "Review");
+    const field = nameField();
+    expect(field.value).toBe("Review");
+    act(() => field.focus());
+    fireEvent.blur(field);
+    fireEvent.change(field, { target: { value: "Review " } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(apply).toHaveBeenCalledTimes(0);
+    expect(toasts()).toEqual([]);
+    fireEvent.change(field, { target: { value: "   " } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(apply).toHaveBeenCalledTimes(0);
+    expect(toasts()).toEqual([EMPTY_NAME]);
+    expect(nameField().value).toBe("Review");
+    clearToasts();
+    fireEvent.change(nameField(), { target: { value: "Review 2" } });
+    fireEvent.keyDown(nameField(), { key: "Enter" });
+    expect(intents(apply)).toEqual([{ t: "rename", item: "Review", name: "Review 2" }]);
+    expect(newest(t)).toBe("Renamed “Review” to “Review 2”");
+    fireEvent.change(nameField(), { target: { value: "Review 3" } });
+    fireEvent.blur(nameField());
+    expect(intents(apply)[1]).toEqual({ t: "rename", item: "Review", name: "Review 3" });
+    expect(apply).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers groupOptions' labels in the Group picker and places into a group or the top level", async () => {
+    const t = await made(EDIT_SEED);
+    shown(t, "S4");
+    expect([...select("Group").options].map((o) => o.textContent)).toEqual(["Top level"]);
+    cleanup();
+    const { apply } = shown(t, "Review");
+    const group = select("Group");
+    expect([...group.options].map((o) => o.textContent)).toEqual(["Top level", "Sprint 4", "Sprint 4 › QA"]);
+    expect(group.selectedOptions[0]?.textContent).toBe("Sprint 4");
+    fireEvent.change(group, { target: { value: "S4" } });
+    expect(apply).toHaveBeenCalledTimes(0);
+    fireEvent.change(select("Group"), { target: { value: "QA" } });
+    expect(intents(apply)).toEqual([{ t: "place", item: "Review", parent: "QA", after: "Test" }]);
+    expect(newest(t)).toBe("Moved “Review” into “QA”");
+    fireEvent.change(select("Group"), { target: { value: "" } });
+    expect(intents(apply)[1]).toEqual({ t: "place", item: "Review", parent: null, after: "Notes" });
+    expect(newest(t)).toBe("Moved “Review” to the top level");
+    expect(apply).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not offer a trashed group", async () => {
+    const t = await made(EDIT_SEED);
+    act(() => {
+      t.session.apply({ t: "trash", items: ["QA"] });
+    });
+    shown(t, "Review");
+    expect([...select("Group").options].map((o) => o.textContent)).toEqual(["Top level", "Sprint 4"]);
+  });
+
+  it("unschedules a scheduled task, and shows no Unschedule on an unscheduled item or a group", async () => {
+    const t = await made(EDIT_SEED);
+    const { apply } = shown(t, "Review");
+    fireEvent.click(button("Unschedule"));
+    expect(intents(apply)).toEqual([{ t: "schedule", item: "Review", set: { start: null } }]);
+    expect(newest(t)).toBe("Unscheduled “Review”");
+    cleanup();
+    shown(t, "Notes");
+    expect(noButton("Unschedule")).toBeNull();
+    cleanup();
+    shown(t, "S4");
+    expect(noButton("Unschedule")).toBeNull();
+  });
+
+  it("shows a refused Unschedule's message", async () => {
+    const t = await made(EDIT_SEED);
+    const { apply } = shown(t, "Review");
+    apply.mockImplementationOnce(() => {
+      throw new Refused("Refused for the test.");
+    });
+    fireEvent.click(button("Unschedule"));
+    expect(toasts()).toEqual(["Refused for the test."]);
+  });
+
+  it("moves an undated item between Now, Next and Later, and shows no Horizon on a dated item or a group", async () => {
+    const t = await made(EDIT_SEED);
+    const { apply } = shown(t, "Notes");
+    const horizon = select("Horizon");
+    expect([...horizon.options].map((o) => o.textContent)).toEqual(["Now", "Next", "Later"]);
+    expect(horizon.selectedOptions[0]?.textContent).toBe("Now");
+    fireEvent.change(horizon, { target: { value: "now" } });
+    expect(apply).toHaveBeenCalledTimes(0);
+    fireEvent.change(select("Horizon"), { target: { value: "next" } });
+    expect(intents(apply)).toEqual([{ t: "schedule", item: "Notes", set: { horizon: "next" } }]);
+    expect(newest(t)).toBe("Moved “Notes” to Next");
+    expect(toasts()).toEqual(["Moved “Notes” to Next."]);
+    cleanup();
+    shown(t, "Review");
+    expect(within(sheet()).queryByRole("combobox", { name: "Horizon" })).toBeNull();
+    cleanup();
+    shown(t, "S4");
+    expect(within(sheet()).queryByRole("combobox", { name: "Horizon" })).toBeNull();
+  });
+
+  it("moves an item to the Trash and closes the sheet", async () => {
+    const t = await made(EDIT_SEED);
+    const { apply, onClose } = shown(t, "Review");
+    fireEvent.click(button("Move to Trash"));
+    expect(intents(apply)).toEqual([{ t: "trash", items: ["Review"] }]);
+    expect(toasts()).toEqual(["Moved “Review” to the Trash. Undo brings it back."]);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("reorders among siblings with Move up and Move down", async () => {
+    const t = await made(EDIT_SEED);
+    const notes = shown(t, "Notes");
+    fireEvent.click(button("Move up"));
+    expect(intents(notes.apply)).toEqual([{ t: "place", item: "Notes", parent: null, after: null }]);
+    expect(newest(t)).toBe("Reordered “Notes”");
+    expect(notes.apply).toHaveBeenCalledTimes(1);
+    cleanup();
+    const t2 = await made(EDIT_SEED);
+    const qa = shown(t2, "QA");
+    expect(button("Move up").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(button("Move down"));
+    expect(intents(qa.apply)).toEqual([{ t: "place", item: "QA", parent: "S4", after: "Review" }]);
+    expect(qa.apply).toHaveBeenCalledTimes(1);
+    cleanup();
+    shown(t2, "S4");
+    expect(button("Move up").hasAttribute("disabled")).toBe(true);
+    cleanup();
+    const t3 = await made(EDIT_SEED);
+    shown(t3, "Review");
+    expect(button("Move down").hasAttribute("disabled")).toBe(true);
+    cleanup();
+    shown(t3, "Notes");
+    expect(button("Move down").hasAttribute("disabled")).toBe(true);
+  });
+});

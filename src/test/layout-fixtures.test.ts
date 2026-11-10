@@ -11,6 +11,7 @@ import { planRules } from "../plan/rules";
 import { parseKey, validateWrite } from "../plan/units";
 import { fixedClock } from "../services/clock";
 import { decodeAction, encodeAction, PlanDoc } from "../store/doc";
+import { indexRules } from "../store/index-doc";
 import { Registry } from "../store/registry";
 import { MESA_SEED } from "./session";
 import { resetTauri, type Answer } from "./tauriMock";
@@ -185,6 +186,7 @@ describe("layout fixtures", () => {
       "mesa",
       "mesa-linux",
       "phone-choice",
+      "phone-plans",
       "scale",
       "sync-dialog",
       "sync-receiving",
@@ -315,6 +317,21 @@ describe("layout fixtures", () => {
         if (!UNREADABLE_FIXTURES.has(name)) expect(log.pending).toEqual([]);
       }),
     );
+  });
+
+  it("phone-plans lists mesa's and long-names' plan docs untrashed and one plan in the Trash", () => {
+    const f = fixture("phone-plans");
+    const ydoc = ydocOf(f, "local");
+    const log = new LogState(indexRules);
+    const delta = log.add([...new PlanDoc(ydoc).actions()]);
+    expect(delta.refused).toEqual([]);
+    const listings = [...log.units()].filter(([u]) => u.startsWith("ip:")).map(([u, st]) => [u.slice(3), st.value]);
+    expect(listings).toHaveLength(3);
+    expect(listings.filter(([, v]) => isRecord(v) && v.t === true)).toHaveLength(1);
+    const live = listings.filter(([, v]) => isRecord(v) && v.t === false).map(([id]) => String(id));
+    expect(live.sort()).toEqual(["planLong001", "planMesa001"]);
+    live.forEach((id) => expect(() => decoded(f, id)).not.toThrow());
+    expect(decoded(f, "planLong001").plan.name).toBe(LONG_NAMES[0]);
   });
 
   it("all-trashed holds one plan, its listing in the Trash", async () => {

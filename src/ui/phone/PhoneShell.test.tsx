@@ -1,20 +1,36 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useContext } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Built } from "../../actions/intents";
+import type { ItemId, PlanId } from "../../domain/model";
 import { newId } from "../../log/ids";
-import type { Registry } from "../../store/registry";
+import { fixedClock, type Clock } from "../../services/clock";
+import { AppError } from "../../services/ipc";
+import { importPlan } from "../../store/file";
+import { Registry, type PlanListing } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
+import { memoryStore } from "../../test/fixtures/store";
 import { phoneRegistry } from "../../test/phone";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
-import { shellFor } from "../../test/shell";
+import { seededStore, shellFor, type SeededStore } from "../../test/shell";
+import { resetTauri, tauri } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { OpenChoice } from "../run";
-import { useUi, type UiState } from "../state";
+import { importFlow } from "../shell/fileFlows";
+import { PLACE_KEY, useUi, type UiState } from "../state";
 import { PhoneShell } from "./PhoneShell";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("../../store/file", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../../store/file")>();
+  return { ...m, importPlan: vi.fn(m.importPlan) };
+});
+vi.mock("../shell/fileFlows", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../shell/fileFlows")>();
+  return { ...m, importFlow: vi.fn(m.importFlow) };
+});
 vi.mock("../../log/ids", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../log/ids")>();
   return { ...m, newId: vi.fn(m.newId) };
@@ -60,6 +76,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.mocked(useUi).mockClear();
   vi.mocked(newId).mockReset();
+  vi.mocked(importPlan).mockClear();
+  vi.mocked(importFlow).mockClear();
   await Promise.all(sessions.splice(0).map((s) => s.close()));
   await Promise.all(registries.splice(0).map((r) => r.close()));
   window.localStorage.clear();
@@ -269,5 +287,838 @@ describe('PhoneShell, data-form="phone"', () => {
     expect(document.querySelector(".sidebar")).toBeNull();
     expect(document.querySelector(".update-line")).toBeNull();
     expect(screen.queryByText(/Check for updates|Up to date|WebBoard \d/)).toBeNull();
+  });
+});
+
+const INCOMPLETE = "This plan has not arrived yet; it opens once it syncs.";
+const FILES_STAY = "The plan’s files stay on this device.";
+const RELOAD = "Load again from the server";
+const RELOAD_TEXT = "Changes this device had not sent to the server are not loaded again; the damaged files stay on this device.";
+const EMPTY_NAME = "The name is empty. Type at least one character.";
+const CUT_OFF = "The last change before WebBoard stopped was cut off while saving and was not kept.";
+const INDEX_CUT = "The last change to the plan list before WebBoard closed was not saved.";
+
+const toastTexts = (): (string | null)[] => screen.queryAllByRole("status").map((e) => e.textContent);
+
+const topBar = (): HTMLElement => {
+  const el = document.querySelector(".phone-head");
+  if (!(el instanceof HTMLElement)) throw new Error("no phone top bar");
+  return el;
+};
+
+const plansSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Plans" });
+
+const openPlans = (): HTMLElement => {
+  fireEvent.click(within(topBar()).getByRole("button", { name: "Plans" }));
+  return plansSheet();
+};
+
+const closePlans = (): void => {
+  fireEvent.click(within(plansSheet()).getByRole("button", { name: "Close" }));
+};
+
+const planRow = (name: string): HTMLElement => {
+  const li = within(plansSheet()).getByText(name).closest("li");
+  if (!(li instanceof HTMLElement)) throw new Error("no Plans row " + name);
+  return li;
+};
+
+const trashOf = (): HTMLElement => within(plansSheet()).getByRole("region", { name: "Trash" });
+
+const listShows = (name: string): void => {
+  expect(topBar().querySelector(".phone-plan-name")?.textContent).toBe(name);
+  expect(document.querySelector(".phone-list")).not.toBeNull();
+};
+
+const emptyState = (): HTMLElement | null => document.querySelector(".empty-state");
+
+const docArg = (args: unknown): string => {
+  if (typeof args === "object" && args !== null && "doc" in args && typeof args.doc === "string") return args.doc;
+  throw new Error("store_load without a doc");
+};
+
+const indexOpen = async (): Promise<{ registry: Registry; clock: Clock }> => {
+  const clock = fixedClock("2026-11-09");
+  const registry = await Registry.open({ clock });
+  registries.push(registry);
+  return { registry, clock };
+};
+
+const showIndex = async (r: { registry: Registry; clock: Clock }): Promise<void> => {
+  render(<PhoneShell registry={r.registry} clock={r.clock} />);
+  await settle();
+};
+
+const emptyIndex = async (): Promise<{ registry: Registry; clock: Clock }> => {
+  resetTauri({ ...memoryStore().answers, settings_read: () => null, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "ios" }) });
+  return indexOpen();
+};
+
+const failNewDocs = (seeded: ReadonlySet<string>): void => {
+  const load = tauri.answers.store_load;
+  if (load === undefined) throw new Error("no store_load answer");
+  tauri.answers.store_load = (args, o) => {
+    if (!seeded.has(docArg(args))) throw { code: "store.io", message: "Disk full." };
+    return load(args, o);
+  };
+};
+
+const tear = (docs: ReadonlySet<string>): void => {
+  const load = tauri.answers.store_load;
+  if (load === undefined) throw new Error("no store_load answer");
+  tauri.answers.store_load = (args, o) => {
+    const out = load(args, o);
+    if (!(out instanceof ArrayBuffer)) throw new Error("store_load answered no bytes");
+    if (!docs.has(docArg(args))) return out;
+    const copy = out.slice(0);
+    new DataView(copy).setUint8(0, 1);
+    return copy;
+  };
+};
+
+const notifier = (r: Registry): (() => void) => {
+  const subscribers = new Set<() => void>();
+  const real = r.subscribe.bind(r);
+  vi.spyOn(r, "subscribe").mockImplementation((cb) => {
+    subscribers.add(cb);
+    const off = real(cb);
+    return () => {
+      subscribers.delete(cb);
+      off();
+    };
+  });
+  return () => [...subscribers].forEach((cb) => cb());
+};
+
+const gate = (): { wait: Promise<void>; open(): void } => {
+  const opens: (() => void)[] = [];
+  const wait = new Promise<void>((r) => {
+    opens.push(r);
+  });
+  return { wait, open: () => opens.forEach((o) => o()) };
+};
+
+const withSpace = (registry: Registry, ids: ReadonlySet<PlanId>): void => {
+  const real = registry.plans.bind(registry);
+  vi.spyOn(registry, "plans").mockImplementation(() => real().map((l): PlanListing => (ids.has(l.id) ? { ...l, space: "S1" } : l)));
+};
+
+const builtOf = (spy: { mock: { results: { type: string; value: unknown }[] } }, i = 0): Built => {
+  const r = spy.mock.results[i];
+  if (r === undefined || r.type !== "return") throw new Error("the spy did not return");
+  return r.value as Built;
+};
+
+describe("PhoneShell plans (Step 1)", () => {
+  it("Plans lists the plans with the open one current, and a row opens its plan", async () => {
+    const s = await seededStore(["Alpha", "Beta"]);
+    const r = await indexOpen();
+    const session = vi.spyOn(r.registry, "session");
+    await showIndex(r);
+    listShows("Alpha");
+    const sheet = openPlans();
+    expect(within(sheet).getByRole("button", { name: "Alpha" }).getAttribute("aria-current")).toBe("page");
+    expect(within(sheet).getByRole("button", { name: "Beta" }).hasAttribute("aria-current")).toBe(false);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Beta" }));
+    await settle();
+    expect(session).toHaveBeenLastCalledWith(s.ids[1]);
+    listShows("Beta");
+  });
+
+  it("New plan creates the named plan and refuses an empty name", async () => {
+    await seededStore(["Alpha", "Beta"]);
+    const r = await indexOpen();
+    const createPlan = vi.spyOn(r.registry, "createPlan");
+    await showIndex(r);
+    const sheet = openPlans();
+    const field = within(sheet).getByRole("textbox", { name: "Plan name" });
+    fireEvent.change(field, { target: { value: "   " } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "New plan" }));
+    await settle();
+    expect(createPlan).not.toHaveBeenCalled();
+    expect(within(sheet).getByText(EMPTY_NAME).classList.contains("bad")).toBe(true);
+    fireEvent.change(field, { target: { value: "  Gamma " } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "New plan" }));
+    await settle();
+    expect(createPlan.mock.calls).toEqual([["Gamma"]]);
+    listShows("Gamma");
+  });
+
+  it("Move to Trash on the open plan opens the next one, and Restore keeps the open one", async () => {
+    const s = await seededStore(["Alpha", "Beta"]);
+    const r = await indexOpen();
+    const trashPlan = vi.spyOn(r.registry, "trashPlan");
+    const restorePlan = vi.spyOn(r.registry, "restorePlan");
+    await showIndex(r);
+    openPlans();
+    fireEvent.click(within(planRow("Alpha")).getByRole("button", { name: "Move to Trash" }));
+    await settle();
+    expect(trashPlan.mock.calls).toEqual([[s.ids[0]]]);
+    expect(toastTexts()).toEqual(["Moved “Alpha” to the Trash. Restore it from the Trash."]);
+    expect(within(trashOf()).getByText("Alpha")).toBeTruthy();
+    listShows("Beta");
+    clearToasts();
+    fireEvent.click(within(planRow("Alpha")).getByRole("button", { name: "Restore" }));
+    await settle();
+    expect(restorePlan.mock.calls).toEqual([[s.ids[0]]]);
+    expect(toastTexts()).toEqual(["Restored “Alpha” from the Trash."]);
+    expect(within(plansSheet()).queryByRole("region", { name: "Trash" })).toBeNull();
+    listShows("Beta");
+  });
+
+  it("trashing the last open plan reaches the empty state", async () => {
+    await seededStore(["Alpha", "Beta"]);
+    const r = await indexOpen();
+    await showIndex(r);
+    openPlans();
+    fireEvent.click(within(planRow("Alpha")).getByRole("button", { name: "Move to Trash" }));
+    await settle();
+    fireEvent.click(within(planRow("Beta")).getByRole("button", { name: "Move to Trash" }));
+    await settle();
+    expect(emptyState()).not.toBeNull();
+    expect(document.querySelector(".phone-list")).toBeNull();
+  });
+
+  it("a store error shows in Plans", async () => {
+    const s = await seededStore(["Alpha", "Beta"]);
+    const alpha = s.ids[0];
+    const r = await indexOpen();
+    await showIndex(r);
+    const list = document.querySelector(".phone-list");
+    expect(list).not.toBeNull();
+    s.mem.fail("store_append", alpha, { code: "store.io", message: "Disk full." });
+    const session = await r.registry.session(alpha);
+    act(() => {
+      session.apply({ t: "planName", name: "Alpha 2" });
+    });
+    await settle();
+    expect(r.registry.failures().get(alpha)?.message).toBe("Disk full.");
+    expect(document.querySelector(".phone-list")).toBe(list);
+    openPlans();
+    expect(within(planRow("Alpha 2")).getByText("Disk full.").classList.contains("bad")).toBe(true);
+    const retryPlan = vi.spyOn(r.registry, "retryPlan");
+    s.mem.recover("store_append", alpha);
+    fireEvent.click(within(planRow("Alpha 2")).getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(retryPlan.mock.calls).toEqual([[alpha]]);
+    expect(within(planRow("Alpha 2")).queryByText("Disk full.")).toBeNull();
+    expect(document.querySelector(".phone-list")).toBe(list);
+  });
+
+  it("a failed new plan opens nothing", async () => {
+    const s = await seededStore(["Alpha"]);
+    failNewDocs(new Set(["local", ...s.ids]));
+    const r = await indexOpen();
+    const createPlan = vi.spyOn(r.registry, "createPlan");
+    await showIndex(r);
+    const sheet = openPlans();
+    fireEvent.change(within(sheet).getByRole("textbox", { name: "Plan name" }), { target: { value: "Gamma" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "New plan" }));
+    await settle();
+    expect(createPlan.mock.calls).toEqual([["Gamma"]]);
+    expect(within(plansSheet()).getByText("Disk full.").classList.contains("bad")).toBe(true);
+    listShows("Alpha");
+  });
+
+  it("New plan shows it is busy", async () => {
+    await seededStore(["Alpha"]);
+    const r = await indexOpen();
+    const real = r.registry.createPlan.bind(r.registry);
+    const g = gate();
+    const createPlan = vi.spyOn(r.registry, "createPlan").mockImplementation((name) => g.wait.then(() => real(name)));
+    await showIndex(r);
+    const sheet = openPlans();
+    fireEvent.change(within(sheet).getByRole("textbox", { name: "Plan name" }), { target: { value: "Gamma" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "New plan" }));
+    await settle();
+    const busy = within(sheet).getByRole("button", { name: "Creating…" });
+    expect(busy.hasAttribute("disabled")).toBe(true);
+    expect(busy.querySelector(".dim")?.textContent).toBe("Creating…");
+    fireEvent.click(busy);
+    expect(createPlan).toHaveBeenCalledTimes(1);
+    await act(async () => g.open());
+    await settle();
+    listShows("Gamma");
+    const idle = within(openPlans()).getByRole("button", { name: "New plan" });
+    expect(idle.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("Import plan… under New plan runs the import flow and opens the plan", async () => {
+    await seededStore(["Alpha"]);
+    const r = await indexOpen();
+    vi.mocked(importPlan).mockImplementationOnce(async (reg) => reg.createPlan("MESA 2027"));
+    await showIndex(r);
+    const sheet = openPlans();
+    const names = within(sheet)
+      .getAllByRole("button")
+      .map((b) => b.textContent);
+    expect(names.indexOf("Import plan…")).toBe(names.indexOf("New plan") + 1);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Import plan…" }));
+    await settle();
+    expect(vi.mocked(importFlow).mock.calls.map((c) => c[0])).toEqual([r.registry]);
+    listShows("MESA 2027");
+  });
+});
+
+describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
+  const failing = async (code = "store.locked", message = "Locked by another process."): Promise<{ s: SeededStore; registry: Registry }> => {
+    const s = await seededStore(["Alpha", "Beta", "Gamma"]);
+    s.mem.fail("store_load", s.ids[1], { code, message });
+    s.mem.fail("store_load", s.ids[2], { code: "store.corrupt", message: "Bad record in seg-0.log." });
+    const r = await indexOpen();
+    await r.registry.warm();
+    await showIndex(r);
+    return { s, registry: r.registry };
+  };
+
+  it("a locked plan offers Try again", async () => {
+    const { s, registry } = await failing();
+    const beta = s.ids[1];
+    openPlans();
+    expect(within(planRow("Beta")).getByText("Locked by another process.").classList.contains("bad")).toBe(true);
+    expect(within(planRow("Beta")).queryByRole("button", { name: "Move to Trash" })).toBeNull();
+    const retryPlan = vi.spyOn(registry, "retryPlan");
+    s.mem.recover("store_load", beta);
+    fireEvent.click(within(planRow("Beta")).getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(retryPlan.mock.calls).toEqual([[beta]]);
+    expect(within(planRow("Beta")).queryByText("Locked by another process.")).toBeNull();
+    fireEvent.click(within(planRow("Beta")).getByRole("button", { name: "Beta" }));
+    await settle();
+    listShows("Beta");
+  });
+
+  it("a failed retry replaces the failure", async () => {
+    const { s } = await failing();
+    s.mem.fail("store_load", s.ids[1], { code: "store.io", message: "Disk full." });
+    openPlans();
+    fireEvent.click(within(planRow("Beta")).getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(within(planRow("Beta")).getByText("Disk full.").classList.contains("bad")).toBe(true);
+    expect(within(planRow("Beta")).queryByText("Locked by another process.")).toBeNull();
+    expect(within(planRow("Beta")).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("a plan whose load answers ipc.shape offers Try again", async () => {
+    const { s, registry } = await failing("ipc.shape", "store_load did not return bytes.");
+    openPlans();
+    expect(within(planRow("Beta")).getByText("store_load did not return bytes.").classList.contains("bad")).toBe(true);
+    const retryPlan = vi.spyOn(registry, "retryPlan");
+    fireEvent.click(within(planRow("Beta")).getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(retryPlan.mock.calls).toEqual([[s.ids[1]]]);
+  });
+
+  it("a corrupt plan offers Move to Trash", async () => {
+    const { s, registry } = await failing();
+    const gamma = s.ids[2];
+    openPlans();
+    const row = planRow("Gamma");
+    expect(within(row).getByText("Bad record in seg-0.log.").classList.contains("bad")).toBe(true);
+    expect(within(row).getByText(FILES_STAY)).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: "Try again" })).toBeNull();
+    const trashPlan = vi.spyOn(registry, "trashPlan");
+    const from = tauri.calls.length;
+    fireEvent.click(within(row).getByRole("button", { name: "Move to Trash" }));
+    await settle();
+    expect(trashPlan.mock.calls).toEqual([[gamma]]);
+    expect(within(trashOf()).getByText("Gamma")).toBeTruthy();
+    expect(new Set(tauri.calls.slice(from).map((c) => c.cmd).filter((c) => c.startsWith("store_")))).toEqual(new Set(["store_append"]));
+  });
+
+  it("a corrupt space plan loads again from the server", async () => {
+    const { s, registry } = await failing();
+    const gamma = s.ids[2];
+    withSpace(registry, new Set([gamma]));
+    const reload = vi.spyOn(registry, "reloadFromServer");
+    const trashPlan = vi.spyOn(registry, "trashPlan");
+    openPlans();
+    const row = (): HTMLElement => planRow("Gamma");
+    expect(within(row()).getByText("Bad record in seg-0.log.")).toBeTruthy();
+    expect(within(row()).queryByRole("button", { name: "Move to Trash" })).toBeNull();
+    expect(within(row()).queryByText(FILES_STAY)).toBeNull();
+    fireEvent.click(within(row()).getByRole("button", { name: RELOAD }));
+    const confirm = screen.getByRole("dialog", { name: RELOAD });
+    expect(within(confirm).getByText(RELOAD_TEXT)).toBeTruthy();
+    expect(reload).not.toHaveBeenCalled();
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: RELOAD })).toBeNull();
+    expect(reload).not.toHaveBeenCalled();
+    reload.mockRejectedValueOnce(new AppError("store.io", "Permission denied (os error 13)"));
+    fireEvent.click(within(row()).getByRole("button", { name: RELOAD }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
+    await settle();
+    expect(reload.mock.calls).toEqual([[gamma]]);
+    expect(screen.queryAllByRole("status").map((n) => [n.textContent, n.className])).toEqual([["Permission denied (os error 13)", "toast bad"]]);
+    expect(screen.getByRole("dialog", { name: RELOAD })).toBeTruthy();
+    reload.mockResolvedValueOnce(undefined);
+    fireEvent.click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
+    await settle();
+    expect(reload).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog", { name: RELOAD })).toBeNull();
+    expect(toastTexts()).toHaveLength(1);
+    expect(trashPlan).not.toHaveBeenCalled();
+    vi.spyOn(registry, "spaceReadOnly").mockReturnValue(true);
+    closePlans();
+    openPlans();
+    expect(within(row()).getByText("Bad record in seg-0.log.")).toBeTruthy();
+    expect(within(row()).getByText(FILES_STAY)).toBeTruthy();
+    expect(within(row()).queryByRole("button", { name: RELOAD })).toBeNull();
+    expect(within(row()).queryByRole("button", { name: "Move to Trash" })).toBeNull();
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it("a plan trashed on another device", async () => {
+    const s = await seededStore(["Alpha", "Beta"]);
+    const r = await indexOpen();
+    const notify = notifier(r.registry);
+    const trashPlan = vi.spyOn(r.registry, "trashPlan");
+    await showIndex(r);
+    listShows("Alpha");
+    let trashed = new Set([s.ids[0]]);
+    const real = r.registry.plans.bind(r.registry);
+    vi.spyOn(r.registry, "plans").mockImplementation(() => real().map((l) => (trashed.has(l.id) ? { ...l, trashed: true } : l)));
+    act(() => notify());
+    await settle();
+    expect(toastTexts()).toEqual(["“Alpha” was moved to the Trash on another device. Restore it from the Trash."]);
+    listShows("Beta");
+    expect(trashPlan).not.toHaveBeenCalled();
+    trashed = new Set(s.ids);
+    act(() => notify());
+    await settle();
+    expect(emptyState()).not.toBeNull();
+    expect(document.querySelector(".phone-list")).toBeNull();
+  });
+
+  it("an unknown stored plan opens the first", async () => {
+    await seededStore(["Alpha", "Beta"]);
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: "zzzzzzzzzzz" }));
+    const r = await indexOpen();
+    const session = vi.spyOn(r.registry, "session");
+    await showIndex(r);
+    listShows("Alpha");
+    expect(within(openPlans()).getByRole("button", { name: "Alpha" }).getAttribute("aria-current")).toBe("page");
+    expect(toastTexts()).toEqual([]);
+    expect(session.mock.calls.map((c) => c[0])).not.toContain("zzzzzzzzzzz");
+  });
+
+  it("a trashed stored plan opens the first untrashed", async () => {
+    const s = await seededStore(["Alpha", "Beta"], { trash: [0] });
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: s.ids[0] }));
+    const r = await indexOpen();
+    const trashPlan = vi.spyOn(r.registry, "trashPlan");
+    await showIndex(r);
+    listShows("Beta");
+    expect(toastTexts()).toEqual([]);
+    expect(trashPlan).not.toHaveBeenCalled();
+    cleanup();
+    const all = await seededStore(["Alpha", "Beta"], { trash: [0, 1] });
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: all.ids[0] }));
+    await showIndex(await indexOpen());
+    expect(emptyState()).not.toBeNull();
+  });
+
+  it("a plan still arriving opens once it syncs", async () => {
+    const s = await seededStore(["Alpha", "Beta", "Gamma", "Delta"]);
+    const delta = s.ids[3];
+    const r = await indexOpen();
+    const notify = notifier(r.registry);
+    const real = r.registry.session.bind(r.registry);
+    let arriving = true;
+    const session = vi.spyOn(r.registry, "session").mockImplementation((id) => {
+      if (id === delta && arriving) {
+        arriving = false;
+        return Promise.reject(new AppError("plan.incomplete", INCOMPLETE));
+      }
+      return real(id);
+    });
+    await showIndex(r);
+    fireEvent.click(within(openPlans()).getByRole("button", { name: "Delta" }));
+    await settle();
+    expect(screen.getByText(INCOMPLETE)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(r.registry.failures().has(delta)).toBe(false);
+    expect(document.querySelector(".phone-list")).toBeNull();
+    expect(session.mock.calls.filter((c) => c[0] === delta)).toHaveLength(1);
+    act(() => notify());
+    await settle();
+    expect(session.mock.calls.filter((c) => c[0] === delta).length).toBeGreaterThanOrEqual(2);
+    listShows("Delta");
+  });
+
+  it("opening a failed plan shows its error", async () => {
+    await failing();
+    fireEvent.click(within(openPlans()).getByRole("button", { name: "Beta" }));
+    await settle();
+    expect(screen.getByText("Locked by another process.").classList.contains("bad")).toBe(true);
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(document.querySelector(".phone-list")).toBeNull();
+  });
+
+  it("the empty state offers New plan", async () => {
+    const r = await emptyIndex();
+    const createPlan = vi.spyOn(r.registry, "createPlan");
+    await showIndex(r);
+    expect(screen.getByRole("button", { name: "New plan" })).toBeTruthy();
+    expect(document.querySelector(".phone-list")).toBeNull();
+    expect(within(topBar()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Plans"]);
+    expect(screen.queryByRole("button", { name: "+" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "New plan" }));
+    await settle();
+    expect(createPlan.mock.calls).toEqual([["New plan"]]);
+    listShows("New plan");
+    expect(emptyState()).toBeNull();
+  });
+
+  it("the empty state shows a failed New plan under the button", async () => {
+    const r = await emptyIndex();
+    failNewDocs(new Set(["local"]));
+    await showIndex(r);
+    fireEvent.click(screen.getByRole("button", { name: "New plan" }));
+    await settle();
+    const state = emptyState();
+    if (state === null) throw new Error("no empty state");
+    expect(within(state).getByText("Disk full.").classList.contains("bad")).toBe(true);
+    expect(document.querySelector(".phone-list")).toBeNull();
+  });
+
+  it("the empty state's New plan shows it is busy", async () => {
+    const r = await emptyIndex();
+    const real = r.registry.createPlan.bind(r.registry);
+    const g = gate();
+    const createPlan = vi.spyOn(r.registry, "createPlan").mockImplementation((name) => g.wait.then(() => real(name)));
+    await showIndex(r);
+    fireEvent.click(screen.getByRole("button", { name: "New plan" }));
+    await settle();
+    const busy = screen.getByRole("button", { name: "Creating…" });
+    expect(busy.hasAttribute("disabled")).toBe(true);
+    expect(busy.querySelector(".dim")?.textContent).toBe("Creating…");
+    fireEvent.click(busy);
+    expect(createPlan).toHaveBeenCalledTimes(1);
+    await act(async () => g.open());
+    await settle();
+    listShows("New plan");
+  });
+
+  it("the empty state offers Import plan…", async () => {
+    const r = await emptyIndex();
+    vi.mocked(importPlan).mockImplementationOnce(async (reg) => reg.createPlan("MESA 2027"));
+    await showIndex(r);
+    const state = emptyState();
+    if (state === null) throw new Error("no empty state");
+    expect(within(state).getAllByRole("button").map((b) => b.textContent)).toEqual(["New plan", "Import plan…"]);
+    fireEvent.click(within(state).getByRole("button", { name: "Import plan…" }));
+    await settle();
+    expect(importPlan).toHaveBeenCalledTimes(1);
+    expect(toastTexts()).toEqual(["Imported “MESA 2027”"]);
+    listShows("MESA 2027");
+    expect(emptyState()).toBeNull();
+  });
+
+  it("a cancelled import from the empty state changes nothing", async () => {
+    const r = await emptyIndex();
+    vi.mocked(importPlan).mockResolvedValueOnce(null);
+    const createPlan = vi.spyOn(r.registry, "createPlan");
+    await showIndex(r);
+    fireEvent.click(screen.getByRole("button", { name: "Import plan…" }));
+    await settle();
+    expect(emptyState()).not.toBeNull();
+    expect(toastTexts()).toEqual([]);
+    expect(createPlan).not.toHaveBeenCalled();
+  });
+
+  it("all plans trashed is the empty state", async () => {
+    const s = await seededStore(["Alpha", "Beta"], { trash: [0, 1] });
+    const r = await indexOpen();
+    const restorePlan = vi.spyOn(r.registry, "restorePlan");
+    await showIndex(r);
+    expect(screen.getByRole("button", { name: "New plan" })).toBeTruthy();
+    expect(document.querySelector(".phone-list")).toBeNull();
+    expect(screen.queryByRole("button", { name: "+" })).toBeNull();
+    openPlans();
+    expect(within(trashOf()).getByText("Alpha")).toBeTruthy();
+    expect(within(trashOf()).getByText("Beta")).toBeTruthy();
+    fireEvent.click(within(planRow("Beta")).getByRole("button", { name: "Restore" }));
+    await settle();
+    expect(restorePlan.mock.calls).toEqual([[s.ids[1]]]);
+    listShows("Beta");
+    expect(emptyState()).toBeNull();
+  });
+
+  it("repair notices toast once", async () => {
+    const s = await seededStore(["Alpha", "Beta"]);
+    tear(new Set([s.ids[0]]));
+    const r = await indexOpen();
+    await showIndex(r);
+    listShows("Alpha");
+    expect(toastTexts()).toEqual([CUT_OFF]);
+    fireEvent.click(within(openPlans()).getByRole("button", { name: "Beta" }));
+    await settle();
+    fireEvent.click(within(openPlans()).getByRole("button", { name: "Alpha" }));
+    await settle();
+    listShows("Alpha");
+    expect(toastTexts()).toEqual([CUT_OFF]);
+    cleanup();
+    clearToasts();
+    await seededStore(["Alpha"]);
+    tear(new Set(["local"]));
+    await showIndex(await indexOpen());
+    expect(toastTexts()).toEqual([INDEX_CUT]);
+  });
+
+  it("an index notice after start toasts once", async () => {
+    const s = await seededStore(["Alpha", "Beta"]);
+    const r = await indexOpen();
+    let notice: string | null = null;
+    vi.spyOn(r.registry, "takeIndexRepairNotice").mockImplementation(() => {
+      const n = notice;
+      notice = null;
+      return n;
+    });
+    await showIndex(r);
+    expect(toastTexts()).toEqual([]);
+    notice = INDEX_CUT;
+    act(() => r.registry.trashPlan(s.ids[1]));
+    await settle();
+    expect(toastTexts()).toEqual([INDEX_CUT]);
+    act(() => r.registry.restorePlan(s.ids[1]));
+    await settle();
+    expect(toastTexts()).toEqual([INDEX_CUT]);
+  });
+});
+
+describe("PhoneShell undo and redo (Step 2)", () => {
+  const REVIEW: readonly SeedItem[] = [{ name: "Review", start: "2026-11-10", dur: 2 }];
+  const undoButton = (): HTMLElement => within(topBar()).getByRole("button", { name: "Undo" });
+  const redoButton = (): HTMLElement => within(topBar()).getByRole("button", { name: "Redo" });
+
+  it("Undo and Redo follow canUndo and canRedo and report their toasts", async () => {
+    const t = await testSession(REVIEW);
+    sessions.push(t.session);
+    await shown(t);
+    expect([undoButton().hasAttribute("disabled"), redoButton().hasAttribute("disabled")]).toEqual([true, true]);
+    act(() => {
+      t.session.apply({ t: "rename", item: "Review", name: "Review 2" });
+    });
+    expect([undoButton().hasAttribute("disabled"), redoButton().hasAttribute("disabled")]).toEqual([false, true]);
+    const undo = vi.spyOn(t.session, "undo");
+    const redo = vi.spyOn(t.session, "redo");
+    fireEvent.click(undoButton());
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(toastTexts()).toEqual([builtOf(undo).toast]);
+    expect([undoButton().hasAttribute("disabled"), redoButton().hasAttribute("disabled")]).toEqual([true, false]);
+    clearToasts();
+    fireEvent.click(redoButton());
+    expect(redo).toHaveBeenCalledTimes(1);
+    expect(toastTexts()).toEqual([builtOf(redo).toast]);
+  });
+
+  it("undo offer", async () => {
+    const t = await testSession(REVIEW);
+    sessions.push(t.session);
+    const peer = await t.peer("iphone");
+    sessions.push(peer.session);
+    t.session.apply({ t: "move", items: ["Review"], days: 1 });
+    peer.session.apply({ t: "move", items: ["Review"], days: 2 });
+    peer.sync();
+    expect(t.session.view().choices.map((c) => c.units)).toEqual([["s:Review"]]);
+    const offer = t.session.undoOffer();
+    if (offer === null) throw new Error("no undo offer");
+    await shown(t);
+    const undo = vi.spyOn(t.session, "undo");
+    const resolve = vi.spyOn(t.session, "resolve");
+    const actions = t.session.history().length;
+    fireEvent.click(undoButton());
+    expect(lastUi().dialog).toEqual({ t: "choice", id: offer.choice, side: offer.side });
+    const sheet = screen.getByRole("dialog", { name: "Choose which to keep" });
+    expect(undo).not.toHaveBeenCalled();
+    expect(t.session.history()).toHaveLength(actions);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Apply" }));
+    expect(resolve.mock.calls).toEqual([[offer.choice, { side: offer.side }, { pushFromPredecessors: true, returnPushed: true }]]);
+    expect(toastTexts()).toContain(builtOf(resolve).toast);
+  });
+});
+
+describe("PhoneShell new items (Step 3)", () => {
+  it.each([
+    ["New task", { t: "create", kind: "task", name: "New task", parent: null, after: null, start: "2026-11-10", dur: 3 }, "Added task “New task”"],
+    ["New milestone", { t: "create", kind: "milestone", name: "New milestone", parent: null, after: null, start: "2026-11-10" }, "Added milestone “New milestone”"],
+    ["New group", { t: "create", kind: "group", name: "New group", parent: null, after: null, start: null }, "Added group “New group”"],
+  ])("+ → %s creates it with no selection and opens its sheet with the name selected", async (label, intent, history) => {
+    const t = await testSession([{ name: "Review", start: "2026-11-10", dur: 2 }]);
+    sessions.push(t.session);
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    fireEvent.click(within(topBar()).getByRole("button", { name: "+" }));
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["New task", "New milestone", "New group"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: label }));
+    expect(apply.mock.calls).toEqual([[intent]]);
+    expect(t.session.history()[0]?.label).toBe(history);
+    const created = builtOf(apply).action.w.find((w) => w.u.startsWith("e:"));
+    if (created === undefined) throw new Error("the create wrote no e: unit");
+    const id: ItemId = created.u.slice(2);
+    expect(lastUi().selected).toBe(id);
+    expect(screen.queryByRole("menu")).toBeNull();
+    const field = within(screen.getByRole("dialog", { name: label })).getByRole("textbox", { name: "Name" });
+    if (!(field instanceof HTMLInputElement)) throw new Error("no name input");
+    expect(document.activeElement).toBe(field);
+    expect([field.selectionStart, field.selectionEnd]).toEqual([0, label.length]);
+  });
+});
+
+describe("PhoneShell item sheet (Step 4)", () => {
+  const EDIT_SEED: readonly SeedItem[] = [
+    { id: "S4", name: "Sprint 4", kind: "group" },
+    { name: "QA", kind: "group", parent: "S4" },
+    { name: "Test", parent: "QA", start: "2026-11-10", dur: 1 },
+    { name: "Review", parent: "S4", start: "2026-11-10", dur: 2 },
+    { name: "Notes", horizon: "now" },
+  ];
+  const TRASHED_ON_IPHONE = "“Notes” was moved to the Trash on iPhone. Restore it from the Trash.";
+
+  const withPeer = async () => {
+    const t = await testSession(EDIT_SEED);
+    sessions.push(t.session);
+    const peer = await t.peer("iphone");
+    sessions.push(peer.session);
+    await shown(t);
+    setUiNow({ selected: "Notes" });
+    expect(screen.getByRole("dialog", { name: "Notes" })).toBeTruthy();
+    return { t, peer };
+  };
+
+  it("a peer trash closes the sheet", async () => {
+    const { t, peer } = await withPeer();
+    act(() => {
+      peer.session.apply({ t: "trash", items: ["Notes"] });
+      peer.sync();
+    });
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toastTexts()).toEqual([TRASHED_ON_IPHONE]);
+    expect(t.session.authorOf("e:Notes")).toEqual({ dev: "iphone", device: "iPhone" });
+  });
+
+  it("a peer trash among local edits", async () => {
+    const { t, peer } = await withPeer();
+    act(() => {
+      peer.session.apply({ t: "trash", items: ["Notes"] });
+    });
+    act(() => {
+      t.session.apply({ t: "rename", item: "Review", name: "Review 2" });
+    });
+    act(() => peer.sync());
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toastTexts()).toEqual([TRASHED_ON_IPHONE]);
+  });
+
+  it("Undo after a create closes the new item's sheet with only the undo's toast", async () => {
+    const t = await testSession(EDIT_SEED);
+    sessions.push(t.session);
+    await shown(t);
+    fireEvent.click(within(topBar()).getByRole("button", { name: "+" }));
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "New task" }));
+    expect(screen.getByRole("dialog", { name: "New task" })).toBeTruthy();
+    clearToasts();
+    const undo = vi.spyOn(t.session, "undo");
+    fireEvent.click(within(topBar()).getByRole("button", { name: "Undo" }));
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toastTexts()).toEqual([builtOf(undo).toast]);
+  });
+
+  it("a ghost row keeps its sheet", async () => {
+    const { t, peer } = await withPeer();
+    act(() => {
+      peer.session.apply({ t: "trash", items: ["Notes"] });
+    });
+    act(() => {
+      t.session.apply({ t: "rename", item: "Notes", name: "Notes 2" });
+    });
+    act(() => peer.sync());
+    await settle();
+    expect(t.session.view().choices.filter((c) => c.kind === "delete")).toHaveLength(1);
+    const sheet = screen.getByRole("dialog");
+    expect(sheet.querySelector(".isheet")?.firstElementChild?.classList.contains("choice-banner")).toBe(true);
+    expect(toastTexts()).toEqual([]);
+  });
+});
+
+describe("PhoneShell read-only (Step 4b)", () => {
+  const EDIT_SEED: readonly SeedItem[] = [
+    { id: "S4", name: "Sprint 4", kind: "group" },
+    { name: "QA", kind: "group", parent: "S4" },
+    { name: "Test", parent: "QA", start: "2026-11-10", dur: 1 },
+    { name: "Review", parent: "S4", start: "2026-11-10", dur: 2 },
+    { name: "Notes", horizon: "now" },
+  ];
+  const EDITS = ["Group", "Unschedule", "Move up", "Move down", "Move to Trash"];
+
+  it("read-only drops edit controls", async () => {
+    const t = await testSession(EDIT_SEED);
+    sessions.push(t.session);
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    const root = document.querySelector(".app.phone");
+    setUiNow({ selected: "Review" });
+    act(() => t.session.setReadOnly(true));
+    const plus = within(topBar()).getByRole("button", { name: "+" });
+    expect(plus.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(plus);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(within(topBar()).getByRole("button", { name: "Undo" }).hasAttribute("disabled")).toBe(true);
+    expect(within(topBar()).getByRole("button", { name: "Redo" }).hasAttribute("disabled")).toBe(true);
+    const sheet = screen.getByRole("dialog", { name: "Review" });
+    expect(sheet.querySelectorAll("input, select")).toHaveLength(0);
+    expect(sheet.textContent).toContain("Review");
+    expect(sheet.textContent).toContain("Sprint 4");
+    EDITS.forEach((n) => expect([n, within(sheet).queryByRole("button", { name: n })]).toEqual([n, null]));
+    expect(document.querySelector(".app.phone")).toBe(root);
+    const nameText = sheet.querySelector(".title-input");
+    if (nameText === null) throw new Error("no name text");
+    fireEvent.keyDown(nameText, { key: "Enter" });
+    within(sheet)
+      .getAllByRole("button")
+      .filter((b) => b.textContent !== "Close")
+      .forEach((b) => fireEvent.click(b));
+    expect(apply).not.toHaveBeenCalled();
+    act(() => t.session.setReadOnly(false));
+    const back = screen.getByRole("dialog", { name: "Review" });
+    expect(within(back).getByRole("textbox", { name: "Name" })).toBeTruthy();
+    expect(within(back).getByRole("combobox", { name: "Group" })).toBeTruthy();
+    EDITS.filter((n) => n !== "Group").forEach((n) => expect(within(back).getByRole("button", { name: n })).toBeTruthy());
+    setUiNow({ selected: "Notes" });
+    act(() => t.session.setReadOnly(true));
+    const notes = screen.getByRole("dialog", { name: "Notes" });
+    expect(notes.textContent).toContain("Now");
+    expect(within(notes).queryByRole("combobox", { name: "Horizon" })).toBeNull();
+  });
+
+  it("space plans follow spaceReadOnly", async () => {
+    const s = await seededStore(["Alpha", "Beta", "Gamma"], { trash: [2] });
+    const [alpha, , gamma] = s.ids;
+    const r = await indexOpen();
+    withSpace(r.registry, new Set([alpha, gamma]));
+    const spaceReadOnly = vi.spyOn(r.registry, "spaceReadOnly").mockReturnValue(true);
+    const trashPlan = vi.spyOn(r.registry, "trashPlan");
+    const restorePlan = vi.spyOn(r.registry, "restorePlan");
+    await showIndex(r);
+    openPlans();
+    const alphaTrash = within(planRow("Alpha")).getByRole("button", { name: "Move to Trash" });
+    const gammaRestore = within(planRow("Gamma")).getByRole("button", { name: "Restore" });
+    expect([alphaTrash.hasAttribute("disabled"), gammaRestore.hasAttribute("disabled")]).toEqual([true, true]);
+    fireEvent.click(alphaTrash);
+    fireEvent.click(gammaRestore);
+    expect([trashPlan.mock.calls.length, restorePlan.mock.calls.length]).toEqual([0, 0]);
+    expect(within(planRow("Beta")).getByRole("button", { name: "Move to Trash" }).hasAttribute("disabled")).toBe(false);
+    spaceReadOnly.mockReturnValue(false);
+    const session = await r.registry.session(alpha);
+    act(() => session.setReadOnly(true));
+    closePlans();
+    openPlans();
+    expect(within(planRow("Alpha")).getByRole("button", { name: "Move to Trash" }).hasAttribute("disabled")).toBe(false);
+    expect(within(planRow("Gamma")).getByRole("button", { name: "Restore" }).hasAttribute("disabled")).toBe(false);
   });
 });

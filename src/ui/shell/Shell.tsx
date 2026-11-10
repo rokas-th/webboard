@@ -24,6 +24,7 @@ import { RevertDialog } from "../panel/History";
 import { ItemPanel } from "../panel/ItemPanel";
 import { PlanPanel } from "../panel/PlanPanel";
 import { Timeline } from "../timeline/Timeline";
+import { trashRootOf } from "../trashed";
 import { HolidayState } from "./HolidayState";
 import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
@@ -46,14 +47,6 @@ export interface ShellProps {
 }
 
 type CompactSheet = "plans" | "plan" | null;
-
-function trashRootOf(s: PlanSession, id: ItemId): ItemId {
-  const plan = s.view().plan;
-  const it = plan.items.get(id);
-  if (it === undefined) throw new Error(`Shell: no item ${id}`);
-  const parent = it.place.parent === null ? undefined : plan.items.get(it.place.parent);
-  return parent !== undefined && parent.trashed ? trashRootOf(s, parent.id) : id;
-}
 
 function itemName(s: PlanSession, id: ItemId): string {
   const it = s.view().plan.items.get(id);

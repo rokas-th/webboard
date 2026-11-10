@@ -188,7 +188,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
   );
 }
 
-function PlaceFields(p: { plan: PlanState; item: Item; readOnly: boolean; run: Run }) {
+export function PlaceFields(p: { plan: PlanState; item: Item; readOnly: boolean; run: Run }) {
   const { plan, item: it } = p;
   const groupId = useId();
   const options = groupOptions(plan, it.id);

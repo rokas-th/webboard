@@ -1,6 +1,6 @@
 import type { Built, Intent } from "../../actions/intents";
 import { workCalendar } from "../../domain/calendar";
-import { toDay, toIso } from "../../domain/dates";
+import { toDay, toIso, type IsoDate } from "../../domain/dates";
 import type { Item, ItemId, ItemKind, PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
@@ -37,7 +37,7 @@ export interface CommandCtx {
   updates: Updates | null;
 }
 
-const NEW_NAME: Readonly<Record<ItemKind, string>> = { task: "New task", milestone: "New milestone", group: "New group" };
+export const NEW_NAME: Readonly<Record<ItemKind, string>> = { task: "New task", milestone: "New milestone", group: "New group" };
 
 const VIEWS: readonly (readonly [ViewKind, string, string])[] = [
   ["timeline", "Timeline", "1"],
@@ -81,13 +81,14 @@ function placeOf(session: PlanSession, selected: ItemId | null): { parent: ItemI
   return sel.kind === "group" ? { parent: sel.id, after: null } : { parent: sel.place.parent, after: sel.id };
 }
 
-function newItem(ctx: CommandCtx, session: PlanSession, run: (i: Intent) => Built | null, kind: ItemKind): void {
-  const place = placeOf(session, ctx.ui.selected);
+export function createIntent(session: PlanSession, today: IsoDate, kind: ItemKind, place: { parent: ItemId | null; after: ItemId | null }): Intent {
   const name = NEW_NAME[kind];
-  const start = kind === "group" ? null : toIso(workCalendar(session.view().plan.calendar).after(toDay(ctx.clock.today())));
-  const intent: Intent =
-    kind === "task" ? { t: "create", kind, name, ...place, start, dur: 3 } : { t: "create", kind, name, ...place, start };
-  const built = run(intent);
+  const start = kind === "group" ? null : toIso(workCalendar(session.view().plan.calendar).after(toDay(today)));
+  return kind === "task" ? { t: "create", kind, name, ...place, start, dur: 3 } : { t: "create", kind, name, ...place, start };
+}
+
+function newItem(ctx: CommandCtx, session: PlanSession, run: (i: Intent) => Built | null, kind: ItemKind): void {
+  const built = run(createIntent(session, ctx.clock.today(), kind, placeOf(session, ctx.ui.selected)));
   if (built === null) return;
   const id = createdItem(built);
   ctx.setUi({ selected: id, naming: id });

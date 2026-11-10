@@ -426,7 +426,8 @@ function localIndex(plans, trashed) {
   const log = new Log("ixLoc", START);
   log.act({ lbl: "Name device", w: [own("dn:mac", "Mac"), own("dn:iphone", "iPhone")] });
   plans.forEach((id) => log.act({ lbl: "Add plan", w: [own(`ip:${id}`, { t: false })] }));
-  if (trashed) plans.forEach((id) => log.act({ lbl: "Move plan to Trash", w: [own(`ip:${id}`, { t: true })] }));
+  const gone = trashed === true ? plans : trashed === false ? [] : trashed;
+  gone.forEach((id) => log.act({ lbl: "Move plan to Trash", w: [own(`ip:${id}`, { t: true })] }));
   return log.doc();
 }
 
@@ -529,6 +530,10 @@ export function buildFixtures() {
     unreadable,
     "two-choices": fixtureOf([mesa(twoChoicesLog())]),
     "phone-choice": fixtureOf([{ id: PLAN_IDS.phone, name: "Sprint plan", log: phoneChoiceLog() }]),
+    "phone-plans": fixtureOf(
+      [mesa(mesaLog("mesaP")), { id: PLAN_IDS.long, name: LONG.plan, log: longLog() }, { id: PLAN_IDS.blank, name: "Blank plan", log: blankLog() }],
+      { trashed: [PLAN_IDS.blank] },
+    ),
     "sync-dialog": copyOf(mesaOnMac),
     "sync-space": inSpace(mesaOnMac, false),
     "sync-receiving": inSpace(unreadable, false),
