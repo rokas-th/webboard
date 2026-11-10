@@ -27,7 +27,7 @@ const BAD_CODE = {
 };
 const CLOSE_FAILED = {
   error: 'internal',
-  message: 'The device was removed, but 1 plan was not told to close its connections. Remove it again to finish.',
+  message: 'The device was removed, but 1 plan was not told to close its connections. The server tries again every minute; until then the device keeps syncing that plan while it stays connected.',
 };
 
 let addresses = 0;
@@ -307,6 +307,20 @@ describe('the worker', () => {
     await refused(await send('/ticket', { method: 'POST', token: a, body: { doc: 'local' } }), 400, {
       error: 'bad_request',
       message: 'The document id is not valid. Update WebBoard on this device.',
+    });
+  });
+
+  it('a ticket for a plan past the cap answers 409 too_many_plans', async () => {
+    const dev = newDevice();
+    const token = await enrol(dev, 'Mac');
+    await runInDurableObject(env.Space.getByName('space'), (_space, state) => {
+      Array.from({ length: 500 }, () => newDoc()).forEach((doc) =>
+        state.storage.sql.exec('INSERT INTO joins (device, doc) VALUES (?, ?)', dev, doc),
+      );
+    });
+    await refused(await send('/ticket', { method: 'POST', token, body: { doc: newDoc() } }), 409, {
+      error: 'too_many_plans',
+      message: 'This device has joined 500 plans, the most one device may join.',
     });
   });
 

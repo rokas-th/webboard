@@ -3,14 +3,16 @@ import * as auth from './auth';
 import type { Admission, DeviceEntry, Enrolled, Failure, Result } from './auth';
 
 const CLOSE_CHUNK = 50;
+const CLOSE_RETRY_MS = 60_000;
 
 function roomCloseFailed(untold: number): Failure {
   const plans = untold === 1 ? '1 plan was' : `${untold} plans were`;
+  const those = untold === 1 ? 'that plan' : 'those plans';
   return {
     ok: false,
     status: 500,
     error: 'internal',
-    message: `The device was removed, but ${plans} not told to close its connections. Remove it again to finish.`,
+    message: `The device was removed, but ${plans} not told to close its connections. The server tries again every minute; until then the device keeps syncing ${those} while it stays connected.`,
   };
 }
 
@@ -77,15 +79,38 @@ export class Space extends DurableObject<Env> {
       if (!removed.ok) {
         return removed;
       }
-      const joins = removed.value.joins;
-      const settled = await chunked(joins, CLOSE_CHUNK).reduce<Promise<PromiseSettledResult<number>[]>>(
-        async (done, chunk) => [...(await done), ...(await Promise.allSettled(chunk.map((doc) => this.rooms.close(doc, id))))],
-        Promise.resolve([]),
-      );
-      const untold = this.logFailures('closeDevice', id, joins, settled);
-      const closed = settled.reduce((sum, outcome) => (outcome.status === 'fulfilled' ? sum + outcome.value : sum), 0);
+      const { untold, closed } = await this.tell(id, removed.value.joins);
       return untold > 0 ? roomCloseFailed(untold) : { ok: true, value: { closed } };
     });
+  }
+
+  async alarm(): Promise<void> {
+    await auth
+      .untoldDevices(this.ctx.storage)
+      .reduce<Promise<void>>(
+        async (done, device) => {
+          await done;
+          await this.serialised(device, async () => {
+            await this.tell(device, auth.untoldOf(this.ctx.storage, device));
+          });
+        },
+        Promise.resolve(),
+      );
+  }
+
+  private async tell(id: string, docs: readonly string[]): Promise<{ untold: number; closed: number }> {
+    const settled = await chunked(docs, CLOSE_CHUNK).reduce<Promise<PromiseSettledResult<number>[]>>(
+      async (done, chunk) => [...(await done), ...(await Promise.allSettled(chunk.map((doc) => this.rooms.close(doc, id))))],
+      Promise.resolve([]),
+    );
+    this.logFailures('closeDevice', id, docs, settled);
+    const untold = docs.filter((_doc, index) => settled[index].status === 'rejected');
+    auth.keepUntold(this.ctx.storage, id, untold);
+    if (untold.length > 0 && (await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now() + CLOSE_RETRY_MS);
+    }
+    const closed = settled.reduce((sum, outcome) => (outcome.status === 'fulfilled' ? sum + outcome.value : sum), 0);
+    return { untold: untold.length, closed };
   }
 
   private async readmit(admitted: Result<Admission>): Promise<Result<Enrolled>> {

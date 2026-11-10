@@ -8,12 +8,13 @@ export type ErrorCode =
   | 'bad_request'
   | 'not_found'
   | 'too_large'
+  | 'too_many_plans'
   | 'not_configured'
   | 'internal';
 
 export type Failure = {
   ok: false;
-  status: 400 | 401 | 403 | 404 | 405 | 413 | 429 | 500 | 503;
+  status: 400 | 401 | 403 | 404 | 405 | 409 | 413 | 429 | 500 | 503;
   error: ErrorCode;
   message: string;
   retryAfter?: number;
@@ -96,8 +97,8 @@ const BAD_DOC: Failure = {
 };
 const TOO_MANY_PLANS: Failure = {
   ok: false,
-  status: 400,
-  error: 'bad_request',
+  status: 409,
+  error: 'too_many_plans',
   message: `This device has joined ${MAX_PLANS_PER_DEVICE} plans, the most one device may join.`,
 };
 const REMOVE_SELF: Failure = { ok: false, status: 400, error: 'bad_request', message: 'Remove this device from another device.' };
@@ -149,6 +150,7 @@ export function schema(sql: SqlStorage): void {
     'CREATE TABLE IF NOT EXISTS tickets (hash TEXT PRIMARY KEY, doc TEXT NOT NULL, device TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)',
   );
   sql.exec('CREATE TABLE IF NOT EXISTS joins (device TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY (device, doc))');
+  sql.exec('CREATE TABLE IF NOT EXISTS untold (device TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY (device, doc))');
   sql.exec('CREATE TABLE IF NOT EXISTS attempts (scope TEXT NOT NULL, at INTEGER NOT NULL)');
   sql.exec('CREATE INDEX IF NOT EXISTS attempts_scope ON attempts (scope, at)');
 }
@@ -225,6 +227,7 @@ function admit(
     now,
     now,
   );
+  sql.exec('DELETE FROM untold WHERE device = ?', deviceId);
   return { enrolled: { spaceId, deviceId, token }, joins: joinsOf(sql, deviceId) };
 }
 
@@ -445,4 +448,25 @@ export async function removeDevice(
     sql.exec('DELETE FROM codes WHERE issuer = ? AND used_at IS NULL', id);
     return ok({ joins: joinsOf(sql, id) });
   });
+}
+
+export function keepUntold(storage: DurableObjectStorage, device: string, docs: readonly string[]): void {
+  inTransaction(storage, (sql) => {
+    sql.exec('DELETE FROM untold WHERE device = ?', device);
+    docs.forEach((doc) => sql.exec('INSERT INTO untold (device, doc) VALUES (?, ?)', device, doc));
+  });
+}
+
+export function untoldDevices(storage: DurableObjectStorage): string[] {
+  return storage.sql
+    .exec('SELECT DISTINCT device FROM untold ORDER BY device')
+    .toArray()
+    .map((row) => text(row, 'device'));
+}
+
+export function untoldOf(storage: DurableObjectStorage, device: string): string[] {
+  return storage.sql
+    .exec('SELECT doc FROM untold WHERE device = ? ORDER BY doc', device)
+    .toArray()
+    .map((row) => text(row, 'doc'));
 }

@@ -1,4 +1,4 @@
-import { env, runInDurableObject } from 'cloudflare:test';
+import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { getServerByName } from 'partyserver';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEVICE_HEADER } from '../src/limits';
@@ -9,12 +9,14 @@ import { newDoc, value } from './helpers';
 const SECRET = env.SETUP_SECRET;
 const DEV_A = 'devA0000000';
 const DEV_B = 'devB0000000';
-function closeFailed(plans: string): unknown {
+function closeFailed(untold: number): unknown {
+  const plans = untold === 1 ? '1 plan was' : `${untold} plans were`;
+  const that = untold === 1 ? 'that plan' : 'those plans';
   return {
     ok: false,
     status: 500,
     error: 'internal',
-    message: `The device was removed, but ${plans} not told to close its connections. Remove it again to finish.`,
+    message: `The device was removed, but ${plans} not told to close its connections. The server tries again every minute; until then the device keeps syncing ${that} while it stays connected.`,
   };
 }
 const RESTORE_FAILED = {
@@ -49,6 +51,19 @@ async function revokedIn(doc: string, device: string): Promise<boolean> {
   return runInDurableObject(env.Room.getByName(doc), (_room, state) =>
     state.storage.sql.exec('SELECT 1 FROM revoked WHERE device = ?', device).toArray().length > 0,
   );
+}
+
+async function untoldIn(space: DurableObjectStub<Space>): Promise<string[]> {
+  return runInDurableObject(space, (_space, state) =>
+    state.storage.sql
+      .exec('SELECT device, doc FROM untold ORDER BY device, doc')
+      .toArray()
+      .map((row) => `${String(row.device)} ${String(row.doc)}`),
+  );
+}
+
+async function alarmOf(space: DurableObjectStub<Space>): Promise<number | null> {
+  return runInDurableObject(space, async (_space, state) => state.storage.getAlarm());
 }
 
 async function closeAll(...clients: TestClient[]): Promise<void> {
@@ -102,7 +117,7 @@ describe('Space', () => {
         .toArray()
         .map((row) => row.name),
     );
-    expect(tables).toEqual(['attempts', 'codes', 'devices', 'joins', 'meta', 'tickets']);
+    expect(tables).toEqual(['attempts', 'codes', 'devices', 'joins', 'meta', 'tickets', 'untold']);
   });
 
   it('removing a device closes its sockets in every room it joined', async () => {
@@ -190,7 +205,7 @@ describe('Space', () => {
     value(await space.ticket(a, 'docZ0000000'));
     await failCloseIn(space, 'docZ0000000');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed('1 plan was'));
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
     expect(logged.mock.calls).toEqual([roomDown('closeDevice', 'docZ0000000')]);
     expect(await client.closed).toEqual(REMOVED);
     expect(value(await space.devices(b)).devices.map((d) => d.id)).toEqual([DEV_B]);
@@ -205,7 +220,7 @@ describe('Space', () => {
     const last = await synced(space, a, 'docY0000000', DEV_A);
     await failCloseIn(space, 'docM0000000');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed('1 plan was'));
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
     expect(logged.mock.calls).toEqual([roomDown('closeDevice', 'docM0000000')]);
     expect(await Promise.all([first.closed, last.closed])).toEqual([REMOVED, REMOVED]);
     await closeAll(middle);
@@ -288,7 +303,7 @@ describe('Space', () => {
       });
     });
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed('3 plans were'));
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(3));
     expect(logged.mock.calls).toEqual([...failing].map((doc) => roomDown('closeDevice', doc)));
     expect(told.length).toBe(57);
     expect(value(await space.devices(b)).devices.map((d) => d.id)).toEqual([DEV_B]);
@@ -296,6 +311,64 @@ describe('Space', () => {
     told.length = 0;
     expect(await space.removeDevice(b, DEV_A)).toEqual({ ok: true, value: { closed: 0 } });
     expect([...told].sort()).toEqual(docs);
+    expect(await untoldIn(space)).toEqual([]);
+  });
+
+  it('a removal that could not tell some plans keeps them and tells them on its alarm', async () => {
+    const space = spaceOf('remove-alarm');
+    const { a, b } = await twoDevices(space);
+    const docs = ['s0000000000', 's0000000001', 's0000000002', 's0000000003'];
+    for (const doc of docs) {
+      value(await space.ticket(a, doc));
+    }
+    const told: string[] = [];
+    let failing = new Set([docs[1], docs[3]]);
+    await runInDurableObject(space, (instance: Space) => {
+      vi.spyOn(instance.rooms, 'close').mockImplementation(async (doc) => {
+        if (failing.has(doc)) {
+          throw new Error('room down');
+        }
+        told.push(doc);
+        return 1;
+      });
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const before = Date.now();
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(2));
+    expect(await untoldIn(space)).toEqual([`${DEV_A} ${docs[1]}`, `${DEV_A} ${docs[3]}`]);
+    expect(await alarmOf(space)).toBeGreaterThanOrEqual(before + 60_000);
+    failing = new Set([docs[3]]);
+    told.length = 0;
+    logged.mockClear();
+    expect(await runDurableObjectAlarm(space)).toBe(true);
+    expect(told).toEqual([docs[1]]);
+    expect(logged.mock.calls).toEqual([roomDown('closeDevice', docs[3])]);
+    expect(await untoldIn(space)).toEqual([`${DEV_A} ${docs[3]}`]);
+    expect(await alarmOf(space)).not.toBeNull();
+    failing = new Set();
+    told.length = 0;
+    expect(await runDurableObjectAlarm(space)).toBe(true);
+    expect(told).toEqual([docs[3]]);
+    expect(await untoldIn(space)).toEqual([]);
+    expect(await alarmOf(space)).toBeNull();
+  });
+
+  it('a removed device that joins again is not closed by an earlier untold plan', async () => {
+    const space = spaceOf('remove-alarm-readmit');
+    const { a, b } = await twoDevices(space);
+    value(await space.ticket(a, 'docF0000000'));
+    await failCloseIn(space, 'docF0000000');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await space.removeDevice(b, DEV_A)).toEqual(closeFailed(1));
+    expect(await untoldIn(space)).toEqual([`${DEV_A} docF0000000`]);
+    const again = value(await space.enrol(SECRET, DEV_A, 'iPad', '1.1.1.1'));
+    expect(await untoldIn(space)).toEqual([]);
+    const closes = await runInDurableObject(space, (instance: Space) => vi.spyOn(instance.rooms, 'close'));
+    closes.mockClear();
+    expect(await runDurableObjectAlarm(space)).toBe(true);
+    expect(closes).not.toHaveBeenCalled();
+    const back = await synced(space, again.token, 'docF0000000', DEV_A);
+    await closeAll(back);
   });
 
   it('a removal and a re-admission of one device reach its rooms in order', async () => {

@@ -386,8 +386,8 @@ describe('auth', () => {
       const tickets = count(storage, 'tickets');
       expect(await ticket(storage, T, token, 'pX000000000')).toEqual({
         ok: false,
-        status: 400,
-        error: 'bad_request',
+        status: 409,
+        error: 'too_many_plans',
         message: 'This device has joined 500 plans, the most one device may join.',
       });
       expect(count(storage, 'tickets')).toBe(tickets);
