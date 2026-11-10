@@ -479,10 +479,10 @@ const describeConflict = (c: Conflict, label: (id: ItemId) => string, plan: Plan
     : `the link ${label(from)} → ${label(to)}${kind} needs ${label(to)} to start on ${toIso(c.need)} or later`;
 };
 
-const logOf = (action: Action, what: string): LogState => {
+const logOf = (action: Action, what: string, refusal: (message: string) => Error): LogState => {
   const log = new LogState(planRules);
   const delta = log.add([action]);
-  if (delta.refused.length > 0) throw new GanttError(`${what}: ${delta.refused.map((r) => r.message).join("; ")}`);
+  if (delta.refused.length > 0) throw refusal(`${what}: ${delta.refused.map((r) => r.message).join("; ")}`);
   return log;
 };
 
@@ -594,7 +594,7 @@ export function convertGantt(a: { text: string; fileName: string; name?: string;
   const plan: PlanState = { id: newPlanId(), name: planName, items, links, calendar, baselines: new Map([[baseline.id, baseline]]) };
   const action: Action = { id: newId(), dev: a.dev, ses: a.ses, at: a.now, par: [], lbl: `Converted from ${a.fileName}`, w: stateWrites(plan, "own", () => false) };
   const check: GanttCheck = { sources, ids, today: at };
-  const log = logOf(action, "WebBoard refuses the plan");
+  const log = logOf(action, "WebBoard refuses the plan", (m) => new GanttError(m));
   checkFidelity(log, projectPlan(plan.id, log), check);
   const notes = new Map(sources.flatMap((s): [ItemId, string][] => (s.note === "" ? [] : [[idOf(s.id), s.note]])));
   const newNotes = [...items.keys()];
@@ -633,15 +633,23 @@ const textOfBytes = (bytes: Uint8Array): string => {
   }
 };
 
+const ownReadBack = (read: () => ImportResult): ImportResult => {
+  try {
+    return read();
+  } catch (e) {
+    throw Object.assign(new Error(`The converter wrote a plan it cannot read back: ${e instanceof Error ? e.message : String(e)}`), { cause: e });
+  }
+};
+
 export function importGantt(a: { bytes: Uint8Array; fileName: string; dev: DeviceId; ses: SessionId; now: number }): { result: ImportResult; report: GanttReport } {
   const g = convertGantt({ text: textOfBytes(a.bytes), fileName: a.fileName, dev: a.dev, ses: a.ses, now: a.now });
-  const result = buildImport(g.bytes, a.fileName, a.dev, a.ses, a.now);
+  const result = ownReadBack(() => buildImport(g.bytes, a.fileName, a.dev, a.ses, a.now));
   const counts = checkImported(result, g);
   return { result, report: { fileName: a.fileName, name: g.plan.name, counts, dropped: g.dropped } };
 }
 
 function checkImported(r: ImportResult, g: GanttPlan): GanttCounts {
-  const log = logOf(r.action, "The written plan does not read back");
+  const log = logOf(r.action, "The written plan does not read back", (m) => new Error(m));
   const back = projectPlan(r.planId, log);
   const to = (id: string): string => lookup(r.idMap, id, "read-back id");
   const label = labeller(g.check.sources, g.check.ids);
@@ -677,7 +685,7 @@ function checkImported(r: ImportResult, g: GanttPlan): GanttCounts {
     ...differs("the number of baselines", back.baselines.size, g.plan.baselines.size),
     ...baselines,
   ];
-  if (mismatches.length > 0) throw new GanttError(`The written plan does not read back as the converted plan:\n${mismatches.join("\n")}`);
+  if (mismatches.length > 0) throw new Error(`The written plan does not read back as the converted plan:\n${mismatches.join("\n")}`);
   checkFidelity(log, back, { ...g.check, ids: new Map([...g.check.ids].map(([task, item]): [number, ItemId] => [task, to(item)])) });
   return countsOf(back, r.notes);
 }

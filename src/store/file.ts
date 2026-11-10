@@ -310,13 +310,14 @@ async function fromGantt(bytes: Uint8Array, fileName: string, dev: DeviceId): Pr
   }
 }
 
-export async function importPlan(registry: Registry): Promise<Imported | null> {
+export async function importPlan(registry: Registry, review: (report: GanttReport) => Promise<void>): Promise<Imported | null> {
   const path = await open({ multiple: false, directory: false, filters: OPEN_FILTERS });
   if (path === null) return null;
   const bytes = await callBytes("file_read", {}, { headers: { "x-path": encodeURIComponent(path) } });
   const fileName = fileNameOf(path);
   if (fileName.toLowerCase().endsWith(GANTT_EXTENSION)) {
     const { result, report } = await fromGantt(bytes, fileName, registry.device.deviceId);
+    await review(report);
     return { planId: await registry.createPlanFrom(result), converted: report };
   }
   const r = buildImport(bytes, fileName, registry.device.deviceId, newId(), Date.now());

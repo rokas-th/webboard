@@ -1059,7 +1059,10 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
   it("shows the .gantt conversion report in a sheet before it opens the imported plan", async () => {
     const r = await emptyIndex();
     const report = { fileName: "Fixture Plan 20260901.gantt", name: "MESA 2027", counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1 }, dropped: ["TaskID on 4 items"] };
-    vi.mocked(importPlan).mockImplementationOnce(async (reg) => ({ planId: await reg.createPlan("MESA 2027"), converted: report }));
+    vi.mocked(importPlan).mockImplementationOnce(async (reg, review) => {
+      await review(report);
+      return { planId: await reg.createPlan("MESA 2027"), converted: report };
+    });
     await showIndex(r);
     const state = emptyState();
     if (state === null) throw new Error("no empty state");
@@ -1069,6 +1072,8 @@ describe("PhoneShell failed plans and the empty state (Step 1b)", () => {
     expect(sheet.classList.contains("sheet")).toBe(true);
     expect(within(sheet).getByText("TaskID on 4 items")).toBeTruthy();
     expect(toastTexts()).toEqual([]);
+    expect(emptyState()).not.toBeNull();
+    expect(r.registry.plans()).toEqual([]);
     fireEvent.click(within(sheet).getByRole("button", { name: OPEN_PLAN }));
     await settle();
     expect(screen.queryByRole("dialog", { name: CONVERTED_TITLE })).toBeNull();

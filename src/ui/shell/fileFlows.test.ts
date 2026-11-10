@@ -9,7 +9,7 @@ import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts 
 import { testRegistry } from "../../test/shell";
 import { hold, tauri, type Call } from "../../test/tauriMock";
 import { clearToasts, toast } from "../common/Toast";
-import { closeConverted, shownConverted } from "./ConvertedReport";
+import { closeConverted, showConverted, shownConverted } from "./ConvertedReport";
 import { exportFlow, importFlow } from "./fileFlows";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -216,7 +216,7 @@ describe("importFlow", () => {
     const open = vi.fn<(id: PlanId) => void>();
     vi.mocked(importPlan).mockResolvedValueOnce({ planId: id, converted: null });
     await importFlow(registry, open);
-    expect(vi.mocked(importPlan).mock.calls).toEqual([[registry]]);
+    expect(vi.mocked(importPlan).mock.calls).toEqual([[registry, showConverted]]);
     expect(open.mock.calls).toEqual([[id]]);
     expect(toasts()).toEqual([["Imported “MESA 2027”"]]);
   });
@@ -226,7 +226,10 @@ describe("importFlow", () => {
     const id = t.session.view().plan.id;
     const open = vi.fn<(id: PlanId) => void>();
     const report = { fileName: "Fixture Plan 20260901.gantt", name: "MESA 2027", counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1 }, dropped: ["TaskID on 4 items"] };
-    vi.mocked(importPlan).mockResolvedValueOnce({ planId: id, converted: report });
+    vi.mocked(importPlan).mockImplementationOnce(async (_r, review) => {
+      await review(report);
+      return { planId: id, converted: report };
+    });
     const flow = importFlow(testRegistry(t), open);
     await new Promise<void>((r) => setTimeout(r, 0));
     expect(shownConverted()).toEqual(report);
@@ -294,6 +297,16 @@ describe("importFlow", () => {
     vi.mocked(importPlan).mockRejectedValueOnce(new AppError(code, message));
     await importFlow(testRegistry(t), open);
     expect(toasts()).toEqual([[message, "bad"]]);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("shows a multi-line .gantt refusal whole and offers it to copy", async () => {
+    const t = await named([{ name: "A", start: "2026-11-10" }]);
+    const open = vi.fn<(id: PlanId) => void>();
+    const message = "WebBoard would show different dates than the .gantt file:\n- Task 2 Survey: source 2026-09-07 → 2026-09-10, WebBoard 2026-09-07 → 2026-09-11\n- Task 3 Build: source 2026-09-14 → 2026-09-17, WebBoard 2026-09-14 → 2026-09-18";
+    vi.mocked(importPlan).mockRejectedValueOnce(new AppError("import.gantt", message));
+    await importFlow(testRegistry(t), open);
+    expect(toasts()).toEqual([[message, "bad", message]]);
     expect(open).not.toHaveBeenCalled();
   });
 

@@ -725,6 +725,9 @@ button.chip {
   border: none;
   background: transparent;
   box-shadow: none;
+  max-height: 30vh;
+  overflow-y: auto;
+  white-space: pre-line;
   overflow-wrap: anywhere;
   user-select: text;
   -webkit-user-select: text;

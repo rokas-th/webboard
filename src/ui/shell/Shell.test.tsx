@@ -21,7 +21,7 @@ import { orderedSides } from "../choices/order";
 import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
 import { forgetLastPlan, NO_PLAN_KEY, PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
-import { closeConverted, CONVERTED_TITLE, OPEN_PLAN, shownConverted } from "./ConvertedReport";
+import { closeConverted, CONVERTED_TITLE, OPEN_PLAN, showConverted, shownConverted } from "./ConvertedReport";
 import { exportFlow, importFlow } from "./fileFlows";
 import { PlanHead } from "./PlanHead";
 import { Shell } from "./Shell";
@@ -1286,7 +1286,7 @@ describe("Shell on Registry.open", () => {
     }
     await settle();
     expect(importFlow).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(importPlan).mock.calls).toEqual([[registry]]);
+    expect(vi.mocked(importPlan).mock.calls).toEqual([[registry, showConverted]]);
     expect(currentName()).toBe("MESA 2027");
     expectTimeline();
     expect(toastTexts()).toEqual(["Imported “MESA 2027”"]);
@@ -1299,7 +1299,10 @@ describe("Shell on Registry.open", () => {
     resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
     const registry = await opened();
     const report = { fileName: "Fixture Plan 20260901.gantt", name: "MESA 2027", counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1 }, dropped: ["TaskID on 4 items"] };
-    vi.mocked(importPlan).mockImplementationOnce(async (r) => ({ planId: await r.createPlan("MESA 2027"), converted: report }));
+    vi.mocked(importPlan).mockImplementationOnce(async (r, review) => {
+      await review(report);
+      return { planId: await r.createPlan("MESA 2027"), converted: report };
+    });
     render(withSync(shellOn(registry)));
     await settle();
     const main = document.querySelector("main.main");
@@ -1310,6 +1313,8 @@ describe("Shell on Registry.open", () => {
     expect(within(dialog).getByText("Plan “MESA 2027” from Fixture Plan 20260901.gantt")).toBeTruthy();
     expect(within(dialog).getByText("TaskID on 4 items")).toBeTruthy();
     expect(toastTexts()).toEqual([]);
+    expectNoTimeline();
+    expect(registry.plans().map((p) => p.name)).toEqual([]);
     fireEvent.click(within(dialog).getByRole("button", { name: OPEN_PLAN }));
     await settle();
     expect(screen.queryByRole("dialog")).toBeNull();

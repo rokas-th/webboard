@@ -14,7 +14,8 @@ async function shown<T>(work: Promise<T>): Promise<Outcome<T>> {
     return { ok: true, value: await work };
   } catch (e) {
     if (!(e instanceof AppError)) throw e;
-    toast(e.message, "bad");
+    if (e.message.includes("\n")) toast(e.message, "bad", e.message);
+    else toast(e.message, "bad");
     return { ok: false };
   }
 }
@@ -36,10 +37,9 @@ async function exportOnce(session: PlanSession, platform: DeviceInfo["platform"]
 }
 
 async function importOnce(registry: Registry, open: (id: PlanId) => void): Promise<void> {
-  const imported = await shown(importPlan(registry));
+  const imported = await shown(importPlan(registry, showConverted));
   if (!imported.ok || imported.value === null) return;
-  const { planId: id, converted } = imported.value;
-  if (converted !== null) await showConverted(converted);
+  const id = imported.value.planId;
   open(id);
   const session = await shown(registry.session(id));
   if (!session.ok) return;

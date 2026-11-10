@@ -12,6 +12,7 @@ import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { fixedClock } from "../services/clock";
 import { AppError } from "../services/ipc";
+import type { GanttReport } from "../import/gantt";
 import { act } from "../test/act";
 import { memoryStore } from "../test/fixtures/store";
 import { GANTT_FILE, ganttBytes, ganttSource, textBytes } from "../test/fixtures/gantt";
@@ -122,6 +123,8 @@ const idsOf = (plan: PlanState): Set<string> =>
 
 const FILTERS = [{ name: "WebBoard plan", extensions: ["webboard"] }];
 const OPEN_FILTERS = [{ name: "WebBoard plan or .gantt file", extensions: ["webboard", "gantt"] }];
+
+const unreviewed = (report: GanttReport): Promise<void> => Promise.reject(new Error(`no report expected, got one for ${report.fileName}`));
 
 const xpath = (c: Call): string | null => new Headers(c.options?.headers).get("x-path");
 const xname = (c: Call): string | null => new Headers(c.options?.headers).get("x-name");
@@ -613,7 +616,7 @@ describe("malformed refused", () => {
     const before = reg.plans();
     vi.mocked(open).mockResolvedValue("/Users/a/Bad.webboard");
     fileState.read = bytes;
-    const caught = await importPlan(reg).then(
+    const caught = await importPlan(reg, unreviewed).then(
       () => null,
       (e: unknown) => e,
     );
@@ -635,7 +638,7 @@ describe("import reads by header", () => {
     const before = reg.plans().map((p) => p.id);
     vi.mocked(open).mockResolvedValue("/Users/a/My Plan.webboard");
     fileState.read = VALID_WEBBOARD.bytes;
-    const imported = await importPlan(reg);
+    const imported = await importPlan(reg, unreviewed);
     if (imported === null) throw new Error("importPlan resolved null");
     const id = imported.planId;
     expect(imported.converted).toBeNull();
@@ -657,7 +660,7 @@ describe("import reads by header", () => {
     const url = "file:///private/var/mobile/My%20Plan.webboard";
     vi.mocked(open).mockResolvedValue(url);
     fileState.read = VALID_WEBBOARD.bytes;
-    const imported = await importPlan(reg);
+    const imported = await importPlan(reg, unreviewed);
     if (imported === null) throw new Error("importPlan resolved null");
     const id = imported.planId;
     expect(xpath(callsOf(from, "file_read")[0])).toBe(encodeURIComponent(url));
@@ -674,7 +677,7 @@ describe("import reads by header", () => {
     const reg = await registry();
     const from = tauri.calls.length;
     vi.mocked(open).mockResolvedValue(null);
-    expect(await importPlan(reg)).toBeNull();
+    expect(await importPlan(reg, unreviewed)).toBeNull();
     expect(callsOf(from, "file_read")).toHaveLength(0);
   });
 });
@@ -689,9 +692,23 @@ describe("import of a .gantt file", () => {
     return { reg, from, before };
   };
 
-  it("converts the file, creates one plan and reports what it converted and dropped", async () => {
-    const { reg, before } = await pick(`/Users/a/${GANTT_FILE}`, ganttBytes());
-    const imported = await importPlan(reg);
+  const reviewed = (reg: Registry, before: readonly string[]): { review: (report: GanttReport) => Promise<void>; seen: GanttReport[] } => {
+    const seen: GanttReport[] = [];
+    return {
+      seen,
+      review: async (report) => {
+        expect(reg.plans().map((p) => p.id)).toEqual(before);
+        seen.push(report);
+      },
+    };
+  };
+
+  it("converts the file, shows the report before any plan exists, then creates one plan", async () => {
+    const { reg, from, before } = await pick(`/Users/a/${GANTT_FILE}`, ganttBytes());
+    const { review, seen } = reviewed(reg, before);
+    const imported = await importPlan(reg, review);
+    expect(seen).toEqual([imported?.converted]);
+    expect(appendsAfter(from).length).toBeGreaterThan(0);
     if (imported === null) throw new Error("importPlan resolved null");
     expect(reg.plans().map((p) => p.id)).toEqual([...before, imported.planId]);
     expect(imported.converted).toEqual({
@@ -714,9 +731,24 @@ describe("import of a .gantt file", () => {
     expect(session.history()[0].label).toBe(`Imported from ${GANTT_FILE}`);
   });
 
+  it("creates nothing while the report is open", async () => {
+    const { reg, from, before } = await pick(`/Users/a/${GANTT_FILE}`, ganttBytes());
+    let close = (): void => {
+      throw new Error("the report never opened");
+    };
+    const importing = importPlan(reg, () => new Promise<void>((r) => (close = r)));
+    await flush();
+    expect(appendsAfter(from)).toHaveLength(0);
+    expect(reg.plans().map((p) => p.id)).toEqual(before);
+    close();
+    const imported = await importing;
+    if (imported === null) throw new Error("importPlan resolved null");
+    expect(reg.plans().map((p) => p.id)).toEqual([...before, imported.planId]);
+  });
+
   it("recognises the extension whatever its case", async () => {
-    const { reg } = await pick("/Users/a/Fixture Plan.GANTT", ganttBytes());
-    const imported = await importPlan(reg);
+    const { reg, before } = await pick("/Users/a/Fixture Plan.GANTT", ganttBytes());
+    const imported = await importPlan(reg, reviewed(reg, before).review);
     expect(imported?.converted?.name).toBe("Fixture Plan");
   });
 
@@ -735,7 +767,7 @@ describe("import of a .gantt file", () => {
 
   it.each(refusals)("refuses %s as an AppError with the converter's message and creates nothing", async (_name, bytes, message) => {
     const { reg, from, before } = await pick(`/Users/a/${GANTT_FILE}`, bytes());
-    const caught = await importPlan(reg).then(
+    const caught = await importPlan(reg, unreviewed).then(
       () => null,
       (e: unknown) => e,
     );
@@ -750,7 +782,7 @@ describe("import of a .gantt file", () => {
   it("keeps a multi-line fidelity refusal whole", async () => {
     const text = JSON.stringify(ganttSource()).replace("2026-09-11T15:00:00.000Z", "2026-09-10T15:00:00.000Z");
     const { reg } = await pick(`/Users/a/${GANTT_FILE}`, textBytes(text));
-    const caught = await importPlan(reg).then(
+    const caught = await importPlan(reg, unreviewed).then(
       () => null,
       (e: unknown) => e,
     );
@@ -760,6 +792,6 @@ describe("import of a .gantt file", () => {
 
   it("reads a .webboard file as a plan file even when it holds .gantt text", async () => {
     const { reg } = await pick("/Users/a/Fixture.webboard", ganttBytes());
-    await expect(importPlan(reg)).rejects.toMatchObject({ code: "import.foreign" });
+    await expect(importPlan(reg, unreviewed)).rejects.toMatchObject({ code: "import.foreign" });
   });
 });

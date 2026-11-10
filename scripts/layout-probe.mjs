@@ -47,6 +47,7 @@ const FONTS = [
 const PHONE_NAME_MIN = 90;
 const TOAST_TEXT_MIN = 240;
 const UNCAUGHT = "Holiday warm for plan p failed: the holiday service did not answer in time";
+const LISTED = ["WebBoard would show different dates than the .gantt file:", ...Array.from({ length: 40 }, (_, i) => `- Task ${i + 2} Step ${i + 2}: source 2026-09-07 → 2026-09-10, WebBoard 2026-09-07 → 2026-09-11`)].join("\n");
 const EMPTY_PLAN = "No items yet. Add one with + New.";
 const EXAMPLE_PLAN = "Example: Website relaunch";
 const CALENDAR_BANNER = "The calendar was changed on two devices. Nothing moves until you choose.";
@@ -270,6 +271,16 @@ function states() {
       expect('.toast-bad [role="alert"]', UNCAUGHT),
       expect(".toast-bad .toast-actions button", "Copy details"),
       width(".toast-bad .toast", TOAST_TEXT_MIN, 390),
+    ],
+  });
+  add("toast/listed", "mesa", {
+    actions: [
+      viewExpect("timeline"),
+      raise(LISTED),
+      expect('.toast-bad [role="alert"]', LISTED),
+      style(".toast-bad .toast", "white-space", "pre-line"),
+      style(".toast-bad .toast", "overflow-y", "auto"),
+      expect(".toast-bad .toast-actions button", "Copy details"),
     ],
   });
   add("toast/uncaught", "mesa", {
