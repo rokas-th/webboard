@@ -50,6 +50,7 @@
 		C853BC32550975ED9161D0A8 /* menu.rs */ = {isa = PBXFileReference; path = menu.rs; sourceTree = "<group>"; };
 		DA0B2AE1E1171C281D09BB99 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		E371ED94914CD2C005BF25C5 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		F646E1A2C386CB2F64094685 /* probe.rs */ = {isa = PBXFileReference; path = probe.rs; sourceTree = "<group>"; };
 		F7F3A34AB47882D1E92C1AFB /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -172,6 +173,7 @@
 				3C03A1D554590B0F54CE22F2 /* file.rs */,
 				82BF278D4A1F3E5219BC3916 /* holidays.rs */,
 				89B44342A863F79F3C1F62DB /* mod.rs */,
+				F646E1A2C386CB2F64094685 /* probe.rs */,
 				AF1EC1E5AADCC386CED2EDA0 /* settings.rs */,
 				2FE8014F2D8820C0060AA672 /* store.rs */,
 				4993BCB814378AD5633DAAE3 /* sync.rs */,
