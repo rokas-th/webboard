@@ -329,6 +329,36 @@ describe("SyncManager: connecting", () => {
     expect(f.all.length).toBeGreaterThan(0);
   });
 
+  it("a ticket refused with a 4xx the client does not name stops that plan with the server's message", async () => {
+    const message = "Server answered 400 bad_request: The plan id is not valid.";
+    const { f, m } = await started({
+      before: (w) => {
+        const ok = w.ticket;
+        w.ticket = (doc) => (doc === "P" ? fail({ code: "sync.refused", message })() : ok(doc));
+      },
+    });
+    const p = prov(f, "P");
+    expect(errorOf(m.state())).toMatchObject({ code: "failed", doc: "P", message, cause: "sync.refused" });
+    await advance(600_000);
+    expect(p.connects()).toBe(1);
+    expect(errorOf(m.state())).toMatchObject({ code: "failed", doc: "P", message, cause: "sync.refused" });
+    expect(prov(f, "P2").connects()).toBe(1);
+  });
+
+  it("a ticket answered with a 5xx is retried as unreachable", async () => {
+    const message = "Server answered 500 internal: The server could not finish the request.";
+    const { f, m } = await started({
+      before: (w) => {
+        const ok = w.ticket;
+        w.ticket = (doc) => (doc === "P" ? fail({ code: "sync.http", message })() : ok(doc));
+      },
+    });
+    const p = prov(f, "P");
+    expect(errorOf(m.state())).toMatchObject({ code: "unreachable", doc: "P", message, cause: "sync.http" });
+    await advance(1000);
+    expect(p.connects()).toBe(2);
+  });
+
   it("a close before open shows unreachable, or offline without a network", async () => {
     const { w, f, m } = await started();
     prov(f, IX).closeWith(1006, "");

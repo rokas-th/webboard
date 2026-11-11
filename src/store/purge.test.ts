@@ -73,6 +73,23 @@ const labelsTo = (from: number, doc: string): string[] =>
       );
     });
 
+const UNSYNCED = (doc: string): string => `Removed /docs/${doc}. Could not sync the directory /docs: Input/output error (os error 5)`;
+
+const unsyncedDelete =
+  (w: SyncWorld): Answer =>
+  (args) => {
+    const doc = argsOf({ args }).doc;
+    if (typeof doc !== "string") throw new Error("store_delete without a doc");
+    w.mem.docs.delete(doc);
+    throw { code: "store.unsynced", message: UNSYNCED(doc) };
+  };
+
+const syncedOf = (w: SyncWorld): unknown => {
+  const s = w.settings.value;
+  if (typeof s !== "object" || s === null || !("syncedHeads" in s)) throw new Error("settings hold no synced heads");
+  return s.syncedHeads;
+};
+
 const namesOf = (w: SyncWorld): unknown => {
   const s = w.settings.value;
   if (typeof s !== "object" || s === null || !("names" in s)) throw new Error("settings hold no names");
@@ -333,6 +350,23 @@ describe("Registry: delete forever", () => {
     expect(r.takeGoneNotices()).toEqual([]);
   });
 
+  it("an own purge whose directory could not be synced erases here and rejects with the store's message unchanged", async () => {
+    const w = purgeWorld();
+    tauri.answers.store_delete = unsyncedDelete(w);
+    const r = await spaceOpen(w);
+    const from = tauri.calls.length;
+    const e = await rejection(r.purgePlan("L"));
+    await flush();
+    expect(e).toBeInstanceOf(AppError);
+    expect(e).toMatchObject({ code: "store.unsynced", message: UNSYNCED("L") });
+    expect(writesTo(from, "local")).toEqual([gone("L")]);
+    expect(docsOf(from, "store_delete")).toEqual(["L"]);
+    expect(w.mem.docs.has("L")).toBe(false);
+    expect(r.plans().map((p) => p.id)).toEqual(["P"]);
+    expect(namesOf(w)).toEqual({ P: "Launch" });
+    expect(r.takeGoneNotices()).toEqual([]);
+  });
+
   it("refuses a plan that is not in the Trash, and a space plan while read-only", async () => {
     const w = purgeWorld();
     const r = await spaceOpen(w);
@@ -361,6 +395,17 @@ describe("Registry: delete forever", () => {
     expect(r.plans()).toEqual([]);
     expect(r.takeGoneNotices()).toEqual([]);
     expect(namesOf(w)).toEqual({ P: "Launch" });
+  });
+
+  it("at start, files of its own earlier purge removed without a directory sync are erased and say so with the store's message", async () => {
+    const w = purgeWorld({ localGone: true });
+    tauri.answers.store_delete = unsyncedDelete(w);
+    const r = await open();
+    await flush();
+    expect(docsOf(0, "store_delete")).toEqual(["L"]);
+    expect(w.mem.docs.has("L")).toBe(false);
+    expect(namesOf(w)).toEqual({ P: "Launch" });
+    expect(r.takeGoneNotices()).toEqual([{ text: UNSYNCED("L"), bad: true }]);
   });
 
   it("follows a purge on another device: erases the plan and names that device", async () => {
@@ -435,6 +480,23 @@ describe("Registry: delete forever", () => {
         bad: true,
       },
     ]);
+    await remoteName(r, "r-n");
+    expect(docsOf(from, "store_delete")).toEqual(["P"]);
+    expect(r.takeGoneNotices()).toEqual([]);
+  });
+
+  it("files removed whose directory could not be synced count as erased and say so with the store's message", async () => {
+    const w = purgeWorld({ trashed: true, synced: true });
+    tauri.answers.store_delete = unsyncedDelete(w);
+    const r = await spaceOpen(w);
+    const from = tauri.calls.length;
+    await remoteGone(r, "P");
+    expect(docsOf(from, "store_delete")).toEqual(["P"]);
+    expect(w.mem.docs.has("P")).toBe(false);
+    expect(namesOf(w)).toEqual({ L: "Alpha" });
+    expect(syncedOf(w)).toEqual({});
+    expect(r.isGone("P")).toBe(true);
+    expect(r.takeGoneNotices()).toEqual([{ text: `“Launch” was deleted forever on iPhone. It is erased from this device too. ${UNSYNCED("P")}`, bad: true }]);
     await remoteName(r, "r-n");
     expect(docsOf(from, "store_delete")).toEqual(["P"]);
     expect(r.takeGoneNotices()).toEqual([]);

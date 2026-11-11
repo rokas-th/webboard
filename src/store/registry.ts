@@ -845,12 +845,16 @@ export class Registry {
       return;
     }
     this.detach(id);
+    let unsyncedRemoval: AppError | null = null;
     try {
       await storeDelete(id);
     } catch (e) {
       if (!(e instanceof AppError)) throw e;
-      failed(e, "its files on this device could not be removed");
-      return;
+      if (e.code !== "store.unsynced") {
+        failed(e, "its files on this device could not be removed");
+        return;
+      }
+      unsyncedRemoval = e;
     }
     this.stored = this.stored.filter((x) => x !== id);
     this.failed.delete(id);
@@ -860,7 +864,14 @@ export class Registry {
       names: Object.fromEntries(Object.entries(this.settings.names).filter(([x]) => x !== id)),
       ...(heads === undefined ? {} : { syncedHeads: Object.fromEntries(Object.entries(heads).filter(([x]) => x !== id)) }),
     };
-    if (told) this.tell(id, purger, (by) => ({ text: `${label} was deleted forever${where(by)}. It is erased from this device too${lost}.${unread}`, bad: check !== false }));
+    const removal = unsyncedRemoval;
+    if (told) {
+      const kept = removal === null ? "" : ` ${removal.message}`;
+      this.tell(id, purger, (by) => ({ text: `${label} was deleted forever${where(by)}. It is erased from this device too${lost}.${kept}${unread}`, bad: check !== false || removal !== null }));
+    } else if (removal !== null) {
+      if (own) this.ownFailures.set(id, removal);
+      else this.tell(id, purger, () => ({ text: removal.message, bad: true }));
+    }
     try {
       await this.writeSettings();
     } catch (e) {
