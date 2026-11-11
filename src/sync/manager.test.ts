@@ -1583,7 +1583,7 @@ describe("chipText", () => {
 });
 
 describe("SyncManager: plan cap", () => {
-  const CAP = "This device has joined 500 plans, the most one device may join.";
+  const CAP = "This device has joined 500 plans, the most one device may join. Delete a plan forever from the Trash to free a place.";
 
   it("a ticket refused for the plan cap stops that plan with the server's message and is not retried", async () => {
     const { r, f, m } = await started({

@@ -22,7 +22,7 @@ vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 const UNKNOWN = "The server does not know this plan yet. Let it sync, then delete it again.";
 const PENDING = "The plan is deleted, but the server has not erased its history yet. It tries again every minute.";
 const REVOKED = "This device was removed from the space.";
-const CAP = "This device has joined 500 plans, the most one device may join.";
+const CAP = "This device has joined 500 plans, the most one device may join. Delete a plan forever from the Trash to free a place.";
 
 const registries: Registry[] = [];
 

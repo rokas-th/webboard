@@ -2537,7 +2537,7 @@ mod tests {
     async fn a_409_too_many_plans_is_its_own_code_with_the_servers_message() {
         let mut f = Fixture::new().await;
         f.join_with_token();
-        let cap = "This device has joined 500 plans, the most one device may join.";
+        let cap = "This device has joined 500 plans, the most one device may join. Delete a plan forever from the Trash to free a place.";
         let ticket = f
             .server
             .mock("POST", "/ticket")
