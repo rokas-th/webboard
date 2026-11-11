@@ -35,6 +35,7 @@
 		41B7D5BF9D55C1BE3074F082 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		4993BCB814378AD5633DAAE3 /* sync.rs */ = {isa = PBXFileReference; path = sync.rs; sourceTree = "<group>"; };
 		636DB1DD02E68B8C52BF1C12 /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
+		6F8772FCA17A65788448F0D6 /* print.rs */ = {isa = PBXFileReference; path = print.rs; sourceTree = "<group>"; };
 		82BF278D4A1F3E5219BC3916 /* holidays.rs */ = {isa = PBXFileReference; path = holidays.rs; sourceTree = "<group>"; };
 		8359E636D29A055D6A37961F /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		89B44342A863F79F3C1F62DB /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
@@ -173,6 +174,7 @@
 				3C03A1D554590B0F54CE22F2 /* file.rs */,
 				82BF278D4A1F3E5219BC3916 /* holidays.rs */,
 				89B44342A863F79F3C1F62DB /* mod.rs */,
+				6F8772FCA17A65788448F0D6 /* print.rs */,
 				F646E1A2C386CB2F64094685 /* probe.rs */,
 				AF1EC1E5AADCC386CED2EDA0 /* settings.rs */,
 				2FE8014F2D8820C0060AA672 /* store.rs */,
