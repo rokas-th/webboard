@@ -106,6 +106,7 @@ function states() {
       logs: o.logs ?? [],
       net: { ws: o.net?.ws ?? "none", online: o.net?.online ?? true },
       shotMedia: o.shotMedia ?? null,
+      theme: o.theme ?? null,
     });
 
   add("empty", "empty", {
@@ -233,6 +234,18 @@ function states() {
       count('.modal[role="dialog"] img.about-mark', 1),
       loaded('.modal[role="dialog"] img.about-mark'),
     ],
+  });
+  add("theme", "mesa", {
+    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), expect(".theme-panel h2", "Theme")],
+  });
+  add("theme-compact", "mesa", {
+    sizes: "compact-all",
+    dialog: true,
+    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), expect('.sheet[role="dialog"] .sheet-title', "Theme")],
+  });
+  add("light-timeline", "mesa", {
+    theme: { v: 1, mode: "fixed", active: "paper", dark: "cyberdeck", light: "daylight", mine: [] },
+    actions: [viewExpect("timeline"), count(".toolbar .seg-zoom", 1), expect(".slot-panel .panel h2", "Plan"), expect('html[data-scheme="light"]')],
   });
   add("linux-toolbar", "mesa-linux", {
     sizes: "smallest",
@@ -370,6 +383,15 @@ function states() {
       expect(".plan-sheet h2", "History"),
       expect(".plan-sheet button", "Export plan…"),
       expect(".plan-sheet button.about-row", "About WebBoard"),
+    ],
+  });
+  add("phone-theme", "mesa", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-head button", "Plans"),
+      click(".plans-sheet button.theme-row", "Theme…"),
+      expect('.sheet[role="dialog"] .sheet-title', "Theme"),
     ],
   });
   add("phone-about", "mesa", {
@@ -570,6 +592,7 @@ const SHIM = String.raw`
   var P = window.__PROBE__;
   localStorage.clear();
   if (P.place !== null) localStorage.setItem("webboard.place", JSON.stringify(P.place));
+  if (P.theme !== null) localStorage.setItem("webboard.theme", JSON.stringify(P.theme));
   window.__PROBE_MISSING__ = [];
   window.__PROBE_TICKETS__ = {};
   var RealDate = Date;
@@ -2019,6 +2042,7 @@ async function main() {
     if (state === undefined) return null;
     const payload = JSON.stringify({
       place: state.place,
+      theme: state.theme,
       fixture: fixtures.get(state.fixture),
       clip: state.clip,
       clipIn: state.clipIn,

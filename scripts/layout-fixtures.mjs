@@ -515,6 +515,8 @@ function fixtureOf(plans, o = { trashed: false }) {
       holidays_subdivisions: { __byArg: "country", map: SUBDIVISIONS },
       "plugin:event|listen": 1,
       "plugin:event|unlisten": null,
+      "plugin:window|set_background_color": null,
+      "plugin:webview|set_webview_background_color": null,
     },
   };
 }
