@@ -1,4 +1,5 @@
-import { beforeEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
+import { installMatchMedia, resetSystemDark } from "./matchMedia";
 
 class TestPointerEvent extends MouseEvent {
   readonly pointerId: number;
@@ -49,9 +50,18 @@ export function setScreen(w: number, h: number): void {
   window.dispatchEvent(new Event("resize"));
 }
 
+installMatchMedia();
+
 beforeEach(() => {
   scrollIntoView.mockClear();
   setScreen(1440, 900);
+  resetSystemDark();
+});
+
+afterEach(() => {
+  window.localStorage.removeItem("webboard.theme");
+  document.documentElement.removeAttribute("style");
+  delete document.documentElement.dataset.scheme;
 });
 if (!("isContentEditable" in HTMLElement.prototype)) {
   Object.defineProperty(HTMLElement.prototype, "isContentEditable", {

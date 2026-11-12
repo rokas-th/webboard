@@ -20,9 +20,16 @@ import "./styles/phone.css";
 import "./styles/print.css";
 import App from "./App";
 import { RootBoundary } from "./ui/shell/RootBoundary";
+import { applyTokens } from "./theme/apply";
+import { tokensOf } from "./theme/presets";
+import { loadStore, shownTheme } from "./theme/store";
+import { ThemeProvider } from "./theme/ThemeContext";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("index.html has no #root element");
+
+const boot = loadStore(window.localStorage);
+applyTokens(document.documentElement, tokensOf(shownTheme(boot.store, window.matchMedia("(prefers-color-scheme: dark)").matches)));
 
 if (import.meta.env.VITE_WEBBOARD_PROBE === "1") {
   import("./probe/ProbeApp")
@@ -35,7 +42,9 @@ if (import.meta.env.VITE_WEBBOARD_PROBE === "1") {
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
       <RootBoundary reload={() => window.location.reload()}>
-        <App />
+        <ThemeProvider storage={window.localStorage} initial={boot}>
+          <App />
+        </ThemeProvider>
       </RootBoundary>
     </React.StrictMode>,
   );
