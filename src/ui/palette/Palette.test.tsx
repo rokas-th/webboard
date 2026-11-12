@@ -361,7 +361,22 @@ describe("the palette list", () => {
     runFromPalette("Use Cyberdeck theme");
     expect(document.documentElement.style.getPropertyValue("--void")).toBe(ground("cyberdeck"));
     expect(JSON.parse(window.localStorage.getItem("webboard.theme") ?? "null")).toMatchObject({ mode: "fixed", active: "cyberdeck" });
-    expect(uiNow()[0].theme).toBe(false);
+  });
+
+  it("Use Cyberdeck theme drops an open draft with the discard toast and leaves Theme open", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    runFromPalette("Theme…");
+    const region = panel().querySelector<HTMLElement>('section[aria-label="Theme"]');
+    if (region === null) throw new Error("no Theme panel");
+    const field = within(region).getByRole("textbox", { name: "Accent hex" });
+    fireEvent.change(field, { target: { value: "#7CC4FF" } });
+    expect(within(region).getByText("Unsaved")).toBeTruthy();
+    runFromPalette("Use Cyberdeck theme");
+    expect(within(region).queryByText("Unsaved")).toBeNull();
+    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe("#24E0FF");
+    expect([...document.querySelectorAll(".toasts .toast")].map((n) => n.textContent)).toContain("Unsaved colours discarded.");
+    expect(uiNow()[0].theme).toBe(true);
   });
 
   it("opens the calendar dialog", async () => {

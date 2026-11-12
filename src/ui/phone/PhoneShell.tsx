@@ -19,7 +19,7 @@ import { ExampleButton, NewPlanButton } from "../shell/Sidebar";
 import { RemovedBanner } from "../sync/RemovedBanner";
 import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
 import { UiContext, useUi, useUiValue, type DialogState, type SyncPane } from "../state";
-import { canHover, ThemePanel } from "../theme/ThemePanel";
+import { ThemePanel, useCanHover } from "../theme/ThemePanel";
 import { Timeline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { ChoiceSheet } from "./ChoiceSheet";
@@ -123,7 +123,7 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
       {dialog !== null ? (
         <PlanDialog session={p.session} registry={p.registry} clock={p.clock} dialog={dialog} local={local} onClose={closeDialog} />
       ) : (
-        selected !== null && (
+        selected !== null && !ui.theme && (
           <ItemSheet
             key={selected}
             session={p.session}
@@ -268,6 +268,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
   const moveAll = (ids: readonly PlanId[]): void => moveAllToSpace(p.registry, ids);
   const session = main.k === "open" ? main.session : null;
   const closeDialog = (): void => setUi({ dialog: null });
+  const hover = useCanHover();
   const about = (): void => {
     closePlans();
     setUi({ dialog: { t: "about" } });
@@ -330,7 +331,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
           <SyncDialog pane={ui.dialog.pane} frame="sheet" onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />
         )}
         {purging !== null && <PurgeConfirm registry={p.registry} id={purging} frame="sheet" onClose={() => setPurging(null)} />}
-        {ui.theme && <ThemePanel frame="sheet" hover={canHover()} onClose={() => setUi({ theme: false })} />}
+        {ui.theme && <ThemePanel frame="sheet" hover={hover} onClose={() => setUi({ theme: false })} />}
         <ConvertedReport frame="sheet" />
         <Toasts />
       </div>

@@ -2157,6 +2157,68 @@ describe("the theme panel in the wide shell", () => {
     expect(document.documentElement.style.getPropertyValue("--cyan")).toBe(tokensOf(cyberdeck()).cyan);
   });
 
+  it("leaves Escape to a text field outside the panel, keeping Theme open", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    openTheme();
+    editAccent();
+    const field = document.createElement("input");
+    field.type = "text";
+    document.body.append(field);
+    field.focus();
+    act(() => {
+      fireEvent.keyDown(field, { key: "Escape" });
+    });
+    field.remove();
+    expect(lastUi().theme).toBe(true);
+    expect(themeIn(slot("panel"))).not.toBeNull();
+    expect(toastTexts()).not.toContain("Unsaved colours discarded.");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+    expect(lastUi().theme).toBe(false);
+  });
+
+  it("selects a clicked list row while Theme is open, highlighting it, and Theme stays in the slot", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    openTheme();
+    const row = document.querySelector<HTMLElement>('[data-lrow="t3"]');
+    if (row === null) throw new Error("no t3 row");
+    const init = { clientX: 10, clientY: 10, button: 0, pointerId: 1, pointerType: "mouse" };
+    fireEvent.pointerDown(row, init);
+    fireEvent.pointerUp(row, init);
+    expect(lastUi().selected).toBe("t3");
+    expect(document.querySelector('[data-lrow="t3"]')?.classList.contains("selected")).toBe(true);
+    expect(themeIn(slot("panel"))).not.toBeNull();
+    expect(lastUi().theme).toBe(true);
+  });
+
+  it("does not paint a native background on iOS", async () => {
+    vi.mocked(paintNative).mockClear();
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } }).ui));
+    await settle();
+    expect(paintNative).not.toHaveBeenCalled();
+  });
+
+  it("shows a bad toast when the native window background cannot be set", async () => {
+    vi.mocked(paintNative).mockClear();
+    const failure = new Error("no window");
+    vi.mocked(paintNative).mockRejectedValueOnce(failure);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    expect(logged).toHaveBeenCalledWith(failure);
+    logged.mockRestore();
+    expect(vi.mocked(paintNative).mock.calls).toHaveLength(1);
+    expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((n) => [n.textContent, n.className])).toEqual([["Window colour could not be set: no window", "toast bad"]]);
+  });
+
   it("leaves Escape to an open dialog while Theme is open", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));

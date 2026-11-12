@@ -1,13 +1,17 @@
-import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { toast } from "../common/Toast";
-import { readImageColours } from "../../theme/image";
+import { ImageReadError, readImageColours } from "../../theme/image";
 import { DEFAULT_STORE, THEME_KEY, type ThemeStore } from "../../theme/store";
 import { ThemeProvider } from "../../theme/ThemeContext";
-import { DISCARDED, THEME_TITLE, ThemePanel } from "./ThemePanel";
+import { installMatchMedia, setSystemDark } from "../../test/matchMedia";
+import { DISCARDED, THEME_TITLE, ThemePanel, useCanHover } from "./ThemePanel";
 
 vi.mock("../common/Toast", () => ({ toast: vi.fn() }));
-vi.mock("../../theme/image", () => ({ readImageColours: vi.fn() }));
+vi.mock("../../theme/image", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../theme/image")>();
+  return { ...real, readImageColours: vi.fn() };
+});
 
 const SUNSET = "#FFEABA #FED3A4 #FEC759 #FEB484 #FF96A6 #F58A65";
 
@@ -22,7 +26,7 @@ const voidNow = (): string => document.documentElement.style.getPropertyValue("-
 const mount = (frame: "panel" | "sheet", hover = false, store: ThemeStore = DEFAULT_STORE) => {
   const onClose = vi.fn();
   const view = render(
-    <ThemeProvider storage={window.localStorage} initial={{ store, unreadable: false }}>
+    <ThemeProvider storage={window.localStorage} initial={{ store, unreadable: null }}>
       <ThemePanel frame={frame} hover={hover} onClose={onClose} />
     </ThemeProvider>,
   );
@@ -253,7 +257,7 @@ describe("ThemePanel", () => {
     expect(region.querySelectorAll(".theme-strip .theme-swatch")).toHaveLength(4);
     fireEvent.click(within(region).getByRole("button", { name: "Make a dark theme" }));
     expect(notes(region)[0]).toBe("Used 4 colours.");
-    vi.mocked(readImageColours).mockRejectedValueOnce(new Error("broken.png is not an image WebBoard can read."));
+    vi.mocked(readImageColours).mockRejectedValueOnce(new ImageReadError("broken.png is not an image WebBoard can read."));
     await act(async () => {
       fireEvent.drop(within(region).getByText("Drop an image here, or choose one. It stays on this device.").closest(".theme-drop") ?? region, {
         dataTransfer: { files: [new File(["x"], "broken.png")] },
@@ -295,7 +299,7 @@ describe("ThemePanel", () => {
     expect(within(card(region, /^Cyberdeck/)).queryByText("Fails checks")).toBeNull();
   });
 
-  it("goes back to Cyberdeck", () => {
+  it("goes back to Cyberdeck, toasting the discarded draft", () => {
     const { getByRole } = mount("panel");
     const region = getByRole("region", { name: "Theme" });
     fireEvent.click(card(region, /^Paper/));
@@ -304,5 +308,128 @@ describe("ThemePanel", () => {
     expect(voidNow()).toBe("#0A0A14");
     expect(card(region, /^Cyberdeck/).getAttribute("aria-pressed")).toBe("true");
     expect(within(region).queryByText("Unsaved")).toBeNull();
+    expect(vi.mocked(toast).mock.calls).toEqual([[DISCARDED]]);
+  });
+
+  it("lets an image-reading bug escape as an unhandled rejection instead of becoming a note", async () => {
+    const bug = new TypeError("medianCut broke");
+    vi.mocked(readImageColours).mockRejectedValueOnce(bug);
+    const seen: unknown[] = [];
+    const onRejection = (reason: unknown): void => {
+      seen.push(reason);
+    };
+    const node = (globalThis as unknown as { process: { on(e: string, cb: (r: unknown) => void): void; off(e: string, cb: (r: unknown) => void): void } }).process;
+    node.on("unhandledRejection", onRejection);
+    const { getByRole } = mount("panel");
+    const region = getByRole("region", { name: "Theme" });
+    fireEvent.click(within(region).getByRole("button", { name: "From an image" }));
+    await act(async () => {
+      fireEvent.change(within(region).getByLabelText("Choose an image"), { target: { files: [new File(["x"], "a.png")] } });
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    node.off("unhandledRejection", onRejection);
+    expect(seen).toEqual([bug]);
+    expect(notes(region)).toEqual([]);
+  });
+
+  it("deletes a saved light theme while following the system in dark mode", () => {
+    const day = { id: "mine-1", name: "Noon", note: "Yours", group: "mine" as const, seeds: { ground: "#FFFFFF", text: "#111418", accent: "#1F5FD1", highlight: "#A35400", danger: "#CC1F3D" } };
+    setSystemDark(true);
+    const { getByRole } = mount("panel", false, { ...DEFAULT_STORE, mode: "system", mine: [day] });
+    const region = getByRole("region", { name: "Theme" });
+    expect(within(region).queryByRole("button", { name: "Delete" })).toBeNull();
+    fireEvent.click(card(region, /^Noon/));
+    expect(voidNow()).toBe("#0A0A14");
+    expect(hexField(region, "Background").value).toBe("#FFFFFF");
+    fireEvent.click(within(region).getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(region).getByRole("button", { name: "Delete Noon" }));
+    expect(within(cards(region)).queryByRole("button", { name: /^Noon/ })).toBeNull();
+    expect(notes(region)).toEqual(["When light uses Daylight again."]);
+    expect(JSON.parse(window.localStorage.getItem(THEME_KEY) ?? "{}").light).toBe("daylight");
+  });
+
+  it("says when saving changes moves a theme out of its slot", () => {
+    setSystemDark(true);
+    const night = { id: "mine-1", name: "Night", note: "Yours", group: "mine" as const, seeds: { ground: "#0B1630", text: "#C9D6EA", accent: "#7CC4FF", highlight: "#FFD166", danger: "#FF6B88" } };
+    const { getByRole } = mount("panel", false, { ...DEFAULT_STORE, mode: "system", dark: "mine-1", mine: [night] });
+    const region = getByRole("region", { name: "Theme" });
+    typeHex(region, "Background", "#FFFFFF");
+    typeHex(region, "Text", "#111418");
+    typeHex(region, "Accent", "#1F5FD1");
+    typeHex(region, "Highlight", "#A35400");
+    typeHex(region, "Danger", "#CC1F3D");
+    fireEvent.click(within(region).getByRole("button", { name: "Save changes" }));
+    expect(notes(region)).toEqual(["Night is no longer a dark theme, so When dark uses Cyberdeck."]);
+  });
+
+  it("keeps Save changes for an edited saved theme across a remount", () => {
+    const night = { id: "mine-1", name: "Night", note: "Yours", group: "mine" as const, seeds: { ground: "#0B1630", text: "#C9D6EA", accent: "#7CC4FF", highlight: "#FFD166", danger: "#FF6B88" } };
+    const onClose = vi.fn();
+    const store = { ...DEFAULT_STORE, active: "mine-1", mine: [night] };
+    const view = render(
+      <ThemeProvider storage={window.localStorage} initial={{ store, unreadable: null }}>
+        <ThemePanel frame="panel" hover={false} onClose={onClose} />
+      </ThemeProvider>,
+    );
+    typeHex(view.getByRole("region", { name: "Theme" }), "Accent", "#7CC4EE");
+    view.rerender(
+      <ThemeProvider storage={window.localStorage} initial={{ store, unreadable: null }}>
+        <ThemePanel key="sheet" frame="sheet" hover={false} onClose={onClose} />
+      </ThemeProvider>,
+    );
+    const sheet = view.getByRole("dialog", { name: "Theme" });
+    expect(within(sheet).getByText("Unsaved")).toBeTruthy();
+    expect(within(card(sheet, /^Night/)).getByText("Edited")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Save changes" })).toBeTruthy();
+  });
+
+  it("marks your own themes in the slot selects", () => {
+    const sunset = { id: "mine-1", name: "Sunset", note: "Yours", group: "mine" as const, seeds: { ground: "#0B1630", text: "#C9D6EA", accent: "#7CC4FF", highlight: "#FFD166", danger: "#FF6B88" } };
+    const { getByLabelText } = mount("panel", false, { ...DEFAULT_STORE, mode: "system", mine: [sunset] });
+    const dark = getByLabelText("When dark");
+    if (!(dark instanceof HTMLSelectElement)) throw new Error("not a select");
+    expect([...dark.options].filter((o) => o.textContent?.startsWith("Sunset")).map((o) => o.textContent)).toEqual(["Sunset", "Sunset (yours)"]);
+  });
+
+  it("shows a save validation error as a note", () => {
+    const { getByRole } = mount("panel");
+    const region = getByRole("region", { name: "Theme" });
+    typeHex(region, "Accent", "#7CC4FF");
+    saveAs(region, "x".repeat(41));
+    expect(notes(region)).toEqual(["Use at most 40 characters."]);
+  });
+});
+
+describe("useCanHover", () => {
+  afterEach(() => installMatchMedia());
+
+  it("follows (hover: hover) as it changes, and unsubscribes on unmount", () => {
+    const listeners = new Set<() => void>();
+    let matches = false;
+    const queries: string[] = [];
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: (query: string) => {
+        queries.push(query);
+        return {
+          get matches() {
+            return matches;
+          },
+          addEventListener: (_: string, cb: () => void) => listeners.add(cb),
+          removeEventListener: (_: string, cb: () => void) => listeners.delete(cb),
+        };
+      },
+    });
+    const { result, unmount } = renderHook(() => useCanHover());
+    expect(result.current).toBe(false);
+    act(() => {
+      matches = true;
+      listeners.forEach((cb) => cb());
+    });
+    expect(result.current).toBe(true);
+    expect(new Set(queries)).toEqual(new Set(["(hover: hover)"]));
+    unmount();
+    expect(listeners.size).toBe(0);
   });
 });

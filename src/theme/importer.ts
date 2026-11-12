@@ -10,14 +10,15 @@ export interface Assigned {
   notes: readonly string[];
 }
 
-const COLOUR = /#([0-9a-f]{6}|[0-9a-f]{3})\b|rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})/gi;
+const COLOUR = /#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})\b|rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})/gi;
+const CHANNEL_MAX = 255;
 const CHANNELS: readonly Channel[] = [0, 1, 2];
 const OPAQUE = 128;
 const DARK_GROUND_MAX = 0.012;
 const LIGHT_GROUND_MIN = 0.85;
 const MIN_CHROMA = 0.04;
 const OPPOSITES: readonly number[] = [120, 135, 150, 165, 180, 195, 210, 225, 240];
-const FIX_ORDER: readonly CheckId[] = ["accent", "label", "highlight", "danger", "apart-hi", "apart-acc", "apart-acc-hi", "danger-red", "only-danger-red"];
+const FIX_ORDER: readonly CheckId[] = ["text", "dim", "accent", "label", "highlight", "danger", "apart-hi", "apart-acc", "apart-acc-hi", "danger-red", "only-danger-red"];
 const ADJUSTABLE: readonly ("accent" | "highlight" | "danger")[] = ["accent", "highlight", "danger"];
 
 const OWN: Record<Scheme, { accent: Hex; danger: Hex }> = {
@@ -26,14 +27,20 @@ const OWN: Record<Scheme, { accent: Hex; danger: Hex }> = {
 };
 
 const fromHexDigits = (digits: string): Hex => {
-  const full = digits.length === 3 ? digits.split("").map((c) => c + c).join("") : digits;
+  const opaque = digits.length === 4 || digits.length === 8 ? digits.slice(0, digits.length - digits.length / 4) : digits;
+  const full = opaque.length === 3 ? opaque.split("").map((c) => c + c).join("") : opaque;
   return `#${full.toUpperCase()}`;
 };
 
-const colourOf = (m: RegExpMatchArray): Hex =>
-  m[1] === undefined ? rgbToHex([m[2], m[3], m[4]].map(Number)) : fromHexDigits(m[1]);
+const channelsOf = (m: RegExpMatchArray): readonly number[] => [m[2], m[3], m[4]].map(Number);
 
-export const parseColours = (text: string): readonly Hex[] => [...new Set([...text.matchAll(COLOUR)].map(colourOf))];
+const inRange = (m: RegExpMatchArray): boolean => m[1] !== undefined || channelsOf(m).every((c) => c <= CHANNEL_MAX);
+
+const colourOf = (m: RegExpMatchArray): Hex => (m[1] === undefined ? rgbToHex(channelsOf(m)) : fromHexDigits(m[1]));
+
+export const parseColours = (text: string): readonly Hex[] => [...new Set([...text.matchAll(COLOUR)].filter(inRange).map(colourOf))];
+
+export const outOfRange = (text: string): readonly string[] => [...new Set([...text.matchAll(COLOUR)].filter((m) => !inRange(m)).map((m) => `${m[0]})`))];
 
 export const pixelsOf = (data: Uint8ClampedArray): readonly Pixel[] =>
   Array.from({ length: Math.floor(data.length / 4) }, (_, i) => i * 4)
@@ -97,6 +104,13 @@ const failing = (id: CheckId, s: Seeds): boolean => checks(s, derive(s)).some((c
 
 const fixPass = (s: Seeds): Seeds => FIX_ORDER.reduce((acc, id) => (failing(id, acc) ? (fix(id, acc) ?? acc) : acc), s);
 
+export const fixAll = (s: Seeds): Seeds => fixPass(fixPass(s));
+
+export const unfixedNotes = (s: Seeds): readonly string[] =>
+  checks(s, derive(s))
+    .filter((c) => !c.pass)
+    .map((c) => `Could not fix ${c.label} automatically; change the colour by hand.`);
+
 export const assignRoles = (colours: readonly Hex[], scheme: Scheme): Assigned => {
   const unique = [...new Set(colours)];
   if (unique.length < 3) throw new Error("assignRoles needs at least three colours");
@@ -118,7 +132,7 @@ export const assignRoles = (colours: readonly Hex[], scheme: Scheme): Assigned =
   const highlight = second ?? oppositeOf(accent, danger);
   const start: Seeds = { ground, text: textStart, accent, highlight, danger };
   const raw: Seeds = { ...start, text: fix("text", start)?.text ?? textStart };
-  const seeds = fixPass(fixPass(raw));
+  const seeds = fixAll(raw);
   const notes = [
     ...groundNote,
     ...(red === undefined ? ["No red in the palette, so danger keeps WebBoard's own."] : []),
@@ -126,6 +140,7 @@ export const assignRoles = (colours: readonly Hex[], scheme: Scheme): Assigned =
     ...ADJUSTABLE.filter((role) => seeds[role] !== raw[role]).map(
       (role) => `Adjusted ${role} from ${raw[role]} to ${seeds[role]} to keep it readable and distinct.`,
     ),
+    ...unfixedNotes(seeds),
   ];
   return { seeds, notes };
 };

@@ -2,8 +2,8 @@ import { useState, type DragEvent } from "react";
 import { checks, fix, type Check, type CheckId } from "../../theme/checks";
 import type { Hex } from "../../theme/colour";
 import type { Scheme, Seeds, Tokens } from "../../theme/derive";
-import { readImageColours } from "../../theme/image";
-import { assignRoles, parseColours } from "../../theme/importer";
+import { ImageReadError, readImageColours } from "../../theme/image";
+import { assignRoles, outOfRange, parseColours } from "../../theme/importer";
 import { swatch } from "./ThemeCards";
 
 const ROLES: readonly { role: keyof Seeds; name: string; hint: string }[] = [
@@ -33,8 +33,6 @@ export const normaliseHex = (raw: string): Hex | null => {
   const digits = m[1].length === 3 ? m[1].split("").map((c) => c + c).join("") : m[1];
   return `#${digits.toUpperCase()}`;
 };
-
-export const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export function Notes(p: { notes: readonly string[] }) {
   if (p.notes.length === 0) return null;
@@ -132,7 +130,8 @@ export function ImportColours(p: { onMake(s: Seeds): void }) {
       },
       (e: unknown) => {
         setImage([]);
-        setNotes([messageOf(e)]);
+        if (!(e instanceof ImageReadError)) throw e;
+        setNotes([e.message]);
       },
     );
   };
@@ -145,12 +144,13 @@ export function ImportColours(p: { onMake(s: Seeds): void }) {
 
   const make = (scheme: Scheme): void => {
     const colours = source === "paste" ? parseColours(text) : image;
+    const skipped = (source === "paste" ? outOfRange(text) : []).map((t) => `Skipped ${t}: channels go up to 255.`);
     if (colours.length < 3) {
-      setNotes([tooFew(source, colours.length)]);
+      setNotes([tooFew(source, colours.length), ...skipped]);
       return;
     }
     const r = assignRoles(colours, scheme);
-    setNotes([`Used ${colours.length} colours.`, ...r.notes]);
+    setNotes([`Used ${colours.length} colours.`, ...skipped, ...r.notes]);
     p.onMake(r.seeds);
   };
 

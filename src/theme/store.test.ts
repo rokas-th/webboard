@@ -3,11 +3,14 @@ import type { Seeds } from "./derive";
 import {
   DEFAULT_STORE,
   MAX_MINE,
+  THEME_BACKUP_KEY,
   THEME_KEY,
+  ThemeSaveError,
   allThemes,
   loadStore,
   nextMineId,
   parseStore,
+  resetSlots,
   saveStore,
   shownTheme,
   themeById,
@@ -42,7 +45,7 @@ describe("theme store", () => {
     const s = withSaved(withMode(DEFAULT_STORE, "system"), "Night", DARK_SEEDS, null).store;
     saveStore(window.localStorage, s);
     const back = loadStore(window.localStorage);
-    expect(back.unreadable).toBe(false);
+    expect(back.unreadable).toBeNull();
     expect(back.store).toEqual(s);
     expect(JSON.parse(window.localStorage.getItem(THEME_KEY) ?? "")).toEqual({
       v: 1,
@@ -55,31 +58,54 @@ describe("theme store", () => {
   });
 
   it("a missing key gives the defaults and is not unreadable", () => {
-    expect(loadStore(window.localStorage)).toEqual({ store: DEFAULT_STORE, unreadable: false });
+    expect(loadStore(window.localStorage)).toEqual({ store: DEFAULT_STORE, unreadable: null });
     expect(DEFAULT_STORE).toEqual({ v: 1, mode: "fixed", active: "cyberdeck", dark: "cyberdeck", light: "daylight", mine: [] });
   });
 
-  const invalid: readonly [string, string][] = [
-    ["not JSON", "{nope"],
-    ["v 2", raw({ v: 2 })],
-    ["unknown mode", raw({ mode: "auto" })],
-    ["unknown active id", raw({ active: "mine-9" })],
-    ["light theme in the dark slot", raw({ dark: "daylight" })],
-    ["dark theme in the light slot", raw({ light: "phosphor" })],
-    ["short hex seed", raw({ mine: [{ ...mineEntry(1, "A"), seeds: { ...DARK_SEEDS, text: "#fff" } }] })],
-    ["empty name", raw({ mine: [mineEntry(1, "")] })],
-    ["41-char name", raw({ mine: [mineEntry(1, "x".repeat(41))] })],
-    ["duplicate names differing in case", raw({ mine: [mineEntry(1, "Night"), mineEntry(2, "NIGHT")] })],
-    ["25 mine entries", raw({ mine: Array.from({ length: 25 }, (_, i) => mineEntry(i + 1, `T${i}`)) })],
-    ["mine id not mine-<n>", raw({ mine: [{ ...mineEntry(1, "A"), id: "custom" }] })],
-    ["array instead of object", "[]"],
-    ["missing seeds", raw({ mine: [{ id: "mine-1", name: "A" }] })],
+  const invalid: readonly [string, string, string | RegExp][] = [
+    ["not JSON", "{nope", /^not JSON: /],
+    ["v 2", raw({ v: 2 }), "version 2 is not 1"],
+    ["unknown mode", raw({ mode: "auto" }), 'mode "auto" is not fixed or system'],
+    ["unknown active id", raw({ active: "mine-9" }), "the active theme mine-9 does not exist"],
+    ["light theme in the dark slot", raw({ dark: "daylight" }), "the dark slot daylight is not a dark theme"],
+    ["dark theme in the light slot", raw({ light: "phosphor" }), "the light slot phosphor is not a light theme"],
+    ["short hex seed", raw({ mine: [{ ...mineEntry(1, "A"), seeds: { ...DARK_SEEDS, text: "#fff" } }] }), "saved theme 1 is invalid"],
+    ["empty name", raw({ mine: [mineEntry(1, "")] }), "saved theme 1 is invalid"],
+    ["41-char name", raw({ mine: [mineEntry(1, "x".repeat(41))] }), "saved theme 1 is invalid"],
+    ["duplicate names differing in case", raw({ mine: [mineEntry(1, "Night"), mineEntry(2, "NIGHT")] }), "two saved themes share a name"],
+    ["25 mine entries", raw({ mine: Array.from({ length: 25 }, (_, i) => mineEntry(i + 1, `T${i}`)) }), "25 saved themes, more than 24"],
+    ["mine id not mine-<n>", raw({ mine: [mineEntry(1, "A"), { ...mineEntry(2, "B"), id: "custom" }] }), "saved theme 2 is invalid"],
+    ["array instead of object", "[]", "not an object"],
+    ["missing seeds", raw({ mine: [{ id: "mine-1", name: "A" }] }), "saved theme 1 is invalid"],
   ];
 
-  it.each(invalid)("%s → parseStore null and loadStore unreadable with defaults", (_, value) => {
+  it.each(invalid)("%s → parseStore null and loadStore unreadable with defaults, the reason, and a backup", (_, value, reason) => {
+    window.localStorage.removeItem(THEME_BACKUP_KEY);
     expect(parseStore(value)).toBeNull();
     window.localStorage.setItem(THEME_KEY, value);
-    expect(loadStore(window.localStorage)).toEqual({ store: DEFAULT_STORE, unreadable: true });
+    const loaded = loadStore(window.localStorage);
+    expect(loaded.store).toEqual(DEFAULT_STORE);
+    expect(loaded.unreadable).toEqual(typeof reason === "string" ? reason : expect.stringMatching(reason));
+    expect(window.localStorage.getItem(THEME_BACKUP_KEY)).toBe(value);
+  });
+
+  it("does not write a backup for a readable or missing store", () => {
+    window.localStorage.removeItem(THEME_BACKUP_KEY);
+    loadStore(window.localStorage);
+    saveStore(window.localStorage, DEFAULT_STORE);
+    loadStore(window.localStorage);
+    expect(window.localStorage.getItem(THEME_BACKUP_KEY)).toBeNull();
+  });
+
+  it("resetSlots names the slots that changed", () => {
+    expect(resetSlots(DEFAULT_STORE, DEFAULT_STORE)).toEqual([]);
+    expect(resetSlots({ ...DEFAULT_STORE, dark: "phosphor", light: "paper" }, DEFAULT_STORE)).toEqual(["dark", "light"]);
+  });
+
+  it("withSaved throws ThemeSaveError for what the user can fix", () => {
+    expect(() => withSaved(DEFAULT_STORE, "  ", DARK_SEEDS, null)).toThrow(ThemeSaveError);
+    expect(() => withSaved(DEFAULT_STORE, "Bad", FAILING_SEEDS, null)).toThrow(ThemeSaveError);
+    expect(() => withSaved(DEFAULT_STORE, "Bad", DARK_SEEDS, "paper")).not.toThrow(ThemeSaveError);
   });
 
   it("parses a saved theme whose seeds are valid hex but fail today's checks", () => {

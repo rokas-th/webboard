@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { checks, passes } from "./checks";
 import { derive, type Scheme, type Seeds } from "./derive";
-import { assignRoles, medianCut, parseColours, pixelsOf } from "./importer";
+import { assignRoles, fixAll, medianCut, outOfRange, parseColours, pixelsOf, unfixedNotes } from "./importer";
 
 const SUNSET = ["#FFEABA", "#FED3A4", "#FEC759", "#FEB484", "#FF96A6", "#F58A65"];
 const GREYS = ["#000000", "#FFFFFF", "#808080"];
@@ -29,6 +29,16 @@ describe("parseColours", () => {
 
   it("keeps the order of first appearance across hex and rgb", () => {
     expect(parseColours("rgb(1, 2, 3) #FFFFFF rgb(1 2 3) #fff")).toEqual(["#010203", "#FFFFFF"]);
+  });
+
+  it("drops the alpha of #RRGGBBAA and #RGBA", () => {
+    expect(parseColours("#1B2B4A80 #abcd")).toEqual(["#1B2B4A", "#AABBCC"]);
+  });
+
+  it("skips rgb with a channel above 255 and names it", () => {
+    expect(parseColours("rgb(300, 0, 0) rgb(255, 0, 0)")).toEqual(["#FF0000"]);
+    expect(outOfRange("rgb(300, 0, 0) rgb(255, 0, 0)")).toEqual(["rgb(300, 0, 0)"]);
+    expect(outOfRange("#FF0000 rgb(1, 2, 3)")).toEqual([]);
   });
 
   it("finds nothing in plain text or a five-digit hex", () => {
@@ -107,6 +117,20 @@ describe("assignRoles", () => {
     const adjusted = notes.filter((n) => n.startsWith("Adjusted "));
     expect(adjusted.length).toBeGreaterThan(0);
     adjusted.forEach((n) => expect(n).toMatch(/^Adjusted (accent|highlight|danger) from #[0-9A-F]{6} to #[0-9A-F]{6} to keep it readable and distinct\.$/));
+  });
+
+  it("fixes secondary text when text passes but dim does not", () => {
+    const start: Seeds = { ground: "#000000", text: "#777777", accent: "#24E0FF", highlight: "#FFB000", danger: "#FF3B6B" };
+    expect(failing(start)).toEqual(["dim"]);
+    expect(failing(fixAll(start))).toEqual([]);
+  });
+
+  it("names every check it could not fix", () => {
+    const stuck: Seeds = { ground: "#808080", text: "#808080", accent: "#808080", highlight: "#808080", danger: "#808080" };
+    const labels = checks(stuck, derive(stuck)).filter((c) => !c.pass).map((c) => c.label);
+    expect(labels.length).toBeGreaterThan(0);
+    expect(unfixedNotes(stuck)).toEqual(labels.map((l) => `Could not fix ${l} automatically; change the colour by hand.`));
+    expect(assignRoles(SUNSET, "dark").notes.filter((n) => n.startsWith("Could not fix"))).toEqual([]);
   });
 
   it("uses a red from the palette as danger", () => {

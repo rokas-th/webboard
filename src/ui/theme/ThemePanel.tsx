@@ -1,16 +1,16 @@
-import { useId, useState, type KeyboardEvent } from "react";
+import { useId, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { passes } from "../../theme/checks";
 import { derive, schemeOf, type Scheme, type Seeds } from "../../theme/derive";
-import { tokensOf } from "../../theme/presets";
-import { allThemes } from "../../theme/store";
-import { useTheme, type ThemeApi } from "../../theme/ThemeContext";
+import { DEFAULT_DARK, DEFAULT_LIGHT, tokensOf } from "../../theme/presets";
+import { allThemes, DEFAULT_STORE, themeById, ThemeSaveError } from "../../theme/store";
+import { DISCARDED, useTheme, type ThemeApi } from "../../theme/ThemeContext";
 import { Sheet } from "../common/Sheet";
 import { toast } from "../common/Toast";
 import { ThemeCards } from "./ThemeCards";
-import { Customize, ImportColours, Notes, Readability, messageOf } from "./ThemeEditor";
+import { Customize, ImportColours, Notes, Readability } from "./ThemeEditor";
 
 export const THEME_TITLE = "Theme";
-export const DISCARDED = "Unsaved colours discarded.";
+export { DISCARDED };
 
 function SlotSelect(p: { scheme: Scheme; label: string }) {
   const api = useTheme();
@@ -24,7 +24,7 @@ function SlotSelect(p: { scheme: Scheme; label: string }) {
       <select id={id} value={p.scheme === "dark" ? api.store.dark : api.store.light} onChange={(e) => api.setSlot(p.scheme, e.target.value)}>
         {options.map((t) => (
           <option key={t.id} value={t.id}>
-            {t.name}
+            {t.group === "mine" ? `${t.name} (yours)` : t.name}
           </option>
         ))}
       </select>
@@ -65,23 +65,28 @@ function Follow() {
   );
 }
 
+const defaultName = (scheme: Scheme): string => themeById(DEFAULT_STORE, scheme === "dark" ? DEFAULT_DARK : DEFAULT_LIGHT).name;
+
+const slotName = (scheme: Scheme): string => (scheme === "dark" ? "When dark" : "When light");
+
 function Body(p: { hover: boolean }) {
   const api = useTheme();
-  const [base, setBase] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [saveNote, setSaveNote] = useState<string | null>(null);
+  const [saveNotes, setSaveNotes] = useState<readonly string[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const { draft, shown } = api;
-  const seeds = draft ?? shown.seeds;
-  const tokens = draft !== null ? derive(draft) : tokensOf(shown);
-  const edited = draft !== null ? base : null;
+  const target = allThemes(api.store).find((t) => t.id === picked) ?? shown;
+  const seeds = draft?.seeds ?? target.seeds;
+  const tokens = draft !== null ? derive(draft.seeds) : tokensOf(target);
+  const edited = draft?.base ?? null;
   const own = api.store.mine.find((t) => t.id === edited) ?? null;
-  const canSave = draft !== null && passes(draft, derive(draft));
+  const canSave = draft !== null && passes(draft.seeds, derive(draft.seeds));
+  const following = api.store.mode === "system";
 
   const edit = (next: Seeds): void => {
-    if (draft === null) setBase(shown.id);
-    api.setDraft(next);
+    api.setDraft({ seeds: next, base: draft === null ? target.id : draft.base });
   };
 
   const choose = (id: string): void => {
@@ -89,20 +94,32 @@ function Body(p: { hover: boolean }) {
       api.setDraft(null);
       toast(DISCARDED);
     }
+    setPicked(id);
+    setDeleting(null);
     api.choose(id);
+  };
+
+  const attempt = (as: string, replace: string | null, seedsToSave: Seeds): { id: string; reset: readonly Scheme[] } | ThemeSaveError => {
+    try {
+      return api.save(as, seedsToSave, replace);
+    } catch (e) {
+      if (e instanceof ThemeSaveError) return e;
+      throw e;
+    }
   };
 
   const save = (replace: string | null, as: string): void => {
     if (draft === null) throw new Error("There are no unsaved colours to save.");
-    try {
-      const id = api.save(as, draft, replace);
-      api.choose(id);
-      api.setDraft(null);
-      setName("");
-      setSaveNote(null);
-    } catch (e) {
-      setSaveNote(messageOf(e));
+    const r = attempt(as, replace, draft.seeds);
+    if (r instanceof ThemeSaveError) {
+      setSaveNotes([r.message]);
+      return;
     }
+    api.choose(r.id);
+    api.setDraft(null);
+    setPicked(r.id);
+    setName("");
+    setSaveNotes(following ? r.reset.map((scheme) => `${as.trim()} is no longer a ${scheme} theme, so ${slotName(scheme)} uses ${defaultName(scheme)}.`) : []);
   };
 
   const remove = (id: string): void => {
@@ -111,7 +128,15 @@ function Body(p: { hover: boolean }) {
       return;
     }
     setDeleting(null);
-    api.remove(id);
+    setPicked(null);
+    const reset = api.remove(id);
+    setSaveNotes(following ? reset.map((scheme) => `${slotName(scheme)} uses ${defaultName(scheme)} again.`) : []);
+  };
+
+  const useCyberdeck = (): void => {
+    setPicked(null);
+    setDeleting(null);
+    api.useCyberdeck();
   };
 
   return (
@@ -128,24 +153,24 @@ function Body(p: { hover: boolean }) {
             Save theme
           </button>
         </div>
-        {(own !== null || shown.group === "mine") && (
+        {(own !== null || target.group === "mine") && (
           <div className="theme-buttons">
             {own !== null && (
               <button type="button" className="button-small" disabled={!canSave} onClick={() => save(own.id, own.name)}>
                 Save changes
               </button>
             )}
-            {shown.group === "mine" && (
-              <button type="button" className={deleting === shown.id ? "button-small button-danger" : "button-small"} onClick={() => remove(shown.id)}>
-                {deleting === shown.id ? `Delete ${shown.name}` : "Delete"}
+            {target.group === "mine" && (
+              <button type="button" className={deleting === target.id ? "button-small button-danger" : "button-small"} onClick={() => remove(target.id)}>
+                {deleting === target.id ? `Delete ${target.name}` : "Delete"}
               </button>
             )}
           </div>
         )}
-        <Notes notes={saveNote === null ? [] : [saveNote]} />
+        <Notes notes={saveNotes} />
       </div>
       <div className="theme-buttons">
-        <button type="button" className="button-small" onClick={() => api.useCyberdeck()}>
+        <button type="button" className="button-small" onClick={useCyberdeck}>
           Use Cyberdeck
         </button>
       </div>
@@ -153,7 +178,17 @@ function Body(p: { hover: boolean }) {
   );
 }
 
-export const canHover = (): boolean => window.matchMedia("(hover: hover)").matches;
+const HOVER_QUERY = "(hover: hover)";
+
+const canHover = (): boolean => window.matchMedia(HOVER_QUERY).matches;
+
+const onHoverChange = (cb: () => void): (() => void) => {
+  const list = window.matchMedia(HOVER_QUERY);
+  list.addEventListener("change", cb);
+  return () => list.removeEventListener("change", cb);
+};
+
+export const useCanHover = (): boolean => useSyncExternalStore(onHoverChange, canHover);
 
 export function closeTheme(api: ThemeApi, onClose: () => void): void {
   api.preview(null);

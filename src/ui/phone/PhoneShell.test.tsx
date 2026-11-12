@@ -37,6 +37,8 @@ import { argsOf, fail, IX, ip, ixAct, NOW, own, RESET_HINT, seedIndex, seedPlan,
 import type { Answer } from "../../test/tauriMock";
 import { NO_REGION } from "./PhoneStatus";
 import { paintNative } from "../../theme/apply";
+import { PRESETS, tokensOf } from "../../theme/presets";
+import { Shell } from "../shell/Shell";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
@@ -2468,10 +2470,57 @@ describe("the theme sheet on the phone", () => {
     expect(dialogs()).toEqual(["Theme"]);
   });
 
-  it("does not paint a native background on iOS", async () => {
+  it("hides a selected item's sheet while Theme is open, and the item sheet returns after Close", async () => {
+    const t = await made();
+    await shown(t);
+    const review = [...t.session.view().plan.items].find(([, it]) => it.name === "Review")?.[0];
+    if (review === undefined) throw new Error("no Review item");
+    setUiNow({ selected: review });
+    expect(dialogs()).toEqual(["Review"]);
+    setUiNow({ theme: true });
+    expect(dialogs()).toEqual(["Theme"]);
+    expect(lastUi().selected).toBe(review);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Theme" })).getAllByRole("button", { name: "Close" })[0]);
+    expect(dialogs()).toEqual(["Review"]);
+  });
+
+  const shellOn = async (platform: "ios" | "macos"): Promise<void> => {
+    const t = await made();
+    tauri.answers.device_info = () => ({ deviceId: "mac", platform });
+    const registry = await phoneRegistry(t);
+    registries.push(registry);
     vi.mocked(paintNative).mockClear();
-    await shown(await made());
+    render(withSync(<Shell registry={registry} clock={t.clock} />));
+    await settle();
+    expect(document.documentElement.dataset.form).toBe("phone");
     fireEvent.click(themeRow(openPlans()));
+    await settle();
+  };
+
+  const choosePaper = async (): Promise<void> => {
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Theme" })).getByRole("button", { name: /^Paper/ }));
+    await settle();
+  };
+
+  const groundOf = (id: string): string => {
+    const preset = PRESETS.find((x) => x.id === id);
+    if (preset === undefined) throw new Error(`no ${id} preset`);
+    return tokensOf(preset).void;
+  };
+
+  it("does not paint a native background through Shell on iOS, even after choosing a theme", async () => {
+    await shellOn("ios");
+    expect(dialogs()).toEqual(["Theme"]);
+    await choosePaper();
+    expect(document.documentElement.style.getPropertyValue("--void")).toBe(groundOf("paper"));
     expect(paintNative).not.toHaveBeenCalled();
+  });
+
+  it("paints the native background through the same Shell harness on macOS, and again after choosing a theme", async () => {
+    await shellOn("macos");
+    expect(dialogs()).toEqual(["Theme"]);
+    expect(vi.mocked(paintNative).mock.calls).toEqual([[groundOf("cyberdeck")]]);
+    await choosePaper();
+    expect(vi.mocked(paintNative).mock.calls).toEqual([[groundOf("cyberdeck")], [groundOf("paper")]]);
   });
 });

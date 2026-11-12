@@ -465,6 +465,46 @@ mod tests {
         );
     }
 
+    fn plain_permissions(json: &str, file: &str) -> Vec<String> {
+        let caps: serde_json::Value = serde_json::from_str(json)
+            .unwrap_or_else(|e| panic!("capabilities/{file} is not JSON: {e}"));
+        caps["permissions"]
+            .as_array()
+            .unwrap_or_else(|| panic!("capabilities/{file} has no permissions array"))
+            .iter()
+            .filter_map(|p| p.as_str().map(str::to_string))
+            .collect()
+    }
+
+    const BACKGROUND_PERMISSIONS: [&str; 2] = [
+        "core:window:allow-set-background-color",
+        "core:webview:allow-set-webview-background-color",
+    ];
+
+    #[test]
+    fn the_desktop_capabilities_let_the_theme_paint_the_window_background() {
+        let granted =
+            plain_permissions(include_str!("../capabilities/default.json"), "default.json");
+        BACKGROUND_PERMISSIONS.iter().for_each(|needed| {
+            assert!(
+                granted.iter().any(|p| p == needed),
+                "capabilities/default.json does not grant {needed}, so paintNative is refused and \
+                 every theme change toasts 'Window colour could not be set': {granted:?}"
+            )
+        });
+    }
+
+    #[test]
+    fn the_ios_capabilities_do_not_grant_the_window_background() {
+        let granted = plain_permissions(include_str!("../capabilities/ios.json"), "ios.json");
+        BACKGROUND_PERMISSIONS.iter().for_each(|unneeded| {
+            assert!(
+                !granted.iter().any(|p| p == unneeded),
+                "capabilities/ios.json grants {unneeded}, which iOS never uses: {granted:?}"
+            )
+        });
+    }
+
     fn dialog_or_fs_grants(dir: &std::path::Path) -> Vec<(String, Vec<String>)> {
         let mut files: Vec<(String, Vec<String>)> = std::fs::read_dir(dir)
             .unwrap_or_else(|e| panic!("could not list {}: {e}", dir.display()))

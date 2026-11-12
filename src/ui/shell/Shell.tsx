@@ -8,6 +8,7 @@ import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { About } from "../common/About";
 import { Sheet } from "../common/Sheet";
+import { detailsOf } from "../common/errorText";
 import { toast, Toasts } from "../common/Toast";
 import { revealPatch } from "../choices/HeadCounts";
 import { commands, type CommandCtx } from "../palette/commands";
@@ -26,7 +27,7 @@ import { ItemPanel } from "../panel/ItemPanel";
 import { PlanPanel } from "../panel/PlanPanel";
 import { PrintSheet } from "../print/PrintSheet";
 import { startPrint } from "../print/start";
-import { canHover, closeTheme, ThemePanel } from "../theme/ThemePanel";
+import { closeTheme, ThemePanel, useCanHover } from "../theme/ThemePanel";
 import { Timeline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { HolidayState } from "./HolidayState";
@@ -371,6 +372,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     if (compact && ui.theme) setSheet(null);
   }, [compact, ui.theme]);
   const closeThemePanel = (): void => setUi({ theme: false });
+  const hover = useCanHover();
   const sheets = compact && ui.dialog === null && (
     <>
       <Sheet open={sheet === "plans"} title="Plans" onClose={closeSheet}>
@@ -423,7 +425,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
           {!compact && (session !== null || ui.theme) && (
             <div className="slot slot-panel" data-slot="panel">
               {ui.theme ? (
-                <ThemePanel frame="panel" hover={canHover()} onClose={closeThemePanel} />
+                <ThemePanel frame="panel" hover={hover} onClose={closeThemePanel} />
               ) : session === null ? null : selectedItemShown !== null ? (
                 itemPanel(selectedItemShown, session)
               ) : (
@@ -433,7 +435,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
           )}
         </div>
         {sheets}
-        {compact && ui.theme && <ThemePanel frame="sheet" hover={canHover()} onClose={closeThemePanel} />}
+        {compact && ui.theme && <ThemePanel frame="sheet" hover={hover} onClose={closeThemePanel} />}
         {session !== null && ui.dialog !== null && ui.dialog.t === "calendar" && (
           <CalendarDialog key={session.view().plan.id} session={session} registry={registry} clock={p.clock} onClose={() => setUi({ dialog: null })} />
         )}
@@ -470,13 +472,6 @@ function WideShell(p: ShellProps & { compact: boolean }) {
       <WideBody registry={p.registry} clock={p.clock} compact={p.compact} />
     </UiContext.Provider>
   );
-}
-
-function detailsOf(e: unknown): string {
-  if (!(e instanceof Error)) return messageOf(e);
-  const head = e.message === "" ? e.name : `${e.name}: ${e.message}`;
-  if (e.stack === undefined || e.stack === "") return head;
-  return e.stack.startsWith(head) ? e.stack : `${head}\n${e.stack}`;
 }
 
 export function Shell(p: ShellProps) {

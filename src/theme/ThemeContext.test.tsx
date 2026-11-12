@@ -36,7 +36,7 @@ function Native({ platform }: { platform: "macos" | "linux" | "ios" }): null {
   return null;
 }
 
-const mount = (store: ThemeStore = DEFAULT_STORE, unreadable = false, extra: ReactNode = null) =>
+const mount = (store: ThemeStore = DEFAULT_STORE, unreadable: string | null = null, extra: ReactNode = null) =>
   render(
     <StrictMode>
       <ThemeProvider storage={window.localStorage} initial={{ store, unreadable }}>
@@ -84,10 +84,10 @@ describe("ThemeProvider", () => {
 
   it("a draft applies derive(seeds) and setDraft(null) restores", () => {
     mount();
-    act(() => theme().setDraft(SEEDS));
+    act(() => theme().setDraft({ seeds: SEEDS, base: "blueprint" }));
     expect(voidNow()).toBe(derive(SEEDS).void);
     expect(document.documentElement.style.getPropertyValue("--panel")).toBe(derive(SEEDS).panel);
-    expect(theme().draft).toEqual(SEEDS);
+    expect(theme().draft).toEqual({ seeds: SEEDS, base: "blueprint" });
     expect(window.localStorage.getItem(THEME_KEY)).toBeNull();
     act(() => theme().setDraft(null));
     expect(voidNow()).toBe("#0A0A14");
@@ -108,16 +108,18 @@ describe("ThemeProvider", () => {
 
   it("keeps a draft on screen across an OS flip", () => {
     mount({ ...DEFAULT_STORE, mode: "system", dark: "phosphor", light: "paper" });
-    act(() => theme().setDraft(SEEDS));
+    act(() => theme().setDraft({ seeds: SEEDS, base: null }));
     act(() => setSystemDark(false));
     expect(voidNow()).toBe(SEEDS.ground);
     act(() => theme().setDraft(null));
     expect(voidNow()).toBe("#FFFFFF");
   });
 
-  it("toasts THEME_UNREADABLE once for an unreadable initial store", () => {
-    mount(DEFAULT_STORE, true);
-    expect(vi.mocked(toast).mock.calls).toEqual([[THEME_UNREADABLE, "bad"]]);
+  it("toasts THEME_UNREADABLE once for an unreadable initial store, with the reason and the backup key as details", () => {
+    mount(DEFAULT_STORE, "saved theme 2 is invalid");
+    expect(vi.mocked(toast).mock.calls).toEqual([
+      [THEME_UNREADABLE, "bad", "saved theme 2 is invalid. The unreadable settings are kept in local storage under webboard.theme.unreadable."],
+    ]);
   });
 
   it("does not toast for a readable store", () => {
@@ -137,25 +139,50 @@ describe("ThemeProvider", () => {
   it("commits save, setSlot, setMode, remove and useCyberdeck to storage", () => {
     mount();
     const stored = (): ThemeStore => JSON.parse(window.localStorage.getItem(THEME_KEY) ?? "");
-    let id = "";
+    let saved: { id: string; reset: readonly string[] } | null = null;
     act(() => {
-      id = theme().save("Night", SEEDS, null);
+      saved = theme().save("Night", SEEDS, null);
     });
-    expect(id).toBe("mine-1");
+    expect(saved).toEqual({ id: "mine-1", reset: [] });
     expect(stored().mine).toEqual([{ id: "mine-1", name: "Night", seeds: SEEDS }]);
     act(() => theme().setMode("system"));
     expect(stored().mode).toBe("system");
     act(() => theme().setSlot("dark", "mine-1"));
     expect(stored().dark).toBe("mine-1");
     expect(voidNow()).toBe("#0B1630");
-    act(() => theme().remove("mine-1"));
+    let reset: readonly string[] = [];
+    act(() => {
+      reset = theme().remove("mine-1");
+    });
+    expect(reset).toEqual(["dark"]);
     expect(stored().dark).toBe("cyberdeck");
     act(() => theme().preview("paper"));
-    act(() => theme().setDraft(SEEDS));
+    act(() => theme().setDraft({ seeds: SEEDS, base: null }));
     act(() => theme().useCyberdeck());
     expect(stored()).toMatchObject({ mode: "fixed", active: "cyberdeck" });
     expect(theme().draft).toBeNull();
     expect(voidNow()).toBe("#0A0A14");
+    expect(vi.mocked(toast).mock.calls).toEqual([["Unsaved colours discarded."]]);
+  });
+
+  it("useCyberdeck without a draft does not toast", () => {
+    mount();
+    act(() => theme().choose("paper"));
+    act(() => theme().useCyberdeck());
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("save reports a slot reset when a saved theme changes scheme", () => {
+    mount({ ...DEFAULT_STORE, mode: "system" });
+    act(() => {
+      theme().save("Night", SEEDS, null);
+    });
+    act(() => theme().setSlot("dark", "mine-1"));
+    let saved: { id: string; reset: readonly string[] } | null = null;
+    act(() => {
+      saved = theme().save("Night", { ground: "#FFFFFF", text: "#111418", accent: "#1F5FD1", highlight: "#A35400", danger: "#CC1F3D" }, "mine-1");
+    });
+    expect(saved).toEqual({ id: "mine-1", reset: ["dark"] });
   });
 
   it("save throws its message and writes nothing", () => {
@@ -173,13 +200,13 @@ describe("ThemeProvider", () => {
 
 describe("useNativeBackground", () => {
   it("never paints on ios", () => {
-    mount(DEFAULT_STORE, false, <Native platform="ios" />);
+    mount(DEFAULT_STORE, null, <Native platform="ios" />);
     act(() => theme().choose("paper"));
     expect(paintNative).not.toHaveBeenCalled();
   });
 
   it("paints the shown ground on macos and on each committed change", () => {
-    mount(DEFAULT_STORE, false, <Native platform="macos" />);
+    mount(DEFAULT_STORE, null, <Native platform="macos" />);
     expect(lastPaint()).toEqual(["#0A0A14"]);
     act(() => theme().preview("phosphor"));
     expect(lastPaint()).toEqual(["#0A0A14"]);
@@ -187,10 +214,17 @@ describe("useNativeBackground", () => {
     expect(lastPaint()).toEqual(["#FFFFFF"]);
   });
 
-  it("toasts a rejection", async () => {
-    vi.mocked(paintNative).mockRejectedValue(new Error("not allowed"));
-    mount(DEFAULT_STORE, false, <Native platform="linux" />);
+  it("toasts a rejection with details and logs it, once while it keeps failing", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failure = new Error("not allowed");
+    vi.mocked(paintNative).mockRejectedValue(failure);
+    mount(DEFAULT_STORE, null, <Native platform="linux" />);
     await act(async () => {});
-    expect(vi.mocked(toast)).toHaveBeenCalledWith("Window colour could not be set: not allowed", "bad");
+    act(() => theme().choose("paper"));
+    await act(async () => {});
+    expect(vi.mocked(paintNative).mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(vi.mocked(toast).mock.calls).toEqual([["Window colour could not be set: not allowed", "bad", expect.stringContaining("Error: not allowed")]]);
+    expect(logged).toHaveBeenCalledWith(failure);
+    logged.mockRestore();
   });
 });

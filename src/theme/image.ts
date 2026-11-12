@@ -4,9 +4,21 @@ import { medianCut, pixelsOf } from "./importer";
 export const IMAGE_WIDTH = 96;
 const IMAGE_COLOURS = 8;
 
+export class ImageReadError extends Error {
+  override readonly name = "ImageReadError";
+
+  constructor(
+    message: string,
+    readonly cause: unknown = null,
+  ) {
+    super(message);
+  }
+}
+
 const decode = (file: File): Promise<ImageBitmap> =>
-  createImageBitmap(file).catch(() => {
-    throw new Error(`${file.name} is not an image WebBoard can read.`);
+  createImageBitmap(file).catch((e: unknown) => {
+    console.error(e);
+    throw new ImageReadError(`${file.name} is not an image WebBoard can read.`, e);
   });
 
 export const readImageColours = async (file: File): Promise<readonly Hex[]> => {
@@ -18,11 +30,11 @@ export const readImageColours = async (file: File): Promise<readonly Hex[]> => {
   const ctx = canvas.getContext("2d");
   if (ctx === null) {
     bitmap.close();
-    throw new Error("This webview cannot draw images, so WebBoard cannot read colours from them.");
+    throw new ImageReadError("This webview cannot draw images, so WebBoard cannot read colours from them.");
   }
   ctx.drawImage(bitmap, 0, 0, IMAGE_WIDTH, height);
   bitmap.close();
   const colours = medianCut(pixelsOf(ctx.getImageData(0, 0, IMAGE_WIDTH, height).data), IMAGE_COLOURS);
-  if (colours.length === 0) throw new Error(`${file.name} has no visible pixels.`);
+  if (colours.length === 0) throw new ImageReadError(`${file.name} has no visible pixels.`);
   return colours;
 };

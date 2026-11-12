@@ -4,6 +4,7 @@ import { passes } from "./checks";
 import { DEFAULT_DARK, DEFAULT_ID, DEFAULT_LIGHT, PRESETS, type Theme } from "./presets";
 
 export const THEME_KEY = "webboard.theme";
+export const THEME_BACKUP_KEY = "webboard.theme.unreadable";
 export const THEME_UNREADABLE = "Theme settings were unreadable, so WebBoard uses Cyberdeck.";
 export const MAX_MINE = 24;
 export const NAME_MAX = 40;
@@ -57,39 +58,55 @@ const slotHolds = (s: ThemeStore, scheme: Scheme, id: string): boolean => {
   return t !== undefined && schemeOfTheme(t) === scheme;
 };
 
-const valid = (s: ThemeStore): boolean =>
-  s.mine.length <= MAX_MINE &&
-  unique(s.mine.map((t) => t.id)) &&
-  unique(s.mine.map((t) => t.name.toLowerCase())) &&
-  find(s, s.active) !== undefined &&
-  slotHolds(s, "dark", s.dark) &&
-  slotHolds(s, "light", s.light);
+const problemOf = (s: ThemeStore): string | null =>
+  [
+    s.mine.length > MAX_MINE ? `${s.mine.length} saved themes, more than ${MAX_MINE}` : null,
+    unique(s.mine.map((t) => t.id)) ? null : "two saved themes share an id",
+    unique(s.mine.map((t) => t.name.toLowerCase())) ? null : "two saved themes share a name",
+    find(s, s.active) === undefined ? `the active theme ${s.active} does not exist` : null,
+    slotHolds(s, "dark", s.dark) ? null : `the dark slot ${s.dark} is not a dark theme`,
+    slotHolds(s, "light", s.light) ? null : `the light slot ${s.light} is not a light theme`,
+  ].find((p) => p !== null) ?? null;
 
-const parseJson = (raw: string): unknown => {
+const parseJson = (raw: string): { value: unknown } | { reason: string } => {
   try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
+    return { value: JSON.parse(raw) };
+  } catch (e) {
+    return { reason: `not JSON: ${e instanceof Error ? e.message : String(e)}` };
   }
 };
 
-export function parseStore(raw: string): ThemeStore | null {
-  const v = parseJson(raw);
-  if (!isRecord(v) || v.v !== 1 || !isMode(v.mode) || !Array.isArray(v.mine)) return null;
+export function readStore(raw: string): { store: ThemeStore } | { reason: string } {
+  const json = parseJson(raw);
+  if ("reason" in json) return json;
+  const v = json.value;
+  if (!isRecord(v)) return { reason: "not an object" };
+  if (v.v !== 1) return { reason: `version ${JSON.stringify(v.v)} is not 1` };
+  if (!isMode(v.mode)) return { reason: `mode ${JSON.stringify(v.mode)} is not fixed or system` };
+  if (!Array.isArray(v.mine)) return { reason: "mine is not a list" };
   const { mode, active, dark, light } = v;
-  if (typeof active !== "string" || typeof dark !== "string" || typeof light !== "string") return null;
+  if (typeof active !== "string" || typeof dark !== "string" || typeof light !== "string") return { reason: "active, dark or light is not a theme id" };
   const parsed = v.mine.map(parseMine);
+  const bad = parsed.findIndex((t) => t === null);
+  if (bad !== -1) return { reason: `saved theme ${bad + 1} is invalid` };
   const mine = parsed.filter((t): t is Theme => t !== null);
-  if (mine.length !== parsed.length) return null;
   const store: ThemeStore = { v: 1, mode, active, dark, light, mine };
-  return valid(store) ? store : null;
+  const problem = problemOf(store);
+  return problem === null ? { store } : { reason: problem };
 }
 
-export function loadStore(storage: Storage): { store: ThemeStore; unreadable: boolean } {
+export function parseStore(raw: string): ThemeStore | null {
+  const r = readStore(raw);
+  return "store" in r ? r.store : null;
+}
+
+export function loadStore(storage: Storage): { store: ThemeStore; unreadable: string | null } {
   const raw = storage.getItem(THEME_KEY);
-  if (raw === null) return { store: DEFAULT_STORE, unreadable: false };
-  const store = parseStore(raw);
-  return store === null ? { store: DEFAULT_STORE, unreadable: true } : { store, unreadable: false };
+  if (raw === null) return { store: DEFAULT_STORE, unreadable: null };
+  const r = readStore(raw);
+  if ("store" in r) return { store: r.store, unreadable: null };
+  storage.setItem(THEME_BACKUP_KEY, raw);
+  return { store: DEFAULT_STORE, unreadable: r.reason };
 }
 
 export function saveStore(storage: Storage, s: ThemeStore): void {
@@ -129,14 +146,22 @@ const reslot = (s: ThemeStore): ThemeStore => ({
   light: slotHolds(s, "light", s.light) ? s.light : DEFAULT_LIGHT,
 });
 
+export class ThemeSaveError extends Error {
+  override readonly name = "ThemeSaveError";
+}
+
+const SCHEMES: readonly Scheme[] = ["dark", "light"];
+
+export const resetSlots = (before: ThemeStore, after: ThemeStore): readonly Scheme[] => SCHEMES.filter((scheme) => before[scheme] !== after[scheme]);
+
 export function withSaved(s: ThemeStore, name: string, seeds: Seeds, replace: string | null): { store: ThemeStore; id: string } {
   const clean = name.trim();
-  if (clean.length === 0) throw new Error("Name the theme first.");
-  if (clean.length > NAME_MAX) throw new Error(`Use at most ${NAME_MAX} characters.`);
+  if (clean.length === 0) throw new ThemeSaveError("Name the theme first.");
+  if (clean.length > NAME_MAX) throw new ThemeSaveError(`Use at most ${NAME_MAX} characters.`);
   if (replace !== null) requireMine(s, replace);
-  if (s.mine.some((t) => t.id !== replace && t.name.toLowerCase() === clean.toLowerCase())) throw new Error(`You already have a theme called ${clean}.`);
-  if (replace === null && s.mine.length >= MAX_MINE) throw new Error(`You can keep ${MAX_MINE} themes; delete one first.`);
-  if (!passes(seeds, derive(seeds))) throw new Error("Fix the failing checks before saving.");
+  if (s.mine.some((t) => t.id !== replace && t.name.toLowerCase() === clean.toLowerCase())) throw new ThemeSaveError(`You already have a theme called ${clean}.`);
+  if (replace === null && s.mine.length >= MAX_MINE) throw new ThemeSaveError(`You can keep ${MAX_MINE} themes; delete one first.`);
+  if (!passes(seeds, derive(seeds))) throw new ThemeSaveError("Fix the failing checks before saving.");
   const id = replace ?? nextMineId(s);
   const theme = mineTheme(id, clean, seeds);
   const mine = replace === null ? [...s.mine, theme] : s.mine.map((t) => (t.id === replace ? theme : t));

@@ -29,8 +29,18 @@ import { ThemeProvider } from "./theme/ThemeContext";
 const root = document.getElementById("root");
 if (root === null) throw new Error("index.html has no #root element");
 
-const boot = loadStore(window.localStorage);
-applyTokens(document.documentElement, tokensOf(shownTheme(boot.store, window.matchMedia("(prefers-color-scheme: dark)").matches)));
+const loadTheme = (): ReturnType<typeof loadStore> => {
+  try {
+    const loaded = loadStore(window.localStorage);
+    applyTokens(document.documentElement, tokensOf(shownTheme(loaded.store, window.matchMedia("(prefers-color-scheme: dark)").matches)));
+    return loaded;
+  } catch (e) {
+    root.textContent = `WebBoard could not start: its theme settings could not be loaded (${e instanceof Error ? e.message : String(e)}).`;
+    throw e;
+  }
+};
+
+const boot = loadTheme();
 
 if (import.meta.env.VITE_WEBBOARD_PROBE === "1") {
   import("./probe/ProbeApp")
