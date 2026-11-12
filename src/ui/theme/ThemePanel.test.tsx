@@ -240,6 +240,21 @@ describe("ThemePanel", () => {
     expect(within(region).getByText("Unsaved")).toBeTruthy();
     expect(within(region).queryByRole("button", { name: "Save changes" })).toBeNull();
     expect(within(card(region, /^Night/)).queryByText("Edited")).toBeNull();
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("says so when a pasted palette replaces unsaved edits of a saved theme", () => {
+    const night = { id: "mine-1", name: "Night", note: "Yours", group: "mine" as const, seeds: { ground: "#0B1630", text: "#C9D6EA", accent: "#7CC4FF", highlight: "#FFD166", danger: "#FF6B88" } };
+    const { getByRole } = mount("panel", false, { ...DEFAULT_STORE, active: "mine-1", mine: [night] });
+    const region = getByRole("region", { name: "Theme" });
+    typeHex(region, "Accent", "#7CC4EE");
+    expect(within(region).getByRole("button", { name: "Save changes" })).toBeTruthy();
+    fireEvent.change(within(region).getByPlaceholderText("Paste hex codes, or the CSS variables colorfetcher.com exports"), { target: { value: SUNSET } });
+    fireEvent.click(within(region).getByRole("button", { name: "Make a dark theme" }));
+    expect(vi.mocked(toast).mock.calls).toEqual([[DISCARDED]]);
+    expect(within(region).queryByRole("button", { name: "Save changes" })).toBeNull();
+    typeHex(region, "Accent", "#7CC4FF");
+    expect(within(region).queryByRole("button", { name: "Save changes" })).toBeNull();
   });
 
   it("asks for at least three pasted colours", () => {

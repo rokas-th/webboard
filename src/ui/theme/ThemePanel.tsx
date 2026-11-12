@@ -89,6 +89,11 @@ function Body(p: { hover: boolean }) {
     api.setDraft({ seeds: next, base: draft === null ? target.id : draft.base });
   };
 
+  const make = (next: Seeds): void => {
+    if (draft !== null) toast(DISCARDED);
+    api.setDraft({ seeds: next, base: null });
+  };
+
   const choose = (id: string): void => {
     if (draft !== null) {
       api.setDraft(null);
@@ -144,7 +149,7 @@ function Body(p: { hover: boolean }) {
       <ThemeCards hover={p.hover} edited={edited} onChoose={choose} />
       <Follow />
       <Customize seeds={seeds} tokens={tokens} unsaved={draft !== null} onChange={edit} />
-      <ImportColours onMake={(next) => api.setDraft({ seeds: next, base: null })} />
+      <ImportColours onMake={make} />
       <Readability seeds={seeds} tokens={tokens} onFix={edit} />
       <div className="theme-section">
         <div className="theme-save">

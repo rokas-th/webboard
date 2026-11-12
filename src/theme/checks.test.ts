@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checks, fix, passes, type CheckId } from "./checks";
-import { contrast, hslToHex, isRedish } from "./colour";
+import { contrast, hslToHex, isRedish, rgbToHsl } from "./colour";
 import { derive, type Seeds } from "./derive";
 import { PRESETS, tokensOf } from "./presets";
 
@@ -120,18 +120,13 @@ describe("checks", () => {
   });
 
   it("returns null when no lightness reaches the target", () => {
-    const s = { ...cyberdeck, ground: "#757575", accent: "#7A7A7A" };
+    const s = { ...cyberdeck, ground: "#767676", accent: "#7A7A7A" };
     expect(checkOf("accent", s).pass).toBe(false);
     expect(fix("accent", s)).toBeNull();
   });
 
-  it("walks the other way when the preferred direction cannot reach the target", () => {
-    const s = { ...cyberdeck, ground: "#767676", accent: "#7A7A7A" };
-    expect(checkOf("accent", s).pass).toBe(false);
-    const fixed = fix("accent", s);
-    if (fixed === null) throw new Error("accent fix failed on a mid-grey ground");
-    expect(contrast(fixed.accent, "#000000")).toBeLessThan(contrast(s.accent, "#000000"));
-    expect(checkOf("accent", fixed).pass).toBe(true);
+  it("never turns an accent black on a mid-grey ground", () => {
+    expect(fix("accent", { ...cyberdeck, ground: "#767676", accent: hslToHex([25, 0.9, 0.5]) })).toBeNull();
   });
 
   it("separates danger from an accent just past hue 0", () => {
@@ -142,6 +137,39 @@ describe("checks", () => {
     expect(isRedish(fixed.danger)).toBe(true);
     expect(failing(fixed)).toEqual([]);
   });
+
+  it("keeps a danger that also needed contrast inside the red band", () => {
+    const s = { ...cyberdeck, danger: hslToHex([345, 0.9, 0.3]), accent: hslToHex([2, 0.4, 0.72]) };
+    expect(failing(s)).toEqual(["danger", "apart-acc"]);
+    const fixed = fix("apart-acc", s);
+    if (fixed === null) throw new Error("apart-acc fix failed");
+    expect(isRedish(fixed.danger)).toBe(true);
+    expect(failing(fixed)).toEqual([]);
+  });
+
+  it("never breaks a check that passed before the fix", () => {
+    const roles = ["accent", "highlight", "danger"] as const;
+    const cases = PRESETS.flatMap((p) =>
+      roles.flatMap((role) =>
+        Array.from({ length: 12 }, (_, i) => {
+          const [, sat, l] = rgbToHsl(p.seeds[role]);
+          return { ...p.seeds, [role]: hslToHex([i * 30 + 5, sat, l]) };
+        }),
+      ),
+    );
+    const broken = cases.flatMap((s) =>
+      failing(s).flatMap((id) => {
+        const next = fix(id, s);
+        if (next === null) return [];
+        const after = failing(next);
+        const lost = checks(s, derive(s))
+          .filter((c) => c.pass && after.includes(c.id))
+          .map((c) => c.id);
+        return after.includes(id) || lost.length > 0 ? [`${JSON.stringify(s)} ${id} -> ${after.join(",")}`] : [];
+      }),
+    );
+    expect(broken).toEqual([]);
+  }, 30_000);
 
   it("returns null when a hue rotation cannot separate greys", () => {
     const s = { ...cyberdeck, accent: "#AAAAAA", highlight: "#BBBBBB" };

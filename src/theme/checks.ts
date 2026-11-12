@@ -64,22 +64,13 @@ export const passes = (s: Seeds, t: Tokens): boolean => checks(s, t).every((c) =
 
 const withSeed = (s: Seeds, role: keyof Seeds, c: Hex): Seeds => ({ ...s, [role]: c });
 
-const firstHit = (h: number, sat: number, l: number, lighter: boolean, target: number, measure: (c: Hex) => number): { c: Hex; moved: number } | null => {
-  const hit = Array.from({ length: WALK_SAMPLES }, (_, i) => i / (WALK_SAMPLES - 1))
-    .map((t) => (lighter ? l + (1 - l) * t : l * (1 - t)))
-    .map((next) => ({ c: hslToHex([h, sat, next]), moved: Math.abs(next - l) }))
-    .find((x) => measure(x.c) >= target);
-  return hit ?? null;
-};
-
 const walk = (colour: Hex, away: Hex, target: number, measure: (c: Hex) => number): Hex | null => {
   const [h, sat, l] = rgbToHsl(colour);
-  const preferLighter = schemeOf(away) === "dark";
-  const hits = [preferLighter, !preferLighter]
-    .map((lighter) => firstHit(h, sat, l, lighter, target, measure))
-    .filter((x): x is { c: Hex; moved: number } => x !== null);
-  if (hits.length === 0) return null;
-  return hits.reduce((a, b) => (b.moved < a.moved ? b : a)).c;
+  const lighter = schemeOf(away) === "dark";
+  const path = Array.from({ length: WALK_SAMPLES }, (_, i) => i / (WALK_SAMPLES - 1)).map((t) =>
+    hslToHex([h, sat, lighter ? l + (1 - l) * t : l * (1 - t)]),
+  );
+  return path.find((c) => measure(c) >= target) ?? null;
 };
 
 const readable = (role: Coloured, s: Seeds): Seeds | null => {
@@ -99,10 +90,11 @@ const minGap = (c: Hex, s: Seeds): number => Math.min(hueGap(c, s.highlight), hu
 
 const separateDanger = (s: Seeds): Seeds | null => {
   const [, sat, l] = rgbToHsl(s.danger);
-  const red = DANGER_HUES.map((h) => hslToHex([h, Math.max(sat, 0.6), l])).filter(isRedish);
+  const red = DANGER_HUES.map((h) => readable("danger", withSeed(s, "danger", hslToHex([h, Math.max(sat, 0.6), l])))).filter(
+    (x): x is Seeds => x !== null && isRedish(x.danger),
+  );
   if (red.length === 0) return null;
-  const best = red.reduce((a, b) => (minGap(b, s) > minGap(a, s) ? b : a));
-  return readable("danger", withSeed(s, "danger", best));
+  return red.reduce((a, b) => (minGap(b.danger, s) > minGap(a.danger, s) ? b : a));
 };
 
 const unRed = (s: Seeds): Seeds | null =>
@@ -137,9 +129,11 @@ const FIXES: Record<CheckId, (s: Seeds) => Seeds | null> = {
   "only-danger-red": unRed,
 };
 
-const holds = (id: CheckId, s: Seeds): boolean => checks(s, derive(s)).some((c) => c.id === id && c.pass);
+const passing = (s: Seeds): ReadonlySet<CheckId> => new Set(checks(s, derive(s)).filter((c) => c.pass).map((c) => c.id));
 
 export const fix = (id: CheckId, s: Seeds): Seeds | null => {
   const next = FIXES[id](s);
-  return next !== null && holds(id, next) ? next : null;
+  if (next === null) return null;
+  const after = passing(next);
+  return after.has(id) && [...passing(s)].every((c) => after.has(c)) ? next : null;
 };
