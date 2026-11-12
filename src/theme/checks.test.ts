@@ -120,9 +120,27 @@ describe("checks", () => {
   });
 
   it("returns null when no lightness reaches the target", () => {
-    const s = { ...cyberdeck, ground: "#767676", accent: "#7A7A7A" };
+    const s = { ...cyberdeck, ground: "#757575", accent: "#7A7A7A" };
     expect(checkOf("accent", s).pass).toBe(false);
     expect(fix("accent", s)).toBeNull();
+  });
+
+  it("walks the other way when the preferred direction cannot reach the target", () => {
+    const s = { ...cyberdeck, ground: "#767676", accent: "#7A7A7A" };
+    expect(checkOf("accent", s).pass).toBe(false);
+    const fixed = fix("accent", s);
+    if (fixed === null) throw new Error("accent fix failed on a mid-grey ground");
+    expect(contrast(fixed.accent, "#000000")).toBeLessThan(contrast(s.accent, "#000000"));
+    expect(checkOf("accent", fixed).pass).toBe(true);
+  });
+
+  it("separates danger from an accent just past hue 0", () => {
+    const s = { ...cyberdeck, danger: hslToHex([345, 0.9, 0.7]), accent: hslToHex([2, 0.4, 0.72]) };
+    expect(failing(s)).toEqual(["apart-acc"]);
+    const fixed = fix("apart-acc", s);
+    if (fixed === null) throw new Error("apart-acc fix failed");
+    expect(isRedish(fixed.danger)).toBe(true);
+    expect(failing(fixed)).toEqual([]);
   });
 
   it("returns null when a hue rotation cannot separate greys", () => {

@@ -31,7 +31,7 @@ const FIX_RATIO = 4.6;
 const FIX_TEXT = 7;
 const FIX_DIM = 9;
 const WALK_SAMPLES = 201;
-const DANGER_HUES: readonly number[] = [330, 335, 340, 345, 350, 355, 360, 5, 10, 15];
+const DANGER_HUES: readonly number[] = Array.from({ length: 91 }, (_, i) => (330 + i / 2) % 360);
 const ROTATIONS: readonly number[] = Array.from({ length: 11 }, (_, i) => (i + 1) * 30);
 const NOT_RED: readonly ("accent" | "highlight")[] = ["accent", "highlight"];
 
@@ -64,13 +64,22 @@ export const passes = (s: Seeds, t: Tokens): boolean => checks(s, t).every((c) =
 
 const withSeed = (s: Seeds, role: keyof Seeds, c: Hex): Seeds => ({ ...s, [role]: c });
 
+const firstHit = (h: number, sat: number, l: number, lighter: boolean, target: number, measure: (c: Hex) => number): { c: Hex; moved: number } | null => {
+  const hit = Array.from({ length: WALK_SAMPLES }, (_, i) => i / (WALK_SAMPLES - 1))
+    .map((t) => (lighter ? l + (1 - l) * t : l * (1 - t)))
+    .map((next) => ({ c: hslToHex([h, sat, next]), moved: Math.abs(next - l) }))
+    .find((x) => measure(x.c) >= target);
+  return hit ?? null;
+};
+
 const walk = (colour: Hex, away: Hex, target: number, measure: (c: Hex) => number): Hex | null => {
   const [h, sat, l] = rgbToHsl(colour);
-  const lighter = schemeOf(away) === "dark";
-  const path = Array.from({ length: WALK_SAMPLES }, (_, i) => i / (WALK_SAMPLES - 1)).map((t) =>
-    hslToHex([h, sat, lighter ? l + (1 - l) * t : l * (1 - t)]),
-  );
-  return path.find((c) => measure(c) >= target) ?? null;
+  const preferLighter = schemeOf(away) === "dark";
+  const hits = [preferLighter, !preferLighter]
+    .map((lighter) => firstHit(h, sat, l, lighter, target, measure))
+    .filter((x): x is { c: Hex; moved: number } => x !== null);
+  if (hits.length === 0) return null;
+  return hits.reduce((a, b) => (b.moved < a.moved ? b : a)).c;
 };
 
 const readable = (role: Coloured, s: Seeds): Seeds | null => {

@@ -231,6 +231,17 @@ describe("ThemePanel", () => {
     expect(saveButton(region).disabled).toBe(false);
   });
 
+  it("never offers a pasted palette as changes to the saved theme on show", () => {
+    const night = { id: "mine-1", name: "Night", note: "Yours", group: "mine" as const, seeds: { ground: "#0B1630", text: "#C9D6EA", accent: "#7CC4FF", highlight: "#FFD166", danger: "#FF6B88" } };
+    const { getByRole } = mount("panel", false, { ...DEFAULT_STORE, active: "mine-1", mine: [night] });
+    const region = getByRole("region", { name: "Theme" });
+    fireEvent.change(within(region).getByPlaceholderText("Paste hex codes, or the CSS variables colorfetcher.com exports"), { target: { value: SUNSET } });
+    fireEvent.click(within(region).getByRole("button", { name: "Make a dark theme" }));
+    expect(within(region).getByText("Unsaved")).toBeTruthy();
+    expect(within(region).queryByRole("button", { name: "Save changes" })).toBeNull();
+    expect(within(card(region, /^Night/)).queryByText("Edited")).toBeNull();
+  });
+
   it("asks for at least three pasted colours", () => {
     const { getByRole } = mount("panel");
     const region = getByRole("region", { name: "Theme" });

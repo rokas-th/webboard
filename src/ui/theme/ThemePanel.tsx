@@ -144,7 +144,7 @@ function Body(p: { hover: boolean }) {
       <ThemeCards hover={p.hover} edited={edited} onChoose={choose} />
       <Follow />
       <Customize seeds={seeds} tokens={tokens} unsaved={draft !== null} onChange={edit} />
-      <ImportColours onMake={edit} />
+      <ImportColours onMake={(next) => api.setDraft({ seeds: next, base: null })} />
       <Readability seeds={seeds} tokens={tokens} onFix={edit} />
       <div className="theme-section">
         <div className="theme-save">
