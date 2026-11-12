@@ -4,6 +4,7 @@ import probeCss from "../probe/probe.css?raw";
 import { channels } from "../theme/colour";
 import { HEX_TOKENS, type Tokens } from "../theme/derive";
 import { PRESETS, tokensOf } from "../theme/presets";
+import { paint, swatch } from "../ui/theme/ThemeCards";
 
 const SHEETS: Record<string, string> = import.meta.glob("./*.css", { query: "?raw", import: "default", eager: true });
 
@@ -20,11 +21,13 @@ const declarations = (block: string): Map<string, string> =>
 
 const ROOT = declarations(rootBlock(tokensCss));
 
-const DECLARED = new Set([...stripComments(tokensCss).matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
-
 const cyberdeckTheme = PRESETS.find((t) => t.id === "cyberdeck");
 if (cyberdeckTheme === undefined) throw new Error("no cyberdeck preset");
 const CYBERDECK = tokensOf(cyberdeckTheme);
+
+const INLINE = [...Object.keys(paint(CYBERDECK)), ...Object.keys(swatch(CYBERDECK.void))];
+
+const DECLARED = new Set([...[...stripComments(tokensCss).matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]), ...INLINE]);
 
 const COLOUR_TOKENS = (Object.keys(CYBERDECK) as (keyof Tokens)[]).filter((name) => name !== "scheme");
 

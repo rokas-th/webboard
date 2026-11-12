@@ -16,6 +16,7 @@ import "./styles/choices.css";
 import "./styles/palette.css";
 import "./styles/sync.css";
 import "./styles/sheet.css";
+import "./styles/theme.css";
 import "./styles/phone.css";
 import "./styles/print.css";
 import App from "./App";

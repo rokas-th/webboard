@@ -151,7 +151,7 @@ const styled = new Set(sheet.rules.flatMap((r) => (r.selector.match(/\.[A-Za-z][
 
 describe("every class the stylesheets style", () => {
   it("reads the sources and sheets it is asserting against", () => {
-    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./list.css", "./palette.css", "./panel.css", "./phone.css", "./print.css", "./sheet.css", "./shell.css", "./sync.css", "./timeline.css", "./tokens.css"]);
+    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./list.css", "./palette.css", "./panel.css", "./phone.css", "./print.css", "./sheet.css", "./shell.css", "./sync.css", "./theme.css", "./timeline.css", "./tokens.css"]);
     expect(Object.keys(SOURCES).length).toBeGreaterThan(40);
     expect(CODE.length).toBeGreaterThan(100000);
     expect(styled.size).toBeGreaterThan(60);
@@ -235,6 +235,13 @@ describe("the Cyberdeck look", () => {
       ".gbar::before": ".gbar",
       ".gbar::after": ".gbar",
       ".ms::before": ".ms",
+      ".theme-pv-side": ".theme-preview",
+      ".theme-pv-done": ".theme-preview",
+      ".theme-pv-doing": ".theme-preview",
+      ".theme-pv-held": ".theme-preview",
+      ".theme-pv-today": ".theme-preview",
+      ".theme-pv-danger": ".theme-preview",
+      ".theme-switch::after": ".theme-switch",
     };
     const positioned = ["relative", "absolute", "sticky"];
     const absolute = sheet.rules.filter((r) => r.decls["position"] === "absolute" && r.conditions.length === 0).map((r) => r.selector);
