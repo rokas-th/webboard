@@ -89,7 +89,7 @@
   top: 22px;
   height: 24px;
   padding: 4px 0 0 4px;
-  border-left: 1px solid rgba(35, 35, 61, 0.7);
+  border-left: 1px solid rgba(var(--line-rgb), 0.7);
   font-size: 10px;
   color: var(--dim);
   white-space: nowrap;
@@ -97,7 +97,7 @@
 }
 
 .tl-tick.off {
-  color: rgba(116, 133, 160, 0.55);
+  color: rgba(var(--dim-rgb), 0.55);
 }
 
 .tl-tick.hol {
@@ -143,7 +143,7 @@
   gap: 8px;
   height: var(--row-h);
   padding: 0 12px 0 14px;
-  border-bottom: 1px solid rgba(35, 35, 61, 0.55);
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.55);
   border-left: 2px solid transparent;
   cursor: pointer;
   white-space: nowrap;
@@ -202,7 +202,7 @@
 
 .tl-row.ghost-row {
   border-left-style: dashed;
-  border-left-color: rgba(255, 176, 0, 0.45);
+  border-left-color: rgba(var(--amber-rgb), 0.45);
 }
 
 .tl-row.ghost-row .name {
@@ -226,7 +226,7 @@
 
 .dot-doing {
   background: var(--cyan);
-  box-shadow: 0 0 6px rgba(36, 224, 255, 0.55);
+  box-shadow: 0 0 6px rgba(var(--cyan-rgb), 0.55);
 }
 
 .dot-done {
@@ -235,12 +235,12 @@
 
 .dot-late {
   background: var(--amber);
-  box-shadow: 0 0 8px rgba(255, 176, 0, 0.6);
+  box-shadow: 0 0 8px rgba(var(--amber-rgb), 0.6);
 }
 
 .dot-conflict {
   background: var(--magenta);
-  box-shadow: 0 0 8px rgba(255, 59, 107, 0.6);
+  box-shadow: 0 0 8px rgba(var(--magenta-rgb), 0.6);
 }
 
 .tl-chart {
@@ -254,27 +254,27 @@
   left: 0;
   right: 0;
   height: var(--row-h);
-  border-bottom: 1px solid rgba(35, 35, 61, 0.55);
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.55);
 }
 
 .tl-rowline.selected {
-  background: rgba(255, 176, 0, 0.035);
+  background: rgba(var(--amber-rgb), 0.035);
 }
 
 .tl-off {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(116, 133, 160, 0.055);
+  background: rgba(var(--dim-rgb), 0.055);
   pointer-events: none;
 }
 
 .tl-off.hol {
-  background: rgba(255, 176, 0, 0.06);
+  background: rgba(var(--amber-rgb), 0.06);
 }
 
 .tl-off.closure {
-  background: repeating-linear-gradient(135deg, rgba(255, 176, 0, 0.07) 0 4px, transparent 4px 9px);
+  background: repeating-linear-gradient(135deg, rgba(var(--amber-rgb), 0.07) 0 4px, transparent 4px 9px);
 }
 
 .tl-today {
@@ -283,7 +283,7 @@
   bottom: 0;
   width: 1px;
   background: var(--amber);
-  box-shadow: 0 0 8px rgba(255, 176, 0, 0.6);
+  box-shadow: 0 0 8px rgba(var(--amber-rgb), 0.6);
   pointer-events: none;
   z-index: 2;
 }
@@ -352,7 +352,7 @@
   height: 18px;
   border: 1px solid var(--cyan-dim);
   border-radius: 3px;
-  background: rgba(36, 224, 255, 0.1);
+  background: rgba(var(--cyan-rgb), 0.1);
   cursor: grab;
   z-index: 3;
   touch-action: pan-x pan-y;
@@ -365,7 +365,7 @@
 @media (hover: hover) {
   .bar:hover {
     border-color: var(--cyan);
-    box-shadow: 0 0 10px rgba(36, 224, 255, 0.3);
+    box-shadow: 0 0 10px rgba(var(--cyan-rgb), 0.3);
   }
 }
 
@@ -378,14 +378,14 @@
   left: 0;
   top: 0;
   bottom: 0;
-  background: rgba(36, 224, 255, 0.3);
+  background: rgba(var(--cyan-rgb), 0.3);
   border-radius: 2px 0 0 2px;
   pointer-events: none;
 }
 
 .bar.done {
-  border-color: rgba(21, 140, 166, 0.55);
-  background: rgba(21, 140, 166, 0.22);
+  border-color: rgba(var(--cyan-dim-rgb), 0.55);
+  background: rgba(var(--cyan-dim-rgb), 0.22);
 }
 
 .bar.done .fill {
@@ -394,17 +394,17 @@
 
 .bar.late {
   border-color: var(--amber);
-  background: rgba(255, 176, 0, 0.1);
+  background: rgba(var(--amber-rgb), 0.1);
 }
 
 .bar.late .fill {
-  background: rgba(255, 176, 0, 0.28);
+  background: rgba(var(--amber-rgb), 0.28);
 }
 
 .bar.held {
   border-color: var(--amber);
   border-style: dashed;
-  background: rgba(255, 176, 0, 0.07);
+  background: rgba(var(--amber-rgb), 0.07);
 }
 
 .bar.dayoff {
@@ -413,7 +413,7 @@
 
 .bar.conflict {
   border-color: var(--magenta);
-  background: rgba(255, 59, 107, 0.12);
+  background: rgba(var(--magenta-rgb), 0.12);
 }
 
 .bar.dayoff.conflict {
@@ -421,7 +421,7 @@
 }
 
 .bar.selected {
-  box-shadow: 0 0 0 1px var(--amber), 0 0 12px rgba(255, 176, 0, 0.35);
+  box-shadow: 0 0 0 1px var(--amber), 0 0 12px rgba(var(--amber-rgb), 0.35);
 }
 
 .bar .h {
@@ -511,7 +511,7 @@
 .gbar {
   position: absolute;
   height: 6px;
-  background: rgba(200, 211, 224, 0.28);
+  background: rgba(var(--text-rgb), 0.28);
   z-index: 2;
   pointer-events: none;
 }
@@ -523,7 +523,7 @@
   top: 0;
   width: 2px;
   height: 11px;
-  background: rgba(200, 211, 224, 0.45);
+  background: rgba(var(--text-rgb), 0.45);
 }
 
 .gbar::before {
@@ -553,19 +553,19 @@
   inset: 1px;
   transform: rotate(45deg);
   border: 1px solid var(--amber);
-  background: rgba(255, 176, 0, 0.22);
-  box-shadow: 0 0 8px rgba(255, 176, 0, 0.45);
+  background: rgba(var(--amber-rgb), 0.22);
+  box-shadow: 0 0 8px rgba(var(--amber-rgb), 0.45);
   transition: box-shadow 0.12s ease-out;
 }
 
 @media (hover: hover) {
   .ms:hover::before {
-    box-shadow: 0 0 14px rgba(255, 176, 0, 0.75);
+    box-shadow: 0 0 14px rgba(var(--amber-rgb), 0.75);
   }
 }
 
 .ms.done::before {
-  background: rgba(255, 176, 0, 0.6);
+  background: rgba(var(--amber-rgb), 0.6);
 }
 
 .ms.held::before {
@@ -578,12 +578,12 @@
 
 .ms.conflict::before {
   border-color: var(--magenta);
-  background: rgba(255, 59, 107, 0.25);
-  box-shadow: 0 0 8px rgba(255, 59, 107, 0.5);
+  background: rgba(var(--magenta-rgb), 0.25);
+  box-shadow: 0 0 8px rgba(var(--magenta-rgb), 0.5);
 }
 
 .ms.selected::before {
-  box-shadow: 0 0 0 1px var(--heading), 0 0 14px rgba(255, 176, 0, 0.8);
+  box-shadow: 0 0 0 1px var(--heading), 0 0 14px rgba(var(--amber-rgb), 0.8);
 }
 
 .ms .nub {
@@ -618,7 +618,7 @@
 .ghost {
   position: absolute;
   height: 3px;
-  background: rgba(116, 133, 160, 0.75);
+  background: rgba(var(--dim-rgb), 0.75);
   border-radius: 2px;
   z-index: 2;
   pointer-events: none;
@@ -639,7 +639,7 @@
   padding: 0 6px;
   border: 1px dashed var(--cyan);
   border-radius: 3px;
-  background: rgba(36, 224, 255, 0.08);
+  background: rgba(var(--cyan-rgb), 0.08);
   z-index: 3;
   pointer-events: none;
   font-size: 10.5px;
@@ -692,5 +692,5 @@
   background: var(--panel);
   color: var(--cyan);
   font-size: 11.5px;
-  box-shadow: 0 0 12px rgba(36, 224, 255, 0.35);
+  box-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.35);
 }

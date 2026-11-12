@@ -15,7 +15,7 @@
   border-bottom: none;
   border-radius: 12px 12px 0 0;
   padding-bottom: env(safe-area-inset-bottom);
-  box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 -16px 48px rgba(var(--shadow-rgb), 0.55);
 }
 
 .sheet-head {

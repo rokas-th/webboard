@@ -14,7 +14,7 @@
   background: var(--panel);
   border: 1px solid var(--cyan-dim);
   border-radius: 10px;
-  box-shadow: 0 0 24px rgba(36, 224, 255, 0.15), 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 24px rgba(var(--cyan-rgb), 0.15), 0 24px 64px rgba(var(--shadow-rgb), 0.6);
   overflow: hidden;
 }
 

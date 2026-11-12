@@ -1,6 +1,6 @@
 .chip-magenta {
   color: var(--magenta);
-  border-color: rgba(255, 59, 107, 0.55);
+  border-color: rgba(var(--magenta-rgb), 0.55);
 }
 
 .choice-banner {
@@ -9,7 +9,7 @@
   gap: 10px;
   margin: 0 0 8px;
   padding: 7px 10px;
-  border: 1px solid rgba(255, 176, 0, 0.45);
+  border: 1px solid rgba(var(--amber-rgb), 0.45);
   border-radius: 6px;
   background: var(--active);
   color: var(--amber);
@@ -114,7 +114,7 @@
 
 .choice-col.picked {
   border-color: var(--cyan-dim);
-  box-shadow: 0 0 12px rgba(36, 224, 255, 0.15);
+  box-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.15);
 }
 
 .modal .choice-col p,

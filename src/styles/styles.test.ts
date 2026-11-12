@@ -200,7 +200,7 @@ describe("the Cyberdeck look", () => {
 
   it("keeps magenta for danger", () => {
     const allowed = (sel: string): boolean => /bad|conflict|danger|magenta|\.x:/.test(sel) || sel.includes(".legend .lc");
-    const users = sheet.rules.filter((r) => Object.values(r.decls).some((v) => v.includes("var(--magenta)")));
+    const users = sheet.rules.filter((r) => Object.values(r.decls).some((v) => /var\(--magenta(-rgb)?\)/.test(v)));
     expect(users.length).toBeGreaterThan(3);
     expect(users.filter((r) => !allowed(r.selector)).map((r) => r.selector)).toEqual([]);
   });
@@ -324,9 +324,9 @@ describe("the Cyberdeck look", () => {
     expect(timeline).not.toMatch(/90,\s*107,\s*133/);
     const plain = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
     expect([plain(".tl-tick.off")["color"], plain(".tl-off")["background"], plain(".ghost")["background"]]).toEqual([
-      "rgba(116, 133, 160, 0.55)",
-      "rgba(116, 133, 160, 0.055)",
-      "rgba(116, 133, 160, 0.75)",
+      "rgba(var(--dim-rgb), 0.55)",
+      "rgba(var(--dim-rgb), 0.055)",
+      "rgba(var(--dim-rgb), 0.75)",
     ]);
   });
 

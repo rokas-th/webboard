@@ -51,3 +51,9 @@ it("keeps --dim at 4.5:1 or more on void, panel and panel-2", () => {
     ["--panel-2", true],
   ]);
 });
+
+it("gives each of the eleven tokens a channel token with the same colour", () => {
+  const channelsDeclared = new Map([...tokens.matchAll(/(--[a-z0-9-]+)-rgb\s*:\s*(\d+), (\d+), (\d+)\s*;/g)].map((m) => [m[1], [m[2], m[3], m[4]].map(Number)]));
+  const fromHex = (hex: string): number[] => [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  expect(EXPECTED.map(([name]) => [name, channelsDeclared.get(name)])).toEqual(EXPECTED.map(([name, hex]) => [name, fromHex(hex)]));
+});
