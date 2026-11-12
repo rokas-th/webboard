@@ -214,7 +214,7 @@ describe("ItemPanel fields", () => {
       <OpenChoice.Provider value={vi.fn()}>
         <UiContext.Provider
           value={{
-            ui: { plan: null, view: "timeline", zoom: "W", selected: "Late", collapsed: new Set(), baseline: null, dialog: null, reveal: null, follow: null, naming: null },
+            ui: { plan: null, view: "timeline", zoom: "W", selected: "Late", collapsed: new Set(), baseline: null, dialog: null, reveal: null, follow: null, naming: null, theme: false },
             setUi: vi.fn(),
           }}
         >

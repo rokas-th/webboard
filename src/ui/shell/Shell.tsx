@@ -26,6 +26,7 @@ import { ItemPanel } from "../panel/ItemPanel";
 import { PlanPanel } from "../panel/PlanPanel";
 import { PrintSheet } from "../print/PrintSheet";
 import { startPrint } from "../print/start";
+import { canHover, closeTheme, ThemePanel } from "../theme/ThemePanel";
 import { Timeline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { HolidayState } from "./HolidayState";
@@ -46,6 +47,7 @@ import { ExampleButton, NewPlanButton, Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 import { Tray } from "./Tray";
 import { useUpdates, useUpdateState } from "./UpdateLine";
+import { useNativeBackground, useTheme } from "../../theme/ThemeContext";
 
 export interface ShellProps {
   registry: Registry;
@@ -94,6 +96,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   const updates = useUpdates();
   useUpdateState(updates);
   const { ui, setUi } = useUiValue();
+  const theme = useTheme();
   const { main, open: openPlan, trashOwn } = usePlanSelection(registry);
   const files = usePlanFiles(registry, openPlan);
   const { creating, importing, importPlan } = files;
@@ -203,6 +206,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     reveal,
     print,
     updates,
+    theme,
   };
   const ctxRef = useRef(ctx);
   useLayoutEffect(() => {
@@ -223,6 +227,11 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       if (target !== null && target.closest('[role="menu"]') !== null && e.key !== "Escape") return;
       const typing = isTyping(e.target, e.key);
       const dialog = c.ui.dialog !== null || document.querySelector('[aria-modal="true"]') !== null;
+      if (e.key === "Escape" && c.ui.theme && !dialog && !typing) {
+        e.preventDefault();
+        closeTheme(c.theme, () => c.setUi({ theme: false }));
+        return;
+      }
       const id = keyToCommand(e, { mac: c.mac, typing, dialog, selected: c.ui.selected !== null });
       if (id === null) return;
       if (id === "close-dialog" || id === "deselect") {
@@ -358,6 +367,10 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   useEffect(() => {
     if (!compact) setSheet(null);
   }, [compact]);
+  useEffect(() => {
+    if (compact && ui.theme) setSheet(null);
+  }, [compact, ui.theme]);
+  const closeThemePanel = (): void => setUi({ theme: false });
   const sheets = compact && ui.dialog === null && (
     <>
       <Sheet open={sheet === "plans"} title="Plans" onClose={closeSheet}>
@@ -369,7 +382,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         </Sheet>
       )}
       {session !== null && selectedItemShown !== null && (
-        <Sheet key={selectedItemShown} open={sheet === null} title={itemName(session, selectedItemShown)} onClose={() => setUi({ selected: null })}>
+        <Sheet key={selectedItemShown} open={sheet === null && !ui.theme} title={itemName(session, selectedItemShown)} onClose={() => setUi({ selected: null })}>
           {itemPanel(selectedItemShown, session)}
         </Sheet>
       )}
@@ -407,9 +420,11 @@ function WideBody(p: ShellProps & { compact: boolean }) {
             )}
             {content}
           </main>
-          {session !== null && !compact && (
+          {!compact && (session !== null || ui.theme) && (
             <div className="slot slot-panel" data-slot="panel">
-              {selectedItemShown !== null ? (
+              {ui.theme ? (
+                <ThemePanel frame="panel" hover={canHover()} onClose={closeThemePanel} />
+              ) : session === null ? null : selectedItemShown !== null ? (
                 itemPanel(selectedItemShown, session)
               ) : (
                 <PlanPanel session={session} readOnly={readOnly} />
@@ -418,6 +433,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
           )}
         </div>
         {sheets}
+        {compact && ui.theme && <ThemePanel frame="sheet" hover={canHover()} onClose={closeThemePanel} />}
         {session !== null && ui.dialog !== null && ui.dialog.t === "calendar" && (
           <CalendarDialog key={session.view().plan.id} session={session} registry={registry} clock={p.clock} onClose={() => setUi({ dialog: null })} />
         )}
@@ -465,6 +481,7 @@ function detailsOf(e: unknown): string {
 
 export function Shell(p: ShellProps) {
   const form = useFormFactor();
+  useNativeBackground(p.registry.device.platform);
   useEffect(() => {
     const onError = (e: ErrorEvent): void => {
       const error: unknown = e.error;

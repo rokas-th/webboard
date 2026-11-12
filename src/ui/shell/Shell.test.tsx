@@ -28,6 +28,8 @@ import { OpenChoice } from "../run";
 import { PlanHead } from "./PlanHead";
 import { Shell } from "./Shell";
 import { connectedStubs, withSync } from "../../test/withSync";
+import { paintNative } from "../../theme/apply";
+import { PRESETS, tokensOf, type Theme } from "../../theme/presets";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
@@ -164,6 +166,12 @@ const notifier = (r: Registry): (() => void) => {
     };
   });
   return () => [...subscribers].forEach((cb) => cb());
+};
+
+const cyberdeck = (): Theme => {
+  const t = PRESETS.find((p) => p.id === "cyberdeck");
+  if (t === undefined) throw new Error("no cyberdeck preset");
+  return t;
 };
 
 const shellOn = (r: Registry) => <Shell registry={r} clock={fixedClock("2026-11-09")} />;
@@ -2067,5 +2075,105 @@ describe("Shell: print (product-8)", () => {
     await settle();
     expect(printNow).not.toHaveBeenCalled();
     expect(printSheet()).toBeNull();
+  });
+});
+
+describe("the theme panel in the wide shell", () => {
+  const themeIn = (root: Element | null): HTMLElement | null => (root === null ? null : root.querySelector<HTMLElement>('section[aria-label="Theme"]'));
+  const openTheme = (): void => {
+    const panel = slot("panel");
+    if (!(panel instanceof HTMLElement)) throw new Error("no panel slot");
+    fireEvent.click(within(panel).getByRole("button", { name: "Theme…" }));
+  };
+  const closeTheme = (): void => {
+    const section = themeIn(slot("panel"));
+    if (section === null) throw new Error("no theme panel");
+    fireEvent.click(within(section).getAllByRole("button", { name: "Close" })[0]);
+  };
+  const editAccent = (): void => {
+    const section = themeIn(slot("panel"));
+    if (section === null) throw new Error("no theme panel");
+    const field = within(section).getByRole("textbox", { name: "Accent hex" });
+    fireEvent.change(field, { target: { value: "#335577" } });
+    fireEvent.blur(field);
+  };
+
+  it("replaces the plan panel from its Theme… button, and the plan panel returns on Close", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
+    openTheme();
+    expect(lastUi().theme).toBe(true);
+    expect(themeIn(slot("panel"))).not.toBeNull();
+    expect(slot("panel")?.querySelector(".panel")).toBeNull();
+    closeTheme();
+    expect(lastUi().theme).toBe(false);
+    expect(themeIn(slot("panel"))).toBeNull();
+    expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
+  });
+
+  it("keeps Theme in the slot while an item is selected, and shows the item panel after Close", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    openTheme();
+    editAccent();
+    setUiNow({ selected: "t3" });
+    expect(lastUi().selected).toBe("t3");
+    expect(themeIn(slot("panel"))).not.toBeNull();
+    expect(within(themeIn(slot("panel")) ?? document.body).getByRole("textbox", { name: "Accent hex" })).toHaveProperty("value", "#335577");
+    closeTheme();
+    expect(toastTexts()).toContain("Unsaved colours discarded.");
+    expect(within(slot("panel") as HTMLElement).getByLabelText("Name")).toHaveProperty("value", "Tracking: review results");
+  });
+
+  it("shows Theme in the panel slot with no plan open", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t, { plans: () => [] }).ui));
+    await settle();
+    expect(document.querySelector(".empty-state")).not.toBeNull();
+    expect(slot("panel")).toBeNull();
+    setUiNow({ theme: true });
+    expect(themeIn(slot("panel"))).not.toBeNull();
+    closeTheme();
+    expect(slot("panel")).toBeNull();
+  });
+
+  it("closes Theme on Escape at the window, discarding a draft, and leaves the selection", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    openTheme();
+    setUiNow({ selected: "t3" });
+    editAccent();
+    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe("#335577");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+    expect(lastUi().theme).toBe(false);
+    expect(lastUi().selected).toBe("t3");
+    expect(toastTexts()).toContain("Unsaved colours discarded.");
+    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe(tokensOf(cyberdeck()).cyan);
+  });
+
+  it("leaves Escape to an open dialog while Theme is open", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    openTheme();
+    setUiNow({ dialog: { t: "about" } });
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+    expect([lastUi().dialog, lastUi().theme]).toEqual([null, true]);
+  });
+
+  it("paints the native window background with the shown ground on macOS", async () => {
+    vi.mocked(paintNative).mockClear();
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    expect(vi.mocked(paintNative).mock.calls).toEqual([[tokensOf(cyberdeck()).void]]);
   });
 });

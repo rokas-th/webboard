@@ -5,6 +5,7 @@ import { PRESETS, tokensOf } from "./presets";
 const windowSet = vi.fn<(c: string) => Promise<void>>();
 const webviewSet = vi.fn<(c: string) => Promise<void>>();
 
+vi.unmock("./apply");
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ setBackgroundColor: windowSet }) }));
 vi.mock("@tauri-apps/api/webview", () => ({ getCurrentWebview: () => ({ setBackgroundColor: webviewSet }) }));
 

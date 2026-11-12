@@ -381,3 +381,35 @@ describe('compact shell, data-form="compact"', () => {
     expect(document.querySelector(".update-line")).toBeNull();
   });
 });
+
+describe("the theme sheet on compact", () => {
+  it("opens Theme as a sheet from the Plan sheet, closing the Plan sheet, and Close discards a draft", async () => {
+    const t = await made();
+    await shown(t);
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Plan" }));
+    fireEvent.click(within(planSheet()).getByRole("button", { name: "Theme…" }));
+    const sheets = screen.getAllByRole("dialog");
+    expect(sheets.map((d) => d.getAttribute("aria-label"))).toEqual(["Theme"]);
+    expect(sheets[0].getAttribute("aria-modal")).toBe("true");
+    expect(document.querySelector('[data-slot="panel"]')).toBeNull();
+    const field = within(sheets[0]).getByRole("textbox", { name: "Accent hex" });
+    fireEvent.change(field, { target: { value: "#335577" } });
+    fireEvent.blur(field);
+    fireEvent.click(within(sheets[0]).getAllByRole("button", { name: "Close" })[0]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(lastUi()[0].theme).toBe(false);
+    expect(toastTexts()).toContain("Unsaved colours discarded.");
+  });
+
+  it("shows the Theme sheet over a selected item's sheet and returns to it on Escape", async () => {
+    const t = await made();
+    await shown(t);
+    act(() => lastUi()[1]({ selected: "t3" }));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Tracking: review results"]);
+    act(() => lastUi()[1]({ theme: true }));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Theme"]);
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Theme" }), { key: "Escape" });
+    expect(lastUi()[0].theme).toBe(false);
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Tracking: review results"]);
+  });
+});

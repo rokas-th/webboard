@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, vi } from "vitest";
 import { installMatchMedia, resetSystemDark } from "./matchMedia";
 
+vi.mock("../theme/apply", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../theme/apply")>();
+  return { ...real, paintNative: vi.fn(async () => undefined) };
+});
+
 class TestPointerEvent extends MouseEvent {
   readonly pointerId: number;
   readonly pointerType: string;

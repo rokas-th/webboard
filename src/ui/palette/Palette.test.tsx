@@ -13,6 +13,8 @@ import { timelineRows } from "../timeline/rows";
 import type { Command } from "./commands";
 import { shownCommands } from "./Palette";
 import { withSync } from "../../test/withSync";
+import { PRESETS, tokensOf } from "../../theme/presets";
+import { DEFAULT_STORE, saveStore, withChosen } from "../../theme/store";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -177,7 +179,7 @@ describe("opening the palette", () => {
     press("k", { metaKey: true });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(document.activeElement).toBe(query());
-    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileCreate the example plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "HelpCommand palette", "HelpAbout WebBoard"]);
+    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileCreate the example plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "ViewTheme…", "ViewUse Cyberdeck theme", "HelpCommand palette", "HelpAbout WebBoard"]);
     press("Escape", {}, query());
     fireEvent.click(button(bar(), "⌘K"));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
@@ -258,25 +260,25 @@ describe("the palette list", () => {
     await shown(t);
     press("k", { metaKey: true });
     type("view");
-    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results"]);
+    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewTheme…", "ViewUse Cyberdeck theme"]);
     expect(highlighted()).toBe("ViewTimeline1");
     press("ArrowUp", {}, query());
     expect(highlighted()).toBe("ViewTimeline1");
     const scrolled = vi.mocked(Element.prototype.scrollIntoView);
     scrolled.mockClear();
-    [1, 2, 3, 4, 5, 6, 7].forEach(() => press("ArrowDown", {}, query()));
-    expect(highlighted()).toBe("Go toTracking: review results");
+    [1, 2, 3, 4, 5, 6, 7, 8, 9].forEach(() => press("ArrowDown", {}, query()));
+    expect(highlighted()).toBe("ViewUse Cyberdeck theme");
     const lastScrolled = (): string | null => {
       const el: unknown = scrolled.mock.contexts[scrolled.mock.contexts.length - 1];
       if (!(el instanceof Element)) throw new Error("scrollIntoView was not called on an element");
       expect(el.classList.contains("on")).toBe(true);
       return el.textContent;
     };
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([6, "Go toTracking: review results"]);
-    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4, 5, 6].map(() => [{ block: "nearest" }]));
-    [1, 2, 3, 4, 5].forEach(() => press("ArrowUp", {}, query()));
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([8, "ViewUse Cyberdeck theme"]);
+    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4, 5, 6, 7, 8].map(() => [{ block: "nearest" }]));
+    [1, 2, 3, 4, 5, 6, 7].forEach(() => press("ArrowUp", {}, query()));
     expect(highlighted()).toBe("ViewNow · Next · Later2");
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([11, "ViewNow · Next · Later2"]);
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([15, "ViewNow · Next · Later2"]);
     press("Enter", {}, query());
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(uiNow()[0].view).toBe("board");
@@ -340,6 +342,26 @@ describe("the palette list", () => {
     runFromPalette("New plan");
     runFromPalette("New plan");
     expect(createPlan.mock.calls).toEqual([["New plan"]]);
+  });
+
+  it("opens Theme in the panel slot from Theme…", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    runFromPalette("Theme…");
+    expect(uiNow()[0].theme).toBe(true);
+    expect(panel().querySelector('section[aria-label="Theme"]')).not.toBeNull();
+  });
+
+  it("goes back to Cyberdeck from Use Cyberdeck theme", async () => {
+    saveStore(window.localStorage, withChosen(DEFAULT_STORE, "daylight"));
+    const t = await made(MESA_SEED);
+    await shown(t);
+    const ground = (id: string): string => tokensOf(PRESETS.find((p) => p.id === id) ?? PRESETS[0]).void;
+    expect(document.documentElement.style.getPropertyValue("--void")).toBe(ground("daylight"));
+    runFromPalette("Use Cyberdeck theme");
+    expect(document.documentElement.style.getPropertyValue("--void")).toBe(ground("cyberdeck"));
+    expect(JSON.parse(window.localStorage.getItem("webboard.theme") ?? "null")).toMatchObject({ mode: "fixed", active: "cyberdeck" });
+    expect(uiNow()[0].theme).toBe(false);
   });
 
   it("opens the calendar dialog", async () => {
@@ -606,7 +628,7 @@ describe("read-only", () => {
           .filter((e) => !(e instanceof HTMLButtonElement || e instanceof HTMLInputElement || e instanceof HTMLSelectElement || e instanceof HTMLTextAreaElement) || !e.disabled)
           .filter((e) => !((e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement) && e.readOnly))
           .map((e) => e.closest("label")?.textContent ?? e.textContent ?? "");
-      expect(enabled(panel())).toEqual([]);
+      expect(enabled(panel())).toEqual(["Theme…"]);
       fireEvent.click(within(bar()).getByRole("tab", { name: "Now · Next · Later" }));
       const board = document.querySelector('[data-slot="board"]');
       if (!(board instanceof HTMLElement)) throw new Error("no board");

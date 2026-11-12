@@ -8,6 +8,7 @@ import type { InstallProgress } from "./store/updates";
 import { SyncManager } from "./sync/manager";
 import { Registry } from "./store/registry";
 import { seededStore } from "./test/shell";
+import { themed } from "./test/theme";
 import { closeListenerCount, requestWindowClose, resetTauri, tauri, windowState } from "./test/tauriMock";
 import { Dialog } from "./ui/common/Dialog";
 import { clearToasts, Toasts } from "./ui/common/Toast";
@@ -61,7 +62,7 @@ const logged = () => vi.spyOn(console, "error").mockImplementation(() => undefin
 it("the toolbar is the window's drag region and carries the wordmark", async () => {
   await seededStore(["Alpha"]);
   spyOpen();
-  render(<App />);
+  render(themed(<App />));
   await settle();
   expect(document.querySelector("header.toolbar[data-tauri-drag-region] .wordmark")?.textContent).toBe("WebBoard");
 });
@@ -72,7 +73,7 @@ describe("start failure", () => {
     const failure = new AppError("device.io", "Could not read the device id: permission denied.");
     const log = logged();
     const open = spyOpen().mockRejectedValueOnce(failure);
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(log.mock.calls).toEqual([[failure]]);
     expect(screen.getByText("Could not read the device id: permission denied.")).toBeTruthy();
@@ -92,7 +93,7 @@ describe("start failure", () => {
     const failure = new AppError("settings.corrupt", "settings.json is not valid JSON: line 1.");
     const log = logged();
     const open = spyOpen().mockRejectedValueOnce(failure);
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(log.mock.calls).toEqual([[failure]]);
     expect(screen.getByText("settings.json is not valid JSON: line 1.")).toBeTruthy();
@@ -117,7 +118,7 @@ describe("start failure", () => {
     const failure = new AppError("settings.corrupt", "settings.json is not valid JSON: line 1.");
     const log = logged();
     const open = spyOpen().mockRejectedValueOnce(failure);
-    render(<App />);
+    render(themed(<App />));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Reset settings" }));
     await settle();
@@ -136,7 +137,7 @@ describe("start failure", () => {
     const failure = new AppError("store.corrupt", "The plan list is damaged at record 3.");
     const log = logged();
     const open = spyOpen().mockRejectedValueOnce(failure);
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(log.mock.calls).toEqual([[failure]]);
     expect(screen.getByText("The plan list is damaged at record 3.")).toBeTruthy();
@@ -160,7 +161,7 @@ describe("start failure", () => {
     const failure = new AppError("store.foreign", "/data/plans/Old backup");
     const log = logged();
     const open = spyOpen().mockRejectedValueOnce(failure);
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(log.mock.calls).toEqual([[failure]]);
     expect(screen.getByText(foreignFolderLine("/data/plans/Old backup"))).toBeTruthy();
@@ -185,7 +186,7 @@ describe("the example plan at the first start", () => {
     const s = await seededStore([]);
     s.state.settings = null;
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     await settle();
     expect(current()).toBe("Example: Website relaunch");
@@ -208,7 +209,7 @@ describe("the example plan at the first start", () => {
       opened.push(Promise.resolve(r));
       return r;
     });
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(screen.getByText("Could not save settings.json: disk full").className).toBe("start-bad");
     expect(log).toHaveBeenCalledTimes(1);
@@ -231,7 +232,7 @@ it("lists plans before loading them and warms after the first render", async () 
     seen.push({ sidebar: document.querySelector(".sidebar") !== null });
   });
   spyOpen();
-  render(<App />);
+  render(themed(<App />));
   await settle();
   const nav = screen.getByRole("navigation", { name: "Plans" });
   expect(within(nav).getByText("Alpha")).toBeTruthy();
@@ -247,7 +248,7 @@ it("toasts a warm rejection", async () => {
   const log = logged();
   vi.spyOn(Registry.prototype, "warm").mockRejectedValue(failure);
   spyOpen();
-  render(<App />);
+  render(themed(<App />));
   await settle();
   expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => [e.textContent, e.className])).toEqual([["warm broke", "toast bad"]]);
   expect(log.mock.calls).toEqual([[failure]]);
@@ -265,7 +266,7 @@ describe("closing the window", () => {
   it("closes the registry, then destroys the window", async () => {
     await seededStore(["Alpha"]);
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(closeListenerCount()).toBe(1);
     const order: string[] = [];
@@ -286,10 +287,12 @@ describe("closing the window", () => {
     const log = logged();
     spyOpen();
     render(
-      <>
-        <App />
-        <Toasts />
-      </>,
+      themed(
+        <>
+          <App />
+          <Toasts />
+        </>,
+      ),
     );
     await settle();
     const close = vi.spyOn(Registry.prototype, "close").mockRejectedValueOnce(failure);
@@ -311,7 +314,7 @@ describe("closing the window", () => {
     const failure = new Error("window not found");
     const log = logged();
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     windowState.destroyFailure = failure;
     await requestClose();
@@ -327,7 +330,7 @@ describe("closing the window", () => {
     await seededStore(["Alpha"]);
     logged();
     const open = spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const close = vi.spyOn(Registry.prototype, "close").mockRejectedValueOnce(new Error("disk full"));
     await requestClose();
@@ -343,7 +346,7 @@ describe("closing the window", () => {
   it("stops listening when the app unmounts", async () => {
     await seededStore(["Alpha"]);
     spyOpen();
-    const { unmount } = render(<App />);
+    const { unmount } = render(themed(<App />));
     await settle();
     expect(closeListenerCount()).toBe(1);
     unmount();
@@ -354,14 +357,14 @@ describe("closing the window", () => {
 it("restores the view from webboard.place after a remount", async () => {
   await seededStore(["Alpha"]);
   spyOpen();
-  const first = render(<App />);
+  const first = render(themed(<App />));
   await settle();
   fireEvent.click(screen.getByRole("tab", { name: "List" }));
   expect(JSON.parse(window.localStorage.getItem(PLACE_KEY) ?? "null")).toMatchObject({ view: "list" });
   first.unmount();
   const [p] = opened.splice(0);
   await (await p).close();
-  render(<App />);
+  render(themed(<App />));
   await settle();
   expect(screen.getByRole("tab", { name: "List" }).getAttribute("aria-selected")).toBe("true");
   expect(document.querySelector('[data-slot="list"]')).not.toBeNull();
@@ -388,7 +391,7 @@ describe("updates", () => {
   it("checks once when the shell opens on the desktop and shows the line at the bottom of the sidebar", async () => {
     await seededStore(["Alpha"]);
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(checkUpdate).toHaveBeenCalledTimes(1);
     const line = document.querySelector("nav.sidebar")?.lastElementChild;
@@ -403,7 +406,7 @@ describe("updates", () => {
     const seeded = await seededStore(["Alpha"]);
     resetTauri({ ...seeded.answers, device_info: () => ({ deviceId: "mac", platform: "ios" }) });
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(toolbar()).not.toBeNull();
     expect(checkUpdate).not.toHaveBeenCalled();
@@ -432,7 +435,7 @@ describe("updates", () => {
       await real.call(this);
     });
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(screen.getByText("WebBoard 0.2.0 is available")).toBeTruthy();
     order.length = 0;
@@ -447,7 +450,7 @@ describe("updates", () => {
     const log = logged();
     const close = vi.spyOn(Registry.prototype, "close");
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
     await settle();
@@ -464,7 +467,7 @@ describe("updates", () => {
     const failure = new AppError("store.io", "Could not save “Alpha”: disk full.");
     const log = logged();
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const close = vi.spyOn(Registry.prototype, "close").mockRejectedValueOnce(failure);
     fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
@@ -489,10 +492,12 @@ describe("updates", () => {
     const close = vi.spyOn(Registry.prototype, "close");
     spyOpen();
     render(
-      <>
-        <App />
-        <Toasts />
-      </>,
+      themed(
+        <>
+          <App />
+          <Toasts />
+        </>,
+      ),
     );
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
@@ -515,7 +520,7 @@ describe("updates", () => {
     const log = logged();
     vi.mocked(checkUpdate).mockRejectedValueOnce(failure);
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(screen.getByText("Could not check for updates: error sending request")).toBeTruthy();
     expect(log.mock.calls).toEqual([[failure]]);

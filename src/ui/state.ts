@@ -28,6 +28,7 @@ export interface UiState {
   reveal: ItemId | "today" | null;
   follow: ItemId | null;
   naming: ItemId | null;
+  theme: boolean;
 }
 
 export const PLACE_KEY = "webboard.place";
@@ -52,6 +53,7 @@ const DEFAULTS: UiState = {
   reveal: null,
   follow: null,
   naming: null,
+  theme: false,
 };
 
 type Place = Pick<UiState, "plan" | "view" | "zoom" | "collapsed">;

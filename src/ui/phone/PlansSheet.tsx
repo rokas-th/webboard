@@ -11,7 +11,7 @@ import { restorePlan, type PlanFiles } from "../shell/selection";
 import { EntryTag, LocalLine } from "../shell/LocalLine";
 import { canMoveToSpace } from "../shell/moving";
 import { NewPlanButton } from "../shell/Sidebar";
-import type { SyncPane } from "../state";
+import { useUiValue, type SyncPane } from "../state";
 
 export const NEW_PLAN = "New plan";
 
@@ -27,6 +27,22 @@ export function AboutRow(p: { onAbout(): void }) {
   return (
     <button type="button" className="choice-row about-row" onClick={p.onAbout}>
       {ABOUT_TITLE}
+    </button>
+  );
+}
+
+export function ThemeRow(p: { onClose(): void }) {
+  const { setUi } = useUiValue();
+  return (
+    <button
+      type="button"
+      className="choice-row theme-row"
+      onClick={() => {
+        setUi({ theme: true });
+        p.onClose();
+      }}
+    >
+      Theme…
     </button>
   );
 }
@@ -163,6 +179,7 @@ export function PlansSheet(p: {
             </ul>
           </section>
         )}
+        <ThemeRow onClose={p.onClose} />
         {p.onAbout !== undefined && <AboutRow onAbout={p.onAbout} />}
       </nav>
     </Sheet>

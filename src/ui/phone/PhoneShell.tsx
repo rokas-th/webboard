@@ -19,6 +19,7 @@ import { ExampleButton, NewPlanButton } from "../shell/Sidebar";
 import { RemovedBanner } from "../sync/RemovedBanner";
 import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
 import { UiContext, useUi, useUiValue, type DialogState, type SyncPane } from "../state";
+import { canHover, ThemePanel } from "../theme/ThemePanel";
 import { Timeline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { ChoiceSheet } from "./ChoiceSheet";
@@ -329,6 +330,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
           <SyncDialog pane={ui.dialog.pane} frame="sheet" onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />
         )}
         {purging !== null && <PurgeConfirm registry={p.registry} id={purging} frame="sheet" onClose={() => setPurging(null)} />}
+        {ui.theme && <ThemePanel frame="sheet" hover={canHover()} onClose={() => setUi({ theme: false })} />}
         <ConvertedReport frame="sheet" />
         <Toasts />
       </div>

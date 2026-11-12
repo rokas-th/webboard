@@ -8,6 +8,7 @@ import { SyncProvider } from "../sync/SyncProvider";
 import { fakeFactory } from "./fakeProvider";
 import { memoryDoc, type TestSession } from "./session";
 import { tauri } from "./tauriMock";
+import { themed } from "./theme";
 
 export const SYNC_SERVER = "https://webboard.rokass.org";
 export const SYNC_SPACE = "sp000000000";
@@ -32,10 +33,10 @@ export function withSync(
   tauri.answers.sync_status = () => status;
   if (connected && tauri.answers.sync_ticket === undefined) tauri.answers.sync_ticket = () => ({ ticket: "tk_test", expiresAt: 0 });
   const factory = opts?.factory ?? fakeFactory(connected ? { syncOnConnect: true } : undefined);
-  return (
+  return themed(
     <SyncProvider registry={registry} factory={factory}>
       {ui}
-    </SyncProvider>
+    </SyncProvider>,
   );
 }
 

@@ -36,6 +36,7 @@ import { fakeFactory, type FakeFactory, type FakeProvider } from "../../test/fak
 import { argsOf, fail, IX, ip, ixAct, NOW, own, RESET_HINT, seedIndex, seedPlan, seedSpace, SPACE, syncWorld, TODAY, type SyncWorld } from "../../test/syncWorld";
 import type { Answer } from "../../test/tauriMock";
 import { NO_REGION } from "./PhoneStatus";
+import { paintNative } from "../../theme/apply";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
@@ -2433,5 +2434,44 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     expect(r.plans()).toEqual([]);
     expect(emptyState()).not.toBeNull();
     expect(topBar().querySelector(".phone-plan-name")).toBeNull();
+  });
+});
+
+describe("the theme sheet on the phone", () => {
+  const themeRow = (sheet: HTMLElement): HTMLElement => {
+    const row = sheet.querySelector("button.theme-row");
+    if (!(row instanceof HTMLElement)) throw new Error("no Theme… row");
+    expect(row.textContent).toBe("Theme…");
+    return row;
+  };
+  const dialogs = (): (string | null)[] => screen.queryAllByRole("dialog").map((d) => d.getAttribute("aria-label"));
+
+  it("opens Theme from the Plans sheet, closing it", async () => {
+    await shown(await made());
+    fireEvent.click(themeRow(openPlans()));
+    expect(dialogs()).toEqual(["Theme"]);
+    expect(lastUi().theme).toBe(true);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Theme" })).getAllByRole("button", { name: "Close" })[0]);
+    expect(dialogs()).toEqual([]);
+    expect(lastUi().theme).toBe(false);
+  });
+
+  it("opens Theme from the Plans sheet in the empty state", async () => {
+    await showIndex(await emptyIndex());
+    fireEvent.click(themeRow(openPlans()));
+    expect(dialogs()).toEqual(["Theme"]);
+  });
+
+  it("opens Theme from the ⋯ Plan sheet, closing it", async () => {
+    await shown(await planSheetMade());
+    fireEvent.click(themeRow(openPlanSheet()));
+    expect(dialogs()).toEqual(["Theme"]);
+  });
+
+  it("does not paint a native background on iOS", async () => {
+    vi.mocked(paintNative).mockClear();
+    await shown(await made());
+    fireEvent.click(themeRow(openPlans()));
+    expect(paintNative).not.toHaveBeenCalled();
   });
 });

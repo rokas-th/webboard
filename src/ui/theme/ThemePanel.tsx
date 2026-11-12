@@ -3,7 +3,7 @@ import { passes } from "../../theme/checks";
 import { derive, schemeOf, type Scheme, type Seeds } from "../../theme/derive";
 import { tokensOf } from "../../theme/presets";
 import { allThemes } from "../../theme/store";
-import { useTheme } from "../../theme/ThemeContext";
+import { useTheme, type ThemeApi } from "../../theme/ThemeContext";
 import { Sheet } from "../common/Sheet";
 import { toast } from "../common/Toast";
 import { ThemeCards } from "./ThemeCards";
@@ -153,16 +153,20 @@ function Body(p: { hover: boolean }) {
   );
 }
 
+export const canHover = (): boolean => window.matchMedia("(hover: hover)").matches;
+
+export function closeTheme(api: ThemeApi, onClose: () => void): void {
+  api.preview(null);
+  if (api.draft !== null) {
+    api.setDraft(null);
+    toast(DISCARDED);
+  }
+  onClose();
+}
+
 export function ThemePanel(p: { frame: "panel" | "sheet"; hover: boolean; onClose(): void }) {
   const api = useTheme();
-  const close = (): void => {
-    api.preview(null);
-    if (api.draft !== null) {
-      api.setDraft(null);
-      toast(DISCARDED);
-    }
-    p.onClose();
-  };
+  const close = (): void => closeTheme(api, p.onClose);
 
   if (p.frame === "sheet") {
     return (

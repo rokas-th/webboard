@@ -43,13 +43,16 @@ export function PlanPanel(p: { session: PlanSession; readOnly: boolean }) {
       </div>
       <h2>Calendar</h2>
       <p className="val-line">{calendarSummary(plan.calendar)}</p>
-      {!p.readOnly && (
-        <div className="actions">
+      <div className="actions">
+        {!p.readOnly && (
           <button type="button" className="button-small" onClick={() => setUi({ dialog: { t: "calendar" } })}>
             Change calendar…
           </button>
-        </div>
-      )}
+        )}
+        <button type="button" className="button-small" onClick={() => setUi({ theme: true })}>
+          Theme…
+        </button>
+      </div>
       <Baselines view={view} readOnly={p.readOnly} run={run} />
       <Trash view={view} readOnly={p.readOnly} run={run} />
       <History session={p.session} readOnly={p.readOnly} />

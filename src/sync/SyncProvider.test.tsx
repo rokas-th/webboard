@@ -27,6 +27,7 @@ import {
 } from "../test/syncWorld";
 import { setScreen } from "../test/setup";
 import { requestWindowClose, tauri } from "../test/tauriMock";
+import { themed } from "../test/theme";
 import { clearToasts } from "../ui/common/Toast";
 import { useUi, type UiState } from "../ui/state";
 import { SyncManager } from "./manager";
@@ -155,7 +156,7 @@ describe("SyncProvider", () => {
     const factory = vi.fn(f);
     fake.factory = factory;
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(within(screen.getByRole("banner")).getByRole("button", { name: "Local only" })).toBe(chip());
     expect(factory).not.toHaveBeenCalled();
@@ -165,7 +166,7 @@ describe("SyncProvider", () => {
     const w = syncWorld({ answers: { sync_setup: () => SPACE } });
     w.status = () => ({ space: null, revoked: false });
     const registry = spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const r = await registry();
     const attach = vi.spyOn(r, "attachSpace");
@@ -183,7 +184,7 @@ describe("SyncProvider", () => {
     const w = syncWorld({ answers: { sync_pair_join: () => SPACE } });
     w.status = () => ({ space: null, revoked: false });
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const main = document.querySelector("main.main");
     if (!(main instanceof HTMLElement)) throw new Error("no main");
@@ -219,7 +220,7 @@ describe("SyncProvider", () => {
     spaceStore(w, [["P", "Launch"]]);
     w.status = () => ({ space: SPACE, revoked: true });
     const registry = spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const r = await registry();
     await click(within(sidebar()).getByRole("button", { name: "Launch" }));
@@ -257,7 +258,7 @@ describe("SyncProvider", () => {
       managers.push(this);
       return start.call(this);
     });
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const r = await registry();
     const p = await r.session("P");
@@ -293,7 +294,7 @@ describe("SyncProvider", () => {
       ["R", "Plan R"],
     ]);
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(current()).toBe("Plan P");
     const appends = vi.spyOn(PlanDoc.prototype, "append");
@@ -316,7 +317,7 @@ describe("SyncProvider", () => {
     const w = syncWorld({ names: { P: "Plan P" } });
     spaceStore(w, [["P", "Plan P"]]);
     const registry = spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const r = await registry();
     const p = await r.session("P");
@@ -345,7 +346,7 @@ describe("SyncProvider", () => {
     seedPlan(w.mem, "P", "Plan P");
     w.status = fail({ code: "sync.io", message });
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const before = root();
     expect(within(sidebar()).getByText("Plan P")).toBeTruthy();
@@ -374,7 +375,7 @@ describe("SyncProvider", () => {
     const w = syncWorld({ answers: { sync_reset: fail({ code: "sync.io", message: "Could not set the sync state aside: Permission denied (os error 13)" }) } });
     w.status = fail({ code: "sync.io", message: "Could not read the sync state: invalid JSON" });
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     await click(chip());
     const before = calls("sync_status");
@@ -387,7 +388,7 @@ describe("SyncProvider", () => {
     const w = syncWorld({ names: { P: "Plan P" } });
     spaceStore(w, [["P", "Plan P"]]);
     spyOpen();
-    const { unmount } = render(<App />);
+    const { unmount } = render(themed(<App />));
     await settle();
     expect(f.all.length).toBeGreaterThan(0);
     unmount();
@@ -426,7 +427,7 @@ describe("SyncProvider", () => {
     const registry = spyOpen();
     const stop = vi.spyOn(SyncManager.prototype, "stop");
     const start = vi.spyOn(SyncManager.prototype, "start");
-    render(<App />);
+    render(themed(<App />));
     const closes: string[] = [];
     await act(async () => {
       const r = await registry();
@@ -467,7 +468,7 @@ describe("SyncProvider", () => {
     const w = syncWorld({ names: { P: "Plan P" } });
     spaceStore(w, [["P", "Plan P"]]);
     const registry = spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const r = await registry();
     const order: string[] = [];
@@ -533,7 +534,7 @@ describe("SyncProvider on the phone", () => {
     seedIndex(w.mem, "local", localIndex(ixAct("l-L", ["l-n"], [ip("L", false)])));
     seedPlan(w.mem, "L", "Alpha");
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const before = root();
     await openPlans();
@@ -562,7 +563,7 @@ describe("SyncProvider on the phone", () => {
     const w = syncWorld({ platform: "ios", answers: { sync_pair_join: () => SPACE } });
     w.status = () => ({ space: null, revoked: false });
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const before = root();
     expect(emptyButtons()).toEqual(EMPTY);
@@ -618,7 +619,7 @@ describe("SyncProvider on the phone", () => {
       ["R", "Plan R"],
     ]);
     spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     expect(planName()).toBe("Plan P");
     const appends = vi.spyOn(PlanDoc.prototype, "append");
@@ -640,7 +641,7 @@ describe("SyncProvider on the phone", () => {
     const w = syncWorld({ platform: "ios", names: { P: "Plan P" } });
     spaceStore(w, [["P", "Plan P"]]);
     const registry = spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const r = await registry();
     const p = await r.session("P");
@@ -668,7 +669,7 @@ describe("SyncProvider on the phone", () => {
     seedPlan(w.mem, "P", "Plan P");
     w.status = fail({ code: "sync.io", message });
     const registry = spyOpen();
-    render(<App />);
+    render(themed(<App />));
     await settle();
     const r = await registry();
     const before = root();

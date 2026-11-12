@@ -19,7 +19,7 @@ import { canMoveToSpace } from "../shell/moving";
 import { exportFlow } from "../shell/fileFlows";
 import type { PlanFiles } from "../shell/selection";
 import { useUiValue } from "../state";
-import { AboutRow, ImportButton } from "./PlansSheet";
+import { AboutRow, ImportButton, ThemeRow } from "./PlansSheet";
 import { useReadOnly } from "./readOnly";
 
 export function CalendarSheet(p: { session: PlanSession; registry: Registry; clock: Clock; review?: CalendarReview; onClose(): void }) {
@@ -108,6 +108,7 @@ export function PlanSheet(p: { session: PlanSession; files: PlanFiles; onClose()
           </button>
           <ImportButton files={p.files} />
         </div>
+        <ThemeRow onClose={p.onClose} />
         <AboutRow onAbout={() => setUi({ dialog: { t: "about" } })} />
       </div>
     </Sheet>

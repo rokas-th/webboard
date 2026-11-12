@@ -7,6 +7,7 @@ import type { Registry } from "../../store/registry";
 import { childrenOf } from "../../plan/project";
 import type { PlanSession } from "../../store/session";
 import type { Updates } from "../../store/updates";
+import type { ThemeApi } from "../../theme/ThemeContext";
 import { duplicateRow } from "../duplicate";
 import { countedConflicts, goToFirstPatch } from "../choices/HeadCounts";
 import { baselineDefault } from "../panel/Baselines";
@@ -40,6 +41,7 @@ export interface CommandCtx {
   reveal(target: ItemId | "today"): void;
   print(): void;
   updates: Updates | null;
+  theme: ThemeApi;
 }
 
 export const NEW_NAME: Readonly<Record<ItemKind, string>> = { task: "New task", milestone: "New milestone", group: "New group" };
@@ -314,6 +316,8 @@ export function commands(ctx: CommandCtx): Command[] {
     { id: "sync-join", group: "File", label: "Join with a code", run: () => ctx.setUi({ dialog: { t: "sync", pane: "join" } }) },
     { id: "sync-devices", group: "File", label: "Sync devices", run: () => ctx.setUi({ dialog: { t: "sync", pane: "devices" } }) },
     ...openPlans,
+    { id: "theme", group: "View", label: "Theme…", run: () => ctx.setUi({ theme: true }) },
+    { id: "theme-cyberdeck", group: "View", label: "Use Cyberdeck theme", run: () => ctx.theme.useCyberdeck() },
     { id: "palette", group: "Help", label: "Command palette", keys: ctx.mac ? "⌘K" : "Ctrl K", run: () => ctx.setUi({ dialog: { t: "palette" } }) },
     { id: "about", group: "Help", label: "About WebBoard", run: () => ctx.setUi({ dialog: { t: "about" } }) },
     ...updateCommands(ctx.updates),

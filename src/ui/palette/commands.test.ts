@@ -11,6 +11,7 @@ import { runWith } from "../run";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { UiState } from "../state";
 import type { UpdateState, Updates } from "../../store/updates";
+import type { ThemeApi } from "../../theme/ThemeContext";
 import { commands, createdItem, type CommandCtx } from "./commands";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -43,6 +44,7 @@ const UI: UiState = {
   reveal: null,
   follow: null,
   naming: null,
+  theme: false,
 };
 
 const SMALL: readonly SeedItem[] = [
@@ -63,6 +65,7 @@ interface Harness {
   reveal: ReturnType<typeof vi.fn<(target: string) => void>>;
   print: ReturnType<typeof vi.fn<() => void>>;
   open: ReturnType<typeof vi.fn<(choice: string, side?: string) => void>>;
+  useCyberdeck: ReturnType<typeof vi.fn<() => void>>;
 }
 
 function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly string[] = [], more: Partial<Registry> = {}): Harness {
@@ -73,6 +76,8 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
   const reveal = vi.fn<(target: string) => void>();
   const print = vi.fn<() => void>();
   const open = vi.fn<(choice: string, side?: string) => void>();
+  const useCyberdeck = vi.fn<() => void>();
+  const theme = { useCyberdeck } as unknown as ThemeApi;
   const id = t.session.view().plan.id;
   const registry = testRegistry(t, {
     plans: () => [
@@ -100,8 +105,9 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     reveal,
     print,
     updates: null,
+    theme,
   };
-  return { ctx, setUi, select, newPlan, newExample, reveal, print, open };
+  return { ctx, setUi, select, newPlan, newExample, reveal, print, open, useCyberdeck };
 }
 
 const find = (ctx: CommandCtx, id: string) => {
@@ -144,7 +150,7 @@ describe("commands()", () => {
     const t = await made(SMALL);
     const h = harness(t, { plan: null }, ["p2"]);
     const ctx: CommandCtx = { ...h.ctx, session: null, run: null, undo: null, redo: null };
-    expect(ids(ctx)).toEqual(["new-plan", "example-plan", "import", "sync-setup", "sync-join", "sync-devices", `open-plan:${t.session.view().plan.id}`, "open-plan:p2", "palette", "about"]);
+    expect(ids(ctx)).toEqual(["new-plan", "example-plan", "import", "sync-setup", "sync-join", "sync-devices", `open-plan:${t.session.view().plan.id}`, "open-plan:p2", "theme", "theme-cyberdeck", "palette", "about"]);
   });
 
   it("holds export and import in the File group with an open plan", async () => {
@@ -237,6 +243,25 @@ describe("commands()", () => {
     const h = harness(t);
     ["palette", "about", "calendar"].forEach((id) => find(h.ctx, id).run());
     expect(h.setUi.mock.calls).toEqual([[{ dialog: { t: "palette" } }], [{ dialog: { t: "about" } }], [{ dialog: { t: "calendar" } }]]);
+  });
+
+  it.each([
+    ["with", true],
+    ["without", false],
+  ])("offers Theme… and Use Cyberdeck theme in View %s a plan", async (_w, open) => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    const ctx: CommandCtx = open ? h.ctx : { ...h.ctx, session: null, run: null, undo: null, redo: null };
+    expect([find(ctx, "theme"), find(ctx, "theme-cyberdeck")].map((c) => [c.label, c.group])).toEqual([
+      ["Theme…", "View"],
+      ["Use Cyberdeck theme", "View"],
+    ]);
+    find(ctx, "theme").run();
+    expect(h.setUi.mock.calls).toEqual([[{ theme: true }]]);
+    expect(h.useCyberdeck).not.toHaveBeenCalled();
+    find(ctx, "theme-cyberdeck").run();
+    expect(h.useCyberdeck).toHaveBeenCalledTimes(1);
+    expect(h.setUi).toHaveBeenCalledTimes(1);
   });
 
   it("switches views and zooms, and jumps to today", async () => {
