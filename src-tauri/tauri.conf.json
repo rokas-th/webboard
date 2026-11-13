@@ -39,7 +39,7 @@
       "endpoints": [
         "https://webboard.rokass.org/releases/latest.json"
       ],
-      "pubkey": ""
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgyNTcyRjFBRDkwREQ1RDQKUldUVTFRM1pHaTlYZ2hKR0hiT1lPSEN0OCtvblpTNmxqQ2YrR2V3SDQvcnlpc2pUUGZ4c0g1UEwK"
     }
   },
   "bundle": {
