@@ -27,14 +27,15 @@ const touch = (w, h, form) => ({ size: [w, h], screen: [w, h], touch: true, form
 const cdesk = (w, h) => ({ size: [w, h], screen: [w, h], touch: false, form: "compact" });
 
 const DESKTOP = [desk(1180, 760), desk(1440, 920), desk(1920, 1080)];
+const BREAK_EDGE = [desk(1241, 800), desk(1260, 800)];
 const ABOVE_BREAK = [desk(1280, 800)];
 const COMPACT_DESK = [cdesk(1024, 700), cdesk(1100, 760), cdesk(1179, 760)];
 const PHONE = [touch(390, 844, "phone")];
 const PORTRAIT = [touch(820, 1180, "compact")];
 const LANDSCAPE = [touch(1180, 820, "full"), touch(1366, 1024, "full")];
 const NARROW = [{ size: [500, 820], screen: [820, 1180], touch: true, form: "compact" }];
-const VIEWPORTS = [...DESKTOP, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
-const TOOLBAR = [...DESKTOP, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
+const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
+const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
 const LOAD_MS = 2000;
 
 const nameOf = (v) => `${v.size[0]}x${v.size[1]}`;
@@ -655,8 +656,8 @@ const SIZES = {
   smallest: ["1180x760"],
   standard: ["1440x920"],
   widest: ["1920x1080"],
-  "above-break-and-standard": namesOf([...ABOVE_BREAK, DESKTOP[1]]),
-  "above-break-and-wide": namesOf([...ABOVE_BREAK, DESKTOP[1], DESKTOP[2]]),
+  "above-break-and-standard": namesOf([...BREAK_EDGE, ...ABOVE_BREAK, DESKTOP[1]]),
+  "above-break-and-wide": namesOf([...BREAK_EDGE, ...ABOVE_BREAK, DESKTOP[1], DESKTOP[2]]),
   phone: namesOf(PHONE),
   portrait: namesOf(PORTRAIT),
   landscape: namesOf(LANDSCAPE),
@@ -1505,8 +1506,31 @@ window.__probeAct = function (a) {
     if (Math.abs(c - mid) <= 1) return { ok: true };
     if (a.centred !== undefined) return { fail: where };
     if (c < Math.min(free, mid) - 0.5 || c > Math.max(free, mid) + 0.5) return { fail: where + ": outside the range from the free-space centre to the window centre" };
-    var room = c < mid ? nextR.left - t.right : t.left - prevR.right;
+    if (t.left - prevR.right < gap - 0.5 || nextR.left - t.right < gap - 0.5) return { fail: where + ": closer to a neighbour than the toolbar gap of " + gap + " px" };
+    var towardEnd = c < mid;
+    var room = towardEnd ? nextR.left - t.right : t.left - prevR.right;
     if (room > gap + 1) return { fail: where + ": the tabs stop short of the window centre with " + r1(room) + " px free toward it, gap " + gap + " px" };
+    var side = towardEnd ? ctls.slice(at) : ctls.slice(0, at + 1).reverse();
+    var loose = side.slice(1).map(function (el, i) {
+      var a1 = side[i].getBoundingClientRect();
+      var b1 = el.getBoundingClientRect();
+      return { el: el, space: towardEnd ? b1.left - a1.right : a1.left - b1.right };
+    }).filter(function (s1) { return s1.space > gap + 1; });
+    if (loose.length > 0) return { fail: where + ": the side that pushes the tabs is not packed, " + r1(loose[0].space) + " px before " + JSON.stringify(loose[0].el.textContent.trim().slice(0, 20)) };
+    var outer = side[side.length - 1];
+    var group = outer.closest(".toolbar-group");
+    if (group === null) return { fail: where + ": " + JSON.stringify(outer.textContent.trim().slice(0, 20)) + " sits in no .toolbar-group" };
+    var gcss = getComputedStyle(group);
+    var gr = group.getBoundingClientRect();
+    var bcss = getComputedStyle(bar);
+    var br = bar.getBoundingClientRect();
+    var or = outer.getBoundingClientRect();
+    var slack = towardEnd
+      ? br.right - parseFloat(bcss.paddingRight) - or.right
+      : gr.left - (br.left + parseFloat(bcss.paddingLeft)) + or.left - (gr.left + parseFloat(gcss.paddingLeft));
+    var outerName = JSON.stringify((outer.getAttribute("aria-label") || outer.textContent.trim()).slice(0, 20));
+    if (slack > 1) return { fail: where + ": the side that pushes the tabs leaves " + r1(slack) + " px between " + outerName + " and the toolbar's edge" };
+    if ((towardEnd ? or.right - br.right : br.left - or.left) > 0.5) return { fail: where + ": " + outerName + " spills past the toolbar's edge" };
     return { ok: true };
   }
   if (a.oneRow !== undefined) {
