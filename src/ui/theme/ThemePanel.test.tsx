@@ -73,7 +73,7 @@ const saveAs = (root: HTMLElement, name: string): void => {
 
 const notes = (root: HTMLElement): string[] => [...root.querySelectorAll(".theme-notes li")].map((li) => li.textContent ?? "");
 
-describe("ThemePanel", () => {
+describe("the Theme tab of Settings", () => {
   it("sits in the Theme tab of Settings in both frames", () => {
     expect(DISCARDED).toBe("Unsaved colours discarded.");
     const a = mount("panel");

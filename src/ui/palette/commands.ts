@@ -13,7 +13,7 @@ import { countedConflicts, goToFirstPatch } from "../choices/HeadCounts";
 import { baselineDefault } from "../panel/Baselines";
 import { placeStep } from "../panel/placeStep";
 import { exportFlow, importFlow } from "../shell/fileFlows";
-import type { UiState, ViewKind, Zoom } from "../state";
+import type { SettingsTab, UiState, ViewKind, Zoom } from "../state";
 import { timelineRows } from "../timeline/rows";
 
 export interface Command {
@@ -306,6 +306,10 @@ export function commands(ctx: CommandCtx): Command[] {
   const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session) }];
   const printCommand: Command[] =
     session === null || platform === "ios" ? [] : [{ id: "print", group: "File", label: "Print…", keys: ctx.mac ? "⌘P" : "Ctrl P", run: () => ctx.print() }];
+  const settingsAt = (tab: SettingsTab): void => {
+    ctx.theme.preview(null);
+    ctx.setUi({ settings: tab });
+  };
   const always: Command[] = [
     { id: "new-plan", group: "File", label: "New plan", run: () => ctx.newPlan() },
     { id: "example-plan", group: "File", label: "Create the example plan", run: () => ctx.newExample() },
@@ -316,11 +320,11 @@ export function commands(ctx: CommandCtx): Command[] {
     { id: "sync-join", group: "File", label: "Join with a code", run: () => ctx.setUi({ dialog: { t: "sync", pane: "join" } }) },
     { id: "sync-devices", group: "File", label: "Sync devices", run: () => ctx.setUi({ dialog: { t: "sync", pane: "devices" } }) },
     ...openPlans,
-    { id: "settings", group: "View", label: "Settings…", run: () => ctx.setUi({ settings: "theme" }) },
-    { id: "theme", group: "View", label: "Theme…", run: () => ctx.setUi({ settings: "theme" }) },
+    { id: "settings", group: "View", label: "Settings…", run: () => settingsAt("theme") },
+    { id: "theme", group: "View", label: "Theme…", run: () => settingsAt("theme") },
     { id: "theme-cyberdeck", group: "View", label: "Use Cyberdeck theme", run: () => ctx.theme.useCyberdeck() },
     { id: "palette", group: "Help", label: "Command palette", keys: ctx.mac ? "⌘K" : "Ctrl K", run: () => ctx.setUi({ dialog: { t: "palette" } }) },
-    { id: "about", group: "Help", label: "About WebBoard", run: () => ctx.setUi({ settings: "about" }) },
+    { id: "about", group: "Help", label: "About WebBoard", run: () => settingsAt("about") },
     ...updateCommands(ctx.updates),
   ];
   return session === null ? always : [...planCommands(ctx, session), ...always];

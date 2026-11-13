@@ -2079,22 +2079,22 @@ describe("Shell: print (product-8)", () => {
 });
 
 describe("the settings panel in the wide shell", () => {
-  const themeIn = (root: Element | null): HTMLElement | null => (root === null ? null : root.querySelector<HTMLElement>('section[aria-label="Settings"]'));
+  const settingsIn = (root: Element | null): HTMLElement | null => (root === null ? null : root.querySelector<HTMLElement>('section[aria-label="Settings"]'));
   const gear = (): HTMLElement => {
     const bar = document.querySelector("header.toolbar");
     if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
     return within(bar).getByRole("button", { name: "Settings" });
   };
-  const openTheme = (): void => {
+  const openSettings = (): void => {
     fireEvent.click(gear());
   };
-  const closeTheme = (): void => {
-    const section = themeIn(slot("panel"));
+  const closeSettings = (): void => {
+    const section = settingsIn(slot("panel"));
     if (section === null) throw new Error("no settings panel");
     fireEvent.click(within(section).getAllByRole("button", { name: "Close" })[0]);
   };
   const editAccent = (): void => {
-    const section = themeIn(slot("panel"));
+    const section = settingsIn(slot("panel"));
     if (section === null) throw new Error("no settings panel");
     const field = within(section).getByRole("textbox", { name: "Accent hex" });
     fireEvent.change(field, { target: { value: "#335577" } });
@@ -2107,13 +2107,13 @@ describe("the settings panel in the wide shell", () => {
     await settle();
     expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
     expect(within(slot("panel") as HTMLElement).queryByRole("button", { name: "Theme…" })).toBeNull();
-    openTheme();
+    openSettings();
     expect(lastUi().settings).toBe("theme");
-    expect(themeIn(slot("panel"))).not.toBeNull();
+    expect(settingsIn(slot("panel"))).not.toBeNull();
     expect(slot("panel")?.querySelector(".panel")).toBeNull();
-    closeTheme();
+    closeSettings();
     expect(lastUi().settings).toBeNull();
-    expect(themeIn(slot("panel"))).toBeNull();
+    expect(settingsIn(slot("panel"))).toBeNull();
     expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
   });
 
@@ -2127,14 +2127,14 @@ describe("the settings panel in the wide shell", () => {
     expect(settings.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(settings);
     expect(lastUi().settings).toBe("theme");
-    expect(within(themeIn(slot("panel")) ?? document.body).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
-    expect(themeIn(slot("panel"))).not.toBeNull();
+    expect(within(settingsIn(slot("panel")) ?? document.body).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
+    expect(settingsIn(slot("panel"))).not.toBeNull();
     expect(within(bar).getByRole("button", { name: "Settings" }).getAttribute("aria-pressed")).toBe("true");
     editAccent();
     expect(document.documentElement.style.getPropertyValue("--cyan")).toBe("#335577");
     fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
     expect(lastUi().settings).toBeNull();
-    expect(themeIn(slot("panel"))).toBeNull();
+    expect(settingsIn(slot("panel"))).toBeNull();
     expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
     expect(toastTexts()).toContain("Unsaved colours discarded.");
     expect(document.documentElement.style.getPropertyValue("--cyan")).toBe(tokensOf(cyberdeck()).cyan);
@@ -2145,9 +2145,9 @@ describe("the settings panel in the wide shell", () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
-    openTheme();
+    openSettings();
     editAccent();
-    const section = themeIn(slot("panel"));
+    const section = settingsIn(slot("panel"));
     if (section === null) throw new Error("no settings panel");
     expect(within(section).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Theme", "Sync", "About"]);
     fireEvent.click(within(section).getByRole("tab", { name: "Sync" }));
@@ -2155,7 +2155,7 @@ describe("the settings panel in the wide shell", () => {
     expect(within(section).getByText("Local only")).toBeTruthy();
     fireEvent.click(within(section).getByRole("button", { name: "Add a device" }));
     expect([lastUi().settings, lastUi().dialog]).toEqual([null, { t: "sync", pane: "pair" }]);
-    expect(themeIn(slot("panel"))).toBeNull();
+    expect(settingsIn(slot("panel"))).toBeNull();
     expect(toastTexts()).toContain("Unsaved colours discarded.");
     expect(document.documentElement.style.getPropertyValue("--cyan")).toBe(tokensOf(cyberdeck()).cyan);
     const dialog = screen.getByRole("dialog", { name: "Sync" });
@@ -2172,20 +2172,20 @@ describe("the settings panel in the wide shell", () => {
     const bar = document.querySelector("header.toolbar");
     if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
     fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
-    expect(themeIn(slot("panel"))).not.toBeNull();
+    expect(settingsIn(slot("panel"))).not.toBeNull();
   });
 
   it("keeps Settings in the slot while an item is selected, and shows the item panel after Close", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
-    openTheme();
+    openSettings();
     editAccent();
     setUiNow({ selected: "t3" });
     expect(lastUi().selected).toBe("t3");
-    expect(themeIn(slot("panel"))).not.toBeNull();
-    expect(within(themeIn(slot("panel")) ?? document.body).getByRole("textbox", { name: "Accent hex" })).toHaveProperty("value", "#335577");
-    closeTheme();
+    expect(settingsIn(slot("panel"))).not.toBeNull();
+    expect(within(settingsIn(slot("panel")) ?? document.body).getByRole("textbox", { name: "Accent hex" })).toHaveProperty("value", "#335577");
+    closeSettings();
     expect(toastTexts()).toContain("Unsaved colours discarded.");
     expect(within(slot("panel") as HTMLElement).getByLabelText("Name")).toHaveProperty("value", "Tracking: review results");
   });
@@ -2197,8 +2197,8 @@ describe("the settings panel in the wide shell", () => {
     expect(document.querySelector(".empty-state")).not.toBeNull();
     expect(slot("panel")).toBeNull();
     setUiNow({ settings: "theme" });
-    expect(themeIn(slot("panel"))).not.toBeNull();
-    closeTheme();
+    expect(settingsIn(slot("panel"))).not.toBeNull();
+    closeSettings();
     expect(slot("panel")).toBeNull();
   });
 
@@ -2206,7 +2206,7 @@ describe("the settings panel in the wide shell", () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
-    openTheme();
+    openSettings();
     setUiNow({ selected: "t3" });
     editAccent();
     expect(document.documentElement.style.getPropertyValue("--cyan")).toBe("#335577");
@@ -2223,7 +2223,7 @@ describe("the settings panel in the wide shell", () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
-    openTheme();
+    openSettings();
     editAccent();
     const field = document.createElement("input");
     field.type = "text";
@@ -2234,7 +2234,7 @@ describe("the settings panel in the wide shell", () => {
     });
     field.remove();
     expect(lastUi().settings).toBe("theme");
-    expect(themeIn(slot("panel"))).not.toBeNull();
+    expect(settingsIn(slot("panel"))).not.toBeNull();
     expect(toastTexts()).not.toContain("Unsaved colours discarded.");
     act(() => {
       fireEvent.keyDown(document.body, { key: "Escape" });
@@ -2247,7 +2247,7 @@ describe("the settings panel in the wide shell", () => {
     render(withSync(shellFor(t).ui));
     await settle();
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
-    openTheme();
+    openSettings();
     const row = document.querySelector<HTMLElement>('[data-lrow="t3"]');
     if (row === null) throw new Error("no t3 row");
     const init = { clientX: 10, clientY: 10, button: 0, pointerId: 1, pointerType: "mouse" };
@@ -2255,7 +2255,7 @@ describe("the settings panel in the wide shell", () => {
     fireEvent.pointerUp(row, init);
     expect(lastUi().selected).toBe("t3");
     expect(document.querySelector('[data-lrow="t3"]')?.classList.contains("selected")).toBe(true);
-    expect(themeIn(slot("panel"))).not.toBeNull();
+    expect(settingsIn(slot("panel"))).not.toBeNull();
     expect(lastUi().settings).toBe("theme");
   });
 
@@ -2285,7 +2285,7 @@ describe("the settings panel in the wide shell", () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
-    openTheme();
+    openSettings();
     setUiNow({ dialog: { t: "calendar" } });
     act(() => {
       fireEvent.keyDown(document.body, { key: "Escape" });

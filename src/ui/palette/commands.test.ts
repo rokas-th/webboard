@@ -66,6 +66,7 @@ interface Harness {
   print: ReturnType<typeof vi.fn<() => void>>;
   open: ReturnType<typeof vi.fn<(choice: string, side?: string) => void>>;
   useCyberdeck: ReturnType<typeof vi.fn<() => void>>;
+  preview: ReturnType<typeof vi.fn<(id: string | null) => void>>;
 }
 
 function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly string[] = [], more: Partial<Registry> = {}): Harness {
@@ -77,7 +78,8 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
   const print = vi.fn<() => void>();
   const open = vi.fn<(choice: string, side?: string) => void>();
   const useCyberdeck = vi.fn<() => void>();
-  const theme = { useCyberdeck } as unknown as ThemeApi;
+  const preview = vi.fn<(id: string | null) => void>();
+  const theme = { useCyberdeck, preview } as unknown as ThemeApi;
   const id = t.session.view().plan.id;
   const registry = testRegistry(t, {
     plans: () => [
@@ -107,7 +109,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     updates: null,
     theme,
   };
-  return { ctx, setUi, select, newPlan, newExample, reveal, print, open, useCyberdeck };
+  return { ctx, setUi, select, newPlan, newExample, reveal, print, open, useCyberdeck, preview };
 }
 
 const find = (ctx: CommandCtx, id: string) => {
@@ -243,6 +245,7 @@ describe("commands()", () => {
     const h = harness(t);
     ["palette", "about", "calendar"].forEach((id) => find(h.ctx, id).run());
     expect(h.setUi.mock.calls).toEqual([[{ dialog: { t: "palette" } }], [{ settings: "about" }], [{ dialog: { t: "calendar" } }]]);
+    expect(h.preview.mock.calls).toEqual([[null]]);
     expect([find(h.ctx, "about").label, find(h.ctx, "about").group]).toEqual(["About WebBoard", "Help"]);
   });
 
@@ -261,6 +264,7 @@ describe("commands()", () => {
     find(ctx, "settings").run();
     find(ctx, "theme").run();
     expect(h.setUi.mock.calls).toEqual([[{ settings: "theme" }], [{ settings: "theme" }]]);
+    expect(h.preview.mock.calls).toEqual([[null], [null]]);
     expect(h.useCyberdeck).not.toHaveBeenCalled();
     find(ctx, "theme-cyberdeck").run();
     expect(h.useCyberdeck).toHaveBeenCalledTimes(1);

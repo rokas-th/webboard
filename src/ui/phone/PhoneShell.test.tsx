@@ -1809,8 +1809,11 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
-  it("offers the Settings row in the empty state's Plans and an open plan's Plans, without an About row", async () => {
-    await showIndex(await emptyIndex());
+  it.each([
+    ["the empty state's Plans", async (): Promise<void> => showIndex(await emptyIndex())],
+    ["an open plan's Plans", async (): Promise<void> => shown(await planSheetMade())],
+  ])("offers the Settings row in %s, without an About row", async (_, show) => {
+    await show();
     openPlans();
     expect(within(plansSheet()).queryByRole("button", { name: "About WebBoard" })).toBeNull();
     fireEvent.click(within(plansSheet()).getByRole("button", { name: "Settings…" }));
@@ -2479,6 +2482,8 @@ describe("the settings sheet on the phone", () => {
     await shown(await planSheetMade());
     fireEvent.click(themeRow(openPlanSheet()));
     expect(dialogs()).toEqual(["Settings"]);
+    expect(lastUi().settings).toBe("theme");
+    expect(within(screen.getByRole("dialog", { name: "Settings" })).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
   });
 
   it("hides a selected item's sheet while Settings is open, and the item sheet returns after Close", async () => {

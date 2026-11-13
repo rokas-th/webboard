@@ -15,6 +15,7 @@ import { shownCommands } from "./Palette";
 import { withSync } from "../../test/withSync";
 import { PRESETS, tokensOf } from "../../theme/presets";
 import { DEFAULT_STORE, saveStore, withChosen } from "../../theme/store";
+import { installMatchMedia } from "../../test/matchMedia";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -417,6 +418,30 @@ describe("About", () => {
     expect(within(box).getByText("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.").textContent).toBe("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.");
     fireEvent.click(button(region, "Close"));
     expect(uiNow()[0].settings).toBeNull();
+  });
+});
+
+describe("switching the Settings tab from the palette", () => {
+  afterEach(() => installMatchMedia());
+
+  it.each(["About WebBoard", "Settings…", "Theme…"])("clears a live hover preview when %s runs", async (label) => {
+    const plain = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: (query: string): MediaQueryList => (query === "(hover: hover)" ? { ...plain(query), matches: true } : plain(query)),
+    });
+    const t = await made(MESA_SEED);
+    await shown(t);
+    const voidNow = (): string => document.documentElement.style.getPropertyValue("--void");
+    const ground = (id: string): string => tokensOf(PRESETS.find((p) => p.id === id) ?? PRESETS[0]).void;
+    runFromPalette("Theme…");
+    const region = panel().querySelector<HTMLElement>('section[aria-label="Settings"]');
+    if (region === null) throw new Error("no Settings panel");
+    fireEvent.pointerEnter(within(region).getByRole("button", { name: /^Phosphor/ }));
+    expect(voidNow()).toBe(ground("phosphor"));
+    runFromPalette(label);
+    expect(voidNow()).toBe(ground("cyberdeck"));
   });
 });
 
