@@ -2140,6 +2140,8 @@ describe("the theme panel in the wide shell", () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t, { plans: () => [] }).ui));
     await settle();
+    expect(document.querySelector(".empty-state")).not.toBeNull();
+    expect(slot("panel")).toBeNull();
     const bar = document.querySelector("header.toolbar");
     if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
     fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));

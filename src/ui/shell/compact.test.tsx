@@ -401,14 +401,16 @@ describe("the theme sheet on compact", () => {
     expect(toastTexts()).toContain("Unsaved colours discarded.");
   });
 
-  it("opens Theme as a sheet from the toolbar's Settings button, closing the Plans sheet", async () => {
+  it("opens Theme as a sheet from the toolbar's Settings button", async () => {
     const t = await made();
     await shown(t);
-    fireEvent.click(within(toolbar()).getByRole("button", { name: "Plans" }));
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Plans"]);
+    expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Settings" }));
     expect(lastUi()[0].theme).toBe(true);
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Theme"]);
+    const sheets = screen.getAllByRole("dialog");
+    expect(sheets.map((d) => d.getAttribute("aria-label"))).toEqual(["Theme"]);
+    expect(sheets[0].getAttribute("aria-modal")).toBe("true");
+    expect(document.querySelector('[data-slot="panel"]')).toBeNull();
   });
 
   it("shows the Theme sheet over a selected item's sheet and returns to it on Escape", async () => {
