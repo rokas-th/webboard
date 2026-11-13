@@ -1,5 +1,5 @@
 import { routePartykitRequest, type Lobby } from 'partyserver';
-import type { ErrorCode, Result } from './auth';
+import { configuredSecret, type ErrorCode, type Result } from './auth';
 import type { Space } from './space';
 import { DEVICE_HEADER } from './limits';
 
@@ -21,7 +21,6 @@ interface Route {
   run(call: Call): Promise<Response>;
 }
 
-const MIN_SECRET_BYTES = 32;
 const MAX_BODY_BYTES = 4096;
 const SPACE_NAME = 'space';
 const ROOM_PATH = /^\/parties\/room\/[^/]+$/;
@@ -31,7 +30,6 @@ const PROPS_HEADER = 'x-partykit-props';
 const CONNECTION_PARAM = '_pk';
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
 
-const NOT_CONFIGURED = 'The server has no setup secret. Run wrangler secret put SETUP_SECRET.';
 const NOT_FOUND = 'There is nothing at this address on the WebBoard server.';
 const WRONG_METHOD = 'This address does not take that method.';
 const TOO_LARGE = 'The request body is larger than 4 KB.';
@@ -57,8 +55,8 @@ function answer<T>(result: Result<T>): Response {
   return new Response(JSON.stringify(result.value), { status: 200, headers: { 'Content-Type': JSON_TYPE } });
 }
 
-function isConfigured(env: Config): env is Env {
-  return env.SETUP_SECRET !== undefined && new TextEncoder().encode(env.SETUP_SECRET).length >= MIN_SECRET_BYTES;
+function hasSecret(env: Config): env is Env {
+  return env.SETUP_SECRET !== undefined;
 }
 
 function space(env: Env): DurableObjectStub<Space> {
@@ -277,8 +275,12 @@ async function room(req: Request, env: Env, pathname: string): Promise<Response>
 }
 
 export async function handle(req: Request, env: Config): Promise<Response> {
-  if (!isConfigured(env)) {
-    return refuse(503, 'not_configured', NOT_CONFIGURED);
+  const secret = configuredSecret(env.SETUP_SECRET);
+  if (!secret.ok) {
+    return answer(secret);
+  }
+  if (!hasSecret(env)) {
+    throw new Error('The setup secret passed its check but is missing from the environment.');
   }
   const pathname = new URL(req.url).pathname;
   return ROOM_PATH.test(pathname) ? room(req, env, pathname) : api(req, env, pathname);

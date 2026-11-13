@@ -83,6 +83,12 @@ const NOT_CONFIGURED: Failure = {
   error: 'not_configured',
   message: 'The server has no setup secret. Run wrangler secret put SETUP_SECRET.',
 };
+const SHORT_SECRET: Failure = {
+  ok: false,
+  status: 503,
+  error: 'not_configured',
+  message: "The server's setup secret is shorter than 32 bytes. Run wrangler secret put SETUP_SECRET with at least 32 characters.",
+};
 const BAD_DEVICE_ID: Failure = {
   ok: false,
   status: 400,
@@ -147,6 +153,16 @@ function limited(message: string, retryAfter: number): Failure {
 
 function base64url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+}
+
+export function configuredSecret(setupSecret: string | undefined): Result<string> {
+  if (setupSecret === undefined) {
+    return NOT_CONFIGURED;
+  }
+  if (new TextEncoder().encode(setupSecret).length < MIN_SECRET_BYTES) {
+    return SHORT_SECRET;
+  }
+  return { ok: true, value: setupSecret };
 }
 
 export function randomBase64url(length: number): string {
@@ -346,13 +362,14 @@ export async function enrol(
   deviceName: string,
   ip: string,
 ): Promise<Result<Admission>> {
-  if (setupSecret === undefined || new TextEncoder().encode(setupSecret).length < MIN_SECRET_BYTES) {
-    return NOT_CONFIGURED;
+  const configured = configuredSecret(setupSecret);
+  if (!configured.ok) {
+    return configured;
   }
   if (!DEVICE_ID.test(deviceId)) {
     return BAD_DEVICE_ID;
   }
-  const matches = crypto.subtle.timingSafeEqual(await digest(secret), await digest(setupSecret));
+  const matches = crypto.subtle.timingSafeEqual(await digest(secret), await digest(configured.value));
   const token = randomBase64url(32);
   const tokenHash = await sha256Hex(token);
   const scope = 'enrol:' + ip;

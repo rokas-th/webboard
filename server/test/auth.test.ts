@@ -88,7 +88,7 @@ describe('auth', () => {
     });
   });
 
-  it('answers not_configured without a setup secret of 32 bytes', async () => {
+  it('answers not_configured without a setup secret', async () => {
     await inSpace('not-configured', async (storage) => {
       const refused = {
         ok: false,
@@ -96,15 +96,39 @@ describe('auth', () => {
         error: 'not_configured',
         message: 'The server has no setup secret. Run wrangler secret put SETUP_SECRET.',
       };
-      const short = 'x'.repeat(31);
-      expect(await enrol(storage, T, undefined, short, DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
-      expect(await enrol(storage, T, '', '', DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
-      expect(await enrol(storage, T, short, short, DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
+      expect(await enrol(storage, T, undefined, 'x'.repeat(31), DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
       expect(await enrol(storage, T, undefined, SECRET, 'short', 'Mac', '1.1.1.1')).toEqual(refused);
       expect(TABLES.map((table) => count(storage, table))).toEqual([0, 0, 0, 0, 0, 0]);
+    });
+  });
+
+  it('answers not_configured with a setup secret under 32 bytes', async () => {
+    await inSpace('short-secret', async (storage) => {
+      const refused = {
+        ok: false,
+        status: 503,
+        error: 'not_configured',
+        message: "The server's setup secret is shorter than 32 bytes. Run wrangler secret put SETUP_SECRET with at least 32 characters.",
+      };
+      const short = 'x'.repeat(31);
+      const wideShort = 'é'.repeat(15) + 'x';
+      expect(wideShort.length).toBe(16);
+      expect(await enrol(storage, T, '', '', DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
+      expect(await enrol(storage, T, 'x'.repeat(8), 'x'.repeat(8), DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
+      expect(await enrol(storage, T, short, short, DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
+      expect(await enrol(storage, T, wideShort, wideShort, DEV_A, 'Mac', '1.1.1.1')).toEqual(refused);
+      expect(await enrol(storage, T, short, SECRET, 'short', 'Mac', '1.1.1.1')).toEqual(refused);
+      expect(TABLES.map((table) => count(storage, table))).toEqual([0, 0, 0, 0, 0, 0]);
+    });
+  });
+
+  it('accepts a setup secret of exactly 32 bytes, counted in UTF-8 bytes', async () => {
+    await inSpace('secret-boundary', async (storage) => {
+      const exact = 'x'.repeat(32);
+      expect(value(await enrol(storage, T, exact, exact, DEV_A, 'Mac', '1.1.1.1')).enrolled.deviceId).toBe(DEV_A);
       const wide = 'é'.repeat(16);
-      expect(value(await enrol(storage, T, wide, wide, DEV_A, 'Mac', '1.1.1.1')).enrolled.deviceId).toBe(DEV_A);
-      expect(count(storage, 'devices')).toBe(1);
+      expect(value(await enrol(storage, T, wide, wide, DEV_B, 'Mac', '1.1.1.1')).enrolled.deviceId).toBe(DEV_B);
+      expect(count(storage, 'devices')).toBe(2);
       expect(count(storage, 'attempts')).toBe(0);
     });
   });

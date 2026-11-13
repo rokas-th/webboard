@@ -15,6 +15,10 @@ const NOT_CONFIGURED = {
   error: 'not_configured',
   message: 'The server has no setup secret. Run wrangler secret put SETUP_SECRET.',
 };
+const SHORT_SECRET = {
+  error: 'not_configured',
+  message: "The server's setup secret is shorter than 32 bytes. Run wrangler secret put SETUP_SECRET with at least 32 characters.",
+};
 const BAD_SECRET = { error: 'unauthorized', message: 'The setup secret is not correct.' };
 const UNKNOWN_DEVICE = { error: 'unauthorized', message: 'This device is not known to the space. Set up sync again.' };
 const NO_ADDRESS = { error: 'bad_request', message: 'The request carries no client address.' };
@@ -153,12 +157,29 @@ describe('the worker', () => {
       upgrade('/parties/room/' + doc + '?ticket=t'),
       request('/nope'),
     ];
-    for (const secret of [undefined, 'x'.repeat(31)]) {
+    const cases: [string | undefined, typeof NOT_CONFIGURED][] = [
+      [undefined, NOT_CONFIGURED],
+      ['', SHORT_SECRET],
+      ['x'.repeat(8), SHORT_SECRET],
+      ['x'.repeat(31), SHORT_SECRET],
+      ['é'.repeat(15) + 'x', SHORT_SECRET],
+    ];
+    for (const [secret, body] of cases) {
       for (const req of requests()) {
-        await refused(await handle(req, { ...env, SETUP_SECRET: secret }), 503, NOT_CONFIGURED);
+        await refused(await handle(req, { ...env, SETUP_SECRET: secret }), 503, body);
       }
     }
     expect(await roomExists(doc)).toBe(false);
+  });
+
+  it('a setup secret is counted in UTF-8 bytes, not characters', async () => {
+    const device = newDevice();
+    const response = await handle(
+      request('/space', { method: 'POST', token: SECRET, body: { deviceId: device, deviceName: 'Mac' } }),
+      { ...env, SETUP_SECRET: 'é'.repeat(16) },
+    );
+    expect(response.status).toBe(200);
+    expect(await json(response)).toMatchObject({ deviceId: device });
   });
 
   it('a 32-byte setup secret is enough', async () => {
