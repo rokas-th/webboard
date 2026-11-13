@@ -27,13 +27,14 @@ const touch = (w, h, form) => ({ size: [w, h], screen: [w, h], touch: true, form
 const cdesk = (w, h) => ({ size: [w, h], screen: [w, h], touch: false, form: "compact" });
 
 const DESKTOP = [desk(1180, 760), desk(1440, 920), desk(1920, 1080)];
+const ABOVE_BREAK = [desk(1280, 800)];
 const COMPACT_DESK = [cdesk(1024, 700), cdesk(1100, 760), cdesk(1179, 760)];
 const PHONE = [touch(390, 844, "phone")];
 const PORTRAIT = [touch(820, 1180, "compact")];
 const LANDSCAPE = [touch(1180, 820, "full"), touch(1366, 1024, "full")];
 const NARROW = [{ size: [500, 820], screen: [820, 1180], touch: true, form: "compact" }];
-const VIEWPORTS = [...DESKTOP, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
-const TOOLBAR = [...DESKTOP, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
+const VIEWPORTS = [...DESKTOP, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
+const TOOLBAR = [...DESKTOP, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
 const LOAD_MS = 2000;
 
 const nameOf = (v) => `${v.size[0]}x${v.size[1]}`;
@@ -80,6 +81,8 @@ const monthCut = () => ({ monthCut: true });
 const raise = (message) => ({ raise: message });
 const media = (kind) => ({ media: kind });
 const oneRow = (selector, n) => ({ oneRow: [selector, n] });
+const centred = (selector) => ({ centred: selector });
+const nearCentre = (selector) => ({ nearCentre: selector });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -312,6 +315,23 @@ function states() {
   add("linux-toolbar", "mesa-linux", {
     sizes: "smallest",
     actions: [viewExpect("timeline"), expect("header.toolbar .wordmark", "WebBoard"), count(".toolbar-mac", 0)],
+  });
+  [
+    ["mac", "mesa"],
+    ["linux", "mesa-linux"],
+  ].forEach(([os, fixture]) => {
+    const timeline = [viewExpect("timeline"), count(".toolbar .seg-zoom", 1)];
+    const board = { place: { view: "board", zoom: "W" } };
+    const boardShown = [viewExpect("board"), count(".toolbar .seg-zoom", 0)];
+    add(`tabs-centred/${os}`, fixture, { sizes: "widest", actions: [...timeline, centred(".seg-modes")] });
+    add(`tabs-centred/${os}/board`, fixture, { ...board, sizes: "widest", actions: [...boardShown, centred(".seg-modes")] });
+    add(`tabs-near-centre/${os}`, fixture, { sizes: "above-break-and-standard", actions: [...timeline, nearCentre(".seg-modes")] });
+    add(`tabs-near-centre/${os}/board`, fixture, { ...board, sizes: "above-break-and-standard", actions: [...boardShown, nearCentre(".seg-modes")] });
+  });
+  add("tabs-near-centre/offline", "sync-space", {
+    sizes: "above-break-and-wide",
+    net: { ws: "silent", online: false },
+    actions: [viewExpect("timeline"), expect(".toolbar button.sync-chip.chip-amber", "Offline — 1 change waiting"), nearCentre(".seg-modes")],
   });
   add("sync-chip/off", "mesa", { actions: [viewExpect("timeline"), expect(".toolbar button.sync-chip.chip-cyan", "Local only")] });
   add("sync-chip/syncing", "sync-space", { net: { ws: "silent" }, actions: [viewExpect("timeline"), expect(".toolbar button.sync-chip.chip-cyan", "Syncing")] });
@@ -620,7 +640,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -634,6 +654,9 @@ const SIZES = {
   both: namesOf([...DESKTOP, LANDSCAPE[0]]),
   smallest: ["1180x760"],
   standard: ["1440x920"],
+  widest: ["1920x1080"],
+  "above-break-and-standard": namesOf([...ABOVE_BREAK, DESKTOP[1]]),
+  "above-break-and-wide": namesOf([...ABOVE_BREAK, DESKTOP[1], DESKTOP[2]]),
   phone: namesOf(PHONE),
   portrait: namesOf(PORTRAIT),
   landscape: namesOf(LANDSCAPE),
@@ -1456,6 +1479,34 @@ window.__probeAct = function (a) {
     if (wide === undefined) return { fail: "no " + a.width[0] + " on screen to measure" };
     var ww = wide.getBoundingClientRect().width;
     if (ww < a.width[1] - 0.5 || ww > a.width[2] + 0.5) return { fail: a.width[0] + " is " + Math.round(ww * 10) / 10 + " px wide, not " + a.width[1] + ".." + a.width[2] };
+    return { ok: true };
+  }
+  if (a.centred !== undefined || a.nearCentre !== undefined) {
+    var tabSel = a.centred !== undefined ? a.centred : a.nearCentre;
+    var bar = document.querySelector(".toolbar");
+    if (bar === null) return { fail: "no .toolbar to measure " + tabSel + " in" };
+    var tabsEl = bar.querySelector(tabSel);
+    if (tabsEl === null || !onScreen(tabsEl)) return { fail: "no " + tabSel + " on screen in the toolbar" };
+    var pickedCtl = Array.prototype.slice.call(bar.querySelectorAll("button, .seg, .wordmark")).filter(onScreen);
+    var ctls = pickedCtl.filter(function (el) { return !pickedCtl.some(function (other) { return other !== el && other.contains(el); }); });
+    var at = ctls.indexOf(tabsEl);
+    var prevEl = ctls[at - 1];
+    var nextEl = ctls[at + 1];
+    if (prevEl === undefined || nextEl === undefined) return { fail: tabSel + " has no toolbar control on both sides to measure against" };
+    var t = tabsEl.getBoundingClientRect();
+    var prevR = prevEl.getBoundingClientRect();
+    var nextR = nextEl.getBoundingClientRect();
+    var mid = window.innerWidth / 2;
+    var c = (t.left + t.right) / 2;
+    var free = (prevR.right + nextR.left) / 2;
+    var gap = parseFloat(getComputedStyle(bar).columnGap);
+    var r1 = function (x) { return Math.round(x * 10) / 10; };
+    var where = tabSel + " centre is " + r1(c - mid) + " px from the window centre (today's free-space centre " + r1(free - mid) + ", " + r1(t.left - prevR.right) + " px after " + JSON.stringify(prevEl.textContent.trim().slice(0, 20)) + ", " + r1(nextR.left - t.right) + " px before " + JSON.stringify(nextEl.textContent.trim().slice(0, 20)) + ")";
+    if (Math.abs(c - mid) <= 1) return { ok: true };
+    if (a.centred !== undefined) return { fail: where };
+    if (c < Math.min(free, mid) - 0.5 || c > Math.max(free, mid) + 0.5) return { fail: where + ": outside the range from the free-space centre to the window centre" };
+    var room = c < mid ? nextR.left - t.right : t.left - prevR.right;
+    if (room > gap + 1) return { fail: where + ": the tabs stop short of the window centre with " + r1(room) + " px free toward it, gap " + gap + " px" };
     return { ok: true };
   }
   if (a.oneRow !== undefined) {

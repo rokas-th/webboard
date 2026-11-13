@@ -162,7 +162,7 @@ describe("Review Focus 5: only the rows in view are mounted", () => {
     );
     await shown(SEED);
     const scroll = one('[data-slot="timeline"] .tl-scroll');
-    expect(observed).toEqual([document.documentElement, scroll]);
+    expect(observed.filter((el) => el.closest("header.toolbar") === null)).toEqual([document.documentElement, scroll]);
     const indices = (): number[] => all(".tl-row").map((r) => Number(r.dataset.index));
     expect(indices()).toEqual(Array.from({ length: 29 }, (_, i) => i));
     act(() => {
