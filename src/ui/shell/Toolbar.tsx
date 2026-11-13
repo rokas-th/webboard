@@ -3,7 +3,7 @@ import { useTheme } from "../../theme/ThemeContext";
 import { useRun } from "../run";
 import type { UiState, ViewKind, Zoom } from "../state";
 import { NewItemMenu } from "../common/NewItemMenu";
-import { closeTheme } from "../theme/ThemePanel";
+import { closeSettings } from "../settings/SettingsPanel";
 import { SyncChip } from "./SyncChip";
 
 const TABS: readonly (readonly [ViewKind, string])[] = [
@@ -27,8 +27,8 @@ const TEETH = Array.from({ length: 8 }, (_, i) => {
 function SettingsButton(p: { open: boolean; setUi(patch: Partial<UiState>): void }) {
   const theme = useTheme();
   const toggle = (): void => {
-    if (p.open) closeTheme(theme, () => p.setUi({ theme: false }));
-    else p.setUi({ theme: true });
+    if (p.open) closeSettings(theme, () => p.setUi({ settings: null }));
+    else p.setUi({ settings: "theme" });
   };
   return (
     <button type="button" className="icon-button" aria-label="Settings" title="Settings" aria-pressed={p.open} onClick={toggle}>
@@ -122,7 +122,7 @@ export function Toolbar(p: ToolbarProps) {
         <NewItemMenu label="+ New" className="button-primary" disabled={p.readOnly} onPick={(kind) => p.onCommand(`new-${kind}`)} />
       )}
       <SyncChip />
-      <SettingsButton open={p.ui.theme} setUi={p.setUi} />
+      <SettingsButton open={p.ui.settings !== null} setUi={p.setUi} />
       {p.compact !== null && p.session !== null && (
         <button type="button" onClick={p.compact.onPlan}>
           Plan

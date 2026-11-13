@@ -79,6 +79,7 @@ const fitLabels = () => ({ fitLabels: true });
 const monthCut = () => ({ monthCut: true });
 const raise = (message) => ({ raise: message });
 const media = (kind) => ({ media: kind });
+const oneRow = (selector, n) => ({ oneRow: [selector, n] });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -225,31 +226,84 @@ function states() {
     dialog: true,
     actions: [key("k", "KeyK", 4), expect('.palette[role="dialog"]'), expect(".palette-item .palette-label")],
   });
+  const SETTINGS_TAB = '.settings-tabs [role="tab"]';
+  const SETTINGS_SHOWN = '[role="tabpanel"]:not([hidden])';
+  const settingsOn = (label) => expect(`${SETTINGS_TAB}[aria-selected="true"]`, label);
+  const aboutShown = [count(`${SETTINGS_SHOWN} img.about-mark`, 1), loaded(`${SETTINGS_SHOWN} img.about-mark`), expect(`${SETTINGS_SHOWN} .settings-about p`, "Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.")];
   add("about", "mesa", {
-    dialog: true,
-    actions: [
-      key("k", "KeyK", 4),
-      tap(".palette-item .palette-label", "About WebBoard"),
-      expect('.modal[role="dialog"] h3', "About WebBoard"),
-      count('.modal[role="dialog"] img.about-mark', 1),
-      loaded('.modal[role="dialog"] img.about-mark'),
-    ],
+    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "About WebBoard"), expect(".settings-panel h2", "Settings"), settingsOn("About"), ...aboutShown],
   });
   add("theme", "mesa", {
-    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), expect(".theme-panel h2", "Theme")],
+    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), expect(".settings-panel h2", "Settings"), settingsOn("Theme"), expect(`${SETTINGS_SHOWN} .theme-body`)],
   });
   add("theme-compact", "mesa", {
     sizes: "compact-all",
     dialog: true,
-    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), expect('.sheet[role="dialog"] .sheet-title', "Theme")],
+    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme")],
   });
   add("settings-button", "mesa", {
-    actions: [viewExpect("timeline"), count('.toolbar button[aria-label="Settings"][aria-pressed="false"]', 1), click('.toolbar button[aria-label="Settings"]'), expect(".theme-panel h2", "Theme"), count('.toolbar button[aria-label="Settings"][aria-pressed="true"]', 1)],
+    actions: [
+      viewExpect("timeline"),
+      count('.toolbar button[aria-label="Settings"][aria-pressed="false"]', 1),
+      click('.toolbar button[aria-label="Settings"]'),
+      expect(".settings-panel h2", "Settings"),
+      settingsOn("Theme"),
+      count('.toolbar button[aria-label="Settings"][aria-pressed="true"]', 1),
+    ],
   });
   add("settings-button-compact", "mesa", {
     sizes: "compact-all",
     dialog: true,
-    actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect('.sheet[role="dialog"] .sheet-title', "Theme")],
+    actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme")],
+  });
+  const settingsTabs = (labels) => [
+    ["theme", "Theme", [expect(`${SETTINGS_SHOWN} .theme-body`), expect(`${SETTINGS_SHOWN} button`, "Save theme")]],
+    ["sync", "Sync", [expect(`${SETTINGS_SHOWN} .settings-status.cyan`, "Local only"), count(`${SETTINGS_SHOWN} .settings-buttons button`, 4), expect(`${SETTINGS_SHOWN} .settings-buttons button`, "Join with a code")]],
+    ["updates", "Updates", [expect(`${SETTINGS_SHOWN} .update-line .update-status`, "Up to date · checked 09:00")]],
+    ["about", "About", aboutShown],
+  ].filter(([, label]) => labels.includes(label));
+  const DESK_TABS = ["Theme", "Sync", "Updates", "About"];
+  settingsTabs(DESK_TABS).forEach(([slug, label, shownTab]) => {
+    add(`settings/${slug}`, "mesa", {
+      sizes: "smallest",
+      actions: [
+        viewExpect("timeline"),
+        click('.toolbar button[aria-label="Settings"]'),
+        width(".slot-panel", 316, 316),
+        click(SETTINGS_TAB, label),
+        settingsOn(label),
+        oneRow(SETTINGS_TAB, DESK_TABS.length),
+        ...shownTab,
+      ],
+    });
+    add(`settings-compact/${slug}`, "mesa", {
+      sizes: "compact-all",
+      dialog: true,
+      actions: [
+        viewExpect("timeline"),
+        click('.toolbar button[aria-label="Settings"]'),
+        expect('.sheet[role="dialog"] .sheet-title', "Settings"),
+        click(SETTINGS_TAB, label),
+        settingsOn(label),
+        oneRow(SETTINGS_TAB, DESK_TABS.length),
+        ...shownTab,
+      ],
+    });
+  });
+  settingsTabs(DESK_TABS).forEach(([slug, label, shownTab]) => {
+    add(`phone-settings/${slug}`, "mesa", {
+      sizes: "phone",
+      dialog: true,
+      actions: [
+        click(".phone-head button", "Plans"),
+        click(".plans-sheet button.settings-row", "Settings…"),
+        expect('.sheet[role="dialog"] .sheet-title', "Settings"),
+        click(SETTINGS_TAB, label),
+        settingsOn(label),
+        oneRow(SETTINGS_TAB, DESK_TABS.length),
+        ...shownTab,
+      ],
+    });
   });
   add("light-timeline", "mesa", {
     theme: { v: 1, mode: "fixed", active: "paper", dark: "cyberdeck", light: "daylight", mine: [] },
@@ -390,7 +444,7 @@ function states() {
       expect('.sheet[role="dialog"] .sheet-title', "Plan"),
       expect(".plan-sheet h2", "History"),
       expect(".plan-sheet button", "Export plan…"),
-      expect(".plan-sheet button.about-row", "About WebBoard"),
+      expect(".plan-sheet button.settings-row", "Settings…"),
     ],
   });
   add("phone-theme", "mesa", {
@@ -398,8 +452,9 @@ function states() {
     dialog: true,
     actions: [
       click(".phone-head button", "Plans"),
-      click(".plans-sheet button.theme-row", "Theme…"),
-      expect('.sheet[role="dialog"] .sheet-title', "Theme"),
+      click(".plans-sheet button.settings-row", "Settings…"),
+      expect('.sheet[role="dialog"] .sheet-title', "Settings"),
+      settingsOn("Theme"),
     ],
   });
   add("phone-about", "mesa", {
@@ -407,10 +462,11 @@ function states() {
     dialog: true,
     actions: [
       click(".phone-head button.phone-more", "⋯"),
-      click(".plan-sheet button.about-row", "About WebBoard"),
-      expect('.sheet[role="dialog"] .sheet-title', "About WebBoard"),
-      count('.sheet[role="dialog"] .about-sheet img.about-mark', 1),
-      loaded('.sheet[role="dialog"] .about-sheet img.about-mark'),
+      click(".plan-sheet button.settings-row", "Settings…"),
+      expect('.sheet[role="dialog"] .sheet-title', "Settings"),
+      click(SETTINGS_TAB, "About"),
+      settingsOn("About"),
+      ...aboutShown,
     ],
   });
   add("phone-status/strip", "phone-status", {
@@ -1400,6 +1456,28 @@ window.__probeAct = function (a) {
     if (wide === undefined) return { fail: "no " + a.width[0] + " on screen to measure" };
     var ww = wide.getBoundingClientRect().width;
     if (ww < a.width[1] - 0.5 || ww > a.width[2] + 0.5) return { fail: a.width[0] + " is " + Math.round(ww * 10) / 10 + " px wide, not " + a.width[1] + ".." + a.width[2] };
+    return { ok: true };
+  }
+  if (a.oneRow !== undefined) {
+    var tabsIn = Array.prototype.slice.call(document.querySelectorAll(a.oneRow[0])).filter(onScreen);
+    if (tabsIn.length !== a.oneRow[1]) return { fail: a.oneRow[0] + " shows " + tabsIn.length + " elements on screen, not " + a.oneRow[1] };
+    var rowEl = tabsIn[0].parentElement;
+    var rowBox = rowEl.getBoundingClientRect();
+    var tabBoxes = tabsIn.map(function (el) { return el.getBoundingClientRect(); });
+    var first = tabBoxes[0];
+    var wrapped = tabsIn.filter(function (el, i) { return Math.abs(tabBoxes[i].top - first.top) > 0.5 || Math.abs(tabBoxes[i].height - first.height) > 0.5; });
+    if (wrapped.length > 0) return { fail: a.oneRow[0] + " wraps: " + wrapped.map(function (el) { return JSON.stringify(el.textContent); }).join(", ") + " sits off the first row" };
+    var twoLine = tabsIn.filter(function (el) {
+      var range = document.createRange();
+      range.selectNodeContents(el);
+      var tops = Array.prototype.slice.call(range.getClientRects()).filter(function (rc) { return rc.width >= 1; }).map(function (rc) { return Math.round(rc.top); });
+      return tops.some(function (t) { return Math.abs(t - tops[0]) > 2; });
+    });
+    if (twoLine.length > 0) return { fail: twoLine.length + " " + a.oneRow[0] + " break their label onto two lines, first " + JSON.stringify(twoLine[0].textContent) };
+    var crossing = tabBoxes.slice(1).filter(function (bx, i) { return bx.left < tabBoxes[i].right - 0.5; });
+    if (crossing.length > 0) return { fail: crossing.length + " " + a.oneRow[0] + " overlap the one before them" };
+    var outsideRow = tabBoxes.filter(function (bx) { return bx.left < rowBox.left - 0.5 || bx.right > rowBox.right + 0.5; });
+    if (outsideRow.length > 0 || rowEl.scrollWidth > rowEl.clientWidth + 0.5) return { fail: a.oneRow[0] + " runs out of its row (" + rowEl.scrollWidth + " of " + rowEl.clientWidth + " px)" };
     return { ok: true };
   }
   if (a.valued !== undefined) {

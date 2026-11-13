@@ -44,7 +44,7 @@ const UI: UiState = {
   reveal: null,
   follow: null,
   naming: null,
-  theme: false,
+  settings: null,
 };
 
 const SMALL: readonly SeedItem[] = [
@@ -128,7 +128,7 @@ describe("commands()", () => {
     const h = harness(t, { selected: "a" }, ["p2"]);
     const all = ids(h.ctx);
     const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash", "today", "select-next", "select-prev", "duplicate", "print"];
-    const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", "zoom-F", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "about"];
+    const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", "zoom-F", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "settings", "about"];
     const goTo = ["g1", "a", "b", "one", "m", "u"].map((x) => `goto:${x}`);
     expect([...keyed, ...more, ...goTo].filter((x) => !all.includes(x))).toEqual([]);
     expect(all.filter((x) => x === "close-dialog" || x === "deselect")).toEqual([]);
@@ -150,7 +150,7 @@ describe("commands()", () => {
     const t = await made(SMALL);
     const h = harness(t, { plan: null }, ["p2"]);
     const ctx: CommandCtx = { ...h.ctx, session: null, run: null, undo: null, redo: null };
-    expect(ids(ctx)).toEqual(["new-plan", "example-plan", "import", "sync-setup", "sync-join", "sync-devices", `open-plan:${t.session.view().plan.id}`, "open-plan:p2", "theme", "theme-cyberdeck", "palette", "about"]);
+    expect(ids(ctx)).toEqual(["new-plan", "example-plan", "import", "sync-setup", "sync-join", "sync-devices", `open-plan:${t.session.view().plan.id}`, "open-plan:p2", "settings", "theme", "theme-cyberdeck", "palette", "about"]);
   });
 
   it("holds export and import in the File group with an open plan", async () => {
@@ -238,30 +238,33 @@ describe("commands()", () => {
     expect(h.newPlan).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the palette, the about box and the calendar through UI state", async () => {
+  it("opens the palette, Settings at About and the calendar through UI state", async () => {
     const t = await made(SMALL);
     const h = harness(t);
     ["palette", "about", "calendar"].forEach((id) => find(h.ctx, id).run());
-    expect(h.setUi.mock.calls).toEqual([[{ dialog: { t: "palette" } }], [{ dialog: { t: "about" } }], [{ dialog: { t: "calendar" } }]]);
+    expect(h.setUi.mock.calls).toEqual([[{ dialog: { t: "palette" } }], [{ settings: "about" }], [{ dialog: { t: "calendar" } }]]);
+    expect([find(h.ctx, "about").label, find(h.ctx, "about").group]).toEqual(["About WebBoard", "Help"]);
   });
 
   it.each([
     ["with", true],
     ["without", false],
-  ])("offers Theme… and Use Cyberdeck theme in View %s a plan", async (_w, open) => {
+  ])("offers Settings…, Theme… and Use Cyberdeck theme in View %s a plan", async (_w, open) => {
     const t = await made(SMALL);
     const h = harness(t);
     const ctx: CommandCtx = open ? h.ctx : { ...h.ctx, session: null, run: null, undo: null, redo: null };
-    expect([find(ctx, "theme"), find(ctx, "theme-cyberdeck")].map((c) => [c.label, c.group])).toEqual([
+    expect([find(ctx, "settings"), find(ctx, "theme"), find(ctx, "theme-cyberdeck")].map((c) => [c.label, c.group])).toEqual([
+      ["Settings…", "View"],
       ["Theme…", "View"],
       ["Use Cyberdeck theme", "View"],
     ]);
+    find(ctx, "settings").run();
     find(ctx, "theme").run();
-    expect(h.setUi.mock.calls).toEqual([[{ theme: true }]]);
+    expect(h.setUi.mock.calls).toEqual([[{ settings: "theme" }], [{ settings: "theme" }]]);
     expect(h.useCyberdeck).not.toHaveBeenCalled();
     find(ctx, "theme-cyberdeck").run();
     expect(h.useCyberdeck).toHaveBeenCalledTimes(1);
-    expect(h.setUi).toHaveBeenCalledTimes(1);
+    expect(h.setUi).toHaveBeenCalledTimes(2);
   });
 
   it("switches views and zooms, and jumps to today", async () => {

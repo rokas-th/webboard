@@ -374,12 +374,11 @@ html[data-form="phone"] .tl-row .days {
 }
 
 .calendar-sheet,
-.about-sheet,
 .revert-sheet {
   padding: 18px 20px 24px;
 }
 
-.about-row {
+.settings-row {
   min-height: 44px;
   margin-top: 12px;
   border-top: 1px solid var(--line);

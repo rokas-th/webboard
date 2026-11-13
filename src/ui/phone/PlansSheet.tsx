@@ -4,7 +4,6 @@ import type { PlanListing, Registry } from "../../store/registry";
 import type { SyncState } from "../../sync/manager";
 import { canReload } from "../../sync/reload";
 import { useSyncState } from "../../sync/SyncProvider";
-import { ABOUT_TITLE } from "../common/About";
 import { Sheet } from "../common/Sheet";
 import { FailedPlanView } from "../shell/PlanFailed";
 import { restorePlan, type PlanFiles } from "../shell/selection";
@@ -23,26 +22,18 @@ export function ImportButton(p: { files: PlanFiles }) {
   );
 }
 
-export function AboutRow(p: { onAbout(): void }) {
-  return (
-    <button type="button" className="choice-row about-row" onClick={p.onAbout}>
-      {ABOUT_TITLE}
-    </button>
-  );
-}
-
-export function ThemeRow(p: { onClose(): void }) {
+export function SettingsRow(p: { onClose(): void }) {
   const { setUi } = useUiValue();
   return (
     <button
       type="button"
-      className="choice-row theme-row"
+      className="choice-row settings-row"
       onClick={() => {
-        setUi({ theme: true });
+        setUi({ settings: "theme" });
         p.onClose();
       }}
     >
-      Theme…
+      Settings…
     </button>
   );
 }
@@ -119,7 +110,6 @@ export function PlansSheet(p: {
   onTrash(id: PlanId): void;
   onPurge(id: PlanId): void;
   onMoveAll(ids: readonly PlanId[]): void;
-  onAbout?: () => void;
   onSync(pane: SyncPane): void;
   onClose(): void;
 }) {
@@ -179,8 +169,7 @@ export function PlansSheet(p: {
             </ul>
           </section>
         )}
-        <ThemeRow onClose={p.onClose} />
-        {p.onAbout !== undefined && <AboutRow onAbout={p.onAbout} />}
+        <SettingsRow onClose={p.onClose} />
       </nav>
     </Sheet>
   );

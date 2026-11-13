@@ -382,14 +382,15 @@ describe('compact shell, data-form="compact"', () => {
   });
 });
 
-describe("the theme sheet on compact", () => {
-  it("opens Theme as a sheet from the Plan sheet, closing the Plan sheet, and Close discards a draft", async () => {
+describe("the settings sheet on compact", () => {
+  it("opens Settings as a sheet over the Plan sheet, closing the Plan sheet, and Close discards a draft", async () => {
     const t = await made();
     await shown(t);
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Plan" }));
-    fireEvent.click(within(planSheet()).getByRole("button", { name: "Theme…" }));
+    expect(within(planSheet()).queryByRole("button", { name: "Theme…" })).toBeNull();
+    act(() => lastUi()[1]({ settings: "theme" }));
     const sheets = screen.getAllByRole("dialog");
-    expect(sheets.map((d) => d.getAttribute("aria-label"))).toEqual(["Theme"]);
+    expect(sheets.map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
     expect(sheets[0].getAttribute("aria-modal")).toBe("true");
     expect(document.querySelector('[data-slot="panel"]')).toBeNull();
     const field = within(sheets[0]).getByRole("textbox", { name: "Accent hex" });
@@ -397,31 +398,68 @@ describe("the theme sheet on compact", () => {
     fireEvent.blur(field);
     fireEvent.click(within(sheets[0]).getAllByRole("button", { name: "Close" })[0]);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(lastUi()[0].theme).toBe(false);
+    expect(lastUi()[0].settings).toBeNull();
     expect(toastTexts()).toContain("Unsaved colours discarded.");
   });
 
-  it("opens Theme as a sheet from the toolbar's Settings button", async () => {
+  it("opens Settings at Theme as a sheet from the toolbar's gear", async () => {
     const t = await made();
     await shown(t);
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Settings" }));
-    expect(lastUi()[0].theme).toBe(true);
+    expect(lastUi()[0].settings).toBe("theme");
     const sheets = screen.getAllByRole("dialog");
-    expect(sheets.map((d) => d.getAttribute("aria-label"))).toEqual(["Theme"]);
+    expect(sheets.map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
+    expect(within(sheets[0]).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
     expect(sheets[0].getAttribute("aria-modal")).toBe("true");
     expect(document.querySelector('[data-slot="panel"]')).toBeNull();
   });
 
-  it("shows the Theme sheet over a selected item's sheet and returns to it on Escape", async () => {
+  it("shows an Updates tab only with an update store, holding the same update line", async () => {
+    const t = await made();
+    const state: UpdateState = { k: "current", at: 0 };
+    const updates: Updates = {
+      state: () => state,
+      subscribe: () => () => undefined,
+      start: () => undefined,
+      stop: () => undefined,
+      check: () => Promise.reject(new Error("compact stub: check not used")),
+      install: () => Promise.reject(new Error("compact stub: install not used")),
+    };
+    render(<UpdatesContext.Provider value={updates}>{withSync(shellFor(t).ui)}</UpdatesContext.Provider>);
+    await settle();
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Settings" }));
+    const sheet = screen.getByRole("dialog", { name: "Settings" });
+    expect(within(sheet).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Theme", "Sync", "Updates", "About"]);
+    fireEvent.click(within(sheet).getByRole("tab", { name: "Updates" }));
+    expect(lastUi()[0].settings).toBe("updates");
+    expect(within(sheet).getByRole("tabpanel", { name: "Updates" }).querySelector(".update-line .update-status")?.textContent).toMatch(/^Up to date · checked /);
+    cleanup();
+    render(<UpdatesContext.Provider value={null}>{withSync(shellFor(t).ui)}</UpdatesContext.Provider>);
+    await settle();
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Settings" }));
+    expect(within(screen.getByRole("dialog", { name: "Settings" })).queryByRole("tab", { name: "Updates" })).toBeNull();
+  });
+
+  it("swaps the Settings sheet for the sync dialog from the Sync tab, never stacking them", async () => {
+    const t = await made();
+    await shown(t);
+    act(() => lastUi()[1]({ settings: "sync" }));
+    const sheet = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Join with a code" }));
+    expect([lastUi()[0].settings, lastUi()[0].dialog]).toEqual([null, { t: "sync", pane: "join" }]);
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Sync"]);
+  });
+
+  it("shows the Settings sheet over a selected item's sheet and returns to it on Escape", async () => {
     const t = await made();
     await shown(t);
     act(() => lastUi()[1]({ selected: "t3" }));
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Tracking: review results"]);
-    act(() => lastUi()[1]({ theme: true }));
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Theme"]);
-    fireEvent.keyDown(screen.getByRole("dialog", { name: "Theme" }), { key: "Escape" });
-    expect(lastUi()[0].theme).toBe(false);
+    act(() => lastUi()[1]({ settings: "theme" }));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Settings" }), { key: "Escape" });
+    expect(lastUi()[0].settings).toBeNull();
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Tracking: review results"]);
   });
 });

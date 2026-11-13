@@ -27,7 +27,7 @@ const UI: UiState = {
   reveal: null,
   follow: null,
   naming: null,
-  theme: false,
+  settings: null,
 };
 
 const SEED: readonly SeedItem[] = [

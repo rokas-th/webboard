@@ -2078,42 +2078,46 @@ describe("Shell: print (product-8)", () => {
   });
 });
 
-describe("the theme panel in the wide shell", () => {
-  const themeIn = (root: Element | null): HTMLElement | null => (root === null ? null : root.querySelector<HTMLElement>('section[aria-label="Theme"]'));
+describe("the settings panel in the wide shell", () => {
+  const themeIn = (root: Element | null): HTMLElement | null => (root === null ? null : root.querySelector<HTMLElement>('section[aria-label="Settings"]'));
+  const gear = (): HTMLElement => {
+    const bar = document.querySelector("header.toolbar");
+    if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
+    return within(bar).getByRole("button", { name: "Settings" });
+  };
   const openTheme = (): void => {
-    const panel = slot("panel");
-    if (!(panel instanceof HTMLElement)) throw new Error("no panel slot");
-    fireEvent.click(within(panel).getByRole("button", { name: "Theme…" }));
+    fireEvent.click(gear());
   };
   const closeTheme = (): void => {
     const section = themeIn(slot("panel"));
-    if (section === null) throw new Error("no theme panel");
+    if (section === null) throw new Error("no settings panel");
     fireEvent.click(within(section).getAllByRole("button", { name: "Close" })[0]);
   };
   const editAccent = (): void => {
     const section = themeIn(slot("panel"));
-    if (section === null) throw new Error("no theme panel");
+    if (section === null) throw new Error("no settings panel");
     const field = within(section).getByRole("textbox", { name: "Accent hex" });
     fireEvent.change(field, { target: { value: "#335577" } });
     fireEvent.blur(field);
   };
 
-  it("replaces the plan panel from its Theme… button, and the plan panel returns on Close", async () => {
+  it("replaces the plan panel, which has no Theme… button, and the plan panel returns on Close", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
     expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
+    expect(within(slot("panel") as HTMLElement).queryByRole("button", { name: "Theme…" })).toBeNull();
     openTheme();
-    expect(lastUi().theme).toBe(true);
+    expect(lastUi().settings).toBe("theme");
     expect(themeIn(slot("panel"))).not.toBeNull();
     expect(slot("panel")?.querySelector(".panel")).toBeNull();
     closeTheme();
-    expect(lastUi().theme).toBe(false);
+    expect(lastUi().settings).toBeNull();
     expect(themeIn(slot("panel"))).toBeNull();
     expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
   });
 
-  it("opens Theme from the toolbar's Settings button, and the same button closes it, discarding a draft", async () => {
+  it("opens Settings at Theme from the toolbar's gear, and the gear closes it, discarding a draft", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
@@ -2122,13 +2126,14 @@ describe("the theme panel in the wide shell", () => {
     const settings = within(bar).getByRole("button", { name: "Settings" });
     expect(settings.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(settings);
-    expect(lastUi().theme).toBe(true);
+    expect(lastUi().settings).toBe("theme");
+    expect(within(themeIn(slot("panel")) ?? document.body).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
     expect(themeIn(slot("panel"))).not.toBeNull();
     expect(within(bar).getByRole("button", { name: "Settings" }).getAttribute("aria-pressed")).toBe("true");
     editAccent();
     expect(document.documentElement.style.getPropertyValue("--cyan")).toBe("#335577");
     fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
-    expect(lastUi().theme).toBe(false);
+    expect(lastUi().settings).toBeNull();
     expect(themeIn(slot("panel"))).toBeNull();
     expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
     expect(toastTexts()).toContain("Unsaved colours discarded.");
@@ -2136,7 +2141,29 @@ describe("the theme panel in the wide shell", () => {
     expect(within(bar).getByRole("button", { name: "Settings" }).getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("opens Theme from the toolbar's Settings button with no plan open", async () => {
+  it("opens a sync pane from the Sync tab, closing Settings first and discarding a draft", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    openTheme();
+    editAccent();
+    const section = themeIn(slot("panel"));
+    if (section === null) throw new Error("no settings panel");
+    expect(within(section).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Theme", "Sync", "About"]);
+    fireEvent.click(within(section).getByRole("tab", { name: "Sync" }));
+    expect(lastUi().settings).toBe("sync");
+    expect(within(section).getByText("Local only")).toBeTruthy();
+    fireEvent.click(within(section).getByRole("button", { name: "Add a device" }));
+    expect([lastUi().settings, lastUi().dialog]).toEqual([null, { t: "sync", pane: "pair" }]);
+    expect(themeIn(slot("panel"))).toBeNull();
+    expect(toastTexts()).toContain("Unsaved colours discarded.");
+    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe(tokensOf(cyberdeck()).cyan);
+    const dialog = screen.getByRole("dialog", { name: "Sync" });
+    expect(within(dialog).getByRole("tab", { name: "Add a device" }).getAttribute("aria-selected")).toBe("true");
+    expect(gear().getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("opens Settings from the toolbar's gear with no plan open", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t, { plans: () => [] }).ui));
     await settle();
@@ -2148,7 +2175,7 @@ describe("the theme panel in the wide shell", () => {
     expect(themeIn(slot("panel"))).not.toBeNull();
   });
 
-  it("keeps Theme in the slot while an item is selected, and shows the item panel after Close", async () => {
+  it("keeps Settings in the slot while an item is selected, and shows the item panel after Close", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
@@ -2163,19 +2190,19 @@ describe("the theme panel in the wide shell", () => {
     expect(within(slot("panel") as HTMLElement).getByLabelText("Name")).toHaveProperty("value", "Tracking: review results");
   });
 
-  it("shows Theme in the panel slot with no plan open", async () => {
+  it("shows Settings in the panel slot with no plan open", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t, { plans: () => [] }).ui));
     await settle();
     expect(document.querySelector(".empty-state")).not.toBeNull();
     expect(slot("panel")).toBeNull();
-    setUiNow({ theme: true });
+    setUiNow({ settings: "theme" });
     expect(themeIn(slot("panel"))).not.toBeNull();
     closeTheme();
     expect(slot("panel")).toBeNull();
   });
 
-  it("closes Theme on Escape at the window, discarding a draft, and leaves the selection", async () => {
+  it("closes Settings on Escape at the window, discarding a draft, and leaves the selection", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
@@ -2186,13 +2213,13 @@ describe("the theme panel in the wide shell", () => {
     act(() => {
       fireEvent.keyDown(document.body, { key: "Escape" });
     });
-    expect(lastUi().theme).toBe(false);
+    expect(lastUi().settings).toBeNull();
     expect(lastUi().selected).toBe("t3");
     expect(toastTexts()).toContain("Unsaved colours discarded.");
     expect(document.documentElement.style.getPropertyValue("--cyan")).toBe(tokensOf(cyberdeck()).cyan);
   });
 
-  it("leaves Escape to a text field outside the panel, keeping Theme open", async () => {
+  it("leaves Escape to a text field outside the panel, keeping Settings open", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
@@ -2206,16 +2233,16 @@ describe("the theme panel in the wide shell", () => {
       fireEvent.keyDown(field, { key: "Escape" });
     });
     field.remove();
-    expect(lastUi().theme).toBe(true);
+    expect(lastUi().settings).toBe("theme");
     expect(themeIn(slot("panel"))).not.toBeNull();
     expect(toastTexts()).not.toContain("Unsaved colours discarded.");
     act(() => {
       fireEvent.keyDown(document.body, { key: "Escape" });
     });
-    expect(lastUi().theme).toBe(false);
+    expect(lastUi().settings).toBeNull();
   });
 
-  it("selects a clicked list row while Theme is open, highlighting it, and Theme stays in the slot", async () => {
+  it("selects a clicked list row while Settings is open, highlighting it, and Settings stays in the slot", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
@@ -2229,7 +2256,7 @@ describe("the theme panel in the wide shell", () => {
     expect(lastUi().selected).toBe("t3");
     expect(document.querySelector('[data-lrow="t3"]')?.classList.contains("selected")).toBe(true);
     expect(themeIn(slot("panel"))).not.toBeNull();
-    expect(lastUi().theme).toBe(true);
+    expect(lastUi().settings).toBe("theme");
   });
 
   it("does not paint a native background on iOS", async () => {
@@ -2254,16 +2281,16 @@ describe("the theme panel in the wide shell", () => {
     expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((n) => [n.textContent, n.className])).toEqual([["Window colour could not be set: no window", "toast bad"]]);
   });
 
-  it("leaves Escape to an open dialog while Theme is open", async () => {
+  it("leaves Escape to an open dialog while Settings is open", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
     openTheme();
-    setUiNow({ dialog: { t: "about" } });
+    setUiNow({ dialog: { t: "calendar" } });
     act(() => {
       fireEvent.keyDown(document.body, { key: "Escape" });
     });
-    expect([lastUi().dialog, lastUi().theme]).toEqual([null, true]);
+    expect([lastUi().dialog, lastUi().settings]).toEqual([null, "theme"]);
   });
 
   it("paints the native window background with the shown ground on macOS", async () => {

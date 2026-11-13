@@ -16,14 +16,14 @@ import { JoinPane } from "./JoinPane";
 import { PairPane } from "./PairPane";
 import { SetupPane } from "./SetupPane";
 
-const PANE_LABELS: Record<SyncPane, string> = {
+export const PANE_LABELS: Record<SyncPane, string> = {
   setup: "Set up sync",
   join: "Join with a code",
   pair: "Add a device",
   devices: "Devices",
 };
 
-const PANE_ORDER: readonly SyncPane[] = ["setup", "join", "pair", "devices"];
+export const PANE_ORDER: readonly SyncPane[] = ["setup", "join", "pair", "devices"];
 
 export function resolvePane(state: SyncState, pane: SyncPane | null): SyncPane {
   if (pane !== null) return pane;

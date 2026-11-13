@@ -316,10 +316,11 @@ export function commands(ctx: CommandCtx): Command[] {
     { id: "sync-join", group: "File", label: "Join with a code", run: () => ctx.setUi({ dialog: { t: "sync", pane: "join" } }) },
     { id: "sync-devices", group: "File", label: "Sync devices", run: () => ctx.setUi({ dialog: { t: "sync", pane: "devices" } }) },
     ...openPlans,
-    { id: "theme", group: "View", label: "Theme…", run: () => ctx.setUi({ theme: true }) },
+    { id: "settings", group: "View", label: "Settings…", run: () => ctx.setUi({ settings: "theme" }) },
+    { id: "theme", group: "View", label: "Theme…", run: () => ctx.setUi({ settings: "theme" }) },
     { id: "theme-cyberdeck", group: "View", label: "Use Cyberdeck theme", run: () => ctx.theme.useCyberdeck() },
     { id: "palette", group: "Help", label: "Command palette", keys: ctx.mac ? "⌘K" : "Ctrl K", run: () => ctx.setUi({ dialog: { t: "palette" } }) },
-    { id: "about", group: "Help", label: "About WebBoard", run: () => ctx.setUi({ dialog: { t: "about" } }) },
+    { id: "about", group: "Help", label: "About WebBoard", run: () => ctx.setUi({ settings: "about" }) },
     ...updateCommands(ctx.updates),
   ];
   return session === null ? always : [...planCommands(ctx, session), ...always];

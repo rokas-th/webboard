@@ -179,7 +179,7 @@ describe("opening the palette", () => {
     press("k", { metaKey: true });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(document.activeElement).toBe(query());
-    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileCreate the example plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "ViewTheme…", "ViewUse Cyberdeck theme", "HelpCommand palette", "HelpAbout WebBoard"]);
+    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileCreate the example plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "ViewSettings…", "ViewTheme…", "ViewUse Cyberdeck theme", "HelpCommand palette", "HelpAbout WebBoard"]);
     press("Escape", {}, query());
     fireEvent.click(button(bar(), "⌘K"));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
@@ -193,11 +193,11 @@ describe("opening the palette", () => {
     opener.focus();
     press("k", { metaKey: true }, opener);
     expect(document.activeElement).toBe(query());
-    type("About WebBoard");
+    type("Join with a code");
     press("Enter", {}, query());
-    const about = screen.getByRole("dialog", { name: "About WebBoard" });
-    expect(about.contains(document.activeElement)).toBe(true);
-    press("Escape", {}, about);
+    const sync = screen.getByRole("dialog", { name: "Sync" });
+    expect(sync.contains(document.activeElement)).toBe(true);
+    press("Escape", {}, sync);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(opener);
   });
@@ -225,11 +225,11 @@ describe("opening the palette", () => {
   it("does nothing on Ctrl K off macOS while another dialog is open", async () => {
     const t = await made(MESA_SEED);
     await shown(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
-    setUi({ dialog: { t: "about" } });
-    const about = screen.getByRole("dialog");
-    press("k", { ctrlKey: true }, about);
-    expect(uiNow()[0].dialog).toEqual({ t: "about" });
-    expect(screen.getAllByRole("dialog")).toEqual([about]);
+    setUi({ dialog: { t: "sync", pane: "setup" } });
+    const sync = screen.getByRole("dialog");
+    press("k", { ctrlKey: true }, sync);
+    expect(uiNow()[0].dialog).toEqual({ t: "sync", pane: "setup" });
+    expect(screen.getAllByRole("dialog")).toEqual([sync]);
   });
 
   it("does nothing for a key whose command is absent in the empty state", async () => {
@@ -260,7 +260,7 @@ describe("the palette list", () => {
     await shown(t);
     press("k", { metaKey: true });
     type("view");
-    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewTheme…", "ViewUse Cyberdeck theme"]);
+    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewSettings…", "ViewTheme…", "ViewUse Cyberdeck theme"]);
     expect(highlighted()).toBe("ViewTimeline1");
     press("ArrowUp", {}, query());
     expect(highlighted()).toBe("ViewTimeline1");
@@ -274,11 +274,13 @@ describe("the palette list", () => {
       expect(el.classList.contains("on")).toBe(true);
       return el.textContent;
     };
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([8, "ViewUse Cyberdeck theme"]);
-    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4, 5, 6, 7, 8].map(() => [{ block: "nearest" }]));
-    [1, 2, 3, 4, 5, 6, 7].forEach(() => press("ArrowUp", {}, query()));
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([9, "ViewUse Cyberdeck theme"]);
+    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9].map(() => [{ block: "nearest" }]));
+    press("ArrowDown", {}, query());
+    expect(highlighted()).toBe("ViewUse Cyberdeck theme");
+    [1, 2, 3, 4, 5, 6, 7, 8].forEach(() => press("ArrowUp", {}, query()));
     expect(highlighted()).toBe("ViewNow · Next · Later2");
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([15, "ViewNow · Next · Later2"]);
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([17, "ViewNow · Next · Later2"]);
     press("Enter", {}, query());
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(uiNow()[0].view).toBe("board");
@@ -344,12 +346,14 @@ describe("the palette list", () => {
     expect(createPlan.mock.calls).toEqual([["New plan"]]);
   });
 
-  it("opens Theme in the panel slot from Theme…", async () => {
+  it.each(["Settings…", "Theme…"])("opens Settings at Theme in the panel slot from %s", async (label) => {
     const t = await made(MESA_SEED);
     await shown(t);
-    runFromPalette("Theme…");
-    expect(uiNow()[0].theme).toBe(true);
-    expect(panel().querySelector('section[aria-label="Theme"]')).not.toBeNull();
+    runFromPalette(label);
+    expect(uiNow()[0].settings).toBe("theme");
+    const region = panel().querySelector<HTMLElement>('section[aria-label="Settings"]');
+    if (region === null) throw new Error("no Settings panel");
+    expect(within(region).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
   });
 
   it("goes back to Cyberdeck from Use Cyberdeck theme", async () => {
@@ -367,8 +371,8 @@ describe("the palette list", () => {
     const t = await made(MESA_SEED);
     await shown(t);
     runFromPalette("Theme…");
-    const region = panel().querySelector<HTMLElement>('section[aria-label="Theme"]');
-    if (region === null) throw new Error("no Theme panel");
+    const region = panel().querySelector<HTMLElement>('section[aria-label="Settings"]');
+    if (region === null) throw new Error("no Settings panel");
     const field = within(region).getByRole("textbox", { name: "Accent hex" });
     fireEvent.change(field, { target: { value: "#7CC4FF" } });
     expect(within(region).getByText("Unsaved")).toBeTruthy();
@@ -376,7 +380,7 @@ describe("the palette list", () => {
     expect(within(region).queryByText("Unsaved")).toBeNull();
     expect(document.documentElement.style.getPropertyValue("--cyan")).toBe("#24E0FF");
     expect([...document.querySelectorAll(".toasts .toast")].map((n) => n.textContent)).toContain("Unsaved colours discarded.");
-    expect(uiNow()[0].theme).toBe(true);
+    expect(uiNow()[0].settings).toBe("theme");
   });
 
   it("opens the calendar dialog", async () => {
@@ -399,15 +403,20 @@ describe("the palette list", () => {
 });
 
 describe("About", () => {
-  it("names the version and the holiday data", async () => {
+  it("opens Settings at About, naming the version and the holiday data", async () => {
     const t = await made(MESA_SEED);
     await shown(t);
     runFromPalette("About");
-    const box = screen.getByRole("dialog", { name: "About WebBoard" });
+    expect(uiNow()[0].settings).toBe("about");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const region = panel().querySelector<HTMLElement>('section[aria-label="Settings"]');
+    if (region === null) throw new Error("no Settings panel");
+    expect(within(region).getByRole("tab", { name: "About" }).getAttribute("aria-selected")).toBe("true");
+    const box = within(region).getByRole("tabpanel", { name: "About" });
     expect(within(box).getByText(`WebBoard ${version}`)).toBeTruthy();
     expect(within(box).getByText("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.").textContent).toBe("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.");
-    fireEvent.click(button(box, "Close"));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(button(region, "Close"));
+    expect(uiNow()[0].settings).toBeNull();
   });
 });
 
@@ -643,7 +652,7 @@ describe("read-only", () => {
           .filter((e) => !(e instanceof HTMLButtonElement || e instanceof HTMLInputElement || e instanceof HTMLSelectElement || e instanceof HTMLTextAreaElement) || !e.disabled)
           .filter((e) => !((e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement) && e.readOnly))
           .map((e) => e.closest("label")?.textContent ?? e.textContent ?? "");
-      expect(enabled(panel())).toEqual(["Theme…"]);
+      expect(enabled(panel())).toEqual([]);
       fireEvent.click(within(bar()).getByRole("tab", { name: "Now · Next · Later" }));
       const board = document.querySelector('[data-slot="board"]');
       if (!(board instanceof HTMLElement)) throw new Error("no board");

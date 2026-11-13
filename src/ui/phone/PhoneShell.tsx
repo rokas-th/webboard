@@ -6,7 +6,6 @@ import type { PlanSession } from "../../store/session";
 import type { SyncState } from "../../sync/manager";
 import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
-import { About } from "../common/About";
 import { toast, Toasts } from "../common/Toast";
 import { ghostIds } from "../ghosts";
 import { OpenChoice } from "../run";
@@ -19,7 +18,8 @@ import { ExampleButton, NewPlanButton } from "../shell/Sidebar";
 import { RemovedBanner } from "../sync/RemovedBanner";
 import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
 import { UiContext, useUi, useUiValue, type DialogState, type SyncPane } from "../state";
-import { ThemePanel, useCanHover } from "../theme/ThemePanel";
+import { useCanHover } from "../theme/ThemePanel";
+import { SettingsPanel } from "../settings/SettingsPanel";
 import { Timeline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { ChoiceSheet } from "./ChoiceSheet";
@@ -56,7 +56,6 @@ function PlanDialog(p: { session: PlanSession; registry: Registry; clock: Clock;
       return <CalendarSheet key={p.session.view().plan.id} session={p.session} registry={p.registry} clock={p.clock} onClose={p.onClose} />;
     case "revert":
       return <RevertDialog key={d.id} session={p.session} id={d.id} frame="sheet" onClose={p.onClose} />;
-    case "about":
     case "sync":
       return null;
     case "palette":
@@ -123,7 +122,7 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
       {dialog !== null ? (
         <PlanDialog session={p.session} registry={p.registry} clock={p.clock} dialog={dialog} local={local} onClose={closeDialog} />
       ) : (
-        selected !== null && !ui.theme && (
+        selected !== null && ui.settings === null && (
           <ItemSheet
             key={selected}
             session={p.session}
@@ -269,10 +268,6 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
   const session = main.k === "open" ? main.session : null;
   const closeDialog = (): void => setUi({ dialog: null });
   const hover = useCanHover();
-  const about = (): void => {
-    closePlans();
-    setUi({ dialog: { t: "about" } });
-  };
   const openSync = (pane: SyncPane | null): void => {
     closePlans();
     setUi({ dialog: { t: "sync", pane } });
@@ -321,17 +316,24 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
             onTrash={trash}
             onPurge={setPurging}
             onMoveAll={moveAll}
-            onAbout={main.k === "empty" ? about : undefined}
             onSync={openSync}
             onClose={closePlans}
           />
         )}
-        {ui.dialog !== null && ui.dialog.t === "about" && <About frame="sheet" onClose={closeDialog} />}
         {ui.dialog !== null && ui.dialog.t === "sync" && (
           <SyncDialog pane={ui.dialog.pane} frame="sheet" onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />
         )}
         {purging !== null && <PurgeConfirm registry={p.registry} id={purging} frame="sheet" onClose={() => setPurging(null)} />}
-        {ui.theme && <ThemePanel frame="sheet" hover={hover} onClose={() => setUi({ theme: false })} />}
+        {ui.settings !== null && (
+          <SettingsPanel
+            frame="sheet"
+            tab={ui.settings}
+            hover={hover}
+            onTab={(t) => setUi({ settings: t })}
+            onClose={() => setUi({ settings: null })}
+            onSync={(pane) => setUi({ settings: null, dialog: { t: "sync", pane } })}
+          />
+        )}
         <ConvertedReport frame="sheet" />
         <Toasts />
       </div>

@@ -1789,36 +1789,32 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     listShows("MESA 2027");
   });
 
-  it("about", async () => {
+  it("about, through the Settings row of the ⋯ Plan sheet", async () => {
     const t = await planSheetMade();
     const apply = vi.spyOn(t.session, "apply");
     await shown(t);
     openPlanSheet();
-    fireEvent.click(within(planSheet()).getByRole("button", { name: "About WebBoard" }));
-    const about = screen.getByRole("dialog", { name: "About WebBoard" });
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(within(planSheet()).queryByRole("button", { name: "About WebBoard" })).toBeNull();
+    fireEvent.click(within(planSheet()).getByRole("button", { name: "Settings…" }));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
+    const settings = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(settings).getByRole("tab", { name: "About" }));
+    expect(lastUi().settings).toBe("about");
+    const about = within(settings).getByRole("tabpanel", { name: "About" });
     expect(about.textContent).toContain(`WebBoard ${version}`);
     expect(about.textContent).toContain(HOLIDAY_ATTRIBUTION);
     expect(HOLIDAY_ATTRIBUTION).toBe("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.");
-    fireEvent.click(onlyClose("About WebBoard"));
-    expect(lastUi().dialog).toBeNull();
-    expect(planSheet()).toBeTruthy();
+    fireEvent.click(onlyClose("Settings"));
+    expect(lastUi().settings).toBeNull();
     expect(apply).not.toHaveBeenCalled();
   });
 
-  it("about from the empty state's Plans", async () => {
+  it("offers the Settings row in the empty state's Plans and an open plan's Plans, without an About row", async () => {
     await showIndex(await emptyIndex());
     openPlans();
-    fireEvent.click(within(plansSheet()).getByRole("button", { name: "About WebBoard" }));
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["About WebBoard"]);
-    expect(screen.getByRole("dialog", { name: "About WebBoard" }).textContent).toContain(`WebBoard ${version}`);
-  });
-
-  it("an open plan's Plans has no About row", async () => {
-    const t = await planSheetMade();
-    await shown(t);
-    openPlans();
     expect(within(plansSheet()).queryByRole("button", { name: "About WebBoard" })).toBeNull();
+    fireEvent.click(within(plansSheet()).getByRole("button", { name: "Settings…" }));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
   });
 
   it("baselines on the phone", async () => {
@@ -2439,48 +2435,63 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
   });
 });
 
-describe("the theme sheet on the phone", () => {
+describe("the settings sheet on the phone", () => {
   const themeRow = (sheet: HTMLElement): HTMLElement => {
-    const row = sheet.querySelector("button.theme-row");
-    if (!(row instanceof HTMLElement)) throw new Error("no Theme… row");
-    expect(row.textContent).toBe("Theme…");
+    const row = sheet.querySelector("button.settings-row");
+    if (!(row instanceof HTMLElement)) throw new Error("no Settings… row");
+    expect(row.textContent).toBe("Settings…");
+    expect(sheet.querySelector("button.theme-row, button.about-row")).toBeNull();
     return row;
   };
   const dialogs = (): (string | null)[] => screen.queryAllByRole("dialog").map((d) => d.getAttribute("aria-label"));
 
-  it("opens Theme from the Plans sheet, closing it", async () => {
+  it("opens Settings at Theme from the Plans sheet, closing it", async () => {
     await shown(await made());
     fireEvent.click(themeRow(openPlans()));
-    expect(dialogs()).toEqual(["Theme"]);
-    expect(lastUi().theme).toBe(true);
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Theme" })).getAllByRole("button", { name: "Close" })[0]);
+    expect(dialogs()).toEqual(["Settings"]);
+    expect(lastUi().settings).toBe("theme");
+    const sheet = screen.getByRole("dialog", { name: "Settings" });
+    expect(within(sheet).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Theme", "Sync", "About"]);
+    expect(within(sheet).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(within(sheet).getAllByRole("button", { name: "Close" })[0]);
     expect(dialogs()).toEqual([]);
-    expect(lastUi().theme).toBe(false);
+    expect(lastUi().settings).toBeNull();
   });
 
-  it("opens Theme from the Plans sheet in the empty state", async () => {
+  it("swaps the Settings sheet for the sync sheet from the Sync tab", async () => {
+    await shown(await made());
+    fireEvent.click(themeRow(openPlans()));
+    const sheet = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(sheet).getByRole("tab", { name: "Sync" }));
+    expect(lastUi().settings).toBe("sync");
+    fireEvent.click(within(sheet).getByRole("button", { name: "Set up sync" }));
+    expect([lastUi().settings, lastUi().dialog]).toEqual([null, { t: "sync", pane: "setup" }]);
+    expect(dialogs()).toEqual(["Sync"]);
+  });
+
+  it("opens Settings from the Plans sheet in the empty state", async () => {
     await showIndex(await emptyIndex());
     fireEvent.click(themeRow(openPlans()));
-    expect(dialogs()).toEqual(["Theme"]);
+    expect(dialogs()).toEqual(["Settings"]);
   });
 
-  it("opens Theme from the ⋯ Plan sheet, closing it", async () => {
+  it("opens Settings from the ⋯ Plan sheet, closing it", async () => {
     await shown(await planSheetMade());
     fireEvent.click(themeRow(openPlanSheet()));
-    expect(dialogs()).toEqual(["Theme"]);
+    expect(dialogs()).toEqual(["Settings"]);
   });
 
-  it("hides a selected item's sheet while Theme is open, and the item sheet returns after Close", async () => {
+  it("hides a selected item's sheet while Settings is open, and the item sheet returns after Close", async () => {
     const t = await made();
     await shown(t);
     const review = [...t.session.view().plan.items].find(([, it]) => it.name === "Review")?.[0];
     if (review === undefined) throw new Error("no Review item");
     setUiNow({ selected: review });
     expect(dialogs()).toEqual(["Review"]);
-    setUiNow({ theme: true });
-    expect(dialogs()).toEqual(["Theme"]);
+    setUiNow({ settings: "theme" });
+    expect(dialogs()).toEqual(["Settings"]);
     expect(lastUi().selected).toBe(review);
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Theme" })).getAllByRole("button", { name: "Close" })[0]);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Settings" })).getAllByRole("button", { name: "Close" })[0]);
     expect(dialogs()).toEqual(["Review"]);
   });
 
@@ -2498,7 +2509,7 @@ describe("the theme sheet on the phone", () => {
   };
 
   const choosePaper = async (): Promise<void> => {
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Theme" })).getByRole("button", { name: /^Paper/ }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Settings" })).getByRole("button", { name: /^Paper/ }));
     await settle();
   };
 
@@ -2510,7 +2521,7 @@ describe("the theme sheet on the phone", () => {
 
   it("does not paint a native background through Shell on iOS, even after choosing a theme", async () => {
     await shellOn("ios");
-    expect(dialogs()).toEqual(["Theme"]);
+    expect(dialogs()).toEqual(["Settings"]);
     await choosePaper();
     expect(document.documentElement.style.getPropertyValue("--void")).toBe(groundOf("paper"));
     expect(paintNative).not.toHaveBeenCalled();
@@ -2518,7 +2529,7 @@ describe("the theme sheet on the phone", () => {
 
   it("paints the native background through the same Shell harness on macOS, and again after choosing a theme", async () => {
     await shellOn("macos");
-    expect(dialogs()).toEqual(["Theme"]);
+    expect(dialogs()).toEqual(["Settings"]);
     expect(vi.mocked(paintNative).mock.calls).toEqual([[groundOf("cyberdeck")]]);
     await choosePaper();
     expect(vi.mocked(paintNative).mock.calls).toEqual([[groundOf("cyberdeck")], [groundOf("paper")]]);

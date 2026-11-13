@@ -9,13 +9,14 @@ export type Zoom = FixedZoom | "F";
 
 export type SyncPane = "setup" | "join" | "pair" | "devices";
 
+export type SettingsTab = "theme" | "sync" | "updates" | "about";
+
 export type DialogState =
   | { t: "sync"; pane: SyncPane | null }
   | { t: "calendar" }
   | { t: "choice"; id: string; side?: string }
   | { t: "palette" }
-  | { t: "revert"; id: string }
-  | { t: "about" };
+  | { t: "revert"; id: string };
 
 export interface UiState {
   plan: PlanId | null;
@@ -28,7 +29,7 @@ export interface UiState {
   reveal: ItemId | "today" | null;
   follow: ItemId | null;
   naming: ItemId | null;
-  theme: boolean;
+  settings: SettingsTab | null;
 }
 
 export const PLACE_KEY = "webboard.place";
@@ -53,7 +54,7 @@ const DEFAULTS: UiState = {
   reveal: null,
   follow: null,
   naming: null,
-  theme: false,
+  settings: null,
 };
 
 type Place = Pick<UiState, "plan" | "view" | "zoom" | "collapsed">;

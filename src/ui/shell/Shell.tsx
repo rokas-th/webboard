@@ -6,7 +6,6 @@ import { AppError } from "../../services/ipc";
 import { SPACE_PREFIX } from "../../store/plan-id";
 import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
-import { About } from "../common/About";
 import { Sheet } from "../common/Sheet";
 import { detailsOf } from "../common/errorText";
 import { toast, Toasts } from "../common/Toast";
@@ -16,7 +15,7 @@ import { isTyping, keyToCommand } from "../palette/keymap";
 import { Palette } from "../palette/Palette";
 import { PhoneShell } from "../phone/PhoneShell";
 import { OpenChoice, runWith } from "../run";
-import { UiContext, useUi, useUiValue } from "../state";
+import { UiContext, useUi, useUiValue, type SettingsTab } from "../state";
 import { Board } from "../board/Board";
 import { CalendarDialog } from "../calendar/CalendarDialog";
 import { ChoiceDialog } from "../choices/ChoiceDialog";
@@ -27,7 +26,8 @@ import { ItemPanel } from "../panel/ItemPanel";
 import { PlanPanel } from "../panel/PlanPanel";
 import { PrintSheet } from "../print/PrintSheet";
 import { startPrint } from "../print/start";
-import { closeTheme, ThemePanel, useCanHover } from "../theme/ThemePanel";
+import { useCanHover } from "../theme/ThemePanel";
+import { closeSettings, SettingsPanel } from "../settings/SettingsPanel";
 import { Timeline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { HolidayState } from "./HolidayState";
@@ -228,9 +228,9 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       if (target !== null && target.closest('[role="menu"]') !== null && e.key !== "Escape") return;
       const typing = isTyping(e.target, e.key);
       const dialog = c.ui.dialog !== null || document.querySelector('[aria-modal="true"]') !== null;
-      if (e.key === "Escape" && c.ui.theme && !dialog && !typing) {
+      if (e.key === "Escape" && c.ui.settings !== null && !dialog && !typing) {
         e.preventDefault();
-        closeTheme(c.theme, () => c.setUi({ theme: false }));
+        closeSettings(c.theme, () => c.setUi({ settings: null }));
         return;
       }
       const id = keyToCommand(e, { mac: c.mac, typing, dialog, selected: c.ui.selected !== null });
@@ -369,10 +369,19 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     if (!compact) setSheet(null);
   }, [compact]);
   useEffect(() => {
-    if (compact && ui.theme) setSheet(null);
-  }, [compact, ui.theme]);
-  const closeThemePanel = (): void => setUi({ theme: false });
+    if (compact && ui.settings !== null) setSheet(null);
+  }, [compact, ui.settings]);
   const hover = useCanHover();
+  const settingsPanel = (frame: "panel" | "sheet", tab: SettingsTab) => (
+    <SettingsPanel
+      frame={frame}
+      tab={tab}
+      hover={hover}
+      onTab={(t) => setUi({ settings: t })}
+      onClose={() => setUi({ settings: null })}
+      onSync={(pane) => setUi({ settings: null, dialog: { t: "sync", pane } })}
+    />
+  );
   const sheets = compact && ui.dialog === null && (
     <>
       <Sheet open={sheet === "plans"} title="Plans" onClose={closeSheet}>
@@ -384,7 +393,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         </Sheet>
       )}
       {session !== null && selectedItemShown !== null && (
-        <Sheet key={selectedItemShown} open={sheet === null && !ui.theme} title={itemName(session, selectedItemShown)} onClose={() => setUi({ selected: null })}>
+        <Sheet key={selectedItemShown} open={sheet === null && ui.settings === null} title={itemName(session, selectedItemShown)} onClose={() => setUi({ selected: null })}>
           {itemPanel(selectedItemShown, session)}
         </Sheet>
       )}
@@ -422,10 +431,10 @@ function WideBody(p: ShellProps & { compact: boolean }) {
             )}
             {content}
           </main>
-          {!compact && (session !== null || ui.theme) && (
+          {!compact && (session !== null || ui.settings !== null) && (
             <div className="slot slot-panel" data-slot="panel">
-              {ui.theme ? (
-                <ThemePanel frame="panel" hover={hover} onClose={closeThemePanel} />
+              {ui.settings !== null ? (
+                settingsPanel("panel", ui.settings)
               ) : session === null ? null : selectedItemShown !== null ? (
                 itemPanel(selectedItemShown, session)
               ) : (
@@ -435,7 +444,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
           )}
         </div>
         {sheets}
-        {compact && ui.theme && <ThemePanel frame="sheet" hover={hover} onClose={closeThemePanel} />}
+        {compact && ui.settings !== null && settingsPanel("sheet", ui.settings)}
         {session !== null && ui.dialog !== null && ui.dialog.t === "calendar" && (
           <CalendarDialog key={session.view().plan.id} session={session} registry={registry} clock={p.clock} onClose={() => setUi({ dialog: null })} />
         )}
@@ -453,7 +462,6 @@ function WideBody(p: ShellProps & { compact: boolean }) {
           <RevertDialog key={ui.dialog.id} session={session} id={ui.dialog.id} onClose={() => setUi({ dialog: null })} />
         )}
         {ui.dialog !== null && ui.dialog.t === "palette" && <Palette commands={commands(ctx)} onClose={closeDialog} />}
-        {ui.dialog !== null && ui.dialog.t === "about" && <About onClose={closeDialog} />}
         {ui.dialog !== null && ui.dialog.t === "sync" && <SyncDialog pane={ui.dialog.pane} onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />}
         <ConvertedReport />
         {purging !== null && <PurgeConfirm registry={registry} id={purging} onClose={() => setPurging(null)} />}

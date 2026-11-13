@@ -1,15 +1,13 @@
-import { useId, useState, useSyncExternalStore, type KeyboardEvent } from "react";
+import { useId, useState, useSyncExternalStore } from "react";
 import { passes } from "../../theme/checks";
 import { derive, schemeOf, type Scheme, type Seeds } from "../../theme/derive";
 import { DEFAULT_DARK, DEFAULT_LIGHT, tokensOf } from "../../theme/presets";
 import { allThemes, DEFAULT_STORE, themeById, ThemeSaveError } from "../../theme/store";
-import { DISCARDED, useTheme, type ThemeApi } from "../../theme/ThemeContext";
-import { Sheet } from "../common/Sheet";
+import { DISCARDED, useTheme } from "../../theme/ThemeContext";
 import { toast } from "../common/Toast";
 import { ThemeCards } from "./ThemeCards";
 import { Customize, ImportColours, Notes, Readability } from "./ThemeEditor";
 
-export const THEME_TITLE = "Theme";
 export { DISCARDED };
 
 function SlotSelect(p: { scheme: Scheme; label: string }) {
@@ -69,7 +67,7 @@ const defaultName = (scheme: Scheme): string => themeById(DEFAULT_STORE, scheme 
 
 const slotName = (scheme: Scheme): string => (scheme === "dark" ? "When dark" : "When light");
 
-function Body(p: { hover: boolean }) {
+export function ThemeBody(p: { hover: boolean }) {
   const api = useTheme();
   const [picked, setPicked] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -194,43 +192,3 @@ const onHoverChange = (cb: () => void): (() => void) => {
 };
 
 export const useCanHover = (): boolean => useSyncExternalStore(onHoverChange, canHover);
-
-export function closeTheme(api: ThemeApi, onClose: () => void): void {
-  api.preview(null);
-  if (api.draft !== null) {
-    api.setDraft(null);
-    toast(DISCARDED);
-  }
-  onClose();
-}
-
-export function ThemePanel(p: { frame: "panel" | "sheet"; hover: boolean; onClose(): void }) {
-  const api = useTheme();
-  const close = (): void => closeTheme(api, p.onClose);
-
-  if (p.frame === "sheet") {
-    return (
-      <Sheet open title={THEME_TITLE} onClose={close}>
-        <Body hover={p.hover} />
-      </Sheet>
-    );
-  }
-
-  const onKeyDown = (e: KeyboardEvent<HTMLElement>): void => {
-    if (e.key !== "Escape") return;
-    e.stopPropagation();
-    close();
-  };
-
-  return (
-    <section className="theme-panel" aria-label={THEME_TITLE} onKeyDown={onKeyDown}>
-      <div className="theme-head">
-        <h2>{THEME_TITLE}</h2>
-        <button type="button" className="button-small" onClick={close}>
-          Close
-        </button>
-      </div>
-      <Body hover={p.hover} />
-    </section>
-  );
-}
