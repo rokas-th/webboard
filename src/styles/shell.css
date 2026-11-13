@@ -876,3 +876,22 @@ html[data-form="compact"] .toolbar {
 html[data-form="compact"] .wordmark {
   display: none;
 }
+
+.toolbar .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 9px;
+}
+
+.toolbar .icon-button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.toolbar .icon-button[aria-pressed="true"] {
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+  background: rgba(var(--cyan-rgb), 0.08);
+}

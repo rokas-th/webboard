@@ -1,7 +1,9 @@
 import type { PlanSession } from "../../store/session";
+import { useTheme } from "../../theme/ThemeContext";
 import { useRun } from "../run";
 import type { UiState, ViewKind, Zoom } from "../state";
 import { NewItemMenu } from "../common/NewItemMenu";
+import { closeTheme } from "../theme/ThemePanel";
 import { SyncChip } from "./SyncChip";
 
 const TABS: readonly (readonly [ViewKind, string])[] = [
@@ -16,6 +18,30 @@ const ZOOMS: readonly (readonly [Zoom, string])[] = [
   ["Q", "Quarter"],
   ["F", "Fit the whole plan"],
 ];
+
+const TEETH = Array.from({ length: 8 }, (_, i) => {
+  const a = (i * Math.PI) / 4;
+  return { x1: 8 + 4.6 * Math.cos(a), y1: 8 + 4.6 * Math.sin(a), x2: 8 + 7 * Math.cos(a), y2: 8 + 7 * Math.sin(a) };
+});
+
+function SettingsButton(p: { open: boolean; setUi(patch: Partial<UiState>): void }) {
+  const theme = useTheme();
+  const toggle = (): void => {
+    if (p.open) closeTheme(theme, () => p.setUi({ theme: false }));
+    else p.setUi({ theme: true });
+  };
+  return (
+    <button type="button" className="icon-button" aria-label="Settings" title="Settings" aria-pressed={p.open} onClick={toggle}>
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor">
+        <circle cx="8" cy="8" r="4.6" strokeWidth="1.4" />
+        <circle cx="8" cy="8" r="1.9" strokeWidth="1.4" />
+        {TEETH.map((t, i) => (
+          <line key={i} {...t} strokeWidth="2" />
+        ))}
+      </svg>
+    </button>
+  );
+}
 
 interface ToolbarProps {
   session: PlanSession | null;
@@ -96,6 +122,7 @@ export function Toolbar(p: ToolbarProps) {
         <NewItemMenu label="+ New" className="button-primary" disabled={p.readOnly} onPick={(kind) => p.onCommand(`new-${kind}`)} />
       )}
       <SyncChip />
+      <SettingsButton open={p.ui.theme} setUi={p.setUi} />
       {p.compact !== null && p.session !== null && (
         <button type="button" onClick={p.compact.onPlan}>
           Plan

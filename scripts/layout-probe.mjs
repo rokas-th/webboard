@@ -61,7 +61,7 @@ const STATUS_REFUSED = "Holidays for 2031 not available — open calendar";
 const expect = (selector, text) => ({ expect: text === undefined ? [selector] : [selector, text] });
 const count = (selector, n) => ({ count: [selector, n] });
 const loaded = (selector) => ({ loaded: selector });
-const click = (selector, text) => ({ click: [selector, text] });
+const click = (selector, text) => ({ click: text === undefined ? [selector] : [selector, text] });
 const tap = (selector, text) => ({ tap: [selector, text] });
 const none = (selector, text) => ({ none: [selector, text] });
 const key = (k, code, modifiers) => ({ key: { key: k, code, modifiers } });
@@ -242,6 +242,14 @@ function states() {
     sizes: "compact-all",
     dialog: true,
     actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), expect('.sheet[role="dialog"] .sheet-title', "Theme")],
+  });
+  add("settings-button", "mesa", {
+    actions: [viewExpect("timeline"), count('.toolbar button[aria-label="Settings"][aria-pressed="false"]', 1), click('.toolbar button[aria-label="Settings"]'), expect(".theme-panel h2", "Theme"), count('.toolbar button[aria-label="Settings"][aria-pressed="true"]', 1)],
+  });
+  add("settings-button-compact", "mesa", {
+    sizes: "compact-all",
+    dialog: true,
+    actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect('.sheet[role="dialog"] .sheet-title', "Theme")],
   });
   add("light-timeline", "mesa", {
     theme: { v: 1, mode: "fixed", active: "paper", dark: "cyberdeck", light: "daylight", mine: [] },
@@ -428,7 +436,7 @@ function states() {
   });
   const fullShell = [viewExpect("timeline"), expect(".sidebar"), expect(".slot-panel .panel h2", "Plan")];
   add("touch/full", "mesa", { sizes: "landscape", actions: fullShell });
-  add("desk/full-1180", "mesa", { sizes: "smallest", actions: [...fullShell, expect("header.toolbar .wordmark", "WebBoard"), width(".main", 628, 628)] });
+  add("desk/full-1180", "mesa", { sizes: "smallest", actions: [...fullShell, expect("header.toolbar .wordmark", "WebBoard"), count('.toolbar button[aria-label="Settings"]', 1), width(".main", 628, 628)] });
   add("touch/nub", "mesa", {
     sizes: "ipad-pro",
     actions: [viewExpect("timeline"), click(".tl-row .name", PICKED), expect(".bar.selected .nub"), nubs(60), expect(".slot-panel .panel .kind", "TASK")],
@@ -461,6 +469,7 @@ function states() {
       expect(".empty-state button", "Join with a code"),
       expect(".empty-state button", "Set up sync"),
       expect(".toolbar .sync-chip", "Local only"),
+      count('.toolbar button[aria-label="Settings"]', 1),
     ],
     sizes: "compact-all",
   });

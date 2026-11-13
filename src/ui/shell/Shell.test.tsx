@@ -2113,6 +2113,39 @@ describe("the theme panel in the wide shell", () => {
     expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
   });
 
+  it("opens Theme from the toolbar's Settings button, and the same button closes it, discarding a draft", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const bar = document.querySelector("header.toolbar");
+    if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
+    const settings = within(bar).getByRole("button", { name: "Settings" });
+    expect(settings.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(settings);
+    expect(lastUi().theme).toBe(true);
+    expect(themeIn(slot("panel"))).not.toBeNull();
+    expect(within(bar).getByRole("button", { name: "Settings" }).getAttribute("aria-pressed")).toBe("true");
+    editAccent();
+    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe("#335577");
+    fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
+    expect(lastUi().theme).toBe(false);
+    expect(themeIn(slot("panel"))).toBeNull();
+    expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
+    expect(toastTexts()).toContain("Unsaved colours discarded.");
+    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe(tokensOf(cyberdeck()).cyan);
+    expect(within(bar).getByRole("button", { name: "Settings" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("opens Theme from the toolbar's Settings button with no plan open", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t, { plans: () => [] }).ui));
+    await settle();
+    const bar = document.querySelector("header.toolbar");
+    if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
+    fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
+    expect(themeIn(slot("panel"))).not.toBeNull();
+  });
+
   it("keeps Theme in the slot while an item is selected, and shows the item panel after Close", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));

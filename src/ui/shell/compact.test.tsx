@@ -401,6 +401,16 @@ describe("the theme sheet on compact", () => {
     expect(toastTexts()).toContain("Unsaved colours discarded.");
   });
 
+  it("opens Theme as a sheet from the toolbar's Settings button, closing the Plans sheet", async () => {
+    const t = await made();
+    await shown(t);
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Plans" }));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Plans"]);
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Settings" }));
+    expect(lastUi()[0].theme).toBe(true);
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Theme"]);
+  });
+
   it("shows the Theme sheet over a selected item's sheet and returns to it on Escape", async () => {
     const t = await made();
     await shown(t);
