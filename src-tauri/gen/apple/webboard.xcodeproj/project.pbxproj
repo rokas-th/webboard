@@ -54,6 +54,7 @@
 		E371ED94914CD2C005BF25C5 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		F646E1A2C386CB2F64094685 /* probe.rs */ = {isa = PBXFileReference; path = probe.rs; sourceTree = "<group>"; };
 		F7F3A34AB47882D1E92C1AFB /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		FDEC6815A98DE7E7475DE412 /* alert.rs */ = {isa = PBXFileReference; path = alert.rs; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -172,6 +173,7 @@
 		F66F5FCA5C4DDBF0B07AC588 /* commands */ = {
 			isa = PBXGroup;
 			children = (
+				FDEC6815A98DE7E7475DE412 /* alert.rs */,
 				9C3C6D6CD527BA8F40814166 /* device.rs */,
 				3C03A1D554590B0F54CE22F2 /* file.rs */,
 				82BF278D4A1F3E5219BC3916 /* holidays.rs */,
