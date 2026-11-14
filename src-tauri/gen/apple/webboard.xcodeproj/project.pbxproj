@@ -49,6 +49,7 @@
 		AF1EC1E5AADCC386CED2EDA0 /* settings.rs */ = {isa = PBXFileReference; path = settings.rs; sourceTree = "<group>"; };
 		C0D436D67A66AEE2ABF7BA58 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C853BC32550975ED9161D0A8 /* menu.rs */ = {isa = PBXFileReference; path = menu.rs; sourceTree = "<group>"; };
+		D6E02C53A5C0A3CC34A56104 /* platform.rs */ = {isa = PBXFileReference; path = platform.rs; sourceTree = "<group>"; };
 		DA0B2AE1E1171C281D09BB99 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		E371ED94914CD2C005BF25C5 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		F646E1A2C386CB2F64094685 /* probe.rs */ = {isa = PBXFileReference; path = probe.rs; sourceTree = "<group>"; };
@@ -161,6 +162,7 @@
 				03E9103F890E596352C88EB4 /* lib.rs */,
 				636DB1DD02E68B8C52BF1C12 /* main.rs */,
 				C853BC32550975ED9161D0A8 /* menu.rs */,
+				D6E02C53A5C0A3CC34A56104 /* platform.rs */,
 				F66F5FCA5C4DDBF0B07AC588 /* commands */,
 			);
 			name = src;
