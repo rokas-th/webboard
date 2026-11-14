@@ -1,80 +1,34 @@
-import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import type { ItemKind } from "../../domain/model";
 import { NEW_NAME } from "../palette/commands";
-import { moved, useMenuList } from "./menu";
+import { useMenu } from "./menu";
 
 const KINDS: readonly ItemKind[] = ["task", "milestone", "group"];
 
 export function NewItemMenu(p: { label: string; className: string; disabled: boolean; onPick(kind: ItemKind): void }) {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  const toggle = useRef<HTMLButtonElement>(null);
-  const first = useRef<HTMLButtonElement>(null);
-  const list = useRef<HTMLDivElement>(null);
-  const shown = open && !p.disabled;
-  const listClass = useMenuList(shown, toggle);
-  useEffect(() => {
-    if (!shown) return;
-    if (first.current === null) throw new Error("NewItemMenu: open without its first item");
-    first.current.focus();
-  }, [shown]);
-  useEffect(() => {
-    if (!shown) return;
-    const away = (e: PointerEvent): void => {
-      if (e.target instanceof Node && box.current !== null && box.current.contains(e.target)) return;
-      setOpen(false);
-    };
-    document.addEventListener("pointerdown", away);
-    return () => document.removeEventListener("pointerdown", away);
-  }, [shown]);
-  const close = (): void => {
-    setOpen(false);
-    toggle.current?.focus();
-  };
-  const onKey = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (!shown) return;
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-      return;
-    }
-    if (list.current === null) throw new Error("NewItemMenu: open without its list");
-    const items = [...list.current.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-    const to = moved(e.key, items.findIndex((b) => b === document.activeElement), items.length);
-    if (to === null) return;
-    e.preventDefault();
-    items[to].focus();
-  };
-  const onLeave = (e: FocusEvent<HTMLDivElement>): void => {
-    const next = e.relatedTarget;
-    if (next instanceof Node && box.current?.contains(next)) return;
-    setOpen(false);
-  };
+  const menu = useMenu("NewItemMenu", '[role="menuitem"]', !p.disabled);
   return (
-    <div className="plan-menu" ref={box} onKeyDown={onKey} onBlur={onLeave} onMouseDown={(e) => e.preventDefault()}>
+    <div className="plan-menu" {...menu.box}>
       <button
-        ref={toggle}
+        ref={menu.toggle}
         type="button"
         className={p.className}
         aria-haspopup="menu"
-        aria-expanded={shown}
+        aria-expanded={menu.open}
         disabled={p.disabled}
-        onClick={() => (shown ? close() : setOpen(true))}
+        onClick={menu.onToggle}
       >
         {p.label}
       </button>
-      {shown && (
-        <div ref={list} className={listClass} role="menu" aria-label="New item">
-          {KINDS.map((kind, i) => (
+      {menu.open && (
+        <div ref={menu.list} className={menu.listClass} role="menu" aria-label="New item">
+          {KINDS.map((kind) => (
             <button
               key={kind}
-              ref={i === 0 ? first : undefined}
               type="button"
               role="menuitem"
               className="choice-row"
               onClick={() => {
-                close();
+                menu.close();
                 p.onPick(kind);
               }}
             >

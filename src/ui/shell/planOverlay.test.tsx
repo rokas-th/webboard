@@ -316,6 +316,40 @@ describe("the plan list overlay on an iPad at 700-1179", () => {
     expect(document.activeElement).toBe(toggle());
   });
 
+  it("closes when the palette opens another plan", async () => {
+    const t = await made();
+    await shown(t, twoPlans(t, { session: () => new Promise<PlanSession>(() => undefined) }));
+    fireEvent.click(toggle());
+    press(opened(), "k", { meta: true });
+    const item = screen.getByText("Open Other").closest('[role="option"]');
+    if (item === null) throw new Error("no palette option for Other");
+    fireEvent.mouseDown(item);
+    await settle();
+    expect(main().hasAttribute("inert")).toBe(false);
+    closed();
+  });
+
+  it("closes when the palette makes a new plan, once it is made", async () => {
+    const t = await made();
+    let made_: (id: PlanId) => void = () => {
+      throw new Error("createPlan was not called");
+    };
+    const createPlan = vi.fn(() => new Promise<PlanId>((r) => (made_ = r)));
+    await shown(t, twoPlans(t, { createPlan, session: () => new Promise<PlanSession>(() => undefined) }));
+    fireEvent.click(toggle());
+    press(opened(), "k", { meta: true });
+    const item = screen.getByText("New plan", { selector: '[role="option"] *' }).closest('[role="option"]');
+    if (item === null) throw new Error("no palette option for New plan");
+    fireEvent.mouseDown(item);
+    await settle();
+    expect(createPlan).toHaveBeenCalledTimes(1);
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    made_(OTHER);
+    await settle();
+    expect(main().hasAttribute("inert")).toBe(false);
+    closed();
+  });
+
   it("stays open on Move to Trash", async () => {
     const t = await made();
     const trashPlan = vi.fn();

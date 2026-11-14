@@ -41,7 +41,7 @@ import { FILES_STAY, PlanFailed, ReloadButton } from "./PlanFailed";
 import { PlanHead } from "./PlanHead";
 import { PlanMenu } from "./PlanMenu";
 import { PLAN_OVERLAY_CLASS, PlanOverlay } from "./PlanOverlay";
-import { usePlanListMode, type PlanListMode } from "./planListMode";
+import { useShellShape, type PlanListMode, type ToolbarTier } from "./planListMode";
 import { ConvertedReport } from "./ConvertedReport";
 import { PurgeConfirm } from "./PurgeConfirm";
 import { ReloadConfirm } from "./ReloadConfirm";
@@ -128,7 +128,7 @@ function ShownList(p: { children: ReactNode; onFocusOut(): void }) {
   return <>{p.children}</>;
 }
 
-function WideBody(p: ShellProps & { listMode: WideMode }) {
+function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null }) {
   const registry = p.registry;
   const listMode = p.listMode;
   const compact = listMode !== "column";
@@ -141,24 +141,27 @@ function WideBody(p: ShellProps & { listMode: WideMode }) {
   const appBody = useRef<HTMLDivElement>(null);
   const { ui, setUi } = useUiValue();
   const theme = useTheme();
-  const { main, open: openPlan, trashOwn } = usePlanSelection(registry);
+  const [overlayAsked, setOverlayAsked] = useState(false);
+  const overlayOpen = listMode === "overlay" && overlayAsked;
+  const toggleOverlay = useCallback(() => setOverlayAsked((open) => !open), []);
+  const closeOverlay = useCallback(() => setOverlayAsked(false), []);
+  const { main, open: selectPlan, trashOwn } = usePlanSelection(registry);
+  const openPlan = useCallback(
+    (id: PlanId): void => {
+      selectPlan(id);
+      closeOverlay();
+    },
+    [selectPlan, closeOverlay],
+  );
   const files = usePlanFiles(registry, openPlan);
   const { creating, importing, importPlan } = files;
   const [namingPlan, setNamingPlan] = useState<PlanId | null>(null);
-  const newPlan = (made?: () => void): void =>
-    files.newPlan("New plan", (message) => toast(message, "bad"), (id) => {
-      setNamingPlan(id);
-      made?.();
-    });
+  const newPlan = (): void => files.newPlan("New plan", (message) => toast(message, "bad"), setNamingPlan);
   const newExample = (): void => files.newExample((message) => toast(message, "bad"));
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
   const [sheet, setSheet] = useState<CompactSheet>(null);
   const [printing, setPrinting] = useState(false);
   const [purging, setPurging] = useState<PlanId | null>(null);
-  const [overlayAsked, setOverlayAsked] = useState(false);
-  const overlayOpen = listMode === "overlay" && overlayAsked;
-  const toggleOverlay = useCallback(() => setOverlayAsked((open) => !open), []);
-  const closeOverlay = useCallback(() => setOverlayAsked(false), []);
   const overlayDroppedFocus = useRef(false);
   useEffect(() => {
     if (listMode !== "overlay") setOverlayAsked(false);
@@ -401,12 +404,11 @@ function WideBody(p: ShellProps & { listMode: WideMode }) {
       creating={creating}
       onNew={() => {
         setSheet(null);
-        newPlan(closeOverlay);
+        newPlan();
       }}
       onSelect={(id) => {
         setSheet(null);
         openPlan(id);
-        closeOverlay();
       }}
       onTrash={(id) => void trashOwn(id)}
       onRestore={(id) => restorePlan(registry, id)}
@@ -498,7 +500,7 @@ function WideBody(p: ShellProps & { listMode: WideMode }) {
           mac={mac}
           command={command}
           onCommand={runCommand}
-          listMode={listMode}
+          tier={p.tier}
           compact={compact ? { button: sidebarButton, onPlans: () => setSheet("plans"), onPlan: () => setSheet("plan") } : null}
           sidebar={sidebarToggle}
         />
@@ -583,18 +585,18 @@ function WideBody(p: ShellProps & { listMode: WideMode }) {
   );
 }
 
-function WideShell(p: ShellProps & { listMode: WideMode }) {
+function WideShell(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null }) {
   const [ui, setUi] = useUi();
   const uiValue = useMemo(() => ({ ui, setUi }), [ui, setUi]);
   return (
     <UiContext.Provider value={uiValue}>
-      <WideBody registry={p.registry} clock={p.clock} listMode={p.listMode} />
+      <WideBody registry={p.registry} clock={p.clock} listMode={p.listMode} tier={p.tier} />
     </UiContext.Provider>
   );
 }
 
 export function Shell(p: ShellProps) {
-  const listMode = usePlanListMode();
+  const { mode: listMode, tier } = useShellShape();
   useNativeBackground(p.registry.device.platform);
   useEffect(() => {
     const onError = (e: ErrorEvent): void => {
@@ -613,5 +615,5 @@ export function Shell(p: ShellProps) {
     };
   }, []);
   if (listMode === "phone") return <PhoneShell registry={p.registry} clock={p.clock} />;
-  return <WideShell registry={p.registry} clock={p.clock} listMode={listMode} />;
+  return <WideShell registry={p.registry} clock={p.clock} listMode={listMode} tier={tier} />;
 }

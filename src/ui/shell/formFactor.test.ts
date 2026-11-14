@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formFactor, type FormFactor } from "./formFactor";
-import { usePlanListMode } from "./planListMode";
+import { useShellShape } from "./planListMode";
 
 describe("formFactor", () => {
   const cases: readonly (readonly [number, number, FormFactor])[] = [
@@ -22,7 +22,7 @@ describe("formFactor", () => {
   });
 });
 
-describe("the window measure behind usePlanListMode", () => {
+describe("the window measure behind useShellShape", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -42,7 +42,7 @@ describe("the window measure behind usePlanListMode", () => {
     }
     vi.stubGlobal("ResizeObserver", Watch);
     expect(document.getElementById("root")).toBeNull();
-    const { result } = renderHook(() => usePlanListMode());
+    const { result } = renderHook(() => useShellShape().mode);
     expect(result.current).toBe("column");
     expect(observed).toEqual([document.documentElement]);
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 820 });

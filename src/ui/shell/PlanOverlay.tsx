@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent, type ReactNode, type RefObject, type TransitionEvent as ReactTransitionEvent } from "react";
 import { focusables } from "../common/Dialog";
+import { OPEN_MENU } from "../common/menu";
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
@@ -115,7 +116,7 @@ export function PlanOverlay(p: { open: boolean; button: RefObject<HTMLButtonElem
   };
   const scrim = {
     onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => {
-      press.current = e.target === e.currentTarget ? "down" : "none";
+      press.current = e.target === e.currentTarget && document.querySelector(OPEN_MENU) === null ? "down" : "none";
     },
     onPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => {
       press.current = press.current === "down" && document.elementFromPoint(e.clientX, e.clientY) === e.currentTarget ? "tapped" : "none";

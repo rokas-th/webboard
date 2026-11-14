@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -44,8 +44,19 @@ const IPAD_WINDOWS = [
   { name: "1180x820-on-834x1194", size: [1180, 820], screen: [834, 1194], touch: true, form: "full" },
 ];
 const MAC_834 = [{ ...cdesk(834, 1194), name: "834x1194-desk" }];
-const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE, ...IPAD_WINDOWS, ...MAC_834];
-const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...IPAD_WINDOWS, ...MAC_834];
+const TIERS_TS = readFileSync(new URL("../src/ui/shell/planListMode.ts", import.meta.url), "utf8");
+const tierMin = (name) => {
+  const m = TIERS_TS.match(new RegExp(`^export const ${name} = (\\d+);$`, "m"));
+  if (m === null) throw new Error(`layout-probe: src/ui/shell/planListMode.ts has no "export const ${name} = <number>;"`);
+  return Number(m[1]);
+};
+const MEDIUM_MIN = tierMin("MEDIUM_MIN");
+const BOUNDARY_SPARE = 16;
+const ROOMY_MIN = tierMin("ROOMY_MIN");
+const padWindow = (w, h) => ({ size: [w, h], screen: [834, 1194], touch: true, form: "compact" });
+const IPAD_TIERS = [padWindow(560, 1000), padWindow(MEDIUM_MIN - 1, 1000), padWindow(MEDIUM_MIN, 1000), padWindow(ROOMY_MIN - 1, 820), padWindow(ROOMY_MIN, 820)];
+const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE, ...IPAD_WINDOWS, ...IPAD_TIERS, ...MAC_834];
+const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...IPAD_WINDOWS, ...IPAD_TIERS, ...MAC_834];
 const LOAD_MS = 2000;
 
 const nameOf = (v) => v.name ?? `${v.size[0]}x${v.size[1]}`;
@@ -113,6 +124,7 @@ const centred = (selector) => ({ centred: selector });
 const nearCentre = (selector) => ({ nearCentre: selector });
 const edgeAt = (selector, side, at) => ({ edgeAt: [selector, side, at] });
 const oneLine = (selector) => ({ oneLine: selector });
+const spare = (selector, min, below) => ({ spare: [selector, min, below === undefined ? null : below] });
 const focus = (selector) => ({ focus: selector });
 const fontMin = (selector, px) => ({ fontMin: [selector, px] });
 const keep = (selector) => ({ keep: selector });
@@ -736,6 +748,7 @@ function states() {
   const phoneSettings = [click(".phone-head button", "Plans"), click(".plans-sheet button.settings-row", "Settings…"), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme")];
   add("ios-fields/phone-item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, fontMin(FIELDS, 16)] });
   add("ios-fields/phone-settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, fontMin(FIELDS, 16)] });
+  const settingsFromMore = [click('.toolbar button[aria-label="More"]'), click('.toolbar .plan-menu-list[aria-label="More"] [role="menuitem"]', "Settings")];
   const padItem = [click(".tl-row .name", PICKED), expect('.sheet[role="dialog"] .panel .kind', "TASK")];
   add("ios44/phone/plan", "mesa-ios-phone", { sizes: "phone", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
   add("ios44/phone/plans", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [click(".phone-head button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), hitChrome("sheetHead", "planList")] });
@@ -787,7 +800,7 @@ function states() {
   add("ios44/pad-portrait/settings", "mesa-ios-pad", {
     sizes: "ipad-11-portrait",
     dialog: true,
-    actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), hitChrome("sheetHead", "settingsTabs")],
+    actions: [viewExpect("timeline"), ...settingsFromMore, expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), hitChrome("sheetHead", "settingsTabs")],
   });
   add("ios44/pad-landscape/plan", "mesa-ios-pad", { sizes: "ipad-11-landscape", actions: [...fullShell, hitChrome("toolbar", "planList", "panelActions")] });
   add("ios44/pad-landscape/settings", "mesa-ios-pad", {
@@ -851,7 +864,7 @@ function states() {
   add("ipad-form-sheet/settings", "mesa-ios-pad", {
     sizes: "ipad-overlay-open",
     dialog: true,
-    actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), style(".sheet", "border-bottom-width", "1px"), style(".sheet", "border-bottom-left-radius", "12px"), style(".sheet", "padding-bottom", "0px"), centredIn(".sheet")],
+    actions: [viewExpect("timeline"), ...settingsFromMore, expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), style(".sheet", "border-bottom-width", "1px"), style(".sheet", "border-bottom-left-radius", "12px"), style(".sheet", "padding-bottom", "0px"), centredIn(".sheet")],
   });
   add("ipad-form-sheet/item", "mesa-ios-pad", { sizes: "ipad-11-portrait", dialog: true, actions: [viewExpect("timeline"), ...padItem, style(".sheet", "width", "560px"), centredIn(".sheet")] });
   add("ipad-form-sheet/plans-below-700", "mesa-ios-pad", {
@@ -866,6 +879,38 @@ function states() {
   add("ipad-menus/plan", "mesa-ios-pad", {
     sizes: "ipad-all",
     actions: [viewExpect("timeline"), click('.plan-head button[aria-label="Plan menu"]'), expect('.plan-head .plan-menu-list [role="menuitem"]', "Export plan…"), inWindow(".plan-head .plan-menu-list"), inWindow('.plan-head .plan-menu-list [role="menuitem"]'), hitChrome("menus")],
+  });
+  const MORE = '.toolbar button[aria-label="More"]';
+  const moreRows = '.toolbar .plan-menu-list[aria-label="More"] [role^="menuitem"]';
+  const oneRowBar = [oneLine(".toolbar"), hitChrome("toolbar")];
+  add("ipad-toolbar/roomy", "mesa-ios-pad", { sizes: "ipad-roomy", actions: [viewExpect("timeline"), oneLine(".toolbar"), count(MORE, 0), count(".toolbar .seg-zoom", 1), expect(".toolbar .sync-chip-text"), expect('.toolbar button[aria-label="Settings"]'), ...oneRowBar] });
+  add("ipad-toolbar/medium", "mesa-ios-pad", {
+    sizes: "ipad-medium",
+    actions: [viewExpect("timeline"), oneLine(".toolbar"), count(MORE, 1), count(".toolbar .seg-zoom", 1), expect(".toolbar button", "Today"), count(".toolbar .chip-compact", 1), count('.toolbar button[aria-label="Settings"]', 0), expect(".toolbar .seg-modes button", "Board"), ...oneRowBar],
+  });
+  add("ipad-toolbar/narrow", "mesa-ios-pad", {
+    sizes: "ipad-narrow",
+    actions: [viewExpect("timeline"), oneLine(".toolbar"), count(MORE, 1), count(".toolbar .seg-zoom", 0), none(".toolbar button", "Today"), count(".toolbar .chip-compact", 1), expect(".toolbar .seg-modes button", "Board"), ...oneRowBar],
+  });
+  add("ipad-toolbar/roomy-min", "mesa-ios-pad", { sizes: "ipad-roomy-min", actions: [viewExpect("timeline"), count(MORE, 0), oneLine(".toolbar"), spare(".toolbar", BOUNDARY_SPARE, BOUNDARY_SPARE + 10)] });
+  add("ipad-toolbar/medium-min", "mesa-ios-pad", { sizes: "ipad-medium-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 1), oneLine(".toolbar"), spare(".toolbar", BOUNDARY_SPARE, BOUNDARY_SPARE + 10)] });
+  add("ipad-toolbar/narrow-min", "mesa-ios-pad", { sizes: "ipad-narrow-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 0), oneLine(".toolbar"), spare(".toolbar", 0)] });
+  add("ipad-toolbar/overlay-open", "mesa-ios-pad", {
+    sizes: "ipad-overlay-open",
+    dialog: true,
+    actions: [...overlayOpened, still(), uncovered(MORE), ...oneRowBar],
+  });
+  add("ipad-toolbar/more-open", "mesa-ios-pad", {
+    sizes: "ipad-overlay-open",
+    actions: [viewExpect("timeline"), click(MORE), expect(moreRows, "Settings"), inWindow('.toolbar .plan-menu-list[aria-label="More"]'), inWindow(moreRows), uncovered(moreRows), hitChrome("menus")],
+  });
+  const fromMoreOverOverlay = (row) => [...overlayOpened, click(MORE), click(moreRows, row), expect('.sheet[role="dialog"] .sheet-title', row), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), uncovered(`.sheet-head ${CONTROL}`)];
+  add("ipad-toolbar/settings-over-overlay", "mesa-ios-pad", { sizes: "ipad-overlay-open", actions: fromMoreOverOverlay("Settings") });
+  add("ipad-toolbar/plan-over-overlay", "mesa-ios-pad", { sizes: "ipad-overlay-open", actions: fromMoreOverOverlay("Plan") });
+  add("ipad-toolbar/more-over-overlay", "mesa-ios-pad", {
+    sizes: "ipad-overlay-open",
+    dialog: true,
+    actions: [...overlayOpened, click(MORE), expect(moreRows, "Settings"), inWindow('.toolbar .plan-menu-list[aria-label="More"]'), inWindow(moreRows), uncovered(moreRows), hitChrome("menus")],
   });
   add("ipad-mode/mac-compact", "mesa", { sizes: "mac-compact", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(TOGGLE, 0), count(".plan-overlay-layer", 0), expect(".toolbar .kbd-button", "⌘K"), expect(".toolbar button", "Undo")] });
   add("ipad-mode/mac-834-plans", "mesa", {
@@ -883,7 +928,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.inWindow === undefined && last.uncovered === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.inWindow === undefined && last.uncovered === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -922,6 +967,12 @@ const SIZES = {
   "ipad-overlay-open": namesOf([IPAD_WINDOWS[0], IPAD_11[0]]),
   "ipad-column": namesOf([LANDSCAPE[0], IPAD_WINDOWS[3], IPAD_11[1]]),
   "ipad-all": namesOf([IPAD_WINDOWS[1], IPAD_WINDOWS[0], IPAD_11[0], IPAD_WINDOWS[2], LANDSCAPE[0], IPAD_WINDOWS[3], IPAD_11[1]]),
+  "ipad-roomy-min": namesOf([IPAD_TIERS[4]]),
+  "ipad-medium-min": namesOf([IPAD_TIERS[2]]),
+  "ipad-narrow-min": namesOf([IPAD_TIERS[0]]),
+  "ipad-roomy": namesOf([IPAD_TIERS[4], IPAD_WINDOWS[2]]),
+  "ipad-medium": namesOf([IPAD_TIERS[2], IPAD_11[0], IPAD_TIERS[3]]),
+  "ipad-narrow": namesOf([IPAD_TIERS[0], IPAD_WINDOWS[1], IPAD_WINDOWS[0], IPAD_TIERS[1]]),
   "mac-834": namesOf(MAC_834),
   "mac-compact": namesOf([...PORTRAIT, ...COMPACT_DESK, ...MAC_834]),
 };
@@ -2017,6 +2068,30 @@ window.__probeAct = function (a) {
       return front === null || !(front === el || el.contains(front));
     });
     if (covBad.length > 0) return { fail: covBad.length + " of " + covEls.length + " " + a.uncovered + " are covered at their centre: " + covBad.slice(0, 6).map(function (el) { return JSON.stringify((el.getAttribute("aria-label") || el.textContent.trim()).slice(0, 20)); }).join(", ") };
+    return { ok: true };
+  }
+  if (a.spare !== undefined) {
+    var spareBar = document.querySelector(a.spare[0]);
+    if (spareBar === null || !onScreen(spareBar)) return { fail: "no " + a.spare[0] + " on screen" };
+    var spareCss = getComputedStyle(spareBar);
+    var spareItems = [];
+    (function flat(el) {
+      Array.prototype.forEach.call(el.children, function (kid) {
+        var ks = getComputedStyle(kid);
+        if (ks.display === "contents") flat(kid);
+        else if (ks.display !== "none" && ks.position !== "absolute" && ks.position !== "fixed" && !kid.classList.contains("toolbar-spacer")) spareItems.push(kid);
+      });
+    })(spareBar);
+    var spareUsed = spareItems.reduce(function (sum, el) {
+      var ks = getComputedStyle(el);
+      return sum + el.getBoundingClientRect().width + parseFloat(ks.marginLeft) + parseFloat(ks.marginRight);
+    }, 0);
+    var spareCut = Array.prototype.reduce.call(spareBar.querySelectorAll(".sync-chip-text"), function (sum, el) { return sum + el.scrollWidth - el.clientWidth; }, 0);
+    var spareGaps = parseFloat(spareCss.columnGap) * Math.max(spareItems.length - 1, 0);
+    var spareRoom = spareBar.clientWidth - parseFloat(spareCss.paddingLeft) - parseFloat(spareCss.paddingRight);
+    var spareLeft = Math.round((spareRoom - spareUsed - spareCut - spareGaps) * 10) / 10;
+    if (spareLeft < a.spare[1]) return { fail: a.spare[0] + " has " + spareLeft + " px to spare, under " + a.spare[1] + " (room " + Math.round(spareRoom) + ", content " + Math.round(spareUsed + spareCut + spareGaps) + ")" };
+    if (a.spare[2] !== null && spareLeft >= a.spare[2]) return { fail: a.spare[0] + " has " + spareLeft + " px to spare, " + a.spare[2] + " or more: a narrower boundary would fit (room " + Math.round(spareRoom) + ", content " + Math.round(spareUsed + spareCut + spareGaps) + ")" };
     return { ok: true };
   }
   if (a.oneLine !== undefined) {

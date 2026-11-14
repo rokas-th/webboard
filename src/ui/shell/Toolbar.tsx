@@ -1,27 +1,21 @@
-import { useRef, type RefObject } from "react";
-import { readPlatform } from "../../platform";
+import { useLayoutEffect, useRef, type RefObject } from "react";
 import type { PlanSession } from "../../store/session";
 import { useTheme } from "../../theme/ThemeContext";
 import { useRun } from "../run";
 import type { UiState, ViewKind, Zoom } from "../state";
 import { NewItemMenu } from "../common/NewItemMenu";
 import { closeSettings } from "../settings/SettingsPanel";
-import type { PlanListMode } from "./planListMode";
+import { MoreMenu } from "./MoreMenu";
+import type { ToolbarTier } from "./planListMode";
 import { PLAN_LIST_ID } from "./Sidebar";
 import { SyncChip } from "./SyncChip";
 import { useToolbarTight } from "./toolbarFit";
+import { ZOOMS } from "./zooms";
 
-const TABS: readonly (readonly [ViewKind, string])[] = [
-  ["timeline", "Timeline"],
-  ["board", "Now · Next · Later"],
-  ["list", "List"],
-];
-
-const ZOOMS: readonly (readonly [Zoom, string])[] = [
-  ["W", "Week"],
-  ["M", "Month"],
-  ["Q", "Quarter"],
-  ["F", "Fit the whole plan"],
+const TABS: readonly (readonly [ViewKind, string, string])[] = [
+  ["timeline", "Timeline", "Timeline"],
+  ["board", "Now · Next · Later", "Board"],
+  ["list", "List", "List"],
 ];
 
 const TEETH = Array.from({ length: 8 }, (_, i) => {
@@ -29,14 +23,17 @@ const TEETH = Array.from({ length: 8 }, (_, i) => {
   return { x1: 8 + 4.6 * Math.cos(a), y1: 8 + 4.6 * Math.sin(a), x2: 8 + 7 * Math.cos(a), y2: 8 + 7 * Math.sin(a) };
 });
 
-function SettingsButton(p: { open: boolean; setUi(patch: Partial<UiState>): void }) {
+function useSettingsToggle(open: boolean, setUi: (patch: Partial<UiState>) => void): () => void {
   const theme = useTheme();
-  const toggle = (): void => {
-    if (p.open) closeSettings(theme, () => p.setUi({ settings: null }));
-    else p.setUi({ settings: "theme" });
+  return () => {
+    if (open) closeSettings(theme, () => setUi({ settings: null }));
+    else setUi({ settings: "theme" });
   };
+}
+
+function SettingsButton(p: { open: boolean; onToggle(): void; button: RefObject<HTMLButtonElement | null> }) {
   return (
-    <button type="button" className="icon-button" aria-label="Settings" title="Settings" aria-pressed={p.open} onClick={toggle}>
+    <button ref={p.button} type="button" className="icon-button" aria-label="Settings" title="Settings" aria-pressed={p.open} onClick={p.onToggle}>
       <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor">
         <circle cx="8" cy="8" r="4.6" strokeWidth="1.4" />
         <circle cx="8" cy="8" r="1.9" strokeWidth="1.4" />
@@ -86,53 +83,65 @@ interface ToolbarProps {
   mac: boolean;
   command: boolean;
   onCommand(id: string): void;
-  listMode: Exclude<PlanListMode, "phone">;
+  tier: ToolbarTier | null;
   compact: { button: RefObject<HTMLButtonElement | null>; onPlans(): void; onPlan(): void } | null;
   sidebar: SidebarToggle | null;
 }
 
-function ViewTabs(p: { ui: UiState; setUi(patch: Partial<UiState>): void }) {
+function ViewTabs(p: { ui: UiState; setUi(patch: Partial<UiState>): void; short: boolean }) {
   return (
     <div className="seg seg-modes" role="tablist" aria-label="Views">
-      {TABS.map(([kind, label]) => (
+      {TABS.map(([kind, label, short]) => (
         <button
           key={kind}
           type="button"
           role="tab"
           aria-selected={p.ui.view === kind}
+          aria-label={p.short ? label : undefined}
+          title={p.short ? label : undefined}
           className={p.ui.view === kind ? "active" : undefined}
           onClick={() => p.setUi({ view: kind })}
         >
-          {label}
+          {p.short ? short : label}
         </button>
       ))}
     </div>
   );
 }
 
-function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState; setUi(patch: Partial<UiState>): void; onCommand(id: string): void; glyphs: boolean }) {
+function PlanControls(p: {
+  session: PlanSession;
+  readOnly: boolean;
+  zoom: Zoom | null;
+  onZoom(z: Zoom): void;
+  onToday: (() => void) | null;
+  glyphs: boolean;
+}) {
   const { undo, redo } = useRun(p.session);
+  const { zoom, onZoom, onToday } = p;
   return (
     <>
-      {p.ui.view === "timeline" && (
+      {zoom !== null && (
         <div className="seg seg-zoom" aria-label="Zoom">
-          {ZOOMS.map(([z, title]) => (
+          {ZOOMS.map((z) => (
             <button
-              key={z}
+              key={z.zoom}
               type="button"
-              title={title}
-              aria-pressed={p.ui.zoom === z}
-              className={p.ui.zoom === z ? "active" : undefined}
-              onClick={() => p.setUi({ zoom: z })}
+              title={z.title}
+              aria-pressed={zoom === z.zoom}
+              className={zoom === z.zoom ? "active" : undefined}
+              onClick={() => onZoom(z.zoom)}
             >
-              {z}
+              {z.zoom}
             </button>
           ))}
         </div>
       )}
-      <button type="button" title="Jump to today" onClick={() => p.onCommand("today")}>
-        Today
-      </button>
+      {onToday !== null && (
+        <button type="button" title="Jump to today" onClick={onToday}>
+          Today
+        </button>
+      )}
       {p.glyphs ? (
         <>
           <button type="button" className="glyph-button" aria-label="Undo" title="Undo" disabled={p.readOnly || !p.session.canUndo()} onClick={() => undo()}>
@@ -160,8 +169,27 @@ export function Toolbar(p: ToolbarProps) {
   const bar = useRef<HTMLElement>(null);
   const tight = useToolbarTight(bar);
   const className = ["toolbar", ...(p.mac ? ["toolbar-mac"] : []), ...(tight ? ["toolbar-tight"] : [])].join(" ");
-  const platform = readPlatform(window);
-  const trimmed = platform.os === "ios" && platform.idiom === "pad" && p.listMode !== "column";
+  const tier = p.tier;
+  const trimmed = tier !== null;
+  const folded = tier === "medium" || tier === "narrow";
+  const toggleSettings = useSettingsToggle(p.ui.settings !== null, p.setUi);
+  const compact = p.compact;
+  const onPlan = compact !== null && p.session !== null ? compact.onPlan : null;
+  const zoom = p.session !== null && p.ui.view === "timeline" ? p.ui.zoom : null;
+  const setUi = p.setUi;
+  const zoomTo = (z: Zoom): void => setUi({ zoom: z });
+  const onCommand = p.onCommand;
+  const goToday = p.session !== null ? () => onCommand("today") : null;
+  const inline = tier !== "narrow";
+  const settingsButton = useRef<HTMLButtonElement>(null);
+  const moreDroppedFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (folded || !moreDroppedFocus.current) return;
+    moreDroppedFocus.current = false;
+    const button = settingsButton.current;
+    if (button === null) throw new Error("Toolbar: the More menu left with focus, but the toolbar has no Settings button to take it");
+    button.focus();
+  }, [folded]);
   return (
     <header ref={bar} className={className} data-tauri-drag-region>
       <div className="toolbar-group toolbar-start" data-tauri-drag-region>
@@ -173,10 +201,12 @@ export function Toolbar(p: ToolbarProps) {
         )}
         <span className="wordmark">WebBoard</span>
       </div>
-      {p.session !== null && <ViewTabs ui={p.ui} setUi={p.setUi} />}
+      {p.session !== null && <ViewTabs ui={p.ui} setUi={p.setUi} short={folded} />}
       <div className="toolbar-group toolbar-end" data-tauri-drag-region>
         <span className="toolbar-spacer" />
-        {p.session !== null && <PlanControls session={p.session} readOnly={p.readOnly} ui={p.ui} setUi={p.setUi} onCommand={p.onCommand} glyphs={trimmed} />}
+        {p.session !== null && (
+          <PlanControls session={p.session} readOnly={p.readOnly} zoom={inline ? zoom : null} onZoom={zoomTo} onToday={inline ? goToday : null} glyphs={trimmed} />
+        )}
         {!trimmed && (
           <button type="button" className="kbd-button" title="Command palette" onClick={() => p.onCommand("palette")}>
             {p.command ? "⌘K" : "Ctrl K"}
@@ -185,12 +215,24 @@ export function Toolbar(p: ToolbarProps) {
         {p.session !== null && (
           <NewItemMenu label="+ New" className="button-primary" disabled={p.readOnly} onPick={(kind) => p.onCommand(`new-${kind}`)} />
         )}
-        <SyncChip />
-        <SettingsButton open={p.ui.settings !== null} setUi={p.setUi} />
-        {p.compact !== null && p.session !== null && (
-          <button type="button" onClick={p.compact.onPlan}>
+        <SyncChip compact={folded} />
+        {!folded && <SettingsButton open={p.ui.settings !== null} onToggle={toggleSettings} button={settingsButton} />}
+        {!folded && onPlan !== null && (
+          <button type="button" onClick={onPlan}>
             Plan
           </button>
+        )}
+        {folded && (
+          <MoreMenu
+            zoom={inline ? null : zoom}
+            onZoom={zoomTo}
+            onToday={inline ? null : goToday}
+            onSettings={toggleSettings}
+            onPlan={onPlan}
+            onFocusDropped={() => {
+              moreDroppedFocus.current = true;
+            }}
+          />
         )}
       </div>
     </header>
