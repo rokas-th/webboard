@@ -229,3 +229,8 @@ html[data-form="compact"] .cal-grid > label {
     color: var(--heading);
   }
 }
+
+:where(html[data-os="ios"]) .line-button:active:not(:disabled) {
+  background: transparent;
+  color: var(--heading);
+}

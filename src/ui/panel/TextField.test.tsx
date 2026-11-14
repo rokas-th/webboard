@@ -158,3 +158,28 @@ describe("TextField keys", () => {
     expect(onCommit.mock.calls).toEqual([["5"]]);
   });
 });
+
+describe("TextField keyboard traits", () => {
+  const TRAITS = ["enterkeyhint", "autocapitalize", "autocorrect", "spellcheck", "inputmode"];
+  const traitsOf = (el: Element): (string | null)[] => TRAITS.map((a) => el.getAttribute(a));
+
+  it("asks a name field for a Done key, sentence capitals, no autocorrect and no spell check", () => {
+    shown("Design review", () => true);
+    expect(traitsOf(field())).toEqual(["done", "sentences", "off", "false", null]);
+  });
+
+  it("gives a number field the number pad only when asked, and no name traits", () => {
+    const r = render(<TextField type="number" inputMode="numeric" value="3" label="Duration" className="num-input" readOnly={false} onCommit={() => true} />);
+    expect(traitsOf(screen.getByRole("spinbutton", { name: "Duration" }))).toEqual([null, null, null, null, "numeric"]);
+    r.unmount();
+    render(<TextField type="number" value="0" label="Lag" className="num-input" readOnly={false} onCommit={() => true} />);
+    expect(traitsOf(screen.getByRole("spinbutton", { name: "Lag" }))).toEqual([null, null, null, null, null]);
+  });
+
+  it("leaves a date field's keyboard alone", () => {
+    const { container } = render(<TextField type="date" value="2026-11-10" label="Start" className="date-input" readOnly={false} onCommit={() => true} />);
+    const el = container.querySelector("input");
+    if (el === null) throw new Error("no date input");
+    expect(traitsOf(el)).toEqual([null, null, null, null, null]);
+  });
+});

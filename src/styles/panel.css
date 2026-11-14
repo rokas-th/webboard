@@ -162,6 +162,11 @@
   }
 }
 
+:where(html[data-os="ios"]) .x:active:not(:disabled) {
+  color: var(--magenta);
+  background: rgba(var(--magenta-rgb), 0.06);
+}
+
 .suggest {
   margin-top: 8px;
 }
@@ -299,4 +304,8 @@
 
 .revert-text p:first-child {
   color: var(--heading);
+}
+
+html[data-os="ios"] .panel .actions {
+  row-gap: 22px;
 }

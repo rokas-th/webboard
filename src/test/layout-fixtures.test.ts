@@ -133,7 +133,7 @@ function decoded(f: Fixture, doc: string) {
   return { ydoc, actions, log, plan, cs, held: heldItems(cs, plan) };
 }
 
-const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad" };
+const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad" };
 
 const openRegistries: Registry[] = [];
 
@@ -196,6 +196,7 @@ describe("layout fixtures", () => {
       "all-trashed",
       "blank-plan",
       "choices",
+      "choices-ios-pad",
       "converted",
       "empty",
       "example",
@@ -207,7 +208,9 @@ describe("layout fixtures", () => {
       "phone-choice",
       "phone-plans",
       "phone-removed-banner",
+      "phone-removed-banner-ios",
       "phone-status",
+      "phone-status-ios",
       "phone-sync-sheet",
       "scale",
       "scale-print",
@@ -215,6 +218,7 @@ describe("layout fixtures", () => {
       "sync-local",
       "sync-receiving",
       "sync-removed",
+      "sync-removed-ios-pad",
       "sync-space",
       "two-choices",
       "unreadable",
@@ -232,7 +236,7 @@ describe("layout fixtures", () => {
 
   it("answers sync_status in every state, local only unless the state joins a space", () => {
     const joined = { space: { server: "https://probe.invalid", spaceId: "sp000000000", deviceId: "mac", deviceName: "Mac" }, revoked: false };
-    const expected: Record<string, unknown> = { "sync-space": joined, "sync-local": joined, "sync-receiving": joined, "sync-removed": { ...joined, revoked: true }, "phone-removed-banner": { ...joined, revoked: true } };
+    const expected: Record<string, unknown> = { "sync-space": joined, "sync-local": joined, "sync-receiving": joined, "sync-removed": { ...joined, revoked: true }, "sync-removed-ios-pad": { ...joined, revoked: true }, "phone-removed-banner": { ...joined, revoked: true }, "phone-removed-banner-ios": { ...joined, revoked: true } };
     Object.entries(FIXTURES).forEach(([name, f]) => expect(f.ipc.sync_status, name).toEqual(expected[name] ?? { space: null, revoked: false }));
   });
 
@@ -263,7 +267,7 @@ describe("layout fixtures", () => {
 
   it("gives every space state its index doc and a ticket, and no other state either", () => {
     Object.entries(FIXTURES).forEach(([name, f]) => {
-      const space = ["sync-space", "sync-local", "sync-receiving", "sync-removed", "phone-removed-banner"].includes(name);
+      const space = ["sync-space", "sync-local", "sync-receiving", "sync-removed", "sync-removed-ios-pad", "phone-removed-banner", "phone-removed-banner-ios"].includes(name);
       expect("ix-sp000000000" in f.docs, name).toBe(space);
       expect(f.ipc.sync_ticket, name).toEqual(space ? { ticket: "tk_probe", expiresAt: new Date(2026, 10, 9, 10, 0, 0, 0).getTime() } : undefined);
     });
@@ -344,6 +348,22 @@ describe("layout fixtures", () => {
     expect(pad.ipc).toEqual({ ...mac.ipc, device_info: { deviceId: "ipad", platform: "ios" } });
     expect(phone.platform).toEqual({ os: "ios", idiom: "phone" });
     expect(pad.platform).toEqual({ os: "ios", idiom: "pad" });
+  });
+
+  it.each([
+    ["phone-removed-banner-ios", "phone-removed-banner", "iphone", { os: "ios", idiom: "phone" }],
+    ["sync-removed-ios-pad", "sync-removed", "ipad", { os: "ios", idiom: "pad" }],
+    ["choices-ios-pad", "choices", "ipad", { os: "ios", idiom: "pad" }],
+  ] as const)("%s is the %s fixture on iOS", (name, of, deviceId, platform) => {
+    expect(fixture(name).docs).toEqual(fixture(of).docs);
+    expect(fixture(name).ipc).toEqual({ ...fixture(of).ipc, device_info: { deviceId, platform: "ios" } });
+    expect(fixture(name).platform).toEqual(platform);
+  });
+
+  it("phone-status-ios is the phone-status fixture on an iPhone", () => {
+    expect(fixture("phone-status-ios").docs).toEqual(fixture("phone-status").docs);
+    expect(fixture("phone-status-ios").ipc).toEqual({ ...fixture("phone-status").ipc, device_info: { deviceId: "iphone", platform: "ios" } });
+    expect(fixture("phone-status-ios").platform).toEqual({ os: "ios", idiom: "phone" });
   });
 
   it("every fixture carries a platform global its device_info agrees with", () => {

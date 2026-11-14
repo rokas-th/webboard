@@ -1522,7 +1522,7 @@ describe("PhoneShell read-only (Step 4b)", () => {
     fireEvent.keyDown(nameText, { key: "Enter" });
     within(sheet)
       .getAllByRole("button")
-      .filter((b) => b.textContent !== "Close")
+      .filter((b) => b.textContent !== "Close" && b.getAttribute("aria-label") !== "Close")
       .forEach((b) => fireEvent.click(b));
     expect(apply).not.toHaveBeenCalled();
     act(() => t.session.setReadOnly(false));

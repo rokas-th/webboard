@@ -46,6 +46,8 @@ export function parsePlatform(raw: unknown): Platform {
   return { os, idiom };
 }
 
+export const shortcutsUseCommand = (os: Os): boolean => os === "macos" || os === "ios";
+
 export function readPlatform(w: Window): Platform {
   return parsePlatform(w.__WEBBOARD_PLATFORM__);
 }

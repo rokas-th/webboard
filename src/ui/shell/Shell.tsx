@@ -6,6 +6,7 @@ import { AppError } from "../../services/ipc";
 import { SPACE_PREFIX } from "../../store/plan-id";
 import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
+import { readPlatform, shortcutsUseCommand } from "../../platform";
 import { openersFrom } from "../common/Dialog";
 import { Sheet } from "../common/Sheet";
 import { detailsOf } from "../common/errorText";
@@ -213,6 +214,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   const readOnly = session?.readOnly ?? false;
   const platform = registry.device.platform;
   const mac = platform === "macos";
+  const command = shortcutsUseCommand(readPlatform(window).os);
   const print = (): void => {
     void startPrint(platform, setPrinting);
   };
@@ -237,7 +239,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     undo: runner === null ? null : runner.undo,
     redo: runner === null ? null : runner.redo,
     readOnly,
-    mac,
+    command,
     full: !compact,
     clock: p.clock,
     select: openPlan,
@@ -272,7 +274,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         closeSettings(c.theme, () => c.setUi({ settings: null }));
         return;
       }
-      const id = keyToCommand(e, { mac: c.mac, typing, dialog, selected: c.ui.selected !== null, full: c.full });
+      const id = keyToCommand(e, { command: c.command, typing, dialog, selected: c.ui.selected !== null, full: c.full });
       if (id === null) return;
       if (id === "close-dialog" || id === "deselect") {
         c.setUi(id === "close-dialog" ? { dialog: null } : { selected: null });
@@ -398,7 +400,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
 
   const selectedItemShown = session !== null && ui.selected !== null && session.view().plan.items.has(ui.selected) ? ui.selected : null;
   const itemPanel = (item: ItemId, s: PlanSession) => (
-    <ItemPanel key={item} session={s} item={item} local={registry.device.name} mac={mac} readOnly={readOnly} naming={ui.naming === item} onNamed={clearNaming} />
+    <ItemPanel key={item} session={s} item={item} local={registry.device.name} command={command} readOnly={readOnly} naming={ui.naming === item} onNamed={clearNaming} />
   );
   const closeSheet = (): void => setSheet(null);
   useEffect(() => {
@@ -459,6 +461,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
           ui={ui}
           setUi={setUi}
           mac={mac}
+          command={command}
           onCommand={runCommand}
           compact={compact ? { button: sidebarButton, onPlans: () => setSheet("plans"), onPlan: () => setSheet("plan") } : null}
           sidebar={compact ? null : { open: ui.sidebarOpen, attention, button: sidebarButton, onToggle: () => setUi({ sidebarOpen: !ui.sidebarOpen }) }}

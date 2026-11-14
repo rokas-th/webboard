@@ -383,3 +383,16 @@ html[data-form="phone"] .tl-row .days {
   margin-top: 12px;
   border-top: 1px solid var(--line);
 }
+
+html[data-os="ios"] .phone-head .phone-glyph {
+  margin-left: 2px;
+}
+
+html[data-os="ios"] .phone-head .sync-chip {
+  margin: 0 6px;
+}
+
+html[data-os="ios"] .plans-new {
+  gap: 14px;
+  padding-bottom: 8px;
+}

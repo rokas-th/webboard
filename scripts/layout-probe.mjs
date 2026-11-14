@@ -42,6 +42,23 @@ const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...
 const LOAD_MS = 2000;
 
 const nameOf = (v) => `${v.size[0]}x${v.size[1]}`;
+const CONTROL = ":is(button, a[href], select, summary)";
+export const CHROME = Object.freeze({
+  toolbar: [`.toolbar ${CONTROL}:not(.overlay *)`],
+  phoneBars: [`.phone-head ${CONTROL}:not(.overlay *)`, `.phone-views ${CONTROL}`],
+  phoneStatus: [`.phone-status ${CONTROL}`],
+  planList: [`.sidebar ${CONTROL}`],
+  sheetHead: [`.sheet-head ${CONTROL}`],
+  dialogActions: [`.modal-actions ${CONTROL}`],
+  panelActions: [`.panel .actions ${CONTROL}`],
+  settingsHead: [`.settings-head ${CONTROL}`],
+  settingsTabs: [`.settings-tabs ${CONTROL}`],
+  sync: [`.sync-tabs ${CONTROL}`, `.sync-buttons ${CONTROL}`],
+  banners: [`.banner ${CONTROL}`],
+  choiceBanners: [`.choice-banner ${CONTROL}`],
+  menus: [`.plan-menu-list ${CONTROL}`],
+});
+const hitChrome = (...groups) => ({ hit44: groups.flatMap((g) => CHROME[g]) });
 const READY_MS = 5000;
 const QUIET_MS = 4000;
 const SEND_TIMEOUT_MS = 30_000;
@@ -90,6 +107,7 @@ const nearCentre = (selector) => ({ nearCentre: selector });
 const edgeAt = (selector, side, at) => ({ edgeAt: [selector, side, at] });
 const oneLine = (selector) => ({ oneLine: selector });
 const focus = (selector) => ({ focus: selector });
+const fontMin = (selector, px) => ({ fontMin: [selector, px] });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -699,6 +717,69 @@ function states() {
   add("platform/ipad-11-portrait", "mesa-ios-pad", { sizes: "ipad-11-portrait", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(".sidebar", 0), ...stamped("ios", "pad")] });
   add("platform/ipad-11-landscape", "mesa-ios-pad", { sizes: "ipad-11-landscape", actions: [...fullShell, ...stamped("ios", "pad")] });
   add("platform/iphone-landscape", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), ...stamped("ios", "phone")] });
+  const FIELDS = '.sheet input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), .sheet select, .sheet textarea';
+  const phoneItemSheet = [click(".phone-list .prow"), expect('.sheet[role="dialog"] .isheet')];
+  const phoneSettings = [click(".phone-head button", "Plans"), click(".plans-sheet button.settings-row", "Settings…"), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme")];
+  add("ios-fields/phone-item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, fontMin(FIELDS, 16)] });
+  add("ios-fields/phone-settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, fontMin(FIELDS, 16)] });
+  const padItem = [click(".tl-row .name", PICKED), expect('.sheet[role="dialog"] .panel .kind', "TASK")];
+  add("ios44/phone/plan", "mesa-ios-phone", { sizes: "phone", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
+  add("ios44/phone/plans", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [click(".phone-head button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), hitChrome("sheetHead", "planList")] });
+  add("ios44/phone/item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal(".isheet .actions button", "Move up"), hitChrome("sheetHead", "panelActions")] });
+  add("ios44/phone/item-end", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal(".isheet > .actions button", "Move to Trash"), hitChrome("sheetHead", "panelActions")] });
+  add("ios44/phone/settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, hitChrome("sheetHead", "settingsTabs")] });
+  add("ios44/phone/sync", "mesa-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [click(".phone-head button", "Plans"), click(".plans-sync button", "Set up sync"), expect('.sheet[role="dialog"] .sheet-title', "Sync"), hitChrome("sheetHead", "sync")],
+  });
+  add("ios44/phone/new-menu", "mesa-ios-phone", {
+    sizes: "phone",
+    actions: [click(".phone-head button.phone-add", "+"), expect('.phone-head .plan-menu-list [role="menuitem"]', "New task"), hitChrome("phoneBars", "menus")],
+  });
+  add("ios44/phone/plan-sheet", "mesa-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [click('.phone-head button[aria-label="Plan"]'), expect('.sheet[role="dialog"] .sheet-title', "Plan"), expect(".sheet .history button", "Revert"), style(".sheet .history li button", "position", "static"), hitChrome("sheetHead")],
+  });
+  add("ios44/phone/removed-banner", "phone-removed-banner-ios", { sizes: "phone", actions: [count(".removed-banner button", 3), hitChrome("phoneBars", "banners")] });
+  add("ios44/pad-landscape/removed-banner", "sync-removed-ios-pad", { sizes: "ipad-11-landscape", actions: [count(".removed-banner button", 2), hitChrome("toolbar", "banners")] });
+  add("ios44/pad-landscape/choice-banner", "choices-ios-pad", {
+    sizes: "ipad-11-landscape",
+    actions: [tap(".tl-row .name", PICKED_CHOICE), expect(".slot-panel .choice-banner button", "Choose"), hitChrome("choiceBanners", "panelActions")],
+  });
+  add("ios44/pad-portrait/new-menu", "mesa-ios-pad", {
+    sizes: "ipad-11-portrait",
+    actions: [viewExpect("timeline"), click(".toolbar button", "+ New"), expect('.toolbar .plan-menu-list [role="menuitem"]', "New task"), hitChrome("toolbar", "menus")],
+  });
+  add("ios44/pad-landscape/plan-menu", "mesa-ios-pad", {
+    sizes: "ipad-11-landscape",
+    actions: [...fullShell, click('.plan-head button[aria-label="Plan menu"]'), expect('.plan-head .plan-menu-list [role="menuitem"]', "Export plan…"), hitChrome("menus")],
+  });
+  add("ios44/phone-landscape/plan", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
+  add("ios44/phone/status-strip", "phone-status-ios", { sizes: "phone", actions: [expect(".phone-status .status-strip .status-text", STATUS_FIRST), hitChrome("phoneBars", "phoneStatus")] });
+  add("ios44/pad-landscape/dialog", "mesa-ios-pad", {
+    sizes: "ipad-11-landscape",
+    dialog: true,
+    actions: [...fullShell, click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), hitChrome("dialogActions")],
+  });
+  add("ios44/pad-portrait/plan", "mesa-ios-pad", { sizes: "ipad-11-portrait", actions: [viewExpect("timeline"), hitChrome("toolbar")] });
+  add("ios44/pad-portrait/plans", "mesa-ios-pad", {
+    sizes: "ipad-11-portrait",
+    dialog: true,
+    actions: [viewExpect("timeline"), click(".toolbar button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), hitChrome("sheetHead", "planList")],
+  });
+  add("ios44/pad-portrait/item", "mesa-ios-pad", { sizes: "ipad-11-portrait", dialog: true, actions: [viewExpect("timeline"), ...padItem, hitChrome("sheetHead", "panelActions")] });
+  add("ios44/pad-portrait/settings", "mesa-ios-pad", {
+    sizes: "ipad-11-portrait",
+    dialog: true,
+    actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), hitChrome("sheetHead", "settingsTabs")],
+  });
+  add("ios44/pad-landscape/plan", "mesa-ios-pad", { sizes: "ipad-11-landscape", actions: [...fullShell, hitChrome("toolbar", "planList", "panelActions")] });
+  add("ios44/pad-landscape/settings", "mesa-ios-pad", {
+    sizes: "ipad-11-landscape",
+    actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect(".settings-panel h2", "Settings"), settingsOn("Theme"), hitChrome("toolbar", "settingsHead", "settingsTabs")],
+  });
   add("revert-preview", "mesa", {
     dialog: true,
     actions: [click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), expect(".revert-text p")],
@@ -709,7 +790,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.hit44 === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.hit44 === undefined && last.fontMin === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -1655,18 +1736,49 @@ window.__probeAct = function (a) {
     function fits(s) {
       return s.w >= HIT_MIN - 0.01 && s.h >= HIT_MIN - 0.01;
     }
-    var small = targets.map(function (t) {
-      var sizes = candidates(t).map(measure);
-      if (sizes.some(fits)) return null;
-      var best = sizes.reduce(function (p, q) { return q.w * q.h > p.w * p.h ? q : p; });
-      return { t: t, w: best.w, h: best.h };
-    }).filter(function (m) { return m !== null; });
+    function labelOf(t) {
+      var label = t.el.textContent.trim() || t.el.getAttribute("aria-label") || "";
+      return t.selector + " " + JSON.stringify(label.slice(0, 40));
+    }
+    function listed(items, line) {
+      return items.slice(0, 6).map(line).join("; ") + (items.length > 6 ? "; and " + (items.length - 6) + " more" : "");
+    }
+    var chosen = targets.map(function (t) {
+      var boxes = candidates(t);
+      var passing = boxes.filter(function (r) { return fits(measure(r)); })[0];
+      var best = boxes.reduce(function (p, q) {
+        var mp = measure(p);
+        var mq = measure(q);
+        return mq.w * mq.h > mp.w * mp.h ? q : p;
+      });
+      var area = boxes.reduce(function (p, q) {
+        return { left: Math.min(p.left, q.left), top: Math.min(p.top, q.top), right: Math.max(p.right, q.right), bottom: Math.max(p.bottom, q.bottom) };
+      });
+      return { t: t, rect: passing === undefined ? best : passing, area: area, fits: passing !== undefined };
+    });
+    var small = chosen.filter(function (c) { return !c.fits; }).map(function (c) {
+      var m = measure(c.rect);
+      return { t: c.t, w: m.w, h: m.h };
+    });
     if (small.length > 0) {
-      return { fail: small.slice(0, 6).map(function (m) {
-        var label = m.t.el.textContent.trim() || m.t.el.getAttribute("aria-label") || "";
+      return { fail: listed(small, function (m) {
         var note = m.t.by === null ? "" : " (clipped by " + nameOf(m.t.by) + ")";
-        return m.t.selector + " " + JSON.stringify(label.slice(0, 40)) + " has a hit area of " + m.w + "x" + m.h + " px, under " + HIT_MIN + "x" + HIT_MIN + note;
-      }).join("; ") + (small.length > 6 ? "; and " + (small.length - 6) + " more" : "") };
+        return labelOf(m.t) + " has a hit area of " + m.w + "x" + m.h + " px, under " + HIT_MIN + "x" + HIT_MIN + note;
+      }) };
+    }
+    var overlaps = [];
+    chosen.forEach(function (p, i) {
+      chosen.slice(i + 1).forEach(function (q) {
+        if (p.t.el.contains(q.t.el) || q.t.el.contains(p.t.el)) return;
+        var ox = Math.min(p.area.right, q.area.right) - Math.max(p.area.left, q.area.left);
+        var oy = Math.min(p.area.bottom, q.area.bottom) - Math.max(p.area.top, q.area.top);
+        if (ox > 0.5 && oy > 0.5) overlaps.push({ p: p.t, q: q.t, w: Math.round(ox * 10) / 10, h: Math.round(oy * 10) / 10 });
+      });
+    });
+    if (overlaps.length > 0) {
+      return { fail: listed(overlaps, function (o) {
+        return labelOf(o.p) + " and " + labelOf(o.q) + " have hit areas that overlap by " + o.w + "x" + o.h + " px";
+      }) };
     }
     return { ok: true };
   }
@@ -1854,6 +1966,22 @@ window.__probeAct = function (a) {
     var overflowCss = getComputedStyle(cut).textOverflow;
     if (cut.scrollWidth <= cut.clientWidth) return { fail: a.ellipsed + " fits (" + cut.scrollWidth + " of " + cut.clientWidth + " px), so its ellipsis is not tested" };
     if (overflowCss !== "ellipsis") return { fail: a.ellipsed + " overflows with text-overflow: " + overflowCss + ", not ellipsis" };
+    return { ok: true };
+  }
+  if (a.fontMin !== undefined) {
+    var typed = Array.prototype.slice.call(document.querySelectorAll(a.fontMin[0])).filter(function (el) {
+      return el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible";
+    });
+    if (typed.length === 0) return { fail: "no visible " + a.fontMin[0] + " to read a font size from" };
+    var tiny = typed.map(function (el) {
+      return { el: el, px: parseFloat(getComputedStyle(el).fontSize) };
+    }).filter(function (f) { return !(f.px >= a.fontMin[1]); });
+    if (tiny.length > 0) {
+      return { fail: tiny.map(function (f) {
+        var label = f.el.getAttribute("aria-label") || f.el.getAttribute("name") || f.el.getAttribute("type") || "";
+        return f.el.tagName.toLowerCase() + " " + JSON.stringify(label) + " renders at " + f.px + " px, under " + a.fontMin[1];
+      }).join("; ") };
+    }
     return { ok: true };
   }
   if (a.style !== undefined) {

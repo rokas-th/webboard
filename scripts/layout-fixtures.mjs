@@ -652,6 +652,10 @@ export function buildFixtures() {
   const mesaOnMac = fixtureOf([mesa(mesaLog("mesaM"))]);
   const unreadable = fixtureOf([mesa(unreadableLog())]);
   const scale = fixtureOf([{ id: PLAN_IDS.scale, name: "Scale: 1,000 items", log: scaleLog() }]);
+  const choices = fixtureOf([mesa(choicesLog())]);
+  const removed = inSpace(mesaOnMac, true);
+  const phoneRemoved = inSpace(mesaOnMac, true, [PLAN_IDS.mesa]);
+  const status = withStatusYears(fixtureOf([{ id: PLAN_IDS.status, name: LONG.plan, log: statusLog() }]));
   const fixtures = {
     empty: fixtureOf([]),
     example: firstStart(),
@@ -663,7 +667,8 @@ export function buildFixtures() {
     "mesa-ios-pad": onIosPad(mesaOnMac),
     scale,
     "scale-print": { ...scale, ipc: { ...scale.ipc, print_window: null } },
-    choices: fixtureOf([mesa(choicesLog())]),
+    choices,
+    "choices-ios-pad": onIosPad(choices),
     "long-names": fixtureOf([
       { id: PLAN_IDS.long, name: LONG.plan, log: longLog() },
       { id: PLAN_IDS.longRtl, name: LONG.rtlPlan, log: rtlLog() },
@@ -671,7 +676,8 @@ export function buildFixtures() {
     unreadable,
     "two-choices": fixtureOf([mesa(twoChoicesLog())]),
     "phone-choice": fixtureOf([{ id: PLAN_IDS.phone, name: "Sprint plan", log: phoneChoiceLog() }]),
-    "phone-status": withStatusYears(fixtureOf([{ id: PLAN_IDS.status, name: LONG.plan, log: statusLog() }])),
+    "phone-status": status,
+    "phone-status-ios": onIosPhone(status),
     "phone-plans": fixtureOf(
       [mesa(mesaLog("mesaP")), { id: PLAN_IDS.long, name: LONG.plan, log: longLog() }, { id: PLAN_IDS.blank, name: "Blank plan", log: blankLog() }],
       { trashed: [PLAN_IDS.blank] },
@@ -681,9 +687,11 @@ export function buildFixtures() {
     "sync-local": syncLocal(),
     converted: converted(),
     "sync-receiving": inSpace(unreadable, false),
-    "sync-removed": inSpace(mesaOnMac, true),
+    "sync-removed": removed,
+    "sync-removed-ios-pad": onIosPad(removed),
     "phone-sync-sheet": copyOf(mesaOnMac),
-    "phone-removed-banner": inSpace(mesaOnMac, true, [PLAN_IDS.mesa]),
+    "phone-removed-banner": phoneRemoved,
+    "phone-removed-banner-ios": onIosPhone(phoneRemoved),
     "update-available": withUpdate(mesaOnMac, { "plugin:updater|check": { ...UPDATE_FOUND } }),
     "update-check-failed": withUpdate(mesaOnMac, { "plugin:updater|check": { __reject: UPDATE_CHECK_FAILED } }),
     "update-downloading": withUpdate(mesaOnMac, {

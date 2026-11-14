@@ -562,3 +562,13 @@ input.theme-hex-bad {
     color: var(--text);
   }
 }
+
+:where(html[data-os="ios"]) .theme-card:active:not(:disabled) {
+  color: inherit;
+  border-color: var(--cyan-dim);
+  background: var(--panel-2);
+}
+
+:where(html[data-os="ios"]) .theme-card[aria-pressed="true"]:active:not(:disabled) {
+  border-color: var(--cyan);
+}

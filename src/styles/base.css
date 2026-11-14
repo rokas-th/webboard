@@ -10,6 +10,10 @@ body,
   box-sizing: border-box;
 }
 
+html[data-os="ios"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
 html,
 body {
   background: var(--void);
@@ -64,6 +68,12 @@ button {
   }
 }
 
+:where(html[data-os="ios"]) button:active:not(:disabled) {
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+  background: var(--hover);
+}
+
 button:disabled {
   opacity: 0.4;
   cursor: default;
@@ -89,6 +99,10 @@ textarea:focus-visible,
   }
 }
 
+:where(html[data-os="ios"]) .button-primary:active:not(:disabled) {
+  box-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.35);
+}
+
 .button-danger {
   color: var(--magenta);
   border-color: var(--magenta);
@@ -101,6 +115,13 @@ textarea:focus-visible,
     box-shadow: 0 0 12px rgba(var(--magenta-rgb), 0.35);
     background: rgba(var(--magenta-rgb), 0.06);
   }
+}
+
+:where(html[data-os="ios"]) .button-danger:active:not(:disabled) {
+  color: var(--magenta);
+  border-color: var(--magenta);
+  box-shadow: 0 0 12px rgba(var(--magenta-rgb), 0.35);
+  background: rgba(var(--magenta-rgb), 0.06);
 }
 
 .button-small {
@@ -133,6 +154,12 @@ textarea:focus {
   box-shadow: 0 0 10px rgba(var(--cyan-rgb), 0.2);
 }
 
+html[data-os="ios"] input,
+html[data-os="ios"] select,
+html[data-os="ios"] textarea {
+  font-size: max(16px, 1em) !important;
+}
+
 input[type="range"] {
   accent-color: var(--cyan);
   width: 100%;
@@ -153,4 +180,43 @@ html[data-scheme="dark"] ::-webkit-calendar-picker-indicator {
 
 .dim {
   color: var(--dim);
+}
+
+html[data-os="ios"] .toolbar button:not(.overlay *),
+html[data-os="ios"] .phone-head button:not(.overlay *),
+html[data-os="ios"] .phone-views button,
+html[data-os="ios"] .phone-status button,
+html[data-os="ios"] .sidebar button,
+html[data-os="ios"] .sheet-head button,
+html[data-os="ios"] .modal-actions button,
+html[data-os="ios"] .panel .actions button,
+html[data-os="ios"] .settings-head button,
+html[data-os="ios"] .settings-tabs button,
+html[data-os="ios"] .sync-tabs button,
+html[data-os="ios"] .sync-buttons button,
+html[data-os="ios"] .banner button,
+html[data-os="ios"] .choice-banner button {
+  position: relative;
+}
+
+html[data-os="ios"] .toolbar button:not(.overlay *)::before,
+html[data-os="ios"] .phone-head button:not(.overlay *)::before,
+html[data-os="ios"] .phone-views button::before,
+html[data-os="ios"] .phone-status button::before,
+html[data-os="ios"] .sidebar button::before,
+html[data-os="ios"] .sheet-head button::before,
+html[data-os="ios"] .modal-actions button::before,
+html[data-os="ios"] .panel .actions button::before,
+html[data-os="ios"] .settings-head button::before,
+html[data-os="ios"] .settings-tabs button::before,
+html[data-os="ios"] .sync-tabs button::before,
+html[data-os="ios"] .sync-buttons button::before,
+html[data-os="ios"] .banner button::before,
+html[data-os="ios"] .choice-banner button::before {
+  content: "";
+  position: absolute;
+  top: min(0px, calc(50% - 22px));
+  right: min(0px, calc(50% - 22px));
+  bottom: min(0px, calc(50% - 22px));
+  left: min(0px, calc(50% - 22px));
 }

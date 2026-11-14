@@ -101,7 +101,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     undo: r.undo,
     redo: r.redo,
     readOnly: t.session.readOnly,
-    mac: true,
+    command: true,
     full: false,
     clock: t.clock,
     select,
@@ -559,8 +559,8 @@ describe("order and groups", () => {
     expect([first.includes("move-up"), first.includes("move-down"), last.includes("move-up"), last.includes("move-down")]).toEqual([false, true, true, false]);
     expect(ids(harness(t).ctx).filter((x) => x.startsWith("move-"))).toEqual([]);
     const pc = harness(t, { selected: "b" });
-    expect(find({ ...pc.ctx, mac: false }, "move-up").keys).toBe("Alt ↑");
-    expect(find({ ...pc.ctx, mac: false, ui: { ...pc.ctx.ui, selected: "a" } }, "move-down").keys).toBe("Alt ↓");
+    expect(find({ ...pc.ctx, command: false }, "move-up").keys).toBe("Alt ↑");
+    expect(find({ ...pc.ctx, command: false, ui: { ...pc.ctx.ui, selected: "a" } }, "move-down").keys).toBe("Alt ↓");
   });
 
   it("collapses every group and expands them all again", async () => {
@@ -640,7 +640,7 @@ describe("duplicate (product-7)", () => {
     const t = await made(SMALL);
     const d = find(harness(t, { selected: "a" }).ctx, "duplicate");
     expect([d.label, d.group, d.keys]).toEqual(["Duplicate “A”", "Edit", "⌘D"]);
-    expect(find({ ...harness(t, { selected: "u" }).ctx, mac: false }, "duplicate").keys).toBe("Ctrl D");
+    expect(find({ ...harness(t, { selected: "u" }).ctx, command: false }, "duplicate").keys).toBe("Ctrl D");
     expect(ids(harness(t).ctx)).not.toContain("duplicate");
     t.session.apply({ t: "trash", items: ["one"] });
     expect(ids(harness(t, { selected: "one" }).ctx)).not.toContain("duplicate");
@@ -674,7 +674,7 @@ describe("print (product-8)", () => {
     p.run();
     expect(h.print).toHaveBeenCalledTimes(1);
     const linux = harness(t, {}, [], { device: { deviceId: "pc", name: "pop-os", platform: "linux" } });
-    expect(find({ ...linux.ctx, mac: false }, "print").keys).toBe("Ctrl P");
+    expect(find({ ...linux.ctx, command: false }, "print").keys).toBe("Ctrl P");
   });
 
   it("is not offered without a plan, or on iOS", async () => {
@@ -700,7 +700,7 @@ describe("plan list command", () => {
   it("offers Show the plan list with Ctrl B off the Mac for a hidden list, and shows it", async () => {
     const t = await made(SMALL);
     const h = harness(t, { sidebarOpen: false });
-    const ctx: CommandCtx = { ...h.ctx, full: true, mac: false };
+    const ctx: CommandCtx = { ...h.ctx, full: true, command: false };
     const c = find(ctx, "sidebar");
     expect([c.group, c.label, c.keys]).toEqual(["View", "Show the plan list", "Ctrl B"]);
     c.run();

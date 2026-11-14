@@ -107,6 +107,16 @@ const typed = (el: HTMLInputElement, value: string, end: "Enter" | "Escape" | "b
 };
 
 describe("ItemSheet typed fields", () => {
+  it("asks for the number pad on the duration and leaves every lag field as it is", async () => {
+    const t = await made([REVIEW, { name: "Ship", start: "2026-11-18", dur: 1, deps: [fs("Review")] }, { name: "Notes", start: "2026-11-09", dur: 1 }]);
+    shown(t, "Ship");
+    const mode = (el: Element): [string | null, string | null] => [el.getAttribute("type"), el.getAttribute("inputmode")];
+    expect(mode(field("Duration"))).toEqual(["number", "numeric"]);
+    expect(mode(lagField(linkRow("Review>Ship")))).toEqual(["number", null]);
+    expect(mode(within(sheet()).getByRole("spinbutton", { name: "Lag" }))).toEqual(["number", null]);
+    expect(["enterkeyhint", "autocapitalize", "autocorrect", "spellcheck"].map((a) => field("Name").getAttribute(a))).toEqual(["done", "sentences", "off", "false"]);
+  });
+
   it("types a duration and an end date as one resize each, and refuses an end on a day off", async () => {
     const t = await made([REVIEW]);
     const { apply } = shown(t, "Review");

@@ -39,12 +39,15 @@ after(async () => {
 
 const CSS = "body { margin: 0; } button { box-sizing: border-box; padding: 0; border: 0; margin: 4px; font: 10px sans-serif; }";
 
-async function hit44(body, selectors) {
+async function act(body, action) {
   const { frameTree } = await page.cdp.send("Page.getFrameTree", {}, page.sessionId);
   await page.cdp.send("Page.setDocumentContent", { frameId: frameTree.frame.id, html: `<!doctype html><html><head><style>${CSS}</style></head><body>${body}</body></html>` }, page.sessionId);
   await evaluate(page.cdp, page.sessionId, ACT);
-  return evaluate(page.cdp, page.sessionId, `window.__probeAct(${JSON.stringify({ hit44: selectors })})`, true);
+  return evaluate(page.cdp, page.sessionId, `window.__probeAct(${JSON.stringify(action)})`, true);
 }
+
+const hit44 = (body, selectors) => act(body, { hit44: selectors });
+const fontMin = (body, selector, px) => act(body, { fontMin: [selector, px] });
 
 test("hit44 fails a 30 x 30 button and names its selector, text and size", async () => {
   const got = await hit44('<button class="small" style="width: 30px; height: 30px">Add</button>', [".small"]);
@@ -197,6 +200,59 @@ test("hit44 measures a pseudo-element centred with a translate", async () => {
 test("hit44 measures a button with no pseudo-element under a scaled ancestor in screen space", async () => {
   const body = '<div style="transform: scale(0.5)"><button class="big" style="width: 44px; height: 44px">Add</button></div>';
   assert.equal((await hit44(body, [".big"])).fail, '.big "Add" has a hit area of 22x22 px, under 44x44');
+});
+
+const PAIR = '<style>.g { position: relative; margin: 0; } .g::before { content: ""; position: absolute; inset: -7px; }</style>';
+
+test("hit44 fails two targets whose hit areas overlap, naming both and the overlap", async () => {
+  const body = PAIR + '<div style="display: flex; gap: 8px; padding: 20px"><button class="g" style="width: 30px; height: 30px">One</button><button class="g" style="width: 30px; height: 30px">Two</button></div>';
+  assert.equal((await hit44(body, [".g"])).fail, '.g "One" and .g "Two" have hit areas that overlap by 6x44 px');
+});
+
+test("hit44 names overlapping targets from two selectors", async () => {
+  const body = PAIR + '<div style="display: flex; gap: 8px; padding: 20px"><button class="g a" style="width: 30px; height: 30px">One</button><button class="g b" style="width: 30px; height: 30px">Two</button></div>';
+  assert.equal((await hit44(body, [".a", ".b"])).fail, '.a "One" and .b "Two" have hit areas that overlap by 6x44 px');
+});
+
+test("hit44 passes hit areas that only touch or overlap by half a pixel", async () => {
+  const at = (gap) => PAIR + `<div style="display: flex; gap: ${gap}px; padding: 20px"><button class="g" style="width: 30px; height: 30px">One</button><button class="g" style="width: 30px; height: 30px">Two</button></div>`;
+  assert.deepEqual(await hit44(at(14), [".g"]), { ok: true });
+  assert.deepEqual(await hit44(at(13.5), [".g"]), { ok: true });
+  assert.equal((await hit44(at(13), [".g"])).fail, '.g "One" and .g "Two" have hit areas that overlap by 1x44 px');
+});
+
+test("hit44 passes hit areas that overlap on one axis only", async () => {
+  const body = PAIR + '<div style="display: flex; flex-direction: column; gap: 20px; padding: 20px"><button class="g" style="width: 30px; height: 30px">One</button><button class="g" style="width: 30px; height: 30px">Two</button></div>';
+  assert.deepEqual(await hit44(body, [".g"]), { ok: true });
+});
+
+test("hit44 does not compare a target with a target inside it", async () => {
+  const body = '<div class="row" style="display: flex; width: 120px; height: 60px"><button class="b" style="width: 44px; height: 44px">In</button></div>';
+  assert.deepEqual(await hit44(body, [".row", ".b"]), { ok: true });
+});
+
+test("hit44 compares the whole hit area of a target that already fits, pseudo-elements included", async () => {
+  const body =
+    '<style>.wide { position: relative; } .wide::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; right: -20px; }</style>' +
+    '<div style="display: flex; gap: 8px; padding: 20px"><button class="g wide" style="margin: 0; width: 44px; height: 44px">One</button><button class="g" style="margin: 0; width: 44px; height: 44px">Two</button></div>';
+  assert.equal((await hit44(body, [".g"])).fail, '.g "One" and .g "Two" have hit areas that overlap by 12x44 px');
+});
+
+const FIELDS = "input, select, textarea";
+
+test("fontMin passes fields at or above the size", async () => {
+  const body = '<input aria-label="Name" style="font-size: 16px"><select name="pick" style="font-size: 18px"><option>a</option></select><textarea style="font-size: 16px"></textarea>';
+  assert.deepEqual(await fontMin(body, FIELDS, 16), { ok: true });
+});
+
+test("fontMin fails a field under the size and names it", async () => {
+  const body = '<input aria-label="Name" style="font-size: 16px"><input aria-label="Days" style="font-size: 15px"><select name="pick" style="font-size: 12px"><option>a</option></select>';
+  assert.equal((await fontMin(body, FIELDS, 16)).fail, 'input "Days" renders at 15 px, under 16; select "pick" renders at 12 px, under 16');
+});
+
+test("fontMin fails when no field is visible to read", async () => {
+  const body = '<input aria-label="Hidden" style="display: none"><textarea style="visibility: hidden"></textarea>';
+  assert.equal((await fontMin(body, FIELDS, 16)).fail, "no visible input, select, textarea to read a font size from");
 });
 
 test("the probe runs when started through a symlink to it", async () => {

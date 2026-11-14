@@ -15,6 +15,7 @@ export function TextField(p: {
   type?: "text" | "date" | "number";
   min?: string;
   max?: string;
+  inputMode?: "numeric";
   onCommit(next: string): boolean;
   onUnreadable?(): void;
 }) {
@@ -58,10 +59,16 @@ export function TextField(p: {
     if (!p.onCommit(next)) setDraft(p.value);
   };
   const date = p.type === "date";
+  const name = p.type === undefined || p.type === "text";
   return (
     <input
       ref={input}
       type={p.type ?? "text"}
+      inputMode={p.inputMode}
+      enterKeyHint={name ? "done" : undefined}
+      autoCapitalize={name ? "sentences" : undefined}
+      autoCorrect={name ? "off" : undefined}
+      spellCheck={name ? false : undefined}
       min={p.min ?? (date ? FIRST_PLAN_DATE : undefined)}
       max={p.max ?? (date ? LAST_PLAN_DATE : undefined)}
       className={p.className}

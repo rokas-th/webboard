@@ -1,36 +1,48 @@
 const DARK_QUERY = "(prefers-color-scheme: dark)";
+const COARSE_QUERY = "(pointer: coarse)";
 
 type Listener = (e: MediaQueryListEvent) => void;
 
-const listeners = new Set<Listener>();
+const listeners = new Map<string, Set<Listener>>([
+  [DARK_QUERY, new Set<Listener>()],
+  [COARSE_QUERY, new Set<Listener>()],
+]);
 let dark = true;
+let coarse = false;
 
-const event = (matches: boolean): MediaQueryListEvent => {
+const listenersOf = (query: string): Set<Listener> | undefined => listeners.get(query);
+
+const event = (query: string, matches: boolean): MediaQueryListEvent => {
   const e = new Event("change");
   Object.defineProperty(e, "matches", { value: matches });
-  Object.defineProperty(e, "media", { value: DARK_QUERY });
+  Object.defineProperty(e, "media", { value: query });
   return e as MediaQueryListEvent;
 };
 
+const tell = (query: string, matches: boolean): void => {
+  [...(listenersOf(query) ?? [])].forEach((cb) => cb(event(query, matches)));
+};
+
 const list = (query: string): MediaQueryList => {
-  const live = query === DARK_QUERY;
+  const live = listenersOf(query);
   const mql = {
     get matches() {
-      return live ? dark : false;
+      if (query === COARSE_QUERY) return coarse;
+      return query === DARK_QUERY ? dark : false;
     },
     media: query,
     onchange: null,
     addEventListener: (type: string, cb: Listener) => {
-      if (live && type === "change") listeners.add(cb);
+      if (type === "change") live?.add(cb);
     },
     removeEventListener: (type: string, cb: Listener) => {
-      if (live && type === "change") listeners.delete(cb);
+      if (type === "change") live?.delete(cb);
     },
     addListener: (cb: Listener) => {
-      if (live) listeners.add(cb);
+      live?.add(cb);
     },
     removeListener: (cb: Listener) => {
-      if (live) listeners.delete(cb);
+      live?.delete(cb);
     },
     dispatchEvent: () => true,
   };
@@ -43,11 +55,17 @@ export function installMatchMedia(): void {
 
 export function setSystemDark(next: boolean): void {
   dark = next;
-  [...listeners].forEach((cb) => cb(event(next)));
+  tell(DARK_QUERY, next);
 }
 
-export function resetSystemDark(): void {
+export function resetMediaQueries(): void {
   dark = true;
+  coarse = false;
 }
 
-export const darkListenerCount = (): number => listeners.size;
+export function setCoarsePointer(next: boolean): void {
+  coarse = next;
+  tell(COARSE_QUERY, next);
+}
+
+export const darkListenerCount = (): number => listenersOf(DARK_QUERY)?.size ?? 0;

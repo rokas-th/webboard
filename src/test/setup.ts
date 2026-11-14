@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, vi } from "vitest";
-import { installMatchMedia, resetSystemDark } from "./matchMedia";
+import { installMatchMedia, resetMediaQueries } from "./matchMedia";
 import { setPlatform } from "./platform";
 
 vi.mock("../theme/apply", async (importOriginal) => {
@@ -64,7 +64,7 @@ beforeEach(() => {
   scrollIntoView.mockClear();
   document.documentElement.style.setProperty("--sidebar-w", "284px");
   setScreen(1440, 900);
-  resetSystemDark();
+  resetMediaQueries();
 });
 
 afterEach(() => {

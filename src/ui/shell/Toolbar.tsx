@@ -53,8 +53,8 @@ export interface SidebarToggle {
   onToggle(): void;
 }
 
-function SidebarButton(p: SidebarToggle & { mac: boolean }) {
-  const title = `${p.open ? "Hide" : "Show"} the plan list (${p.mac ? "⌘B" : "Ctrl B"})${p.attention ? " · needs attention" : ""}`;
+function SidebarButton(p: SidebarToggle & { command: boolean }) {
+  const title = `${p.open ? "Hide" : "Show"} the plan list (${p.command ? "⌘B" : "Ctrl B"})${p.attention ? " · needs attention" : ""}`;
   return (
     <button
       ref={p.button}
@@ -82,6 +82,7 @@ interface ToolbarProps {
   ui: UiState;
   setUi(patch: Partial<UiState>): void;
   mac: boolean;
+  command: boolean;
   onCommand(id: string): void;
   compact: { button: RefObject<HTMLButtonElement | null>; onPlans(): void; onPlan(): void } | null;
   sidebar: SidebarToggle | null;
@@ -146,7 +147,7 @@ export function Toolbar(p: ToolbarProps) {
   return (
     <header ref={bar} className={className} data-tauri-drag-region>
       <div className="toolbar-group toolbar-start" data-tauri-drag-region>
-        {p.sidebar !== null && <SidebarButton {...p.sidebar} mac={p.mac} />}
+        {p.sidebar !== null && <SidebarButton {...p.sidebar} command={p.command} />}
         {p.compact !== null && (
           <button ref={p.compact.button} type="button" onClick={p.compact.onPlans}>
             Plans
@@ -159,7 +160,7 @@ export function Toolbar(p: ToolbarProps) {
         <span className="toolbar-spacer" />
         {p.session !== null && <PlanControls session={p.session} readOnly={p.readOnly} ui={p.ui} setUi={p.setUi} onCommand={p.onCommand} />}
         <button type="button" className="kbd-button" title="Command palette" onClick={() => p.onCommand("palette")}>
-          {p.mac ? "⌘K" : "Ctrl K"}
+          {p.command ? "⌘K" : "Ctrl K"}
         </button>
         {p.session !== null && (
           <NewItemMenu label="+ New" className="button-primary" disabled={p.readOnly} onPick={(kind) => p.onCommand(`new-${kind}`)} />

@@ -6,6 +6,7 @@ import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import type { UpdateState, Updates } from "../../store/updates";
 import { MESA_SEED, testSession, type TestSession } from "../../test/session";
+import { LINUX, setPlatform } from "../../test/platform";
 import { setScreen } from "../../test/setup";
 import { shellFor } from "../../test/shell";
 import { resetTauri } from "../../test/tauriMock";
@@ -89,7 +90,7 @@ const press = (target: Element, key: string, o: { meta?: boolean; ctrl?: boolean
   fireEvent.keyDown(target, { key, metaKey: o.meta ?? false, ctrlKey: o.ctrl ?? false });
 };
 
-const LINUX: Partial<Registry> = { device: { deviceId: "pc", name: "PC", platform: "linux" } };
+const ON_LINUX: Partial<Registry> = { device: { deviceId: "pc", name: "PC", platform: "linux" } };
 
 describe("the plan list toggle (full form)", () => {
   it("is the first control in the toolbar, labelled, expanded and controlling the list", async () => {
@@ -127,8 +128,9 @@ describe("the plan list toggle (full form)", () => {
   });
 
   it("names Ctrl B off the Mac", async () => {
+    setPlatform(LINUX);
     const t = await made();
-    await shown(t, { over: LINUX });
+    await shown(t, { over: ON_LINUX });
     expect(toggle().title).toBe("Hide the plan list (Ctrl B)");
     fireEvent.click(toggle());
     expect(toggle().title).toBe("Show the plan list (Ctrl B)");
@@ -153,8 +155,9 @@ describe("the plan list shortcut and palette entry", () => {
   });
 
   it("toggles on Ctrl+B off the Mac and not on ⌘B there", async () => {
+    setPlatform(LINUX);
     const t = await made();
-    await shown(t, { over: LINUX });
+    await shown(t, { over: ON_LINUX });
     press(document.body, "b", { meta: true });
     expect(list()).not.toBeNull();
     press(document.body, "b", { ctrl: true });

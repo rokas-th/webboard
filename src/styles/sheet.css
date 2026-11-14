@@ -56,3 +56,38 @@
   background: none;
   border-right: none;
 }
+
+html[data-os="ios"] .sheet-head {
+  gap: 4px;
+  padding: 4px 8px;
+}
+
+html[data-os="ios"] .sheet-title {
+  text-align: center;
+}
+
+html[data-os="ios"] .sheet-close,
+html[data-os="ios"] .sheet-head-end {
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
+
+html[data-os="ios"] .sheet-close {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--dim);
+  border: none;
+  border-radius: 0;
+}
+
+html[data-os="ios"] .sheet-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+html[data-os="ios"] .sheet:focus-visible,
+html[data-os="ios"] .modal:focus-visible {
+  outline: none;
+}

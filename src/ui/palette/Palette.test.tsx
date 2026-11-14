@@ -16,6 +16,7 @@ import { withSync } from "../../test/withSync";
 import { PRESETS, tokensOf } from "../../theme/presets";
 import { DEFAULT_STORE, saveStore, withChosen } from "../../theme/store";
 import { installMatchMedia } from "../../test/matchMedia";
+import { IPAD, IPHONE, LINUX, MAC, setPlatform } from "../../test/platform";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -145,6 +146,7 @@ describe("opening the palette", () => {
   });
 
   it("opens on Ctrl K off macOS, and ⌘K does nothing there", async () => {
+    setPlatform(LINUX);
     const t = await made(MESA_SEED);
     await shown(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
     press("k", { metaKey: true });
@@ -153,7 +155,8 @@ describe("opening the palette", () => {
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 
-  it("takes the modifier from the device's platform, not from a web view that names itself MacIntel", async () => {
+  it("takes the modifier from the platform stamp, not from a web view that names itself MacIntel", async () => {
+    setPlatform(LINUX);
     const t = await made(MESA_SEED);
     vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
     await shown(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
@@ -223,7 +226,36 @@ describe("opening the palette", () => {
     expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
   });
 
+  it.each([
+    [IPAD, "linux"],
+    [LINUX, "ios"],
+    [MAC, "linux"],
+  ] as const)("takes ⌘ or Ctrl from the stamp %o when the device reports %s", async (platform, reported) => {
+    setPlatform(platform);
+    const command = platform.os !== "linux";
+    const t = await made(MESA_SEED);
+    await shown(t, { device: { deviceId: "other", name: "Other", platform: reported } });
+    expect(button(bar(), command ? "⌘K" : "Ctrl K")).toBeTruthy();
+    press("k", command ? { ctrlKey: true } : { metaKey: true });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    press("k", command ? { metaKey: true } : { ctrlKey: true });
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  it.each([IPAD, IPHONE])("uses ⌘ on iOS (%o): ⌘K opens, Ctrl K does nothing, and the toolbar reads ⌘K", async (platform) => {
+    setPlatform(platform);
+    const t = await made(MESA_SEED);
+    await shown(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } });
+    expect(button(bar(), "⌘K")).toBeTruthy();
+    expect(within(bar()).queryByRole("button", { name: "Ctrl K" })).toBeNull();
+    press("k", { ctrlKey: true });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    press("k", { metaKey: true });
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
   it("does nothing on Ctrl K off macOS while another dialog is open", async () => {
+    setPlatform(LINUX);
     const t = await made(MESA_SEED);
     await shown(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
     setUi({ dialog: { t: "sync", pane: "setup" } });
@@ -571,7 +603,25 @@ describe("undo through the keys", () => {
     expect([undo.mock.calls.length, redo.mock.calls.length]).toEqual([1, 1]);
   });
 
+  it("undoes on ⌘Z and redoes on ⇧⌘Z on an iPad, where Ctrl+Z and Ctrl+Y do nothing", async () => {
+    setPlatform(IPAD);
+    const t = await made(MESA_SEED);
+    await shown(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } });
+    act(() => {
+      t.session.apply({ t: "move", items: ["t3"], days: 1 });
+    });
+    const undo = vi.spyOn(t.session, "undo");
+    const redo = vi.spyOn(t.session, "redo");
+    press("z", { ctrlKey: true });
+    press("y", { ctrlKey: true });
+    expect([undo.mock.calls.length, redo.mock.calls.length]).toEqual([0, 0]);
+    press("z", { metaKey: true });
+    press("z", { metaKey: true, shiftKey: true });
+    expect([undo.mock.calls.length, redo.mock.calls.length]).toEqual([1, 1]);
+  });
+
   it("redoes on Ctrl+Y off macOS", async () => {
+    setPlatform(LINUX);
     const t = await made(MESA_SEED);
     await shown(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
     act(() => {

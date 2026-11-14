@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { toIso } from "../../domain/dates";
 import type { ItemId } from "../../domain/model";
 import type { PlanSession } from "../../store/session";
@@ -8,6 +8,19 @@ import { useUiValue } from "../state";
 import { geometry } from "../timeline/geometry";
 import { isClick } from "../timeline/gesture";
 import { chartWidth } from "../timeline/Timeline";
+
+export const DRAG_HINT = "Drag one onto the timeline to give it dates.";
+export const TAP_HINT = "Tap one to open it and give it dates.";
+
+const COARSE_QUERY = "(pointer: coarse)";
+
+const isCoarse = (): boolean => window.matchMedia(COARSE_QUERY).matches;
+
+const onCoarseChange = (cb: () => void): (() => void) => {
+  const list = window.matchMedia(COARSE_QUERY);
+  list.addEventListener("change", cb);
+  return () => list.removeEventListener("change", cb);
+};
 
 interface ChipDrag {
   id: ItemId;
@@ -19,6 +32,7 @@ export function Tray(p: { session: PlanSession; readOnly: boolean }) {
   const view = usePlanView(p.session);
   const { ui, setUi } = useUiValue();
   const { run } = useRun(p.session);
+  const coarse = useSyncExternalStore(onCoarseChange, isCoarse);
   const drag = useRef<ChipDrag | null>(null);
   const [floating, setFloating] = useState<{ name: string; x: number; y: number } | null>(null);
   const unscheduled = [...view.plan.items.values()].filter((i) => !i.trashed && i.schedule !== null && i.schedule.start === null);
@@ -86,7 +100,7 @@ export function Tray(p: { session: PlanSession; readOnly: boolean }) {
           {i.name}
         </span>
       ))}
-      {!p.readOnly && <span className="tray-hint">{unscheduled.length > 0 ? "Drag one onto the timeline to give it dates." : "Everything has dates."}</span>}
+      {!p.readOnly && <span className="tray-hint">{unscheduled.length > 0 ? (coarse ? TAP_HINT : DRAG_HINT) : "Everything has dates."}</span>}
       <span className="tray-spacer" />
       <span className="legend">
         <span>

@@ -51,7 +51,7 @@ const panel = (t: TestSession, ui: Partial<UiState> = {}, readOnly = false) => {
   render(
     <OpenChoice.Provider value={vi.fn()}>
       <UiContext.Provider value={{ ui: { ...UI, ...ui }, setUi }}>
-        <ItemPanel session={t.session} item="a" local="Mac" mac={true} readOnly={readOnly} naming={false} onNamed={() => undefined} />
+        <ItemPanel session={t.session} item="a" local="Mac" command={true} readOnly={readOnly} naming={false} onNamed={() => undefined} />
       </UiContext.Provider>
     </OpenChoice.Provider>,
   );

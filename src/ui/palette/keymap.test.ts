@@ -3,8 +3,8 @@ import { isTyping, keyToCommand, type KeyInput, type KeyState } from "./keymap";
 
 const k = (key: string, o: Partial<KeyInput> = {}): KeyInput => ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...o });
 
-const MAC: KeyState = { mac: true, typing: false, dialog: false, selected: false, full: true };
-const PC: KeyState = { ...MAC, mac: false };
+const MAC: KeyState = { command: true, typing: false, dialog: false, selected: false, full: true };
+const PC: KeyState = { ...MAC, command: false };
 
 describe("keyToCommand on macOS", () => {
   it("opens the palette on ⌘K even while typing, and not while a dialog is open", () => {

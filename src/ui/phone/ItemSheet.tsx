@@ -173,6 +173,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
               value={sc.dur}
               min={1}
               max={MAX_TASK_DUR}
+              inputMode="numeric"
               notWhole={DUR_NOT_WHOLE}
               onCommit={(dur) => p.run.run({ t: "resize", item: it.id, dur }) !== null}
             />

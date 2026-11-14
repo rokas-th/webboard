@@ -413,7 +413,7 @@ describe("updates", () => {
     expect(toolbar()).not.toBeNull();
     expect(checkUpdate).not.toHaveBeenCalled();
     expect(document.querySelector(".update-line")).toBeNull();
-    fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "k", code: "KeyK", metaKey: true });
     await settle();
     const palette = document.querySelector(".palette");
     expect(palette).not.toBeNull();

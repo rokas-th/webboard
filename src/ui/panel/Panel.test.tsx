@@ -13,6 +13,7 @@ import { UiContext, useUi, type UiState } from "../state";
 import { historyTime, revertText } from "./historyText";
 import { groupOptions, ItemPanel } from "./ItemPanel";
 import { withSync } from "../../test/withSync";
+import { IPAD, LINUX, MAC, setPlatform } from "../../test/platform";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -218,7 +219,7 @@ describe("ItemPanel fields", () => {
             setUi: vi.fn(),
           }}
         >
-          <ItemPanel session={t.session} item="Late" local="Mac" mac={true} naming={false} onNamed={() => undefined} />
+          <ItemPanel session={t.session} item="Late" local="Mac" command={true} naming={false} onNamed={() => undefined} />
         </UiContext.Provider>
       </OpenChoice.Provider>,
     );
@@ -279,6 +280,7 @@ describe("ItemPanel fields", () => {
     clearToasts();
     const lag = within(one('[data-dep="W"]', panel())).getByRole("spinbutton", { name: "Lag" });
     if (!(lag instanceof HTMLInputElement)) throw new Error("no lag field");
+    expect([input("Duration").getAttribute("inputmode"), lag.type, lag.getAttribute("inputmode")]).toEqual(["numeric", "number", null]);
     edit(unreadable(lag), "", "blur");
     expect([lag.value, toastTexts()]).toEqual(["0", ["Lag must be a whole number of working days."]]);
     expect(apply).not.toHaveBeenCalled();
@@ -590,10 +592,43 @@ describe("the note", () => {
     expect(undo).not.toHaveBeenCalled();
   });
 
+  it("on an iPad, ⌘Z and ⇧⌘Z in the focused note undo its own typing and never run the plan's undo, and Ctrl+Y is not redo", async () => {
+    setPlatform(IPAD);
+    const t = await made([{ name: "A", start: "2026-11-10", note: "abc" }]);
+    render(withSync(shellFor(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } }).ui));
+    await settle();
+    select("A");
+    const note = inPanel().getByLabelText("Notes");
+    if (!(note instanceof HTMLTextAreaElement)) throw new Error("no note");
+    const undo = vi.spyOn(t.session, "undo");
+    const redo = vi.spyOn(t.session, "redo");
+    act(() => note.focus());
+    typeInto(note, "abcd");
+    act(() => {
+      fireEvent.keyDown(note, { key: "z", metaKey: true });
+    });
+    expect(note.value).toBe("abc");
+    act(() => {
+      fireEvent.keyDown(note, { key: "z", metaKey: true, shiftKey: true });
+    });
+    expect(note.value).toBe("abcd");
+    act(() => {
+      fireEvent.keyDown(note, { key: "z", ctrlKey: true });
+    });
+    expect(note.value).toBe("abc");
+    act(() => {
+      fireEvent.keyDown(note, { key: "y", ctrlKey: true });
+    });
+    expect(note.value).toBe("abc");
+    expect(t.session.note("A").toString()).toBe("abc");
+    expect([undo.mock.calls.length, redo.mock.calls.length]).toEqual([0, 0]);
+  });
+
   it.each([
     ["linux", "abcd"],
     ["macos", "abc"],
   ] as const)("on %s, Ctrl+Y in the focused note leaves the note at %s", async (platform, after) => {
+    setPlatform(platform === "linux" ? LINUX : MAC);
     const t = await made([{ name: "A", start: "2026-11-10", note: "abc" }]);
     render(withSync(shellFor(t, { device: { deviceId: "mac", name: "Mac", platform } }).ui));
     await settle();

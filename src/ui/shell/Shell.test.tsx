@@ -30,6 +30,9 @@ import { Shell } from "./Shell";
 import { connectedStubs, withSync } from "../../test/withSync";
 import { paintNative } from "../../theme/apply";
 import { PRESETS, tokensOf, type Theme } from "../../theme/presets";
+import { setCoarsePointer } from "../../test/matchMedia";
+import { LINUX, setPlatform } from "../../test/platform";
+import { TAP_HINT } from "./Tray";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
@@ -396,6 +399,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
   });
 
   it("reads Ctrl K off macOS", async () => {
+    setPlatform(LINUX);
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
     render(withSync(ui));
@@ -458,6 +462,29 @@ describe("Shell on testSession(MESA_SEED)", () => {
     await settle();
     expect(screen.getByText("Unscheduled · 5")).toBeTruthy();
     expect(document.querySelector(".legend")?.textContent).toBe("taskmilestonelateconflictheld");
+  });
+
+  it("tells a mouse to drag an unscheduled item and a finger to tap it, which opens it with its start", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const hint = (): string | null | undefined => document.querySelector(".tray-hint")?.textContent;
+    expect(hint()).toBe("Drag one onto the timeline to give it dates.");
+    act(() => setCoarsePointer(true));
+    expect(hint()).toBe(TAP_HINT);
+    act(() => setCoarsePointer(false));
+    expect(hint()).toBe("Drag one onto the timeline to give it dates.");
+    act(() => setCoarsePointer(true));
+    expect(hint()).toBe(TAP_HINT);
+    const chip = document.querySelector(".tray-chip");
+    if (!(chip instanceof HTMLElement)) throw new Error("no tray chip");
+    fireEvent.pointerDown(chip, { button: 0, pointerType: "touch", clientX: 5, clientY: 5 });
+    fireEvent.pointerUp(chip, { button: 0, pointerType: "touch", clientX: 5, clientY: 5 });
+    await settle();
+    const start = document.querySelector('.slot-panel input[aria-label="Start"], .slot-panel input[aria-label="Date"]');
+    expect(start instanceof HTMLInputElement ? start.value : null).toBe("");
+    const name = document.querySelector('.slot-panel input[aria-label="Name"]');
+    expect(name instanceof HTMLInputElement ? name.value : null).toBe(chip.textContent);
   });
 
   it("toasts the session's repair notice once", async () => {

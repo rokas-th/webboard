@@ -244,6 +244,20 @@ describe("the Cyberdeck look", () => {
       ".theme-switch::after": ".theme-switch",
       ".sidebar-resizer::before": ".sidebar-resizer",
       '.toolbar .sidebar-toggle[data-attention="true"]::after': ".toolbar .sidebar-toggle",
+      'html[data-os="ios"] .toolbar button:not(.overlay *)::before': 'html[data-os="ios"] .toolbar button:not(.overlay *)',
+      'html[data-os="ios"] .phone-head button:not(.overlay *)::before': 'html[data-os="ios"] .phone-head button:not(.overlay *)',
+      'html[data-os="ios"] .phone-views button::before': 'html[data-os="ios"] .phone-views button',
+      'html[data-os="ios"] .phone-status button::before': 'html[data-os="ios"] .phone-status button',
+      'html[data-os="ios"] .sidebar button::before': 'html[data-os="ios"] .sidebar button',
+      'html[data-os="ios"] .sheet-head button::before': 'html[data-os="ios"] .sheet-head button',
+      'html[data-os="ios"] .modal-actions button::before': 'html[data-os="ios"] .modal-actions button',
+      'html[data-os="ios"] .panel .actions button::before': 'html[data-os="ios"] .panel .actions button',
+      'html[data-os="ios"] .settings-head button::before': 'html[data-os="ios"] .settings-head button',
+      'html[data-os="ios"] .settings-tabs button::before': 'html[data-os="ios"] .settings-tabs button',
+      'html[data-os="ios"] .sync-tabs button::before': 'html[data-os="ios"] .sync-tabs button',
+      'html[data-os="ios"] .sync-buttons button::before': 'html[data-os="ios"] .sync-buttons button',
+      'html[data-os="ios"] .banner button::before': 'html[data-os="ios"] .banner button',
+      'html[data-os="ios"] .choice-banner button::before': 'html[data-os="ios"] .choice-banner button',
     };
     const positioned = ["relative", "absolute", "sticky"];
     const absolute = sheet.rules.filter((r) => r.decls["position"] === "absolute" && r.conditions.length === 0).map((r) => r.selector);
@@ -379,5 +393,68 @@ describe("the Cyberdeck look", () => {
     expect(under(".print-today")["width"]).toBe("0");
     expect(under(".print-today")["border-left"]).toMatch(/^0\.3mm solid #/);
     expect(sheet.rules.filter((r) => r.selector.startsWith(".print-") && r.decls["background"] !== undefined && r.decls["background"] !== "#FFFFFF")).toEqual([]);
+  });
+});
+
+const IOS = 'html[data-os="ios"]';
+const PRESS = `:where(${IOS})`;
+
+const BUTTON_HOVERS = [
+  "button:hover:not(:disabled)",
+  ".button-primary:hover:not(:disabled)",
+  ".button-danger:hover:not(:disabled)",
+  ".seg button:hover:not(:disabled)",
+  ".entry:hover",
+  ".entry-open:hover:not(:disabled)",
+  "button.chip:hover:not(:disabled)",
+  ".chip-button:hover:not(:disabled)",
+  ".line-button:hover:not(:disabled)",
+  ".x:hover:not(:disabled)",
+  ".sync-remove.danger:hover:not(:disabled)",
+  ".theme-card:hover:not(:disabled)",
+  '.theme-card[aria-pressed="true"]:hover:not(:disabled)',
+  ".tl-row .caret:hover",
+];
+
+describe("iOS presses", () => {
+  const hoverOf = (sel: string): Decls => {
+    const found = sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 1 && r.conditions[0] === "@media (hover: hover)");
+    expect([sel, found.length]).toEqual([sel, 1]);
+    return found[0].decls;
+  };
+
+  it("never flashes the tap highlight", () => {
+    expect(sheet.rules.filter((r) => r.selector === IOS && r.conditions.length === 0).map((r) => r.decls["-webkit-tap-highlight-color"])).toEqual(["transparent"]);
+  });
+
+  it("shows each button's hover treatment while it is pressed on iOS, at the hover rule's own specificity", () => {
+    const pressed = BUTTON_HOVERS.map((sel) => {
+      const active = `${PRESS} ${sel.replace(":hover", ":active")}`;
+      const rules = sheet.rules.filter((r) => r.selector === active && r.conditions.length === 0);
+      return [active, rules.map((r) => r.decls)];
+    });
+    expect(pressed).toEqual(BUTTON_HOVERS.map((sel) => [`${PRESS} ${sel.replace(":hover", ":active")}`, [hoverOf(sel)]]));
+  });
+
+  it("has a press twin for every button hover, and no other press rule", () => {
+    const twins = sheet.rules.filter((r) => r.selector.includes(":active")).map((r) => r.selector);
+    expect(twins.sort()).toEqual(BUTTON_HOVERS.map((sel) => `${PRESS} ${sel.replace(":hover", ":active")}`).sort());
+  });
+
+  it("presses nothing off iOS", () => {
+    expect(sheet.rules.filter((r) => r.selector.includes(":active") && !r.selector.startsWith(`${PRESS} `)).map((r) => r.selector)).toEqual([]);
+  });
+
+  it("draws no focus ring on a sheet or dialog that took focus on opening, on iOS only", () => {
+    const off = sheet.rules.filter((r) => r.decls["outline"] === "none" && /\.(sheet|modal)\b/.test(r.selector)).map((r) => [r.selector, r.conditions]);
+    expect(off).toEqual([
+      [`${IOS} .sheet:focus-visible`, []],
+      [`${IOS} .modal:focus-visible`, []],
+    ]);
+  });
+
+  it("renders every field on iOS at 16 px or more, so focusing one does not zoom", () => {
+    const fields = sheet.rules.filter((r) => r.selector.startsWith(`${IOS} `) && r.decls["font-size"] !== undefined && /^(input|select|textarea)$/.test(r.selector.slice(IOS.length + 1)));
+    expect(fields.map((r) => [r.selector, r.decls["font-size"], r.conditions])).toEqual(["input", "select", "textarea"].map((f) => [`${IOS} ${f}`, "max(16px, 1em) !important", []]));
   });
 });

@@ -178,6 +178,11 @@
   }
 }
 
+:where(html[data-os="ios"]) .tl-row .caret:active {
+  color: var(--cyan);
+  background: none;
+}
+
 .tl-row .name {
   flex: 1;
   min-width: 0;

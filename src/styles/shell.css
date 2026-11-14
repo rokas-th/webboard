@@ -77,6 +77,12 @@
   }
 }
 
+:where(html[data-os="ios"]) .seg button:active:not(:disabled) {
+  color: var(--text);
+  border-color: transparent;
+  background: var(--hover);
+}
+
 .seg button.active {
   color: var(--cyan);
   border-color: var(--cyan-dim);
@@ -270,6 +276,10 @@ html.sidebar-dragging * {
   }
 }
 
+:where(html[data-os="ios"]) .entry:active {
+  background: var(--hover);
+}
+
 .entry.active {
   background: var(--active);
   border-left-color: var(--amber);
@@ -298,6 +308,11 @@ html.sidebar-dragging * {
     color: var(--text);
     background: transparent;
   }
+}
+
+:where(html[data-os="ios"]) .entry-open:active:not(:disabled) {
+  color: var(--text);
+  background: transparent;
 }
 
 .entry-name {
@@ -608,6 +623,12 @@ button.chip {
   }
 }
 
+:where(html[data-os="ios"]) button.chip:active:not(:disabled) {
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+  background: var(--hover);
+}
+
 .chip-button {
   font-family: var(--mono);
   font-size: 10.5px;
@@ -624,6 +645,10 @@ button.chip {
   .chip-button:hover:not(:disabled) {
     background: transparent;
   }
+}
+
+:where(html[data-os="ios"]) .chip-button:active:not(:disabled) {
+  background: transparent;
 }
 
 .choice-list {
@@ -1034,4 +1059,22 @@ html[data-form="compact"] .wordmark {
   height: 6px;
   border-radius: 50%;
   background: var(--amber);
+}
+
+html[data-os="ios"] .seg-zoom {
+  gap: 8px;
+}
+
+html[data-os="ios"][data-form="compact"] .toolbar {
+  row-gap: 20px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+html[data-os="ios"] .entry {
+  gap: 17px;
+}
+
+html[data-os="ios"] .plan-menu-list .choice-row {
+  line-height: 30px;
 }

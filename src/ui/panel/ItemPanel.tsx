@@ -159,6 +159,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
                   value={sc.dur}
                   min={1}
                   max={MAX_TASK_DUR}
+                  inputMode="numeric"
                   notWhole={DUR_NOT_WHOLE}
                   onCommit={(dur) => p.run.run({ t: "resize", item: it.id, dur }) !== null}
                 />
@@ -275,14 +276,14 @@ export function PlaceFields(p: { plan: PlanState; item: Item; readOnly: boolean;
   );
 }
 
-function noteKey(e: ReactKeyboardEvent<HTMLTextAreaElement>, mac: boolean): "undo" | "redo" | null {
+function noteKey(e: ReactKeyboardEvent<HTMLTextAreaElement>, command: boolean): "undo" | "redo" | null {
   const key = e.key.toLowerCase();
   if ((e.metaKey || e.ctrlKey) && key === "z") return e.shiftKey ? "redo" : "undo";
-  if (!mac && e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && key === "y") return "redo";
+  if (!command && e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && key === "y") return "redo";
   return null;
 }
 
-function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean; mac: boolean }) {
+function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean; command: boolean }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const binding = useRef<NoteBinding | null>(null);
   const readOnly = useRef(p.readOnly);
@@ -298,7 +299,7 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean; mac: b
     };
   }, [p.session, p.item]);
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
-    const k = noteKey(e, p.mac);
+    const k = noteKey(e, p.command);
     if (k === null) return;
     e.preventDefault();
     e.stopPropagation();
@@ -322,7 +323,7 @@ function FirstChoice(p: { view: PlanView; item: ItemId; local: string }) {
   return <ChoiceBanner choice={c} local={p.local} onChoose={() => open(c.id)} />;
 }
 
-export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string; mac: boolean; readOnly?: boolean; naming: boolean; onNamed(): void }) {
+export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string; command: boolean; readOnly?: boolean; naming: boolean; onNamed(): void }) {
   const view = usePlanView(p.session);
   const run = useRun(p.session);
   const { ui, setUi } = useUiValue();
@@ -361,7 +362,7 @@ export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string
       />
       {it.kind !== "group" && <LinksEditor view={view} item={it} readOnly={readOnly} run={run} />}
       <h2>Notes</h2>
-      <Note session={p.session} item={it.id} readOnly={readOnly} mac={p.mac} />
+      <Note session={p.session} item={it.id} readOnly={readOnly} command={p.command} />
       {!readOnly && (
         <div className="actions">
           <button type="button" className="button-small button-danger" onClick={() => run.run({ t: "trash", items: [it.id] })}>

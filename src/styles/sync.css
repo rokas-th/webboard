@@ -169,6 +169,12 @@ button.sync-chip {
   }
 }
 
+:where(html[data-os="ios"]) .sync-remove.danger:active:not(:disabled) {
+  color: var(--magenta);
+  border-color: var(--magenta);
+  background: var(--danger-bg);
+}
+
 .sync-confirm {
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -271,4 +277,8 @@ button.sync-chip.chip-compact {
 
 .phone .removed-banner .banner-text {
   flex-basis: 100%;
+}
+
+html[data-os="ios"] .sync-tabs {
+  row-gap: 18px;
 }

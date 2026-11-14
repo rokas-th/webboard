@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { parsePlatform, readPlatform, stampPlatform, type Platform } from "./platform";
+import { parsePlatform, readPlatform, shortcutsUseCommand, stampPlatform, type Platform } from "./platform";
 import { setPlatform } from "./test/platform";
 
-const SELECTS_STAMP = /data-(os|idiom)\b/;
+const STAMP_SELECTOR = /\[\s*data-(?:os|idiom)\b[^\]]*\]/g;
+const ON_IOS = /^\[\s*data-(?:os\s*=\s*(["']?)ios\1|idiom\s*=\s*(["']?)(?:phone|pad)\2)\s*\]$/;
+const NOT_OPEN = /:not\(/g;
+const depth = (text: string): number => [...text].reduce((d, c) => d + (c === "(" ? 1 : c === ")" ? -1 : 0), 0);
+const negated = (css: string, at: number): boolean => {
+  const selector = css.slice(Math.max(css.lastIndexOf("{", at), css.lastIndexOf("}", at)) + 1, at);
+  return [...selector.matchAll(NOT_OPEN)].some((m) => depth(selector.slice(m.index + ":not".length)) > 0);
+};
+const stampSelectors = (css: string): string[] => [...css.matchAll(STAMP_SELECTOR)].map((m) => (negated(css, m.index) ? `:not(${m[0]})` : m[0]));
+const offIos = (css: string): string[] => stampSelectors(css).filter((sel) => !ON_IOS.test(sel));
 const STYLES = import.meta.glob<string>("/src/styles/*.css", { query: "?raw", import: "default", eager: true });
 
 describe("parsePlatform", () => {
@@ -35,6 +44,16 @@ describe("parsePlatform", () => {
     ["an idiom off ios", Object.freeze({ os: "macos", idiom: "pad" }), 'window.__WEBBOARD_PLATFORM__.idiom is "pad" on macos, where it must be null'],
   ])("refuses a global that is %s and names the fault", (_, raw, message) => {
     expect(() => parsePlatform(raw)).toThrow(message);
+  });
+});
+
+describe("shortcutsUseCommand", () => {
+  it.each([
+    ["macos", true],
+    ["ios", true],
+    ["linux", false],
+  ] as const)("on %s is %s", (os, want) => {
+    expect(shortcutsUseCommand(os)).toBe(want);
   });
 });
 
@@ -82,21 +101,28 @@ describe("stampPlatform", () => {
   });
 });
 
-describe("the stamp is not styled yet", () => {
-  it("finds the stylesheets it pins", () => {
+describe("the stamp styles iOS only", () => {
+  it("finds the stylesheets it pins, and they select on the stamp", () => {
     expect(Object.keys(STYLES).length).toBeGreaterThan(10);
+    expect(Object.values(STYLES).flatMap(stampSelectors).length).toBeGreaterThan(0);
   });
 
-  it("the pin catches a selector on either attribute", () => {
-    expect(SELECTS_STAMP.test('html[data-os="ios"] .toolbar { gap: 0; }')).toBe(true);
-    expect(SELECTS_STAMP.test("html[data-idiom='pad'] .toolbar { gap: 0; }")).toBe(true);
-    expect(SELECTS_STAMP.test("html[data-form='phone'] .toolbar { gap: 0; }")).toBe(false);
+  it("the pin reads every form of the selector and names the ones off iOS", () => {
+    expect(offIos('html[data-os="ios"] .toolbar, html[data-idiom=pad] .a, html[data-idiom=\'phone\'] .b { gap: 0; }')).toEqual([]);
+    expect(offIos('html[data-os="macos"] .toolbar { gap: 0; }')).toEqual(['[data-os="macos"]']);
+    expect(offIos("html[data-os=linux] .toolbar { gap: 0; }")).toEqual(["[data-os=linux]"]);
+    expect(offIos("html[data-os] .toolbar { gap: 0; }")).toEqual(["[data-os]"]);
+    expect(offIos('html[data-os^="i"] .toolbar { gap: 0; }')).toEqual(['[data-os^="i"]']);
+    expect(offIos('html[data-idiom="ios"] .toolbar { gap: 0; }')).toEqual(['[data-idiom="ios"]']);
+    expect(offIos('html[data-os="ios" i] .toolbar { gap: 0; }')).toEqual(['[data-os="ios" i]']);
+    expect(offIos("html[data-form='phone'] .toolbar { gap: 0; }")).toEqual([]);
+    expect(offIos('html:not([data-os="ios"]) .toolbar { gap: 0; }')).toEqual([':not([data-os="ios"])']);
+    expect(offIos('html:not(.x, [data-idiom=pad]) .toolbar { gap: 0; }')).toEqual([":not([data-idiom=pad])"]);
+    expect(offIos('html:not(.x) .a, html[data-os="ios"] .toolbar:not(:hover) { gap: 0; }')).toEqual([]);
   });
 
-  it("no stylesheet selects on data-os or data-idiom", () => {
-    const styled = Object.entries(STYLES)
-      .filter(([, css]) => SELECTS_STAMP.test(css))
-      .map(([file]) => file);
-    expect(styled).toEqual([]);
+  it("every data-os or data-idiom selector names ios, phone or pad", () => {
+    const off = Object.entries(STYLES).flatMap(([file, css]) => offIos(css).map((sel) => `${file}: ${sel}`));
+    expect(off).toEqual([]);
   });
 });

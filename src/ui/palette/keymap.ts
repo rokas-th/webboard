@@ -1,7 +1,7 @@
 export type KeyInput = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">;
 
 export interface KeyState {
-  mac: boolean;
+  command: boolean;
   typing: boolean;
   dialog: boolean;
   selected: boolean;
@@ -26,7 +26,7 @@ export function isTyping(target: EventTarget | null, key: string): boolean {
 }
 
 function modified(e: KeyInput, s: KeyState): string | null {
-  const mod = s.mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  const mod = s.command ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
   if (!mod || e.altKey) return null;
   const key = e.key.toLowerCase();
   if (s.dialog) return null;
@@ -36,7 +36,7 @@ function modified(e: KeyInput, s: KeyState): string | null {
   if (key === "b" && !e.shiftKey) return s.full ? "sidebar" : null;
   if (key === "d" && !e.shiftKey) return s.selected ? "duplicate" : null;
   if (key === "z") return e.shiftKey ? "redo" : "undo";
-  if (key === "y" && !s.mac && !e.shiftKey) return "redo";
+  if (key === "y" && !s.command && !e.shiftKey) return "redo";
   return null;
 }
 

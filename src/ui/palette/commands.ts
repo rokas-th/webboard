@@ -33,7 +33,7 @@ export interface CommandCtx {
   undo: (() => Built | null) | null;
   redo: (() => Built | null) | null;
   readOnly: boolean;
-  mac: boolean;
+  command: boolean;
   full: boolean;
   clock: Clock;
   select(id: PlanId): void;
@@ -71,9 +71,9 @@ const signed = (n: number): string => `${n > 0 ? "+" : ""}${n}`;
 
 const days = (n: number): string => `${Math.abs(n)} working ${Math.abs(n) === 1 ? "day" : "days"}`;
 
-function arrowKeys(mac: boolean, n: number, resize: boolean): string {
+function arrowKeys(command: boolean, n: number, resize: boolean): string {
   const arrow = n > 0 ? "→" : "←";
-  const mods = [resize ? (mac ? "⇧" : "Shift ") : "", Math.abs(n) === 5 ? (mac ? "⌥" : "Alt ") : ""].join("");
+  const mods = [resize ? (command ? "⇧" : "Shift ") : "", Math.abs(n) === 5 ? (command ? "⌥" : "Alt ") : ""].join("");
   return mods + arrow;
 }
 
@@ -138,7 +138,7 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
     id: "duplicate",
     group: "Edit",
     label: `Duplicate “${it.name}”`,
-    keys: ctx.mac ? "⌘D" : "Ctrl D",
+    keys: ctx.command ? "⌘D" : "Ctrl D",
     run: () => duplicateRow(run, () => session.view(), ctx.ui, ctx.setUi, sel),
   };
   const nudges = STEPS.map(
@@ -146,7 +146,7 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
       id: `nudge${signed(n)}`,
       group: "Edit",
       label: `Move ${n > 0 ? "later" : "earlier"} by ${days(n)}`,
-      keys: arrowKeys(ctx.mac, n, false),
+      keys: arrowKeys(ctx.command, n, false),
       run: () => {
         run({ t: "move", items: [sel], days: n });
       },
@@ -157,14 +157,14 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
       id: `resize${signed(n)}`,
       group: "Edit",
       label: `${n > 0 ? "Longer" : "Shorter"} by ${days(n)}`,
-      keys: arrowKeys(ctx.mac, n, true),
+      keys: arrowKeys(ctx.command, n, true),
       run: () => resize(session, run, sel, n),
     }),
   );
   const order = ORDER.flatMap(([by, id, label, arrow]): Command[] => {
     const step = placeStep(session.view().plan, it, by);
     if (step === null) return [];
-    return [{ id: `move-${id}`, group: "Edit", label, keys: `${ctx.mac ? "⌥" : "Alt "}${arrow}`, run: () => void run(step) }];
+    return [{ id: `move-${id}`, group: "Edit", label, keys: `${ctx.command ? "⌥" : "Alt "}${arrow}`, run: () => void run(step) }];
   });
   const copy = ctx.readOnly ? [] : [duplicate];
   if (it.kind === "group") return [...nudges, ...order, ...copy, trash];
@@ -261,7 +261,7 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
       id: "undo",
       group: "Edit",
       label: "Undo",
-      keys: ctx.mac ? "⌘Z" : "Ctrl Z",
+      keys: ctx.command ? "⌘Z" : "Ctrl Z",
       run: () => {
         undo();
       },
@@ -270,7 +270,7 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
       id: "redo",
       group: "Edit",
       label: "Redo",
-      keys: ctx.mac ? "⇧⌘Z" : "Ctrl Y",
+      keys: ctx.command ? "⇧⌘Z" : "Ctrl Y",
       run: () => {
         redo();
       },
@@ -306,7 +306,7 @@ export function commands(ctx: CommandCtx): Command[] {
   const platform = ctx.registry.device.platform;
   const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session) }];
   const printCommand: Command[] =
-    session === null || platform === "ios" ? [] : [{ id: "print", group: "File", label: "Print…", keys: ctx.mac ? "⌘P" : "Ctrl P", run: () => ctx.print() }];
+    session === null || platform === "ios" ? [] : [{ id: "print", group: "File", label: "Print…", keys: ctx.command ? "⌘P" : "Ctrl P", run: () => ctx.print() }];
   const settingsAt = (tab: SettingsTab): void => {
     ctx.theme.preview(null);
     ctx.setUi({ settings: tab });
@@ -317,7 +317,7 @@ export function commands(ctx: CommandCtx): Command[] {
           id: "sidebar",
           group: "View",
           label: ctx.ui.sidebarOpen ? "Hide the plan list" : "Show the plan list",
-          keys: ctx.mac ? "⌘B" : "Ctrl B",
+          keys: ctx.command ? "⌘B" : "Ctrl B",
           run: () => ctx.setUi({ sidebarOpen: !ctx.ui.sidebarOpen }),
         },
       ]
@@ -336,7 +336,7 @@ export function commands(ctx: CommandCtx): Command[] {
     { id: "settings", group: "View", label: "Settings…", run: () => settingsAt("theme") },
     { id: "theme", group: "View", label: "Theme…", run: () => settingsAt("theme") },
     { id: "theme-cyberdeck", group: "View", label: "Use Cyberdeck theme", run: () => ctx.theme.useCyberdeck() },
-    { id: "palette", group: "Help", label: "Command palette", keys: ctx.mac ? "⌘K" : "Ctrl K", run: () => ctx.setUi({ dialog: { t: "palette" } }) },
+    { id: "palette", group: "Help", label: "Command palette", keys: ctx.command ? "⌘K" : "Ctrl K", run: () => ctx.setUi({ dialog: { t: "palette" } }) },
     { id: "about", group: "Help", label: "About WebBoard", run: () => settingsAt("about") },
     ...updateCommands(ctx.updates),
   ];
