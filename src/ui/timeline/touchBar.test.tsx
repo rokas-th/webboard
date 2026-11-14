@@ -4,11 +4,14 @@ import { Refused, type Intent } from "../../actions/intents";
 import { toDay, type IsoDate } from "../../domain/dates";
 import { liveLinks } from "../../plan/project";
 import type { PlanSession } from "../../store/session";
+import { IPAD, MAC, setPlatform } from "../../test/platform";
 import { setScreen } from "../../test/setup";
+import { tauri } from "../../test/tauriMock";
 import { fs, testSession, type SeedItem, type TestSession } from "../../test/session";
 import { shellFor } from "../../test/shell";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
+import { READ_ONLY } from "../run";
 import { useUi, type UiState, type Zoom } from "../state";
 import { geometry } from "./geometry";
 
@@ -500,5 +503,89 @@ describe("touch in the Shell (iPad)", () => {
     expect(uiNow()[0].selected).toBe("Review");
     expect(panelTitle(screen.getByRole("dialog", { name: "Review" }))).toBe("Review");
     expect(apply).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe("haptics on the timeline", () => {
+  const haptics = (from: number): unknown[] => tauri.calls.slice(from).filter((c) => c.cmd === "haptic").map((c) => c.args);
+
+  afterEach(() => setPlatform(MAC));
+
+  it("on iOS a pickup plays medium once and a drop that applies plays light once", async () => {
+    setPlatform(IPAD);
+    const t = await shown();
+    const apply = vi.spyOn(t.session, "apply");
+    const from = tauri.calls.length;
+    const y = rowY("Review");
+    touch(barOf("Review"), "down", x0(t) + 60, y);
+    wait(500);
+    expect(haptics(from)).toEqual([{ kind: "medium" }]);
+    touch(barOf("Review"), "move", x0(t) + 100, y);
+    touch(barOf("Review"), "move", x0(t) + 140, y);
+    expect(haptics(from)).toEqual([{ kind: "medium" }]);
+    touch(barOf("Review"), "up", x0(t) + 140, y);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(haptics(from)).toEqual([{ kind: "medium" }, { kind: "light" }]);
+  });
+
+  it("on iOS a drop with no intent and a cancelled hold play only the pickup", async () => {
+    setPlatform(IPAD);
+    const t = await shown();
+    const apply = vi.spyOn(t.session, "apply");
+    const from = tauri.calls.length;
+    const y = rowY("Review");
+    touch(barOf("Review"), "down", x0(t) + 60, y);
+    wait(500);
+    touch(barOf("Review"), "up", x0(t) + 60, y);
+    touch(barOf("Review"), "down", x0(t) + 60, y);
+    wait(500);
+    touch(barOf("Review"), "move", x0(t) + 140, y);
+    touch(barOf("Review"), "cancel", x0(t) + 140, y);
+    expect(apply).not.toHaveBeenCalled();
+    expect(haptics(from)).toEqual([{ kind: "medium" }, { kind: "medium" }]);
+  });
+
+  it("on iOS a refused drop plays the pickup and the error toast's haptic, and no light", async () => {
+    setPlatform(IPAD);
+    const t = await shown([
+      { id: "Review", name: "Review", start: "2026-11-09", dur: 3 },
+      { id: "Ship", name: "Ship", start: "2026-11-16", dur: 1, deps: [fs("Review")] },
+    ]);
+    const apply = vi.spyOn(t.session, "apply");
+    const from = tauri.calls.length;
+    const shipEnd = geometry(t.session.view(), "W").x(toDay("2026-11-16")) + 40;
+    holdAndDrag(one(".nub", barOf("Ship")), shipEnd + 20, x0(t) + 60, rowY("Ship"), rowY("Review"));
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(one('[role="alert"]').className).toBe("toast bad");
+    expect(haptics(from)).toEqual([{ kind: "medium" }, { kind: "error" }]);
+  });
+
+  it("on iOS a drop on a read-only session plays no light", async () => {
+    setPlatform(IPAD);
+    const t = await shown();
+    vi.spyOn(t.session, "readOnly", "get").mockReturnValue(true);
+    const from = tauri.calls.length;
+    holdAndDrag(barOf("Review"), x0(t) + 60, x0(t) + 140, rowY("Review"));
+    expect(toastTexts()).toEqual([READ_ONLY]);
+    expect(haptics(from)).toEqual([{ kind: "medium" }, { kind: "error" }]);
+  });
+
+  it("on iOS a tap plays nothing", async () => {
+    setPlatform(IPAD);
+    const t = await shown();
+    const from = tauri.calls.length;
+    touch(barOf("Review"), "down", x0(t) + 60, rowY("Review"));
+    wait(120);
+    touch(barOf("Review"), "up", x0(t) + 61, rowY("Review"));
+    expect(haptics(from)).toEqual([]);
+  });
+
+  it("on macOS a touch pickup and drop send no haptic", async () => {
+    const t = await shown();
+    const apply = vi.spyOn(t.session, "apply");
+    const from = tauri.calls.length;
+    holdAndDrag(barOf("Review"), x0(t) + 60, x0(t) + 140, rowY("Review"));
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(haptics(from)).toEqual([]);
   });
 });

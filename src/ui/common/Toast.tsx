@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { haptic } from "../../services/haptics";
 
 export type Tone = "ok" | "bad";
 
@@ -25,11 +26,16 @@ const publish = (list: readonly Entry[]): void => {
 
 const drop = (id: number): void => publish(entries.filter((e) => e.id !== id));
 
-export function toast(text: string, tone?: Tone, details?: string): void {
+export function toastWithoutHaptic(text: string, tone?: Tone, details?: string): void {
   const id = next;
   next += 1;
   publish([...entries, { id, text, tone: tone ?? null, details: details ?? null }]);
   if (tone !== "bad") setTimeout(() => drop(id), TOAST_MS);
+}
+
+export function toast(text: string, tone?: Tone, details?: string): void {
+  toastWithoutHaptic(text, tone, details);
+  if (tone === "bad") haptic("error");
 }
 
 export function clearToasts(): void {

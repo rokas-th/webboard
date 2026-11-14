@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Refused, type Intent } from "../../actions/intents";
 import { toDay, type Day } from "../../domain/dates";
+import { haptic } from "../../services/haptics";
 import type { ItemId, LinkType, PlanId } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
@@ -301,7 +302,7 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
       cancel();
       const intent =
         handle === "link" ? gestureIntent(geo, { kind: "link", item, dxPx: dx, target: target ?? undefined }) : intentOf(geo, MODE[handle], item, dx);
-      if (intent !== null) run(intent);
+      if (intent !== null && run(intent) !== null) haptic("light");
     },
     clear: cancel,
   };

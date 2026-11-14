@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setPlatform } from "../test/platform";
-import { resetTauri, tauri } from "../test/tauriMock";
+import { hold, resetTauri, tauri } from "../test/tauriMock";
 import ProbeApp from "./ProbeApp";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
@@ -105,12 +105,66 @@ describe("ProbeApp", () => {
     expect(logged()).toContain(line);
   });
 
+  it("on iOS sets the dark appearance and plays the selection haptic before it asks the alert", async () => {
+    setPlatform({ os: "ios", idiom: "pad" });
+    tauri.answers.alert_ask = () => "cancel";
+    mount();
+    await settle();
+    const native = tauri.calls.map((c) => c.cmd).filter((c) => c === "appearance_set" || c === "haptic" || c === "alert_ask");
+    expect(native).toEqual(["appearance_set", "haptic", "alert_ask"]);
+    expect(tauri.calls.filter((c) => c.cmd === "appearance_set").map((c) => c.args)).toEqual([{ scheme: "dark" }]);
+    expect(tauri.calls.filter((c) => c.cmd === "haptic").map((c) => c.args)).toEqual([{ kind: "selection" }]);
+    expect(logged()).toContain('appearance {"set":"dark"}');
+    expect(logged()).toContain('haptic {"sent":"selection"}');
+  });
+
+  it("on iOS sends the haptic only after the appearance answered, and asks the alert only after the haptic answered", async () => {
+    setPlatform({ os: "ios", idiom: "pad" });
+    tauri.answers.alert_ask = () => "cancel";
+    const appearance = hold("appearance_set");
+    const played = hold("haptic");
+    const native = (): string[] => tauri.calls.map((c) => c.cmd).filter((c) => c === "appearance_set" || c === "haptic" || c === "alert_ask");
+    mount();
+    await settle();
+    expect(native()).toEqual(["appearance_set"]);
+    await act(async () => {
+      appearance.reject({ code: "appearance.no_window", message: "no window" });
+    });
+    await settle();
+    expect(native()).toEqual(["appearance_set", "haptic"]);
+    await act(async () => {
+      played.resolve(null);
+    });
+    await settle();
+    expect(native()).toEqual(["appearance_set", "haptic", "alert_ask"]);
+  });
+
+  it("on iOS logs a failed appearance or haptic as a bad line", async () => {
+    setPlatform({ os: "ios", idiom: "phone" });
+    tauri.answers.alert_ask = () => "cancel";
+    tauri.answers.appearance_set = () => {
+      throw { code: "appearance.no_controller", message: "no controller" };
+    };
+    tauri.answers.haptic = () => {
+      throw { code: "haptic.no_view", message: "no view" };
+    };
+    mount();
+    await settle();
+    const lines = ['appearance {"error":"appearance.no_controller","message":"no controller"}', 'haptic {"error":"haptic.no_view","message":"no view"}'];
+    lines.forEach((line) => {
+      expect(screen.getByText(line)).toHaveProperty("className", "probe-bad");
+      expect(logged()).toContain(line);
+    });
+  });
+
   it("does not ask the probe alert off iOS", async () => {
     tauri.answers.alert_ask = () => "confirm";
     mount();
     await settle();
     expect(tauri.calls.filter((c) => c.cmd === "alert_ask")).toEqual([]);
     expect(logged().filter((l) => l.startsWith("alert "))).toEqual([]);
+    expect(tauri.calls.filter((c) => c.cmd === "appearance_set" || c.cmd === "haptic")).toEqual([]);
+    expect(logged().filter((l) => l.startsWith("appearance ") || l.startsWith("haptic "))).toEqual([]);
   });
 
   it("logs a keydown with its modifiers", async () => {

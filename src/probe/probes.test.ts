@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { framed } from "../test/fixtures/framed";
 import { resetTauri, tauri } from "../test/tauriMock";
 import { IPAD, setPlatform } from "../test/platform";
-import { failure, PROBE_ALERT, PROBE_BYTES, probeAlert, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine } from "./probes";
+import { failure, PROBE_ALERT, PROBE_BYTES, probeAlert, probeAppearance, probeHaptic, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine } from "./probes";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 
@@ -133,6 +133,38 @@ describe("failure", () => {
   it("reports a rejection that is not an AppError as thrown", () => {
     expect(failure(new TypeError("x"))).toEqual({ thrown: "TypeError: x" });
     expect(failure("s")).toEqual({ thrown: "s" });
+  });
+});
+
+describe("probeAppearance", () => {
+  it("sets the dark appearance and reports it", async () => {
+    setPlatform(IPAD);
+    await expect(probeAppearance()).resolves.toEqual(["appearance", { set: "dark" }]);
+    expect(tauri.calls).toEqual([{ cmd: "appearance_set", args: { scheme: "dark" }, options: undefined }]);
+  });
+
+  it("reports a failed call as its error", async () => {
+    setPlatform(IPAD);
+    tauri.answers.appearance_set = () => {
+      throw { code: "appearance.no_window", message: "no window" };
+    };
+    await expect(probeAppearance()).resolves.toEqual(["appearance", { error: "appearance.no_window", message: "no window" }]);
+  });
+});
+
+describe("probeHaptic", () => {
+  it("plays the selection haptic and reports it", async () => {
+    setPlatform(IPAD);
+    await expect(probeHaptic()).resolves.toEqual(["haptic", { sent: "selection" }]);
+    expect(tauri.calls).toEqual([{ cmd: "haptic", args: { kind: "selection" }, options: undefined }]);
+  });
+
+  it("reports a failed call as its error", async () => {
+    setPlatform(IPAD);
+    tauri.answers.haptic = () => {
+      throw { code: "haptic.no_view", message: "no view" };
+    };
+    await expect(probeHaptic()).resolves.toEqual(["haptic", { error: "haptic.no_view", message: "no view" }]);
   });
 });
 

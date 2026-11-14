@@ -1,5 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { q, workingDays } from "../../actions/copy";
+import { haptic } from "../../services/haptics";
 import { fmtShort, toDay, toIso, type Day } from "../../domain/dates";
 import { linkKey, type Item, type ItemId } from "../../domain/model";
 import { liveLinks } from "../../plan/project";
@@ -186,6 +187,7 @@ function useTouch(p: ChartProps): {
         } else if (!touch.has(ev.item)) {
           reset.current(live());
         } else if (ev.k === "pickup") {
+          haptic("medium");
           picked.current = ev.item;
           touch.pick(ev.item, ev.handle);
         } else if (ev.k === "drag") {

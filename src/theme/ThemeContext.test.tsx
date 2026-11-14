@@ -2,12 +2,20 @@ import { act, cleanup, render } from "@testing-library/react";
 import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "../ui/common/Toast";
-import { darkListenerCount, setSystemDark } from "../test/matchMedia";
+import { darkListenerCount, setSystemDark, setSystemDarkSilently } from "../test/matchMedia";
 import { paintNative } from "./apply";
 import { derive, type Seeds } from "./derive";
 import { DEFAULT_STORE, THEME_KEY, THEME_UNREADABLE, type ThemeStore } from "./store";
-import { ThemeProvider, useNativeBackground, useTheme, type ThemeApi } from "./ThemeContext";
+import { hold, resetTauri, tauri } from "../test/tauriMock";
+import { IPHONE, LINUX, MAC, setPlatform } from "../test/platform";
+import { setNativeScheme } from "../services/appearance";
+import { SYSTEM_KEPT, ThemeProvider, useNativeBackground, useNativeScheme, useTheme, type ThemeApi } from "./ThemeContext";
 
+vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
+vi.mock("../services/appearance", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../services/appearance")>();
+  return { ...real, setNativeScheme: vi.fn(real.setNativeScheme) };
+});
 vi.mock("../ui/common/Toast", () => ({ toast: vi.fn() }));
 vi.mock("./apply", async (importOriginal) => {
   const real = await importOriginal<typeof import("./apply")>();
@@ -35,6 +43,31 @@ function Native({ platform }: { platform: "macos" | "linux" | "ios" }): null {
   useNativeBackground(platform);
   return null;
 }
+
+function NativeScheme(): null {
+  useNativeScheme();
+  return null;
+}
+
+type RejectionListener = (reason: unknown) => void;
+
+declare const process: {
+  listeners(event: "unhandledRejection"): RejectionListener[];
+  removeAllListeners(event: "unhandledRejection"): void;
+  on(event: "unhandledRejection", l: RejectionListener): void;
+  once(event: "unhandledRejection", l: RejectionListener): void;
+};
+
+const nextUnhandled = (): Promise<unknown> => {
+  const saved = process.listeners("unhandledRejection");
+  process.removeAllListeners("unhandledRejection");
+  return new Promise((resolve) => {
+    process.once("unhandledRejection", (reason) => {
+      saved.forEach((l) => process.on("unhandledRejection", l));
+      resolve(reason);
+    });
+  });
+};
 
 const mount = (store: ThemeStore = DEFAULT_STORE, unreadable: string | null = null, extra: ReactNode = null) =>
   render(
@@ -226,5 +259,409 @@ describe("useNativeBackground", () => {
     expect(vi.mocked(toast).mock.calls).toEqual([["Window colour could not be set: not allowed", "bad", expect.stringContaining("Error: not allowed")]]);
     expect(logged).toHaveBeenCalledWith(failure);
     logged.mockRestore();
+  });
+});
+
+describe("useNativeScheme", () => {
+  const schemes = (): unknown[] => tauri.calls.filter((c) => c.cmd === "appearance_set").map((c) => c.args);
+  const settled = async (): Promise<void> => {
+    await act(async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+  };
+
+  beforeEach(() => {
+    setPlatform(IPHONE);
+    resetTauri({});
+  });
+
+  afterEach(() => {
+    setPlatform(MAC);
+    act(() => setSystemDark(true));
+  });
+
+  it("sends the shown scheme once on mount, even under StrictMode", async () => {
+    mount(DEFAULT_STORE, null, <NativeScheme />);
+    await settled();
+    expect(tauri.calls).toEqual([{ cmd: "appearance_set", args: { scheme: "dark" }, options: undefined }]);
+  });
+
+  it("sends again on a theme switch, a preview and a draft, and nothing when only the tokens change", async () => {
+    mount(DEFAULT_STORE, null, <NativeScheme />);
+    await settled();
+    act(() => theme().choose("phosphor"));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }]);
+    act(() => theme().choose("paper"));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }, { scheme: "light" }]);
+    act(() => theme().preview("blueprint"));
+    await settled();
+    act(() => theme().preview(null));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }, { scheme: "light" }, { scheme: "dark" }, { scheme: "light" }]);
+    act(() => theme().setDraft({ seeds: SEEDS, base: null }));
+    await settled();
+    act(() => theme().setDraft({ seeds: { ...SEEDS, accent: "#FFD166" }, base: null }));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }, { scheme: "light" }, { scheme: "dark" }, { scheme: "light" }, { scheme: "dark" }]);
+    expect(document.documentElement.dataset.scheme).toBe("dark");
+  });
+
+  const FOLLOWING: ThemeStore = { ...DEFAULT_STORE, mode: "system", dark: "phosphor", light: "paper" };
+  const LIGHT_SEEDS: Seeds = { ground: "#FFFFFF", text: "#111418", accent: "#1F5FD1", highlight: "#A35400", danger: "#CC1F3D" };
+
+  it("sends system once on mount while following the system", async () => {
+    mount(FOLLOWING, null, <NativeScheme />);
+    await settled();
+    expect(tauri.calls).toEqual([{ cmd: "appearance_set", args: { scheme: "system" }, options: undefined }]);
+  });
+
+  it("sends nothing when the system flips while following the system", async () => {
+    mount(FOLLOWING, null, <NativeScheme />);
+    await settled();
+    act(() => setSystemDark(false));
+    await settled();
+    expect(document.documentElement.dataset.scheme).toBe("light");
+    act(() => setSystemDark(true));
+    await settled();
+    expect(document.documentElement.dataset.scheme).toBe("dark");
+    expect(schemes()).toEqual([{ scheme: "system" }]);
+  });
+
+  it("sends dark for an explicit dark theme and system again on going back to following the system", async () => {
+    mount(FOLLOWING, null, <NativeScheme />);
+    await settled();
+    act(() => theme().setMode("fixed"));
+    act(() => theme().choose("blueprint"));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "system" }, { scheme: "dark" }]);
+    act(() => theme().setMode("system"));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "system" }, { scheme: "dark" }, { scheme: "system" }]);
+  });
+
+  it("sends light for a preview of a light theme while following a dark system, and system when it ends", async () => {
+    mount(FOLLOWING, null, <NativeScheme />);
+    await settled();
+    act(() => theme().preview("paper"));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "system" }, { scheme: "light" }]);
+    act(() => theme().preview(null));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "system" }, { scheme: "light" }, { scheme: "system" }]);
+  });
+
+  it("sends the draft's scheme while following the system, and system when the draft is dropped", async () => {
+    mount(FOLLOWING, null, <NativeScheme />);
+    await settled();
+    act(() => theme().setDraft({ seeds: LIGHT_SEEDS, base: null }));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "system" }, { scheme: "light" }]);
+    act(() => theme().setDraft(null));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "system" }, { scheme: "light" }, { scheme: "system" }]);
+  });
+
+  it("sends a scheme asked for while a call failed with a fault that is not an AppError, and still reports the fault", async () => {
+    const real = await vi.importActual<typeof import("../services/appearance")>("../services/appearance");
+    const fault = new TypeError("appearance_set answered past its handler");
+    vi.mocked(setNativeScheme).mockImplementationOnce((scheme) =>
+      real.setNativeScheme(scheme).then(() => {
+        throw fault;
+      }),
+    );
+    const first = hold("appearance_set");
+    mount(DEFAULT_STORE, null, <NativeScheme />);
+    await settled();
+    act(() => theme().choose("paper"));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }]);
+    const rejected = nextUnhandled();
+    await act(async () => {
+      first.resolve(null);
+    });
+    const reason = await rejected;
+    await settled();
+    expect(reason).toBeInstanceOf(TypeError);
+    expect(reason).toBe(fault);
+    expect(schemes()).toEqual([{ scheme: "dark" }, { scheme: "light" }]);
+  });
+
+  it.each([MAC, LINUX])("sends nothing on $os, judged by the window's platform stamp", async (p) => {
+    setPlatform(p);
+    mount(DEFAULT_STORE, null, <NativeScheme />);
+    await settled();
+    act(() => theme().choose("paper"));
+    await settled();
+    expect(tauri.calls).toEqual([]);
+    expect(vi.mocked(toast)).not.toHaveBeenCalled();
+  });
+
+  it("toasts a failed call with its message, once, and does not retry it", async () => {
+    const message = "The dark appearance cannot be set on the window: its view is in no window.";
+    resetTauri({
+      appearance_set: () => {
+        throw { code: "appearance.no_window", message };
+      },
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mount(DEFAULT_STORE, null, <NativeScheme />);
+    await settled();
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }]);
+    expect(vi.mocked(toast).mock.calls).toEqual([[message, "bad", expect.stringMatching(new RegExp(`^appearance\\.no_window\\nAppError: ${message}`))]]);
+    expect(logged.mock.calls).toEqual([[expect.objectContaining({ code: "appearance.no_window", message })]]);
+    logged.mockRestore();
+  });
+
+  it("sends one call at a time and ends on the last scheme asked for", async () => {
+    const first = hold("appearance_set");
+    mount(DEFAULT_STORE, null, <NativeScheme />);
+    await settled();
+    act(() => theme().choose("paper"));
+    act(() => theme().choose("cyberdeck"));
+    act(() => theme().choose("daylight"));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }]);
+    const second = hold("appearance_set");
+    await act(async () => {
+      first.resolve(null);
+    });
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }, { scheme: "light" }]);
+    act(() => theme().choose("cyberdeck"));
+    act(() => theme().choose("paper"));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }, { scheme: "light" }]);
+    await act(async () => {
+      second.resolve(null);
+    });
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }, { scheme: "light" }]);
+    act(() => theme().choose("cyberdeck"));
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }, { scheme: "light" }, { scheme: "dark" }]);
+  });
+
+  it("keeps the order when a call in flight fails", async () => {
+    const first = hold("appearance_set");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mount(DEFAULT_STORE, null, <NativeScheme />);
+    await settled();
+    act(() => theme().choose("paper"));
+    await act(async () => {
+      first.reject({ code: "appearance.stopped", message: "appearance_set stopped: the main thread dropped it without a result" });
+    });
+    await settled();
+    expect(schemes()).toEqual([{ scheme: "dark" }, { scheme: "light" }]);
+    expect(vi.mocked(toast).mock.calls).toEqual([
+      ["appearance_set stopped: the main thread dropped it without a result", "bad", expect.stringMatching(/^appearance\.stopped\nAppError: appearance_set stopped/)],
+    ]);
+    expect(logged).toHaveBeenCalledTimes(1);
+    logged.mockRestore();
+  });
+
+  describe("systemDark while UIKit's appearance is overridden", () => {
+    const SYSTEM = { scheme: "system" };
+    const DARK = { scheme: "dark" };
+
+    const overriddenAndBack = async (start: () => void, end: () => void): Promise<void> => {
+      setSystemDark(false);
+      mount(FOLLOWING, null, <NativeScheme />);
+      await settled();
+      expect(schemes()).toEqual([SYSTEM]);
+      expect(theme().shown.id).toBe("paper");
+      act(start);
+      await settled();
+      expect(schemes()).toEqual([SYSTEM, DARK]);
+      expect(theme().shown.id).toBe("paper");
+      act(() => setSystemDark(true));
+      expect(theme().systemDark).toBe(false);
+      expect(theme().shown.id).toBe("paper");
+      const released = hold("appearance_set");
+      act(end);
+      await settled();
+      expect(schemes()).toEqual([SYSTEM, DARK, SYSTEM]);
+      expect(theme().shown.id).toBe("paper");
+      act(() => setSystemDark(false));
+      expect(theme().shown.id).toBe("paper");
+      await act(async () => {
+        released.resolve(null);
+      });
+      await settled();
+      expect(theme().systemDark).toBe(false);
+      expect(theme().shown.id).toBe("paper");
+    };
+
+    it("keeps the light slot through a dark preview on a light iPhone that follows the system", async () => {
+      await overriddenAndBack(
+        () => theme().preview("blueprint"),
+        () => theme().preview(null),
+      );
+    });
+
+    it("keeps the light slot through a dark draft on a light iPhone that follows the system", async () => {
+      await overriddenAndBack(
+        () => theme().setDraft({ seeds: SEEDS, base: null }),
+        () => theme().setDraft(null),
+      );
+    });
+
+    it("reads the system again once system is acknowledged, so a sunset under an explicit dark theme shows the dark slot", async () => {
+      setSystemDark(false);
+      mount({ ...FOLLOWING, mode: "fixed", active: "blueprint" }, null, <NativeScheme />);
+      await settled();
+      expect(schemes()).toEqual([DARK]);
+      setSystemDarkSilently(true);
+      act(() => theme().setMode("system"));
+      await settled();
+      expect(schemes()).toEqual([DARK, SYSTEM]);
+      expect(theme().systemDark).toBe(true);
+      expect(theme().store.dark).toBe("blueprint");
+      expect(theme().shown.id).toBe("blueprint");
+    });
+
+    it("follows a system flip at once while nothing is overridden", async () => {
+      mount(FOLLOWING, null, <NativeScheme />);
+      await settled();
+      expect(theme().shown.id).toBe("phosphor");
+      act(() => setSystemDark(false));
+      expect(theme().shown.id).toBe("paper");
+      act(() => setSystemDark(true));
+      expect(theme().shown.id).toBe("phosphor");
+      expect(schemes()).toEqual([SYSTEM]);
+    });
+
+    it("ignores a flip that arrives between sending dark and its acknowledgement", async () => {
+      setSystemDark(false);
+      mount(FOLLOWING, null, <NativeScheme />);
+      await settled();
+      const pending = hold("appearance_set");
+      act(() => theme().preview("blueprint"));
+      await settled();
+      expect(schemes()).toEqual([SYSTEM, DARK]);
+      act(() => setSystemDark(true));
+      expect(theme().systemDark).toBe(false);
+      expect(theme().shown.id).toBe("paper");
+      await act(async () => {
+        pending.resolve(null);
+      });
+      await settled();
+      expect(theme().systemDark).toBe(false);
+      expect(theme().shown.id).toBe("paper");
+    });
+
+    it("keeps holding after a failed system send, and lets go at the next acknowledged one", async () => {
+      const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      setSystemDark(false);
+      mount(FOLLOWING, null, <NativeScheme />);
+      await settled();
+      act(() => theme().preview("blueprint"));
+      await settled();
+      act(() => setSystemDark(true));
+      const failed = hold("appearance_set");
+      act(() => theme().preview(null));
+      await act(async () => {
+        failed.reject({ code: "appearance.stopped", message: "appearance_set stopped: the main thread dropped it without a result" });
+      });
+      await settled();
+      expect(schemes()).toEqual([SYSTEM, DARK, SYSTEM]);
+      expect(vi.mocked(toast)).toHaveBeenCalledTimes(1);
+      expect(theme().systemDark).toBe(false);
+      act(() => setSystemDark(true));
+      expect(theme().systemDark).toBe(false);
+      act(() => theme().preview("blueprint"));
+      await settled();
+      act(() => theme().preview(null));
+      await settled();
+      expect(schemes()).toEqual([SYSTEM, DARK, SYSTEM, DARK, SYSTEM]);
+      expect(theme().systemDark).toBe(true);
+      expect(theme().shown.id).toBe("phosphor");
+      logged.mockRestore();
+    });
+
+    it("keeps the light slot through a dark preview started while system is still in flight", async () => {
+      setSystemDark(false);
+      const pending = hold("appearance_set");
+      mount(FOLLOWING, null, <NativeScheme />);
+      await settled();
+      expect(schemes()).toEqual([SYSTEM]);
+      expect(theme().shown.id).toBe("paper");
+      act(() => theme().preview("blueprint"));
+      await settled();
+      setSystemDarkSilently(true);
+      await act(async () => {
+        pending.resolve(null);
+      });
+      await settled();
+      expect(schemes()).toEqual([SYSTEM, DARK]);
+      expect(theme().systemDark).toBe(false);
+      expect(theme().shown.id).toBe("paper");
+      act(() => setSystemDark(true));
+      expect(theme().shown.id).toBe("paper");
+      setSystemDarkSilently(false);
+      act(() => theme().preview(null));
+      await settled();
+      expect(schemes()).toEqual([SYSTEM, DARK, SYSTEM]);
+      expect(theme().shown.id).toBe("paper");
+      act(() => setSystemDark(true));
+      expect(theme().shown.id).toBe("phosphor");
+    });
+
+    it("toasts a failed first system send without the kept-appearance note and keeps following the device", async () => {
+      const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const message = "The system appearance cannot be set on the window: its view is in no window.";
+      resetTauri({
+        appearance_set: () => {
+          throw { code: "appearance.no_window", message };
+        },
+      });
+      setSystemDark(false);
+      mount(FOLLOWING, null, <NativeScheme />);
+      await settled();
+      await settled();
+      expect(schemes()).toEqual([SYSTEM]);
+      expect(vi.mocked(toast).mock.calls).toEqual([[message, "bad", expect.stringMatching(new RegExp(`^appearance\\.no_window\\nAppError: ${message}`))]]);
+      expect(logged.mock.calls).toEqual([[expect.objectContaining({ code: "appearance.no_window", message })]]);
+      expect(theme().shown.id).toBe("paper");
+      act(() => setSystemDark(true));
+      expect(theme().shown.id).toBe("phosphor");
+      logged.mockRestore();
+    });
+
+    it("says in the toast of a failed system send that the last known system appearance is kept", async () => {
+      const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const message = "appearance_set stopped: the main thread dropped it without a result";
+      setSystemDark(false);
+      mount(FOLLOWING, null, <NativeScheme />);
+      await settled();
+      act(() => theme().preview("blueprint"));
+      await settled();
+      const failed = hold("appearance_set");
+      act(() => theme().preview(null));
+      await act(async () => {
+        failed.reject({ code: "appearance.stopped", message });
+      });
+      await settled();
+      expect(schemes()).toEqual([SYSTEM, DARK, SYSTEM]);
+      expect(vi.mocked(toast).mock.calls).toEqual([[`${message}${SYSTEM_KEPT}`, "bad", expect.stringMatching(/^appearance\.stopped\nAppError: appearance_set stopped/)]]);
+      expect(SYSTEM_KEPT).toBe(" WebBoard keeps the last known system appearance until the theme changes again.");
+      logged.mockRestore();
+    });
+
+    it("on the Mac a flip under an explicit theme or a preview still reaches systemDark", async () => {
+      setPlatform(MAC);
+      mount({ ...FOLLOWING, mode: "fixed", active: "blueprint" }, null, <NativeScheme />);
+      await settled();
+      act(() => setSystemDark(false));
+      expect(theme().systemDark).toBe(false);
+      act(() => theme().setMode("system"));
+      act(() => theme().preview("blueprint"));
+      act(() => setSystemDark(true));
+      expect(theme().systemDark).toBe(true);
+      expect(theme().shown.id).toBe("blueprint");
+      expect(tauri.calls).toEqual([]);
+    });
   });
 });

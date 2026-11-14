@@ -11,7 +11,8 @@ import { readPlatform, shortcutsUseCommand } from "../../platform";
 import { openersFrom } from "../common/Dialog";
 import { Sheet } from "../common/Sheet";
 import { detailsOf } from "../common/errorText";
-import { toast, Toasts } from "../common/Toast";
+import { takeHapticFault } from "../../services/haptics";
+import { toast, Toasts, toastWithoutHaptic } from "../common/Toast";
 import { revealPatch } from "../choices/HeadCounts";
 import { commands, type CommandCtx } from "../palette/commands";
 import { isTyping, keyToCommand } from "../palette/keymap";
@@ -55,7 +56,7 @@ import { appliedWidth } from "./sidebarWidth";
 import { Toolbar } from "./Toolbar";
 import { Tray } from "./Tray";
 import { useUpdates, useUpdateState } from "./UpdateLine";
-import { useNativeBackground, useTheme } from "../../theme/ThemeContext";
+import { useNativeBackground, useNativeScheme, useTheme } from "../../theme/ThemeContext";
 
 export interface ShellProps {
   registry: Registry;
@@ -602,6 +603,7 @@ function WideShell(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | nul
 export function Shell(p: ShellProps) {
   const { mode: listMode, tier } = useShellShape();
   useNativeBackground(p.registry.device.platform);
+  useNativeScheme();
   useEffect(() => {
     const onError = (e: ErrorEvent): void => {
       const error: unknown = e.error;
@@ -609,7 +611,8 @@ export function Shell(p: ShellProps) {
       toast(messageOf(error), "bad", detailsOf(error));
     };
     const onRejection = (e: PromiseRejectionEvent): void => {
-      toast(messageOf(e.reason), "bad", detailsOf(e.reason));
+      const show = takeHapticFault(e.reason) ? toastWithoutHaptic : toast;
+      show(messageOf(e.reason), "bad", detailsOf(e.reason));
     };
     window.addEventListener("error", onError);
     window.addEventListener("unhandledrejection", onRejection);

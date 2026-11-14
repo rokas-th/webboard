@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   call,
+  callNull,
   AppError,
   syncSetup,
   syncPairCode,
@@ -43,6 +44,15 @@ describe("call", () => {
     const e = await call("store_list").catch((x: unknown) => x);
     expect(e).toBeInstanceOf(AppError);
     expect(e).toMatchObject({ code: "ipc.failed", message: "store_list: no fixture answers store_list" });
+  });
+
+  it("names a rejection that cannot be printed without throwing", async () => {
+    const h = hold("store_list");
+    const p = call("store_list");
+    h.reject(Object.create(null));
+    const e = await p.catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(AppError);
+    expect(e).toMatchObject({ code: "ipc.failed", message: "store_list: an object that cannot be printed" });
   });
 
   it("headers reach invoke", async () => {
@@ -93,6 +103,58 @@ describe("call", () => {
       .filter(([, text]) => CORE_IMPORT.test(text))
       .map(([path]) => path);
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("callNull", () => {
+  beforeEach(() => resetTauri({}));
+
+  it("resolves once the command answers null, passing its arguments", async () => {
+    resetTauri({ sync_reset: () => null });
+    await expect(callNull("sync_reset", { why: "test" })).resolves.toBeUndefined();
+    expect(tauri.calls).toEqual([{ cmd: "sync_reset", args: { why: "test" }, options: undefined }]);
+  });
+
+  it.each([
+    [undefined, "undefined"],
+    ["ok", '"ok"'],
+    [0, "0"],
+    [true, "true"],
+    [{}, "{}"],
+    [[1], "[1]"],
+  ])("refuses the answer %o as ipc.shape naming the command and the answer", async (out, named) => {
+    resetTauri({ sync_reset: () => out });
+    const e = await callNull("sync_reset").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(AppError);
+    expect(e).toMatchObject({ code: "ipc.shape", message: `sync_reset answered ${named} instead of null` });
+  });
+
+  it.each([
+    [1n, "a bigint JSON cannot show"],
+    [Symbol("s"), "Symbol(s)"],
+  ])("still names an answer JSON cannot show without throwing: %o", async (out, named) => {
+    resetTauri({ sync_reset: () => out });
+    const e = await callNull("sync_reset").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(AppError);
+    expect(e).toMatchObject({ code: "ipc.shape", message: `sync_reset answered ${named} instead of null` });
+  });
+
+  it("names a cyclic answer without throwing", async () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    resetTauri({ sync_reset: () => cyclic });
+    const e = await callNull("sync_reset").catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(AppError);
+    expect(e).toMatchObject({ code: "ipc.shape", message: "sync_reset answered an object JSON cannot show instead of null" });
+  });
+
+  it("keeps a Rust CommandError's code", async () => {
+    resetTauri({
+      sync_reset: () => {
+        throw { code: "store.io", message: "disk full" };
+      },
+    });
+    await expect(callNull("sync_reset")).rejects.toMatchObject({ code: "store.io", message: "disk full" });
   });
 });
 

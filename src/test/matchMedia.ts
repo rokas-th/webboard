@@ -62,6 +62,10 @@ export function setSystemDark(next: boolean): void {
   tell(DARK_QUERY, next);
 }
 
+export function setSystemDarkSilently(next: boolean): void {
+  dark = next;
+}
+
 export function resetMediaQueries(): void {
   dark = true;
   coarse = false;

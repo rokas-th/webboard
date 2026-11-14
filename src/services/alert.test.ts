@@ -25,6 +25,13 @@ describe("askNative", () => {
     expect(e).toMatchObject({ code: "ipc.shape", message: `alert_ask answered ${JSON.stringify(answer) ?? String(answer)} instead of "confirm" or "cancel"` });
   });
 
+  it("names a bigint answer as ipc.shape without throwing", async () => {
+    resetTauri({ alert_ask: () => 1n });
+    const e = await askNative(ASK).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(AppError);
+    expect(e).toMatchObject({ code: "ipc.shape", message: 'alert_ask answered a bigint JSON cannot show instead of "confirm" or "cancel"' });
+  });
+
   it("propagates a rejected call with its code, never as cancel", async () => {
     resetTauri({
       alert_ask: () => {

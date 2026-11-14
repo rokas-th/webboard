@@ -533,8 +533,12 @@ const copyOf = (f) => ({ docs: Object.fromEntries(Object.entries(f.docs).map(([i
 const mesa = (log) => ({ id: PLAN_IDS.mesa, name: "MESA 1.0", log });
 
 const onLinux = (f) => ({ ...f, platform: { os: "linux", idiom: null }, ipc: { ...f.ipc, device_info: { deviceId: "linux", platform: "linux" } } });
-const onIosPhone = (f) => ({ ...f, platform: { os: "ios", idiom: "phone" }, ipc: { ...f.ipc, device_info: { deviceId: "iphone", platform: "ios" } } });
-const onIosPad = (f) => ({ ...f, platform: { os: "ios", idiom: "pad" }, ipc: { ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" } } });
+const UIKIT_ANSWERS = {
+  appearance_set: { __byArg: "scheme", map: { light: null, dark: null, system: null } },
+  haptic: { __byArg: "kind", map: { selection: null, light: null, medium: null, success: null, warning: null, error: null } },
+};
+const onIosPhone = (f) => ({ ...f, platform: { os: "ios", idiom: "phone" }, ipc: { ...f.ipc, device_info: { deviceId: "iphone", platform: "ios" }, ...UIKIT_ANSWERS } });
+const onIosPad = (f) => ({ ...f, platform: { os: "ios", idiom: "pad" }, ipc: { ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" }, ...UIKIT_ANSWERS } });
 
 const PROBE_SPACE = { server: "https://probe.invalid", spaceId: "sp000000000", deviceId: "mac", deviceName: "Mac" };
 const SPACE_INDEX = "ix-sp000000000";

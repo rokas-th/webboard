@@ -22,12 +22,22 @@ function commandError(e: unknown): e is { code: string; message: string } {
   );
 }
 
+const kindOf = (x: unknown): string => (typeof x === "object" ? "an object" : `a ${typeof x}`);
+
+const printed = (x: unknown): string => {
+  try {
+    return String(x);
+  } catch {
+    return `${kindOf(x)} that cannot be printed`;
+  }
+};
+
 export async function call<T>(cmd: string, args?: InvokeArgs, options?: InvokeOptions): Promise<T> {
   try {
     return await invoke<T>(cmd, args, options);
   } catch (e) {
     if (commandError(e)) throw new AppError(e.code, e.message);
-    throw new AppError("ipc.failed", `${cmd}: ${e instanceof Error ? e.message : String(e)}`);
+    throw new AppError("ipc.failed", `${cmd}: ${e instanceof Error ? e.message : printed(e)}`);
   }
 }
 
@@ -43,6 +53,19 @@ export async function callName(cmd: string, args?: InvokeArgs, options?: InvokeO
   const out = await call<unknown>(cmd, args, options);
   if (out === null || (typeof out === "string" && out !== "")) return out;
   throw new AppError("ipc.shape", `${cmd} answered ${out === "" ? "an empty string" : shapeOf(out)} instead of a file name or null`);
+}
+
+export const answerOf = (x: unknown): string => {
+  try {
+    return JSON.stringify(x) ?? String(x);
+  } catch {
+    return `${kindOf(x)} JSON cannot show`;
+  }
+};
+
+export async function callNull(cmd: string, args?: InvokeArgs): Promise<void> {
+  const out = await call<unknown>(cmd, args);
+  if (out !== null) throw new AppError("ipc.shape", `${cmd} answered ${answerOf(out)} instead of null`);
 }
 
 export interface SpaceInfo {

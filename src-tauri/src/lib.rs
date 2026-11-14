@@ -184,6 +184,10 @@ pub fn run() {
             commands::sync::sync_purge_plan,
             #[cfg(target_os = "ios")]
             commands::alert::alert_ask,
+            #[cfg(target_os = "ios")]
+            commands::appearance::appearance_set,
+            #[cfg(target_os = "ios")]
+            commands::haptic::haptic,
             #[cfg(feature = "probe")]
             commands::probe::probe_log
         ])
@@ -485,6 +489,90 @@ mod tests {
         assert!(
             modules.contains("#[cfg(any(target_os = \"ios\", test))]\npub mod alert;"),
             "commands/mod.rs does not declare the alert module under the iOS (and test) cfg"
+        );
+    }
+
+    #[test]
+    fn run_offers_appearance_and_haptics_on_ios_only() {
+        let body = run_body();
+        let modules = include_str!("commands/mod.rs");
+        [
+            ("commands::appearance::appearance_set", "appearance"),
+            ("commands::haptic::haptic", "haptic"),
+        ]
+        .iter()
+        .for_each(|(command, module)| {
+            let handler = body
+                .find(command)
+                .unwrap_or_else(|| panic!("run() does not register {command}"));
+            let attr = body[..handler]
+                .lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or_default();
+            assert_eq!(
+                attr.trim(),
+                "#[cfg(target_os = \"ios\")]",
+                "{command} is registered under {attr}, not the iOS cfg: UIKit exists only on iOS"
+            );
+            assert_eq!(body.matches(command).count(), 1);
+            assert!(
+                modules.contains(&format!(
+                    "#[cfg(any(target_os = \"ios\", test))]\npub mod {module};"
+                )),
+                "commands/mod.rs does not declare the {module} module under the iOS (and test) cfg"
+            );
+        });
+        assert!(
+            modules.contains("#[cfg(any(target_os = \"ios\", test))]\npub(crate) mod main_thread {"),
+            "commands/mod.rs does not declare the shared main-thread helper under the iOS (and test) cfg"
+        );
+    }
+
+    #[test]
+    fn the_uikit_features_are_declared_for_ios_only() {
+        const MANIFEST: &str = include_str!("../Cargo.toml");
+        let headers: Vec<&str> = MANIFEST
+            .split("\n[")
+            .filter(|s| s.contains("objc2-ui-kit"))
+            .map(|s| s.lines().next().unwrap_or_default())
+            .collect();
+        assert_eq!(
+            headers,
+            ["target.'cfg(target_os = \"ios\")'.dependencies]"],
+            "objc2-ui-kit is declared outside the iOS dependency section"
+        );
+        let line = MANIFEST
+            .lines()
+            .find(|l| l.starts_with("objc2-ui-kit"))
+            .unwrap_or_default();
+        [
+            "UIInterface",
+            "UIView",
+            "UIWindow",
+            "UIFeedbackGenerator",
+            "UIImpactFeedbackGenerator",
+            "UINotificationFeedbackGenerator",
+            "UISelectionFeedbackGenerator",
+        ]
+        .iter()
+        .for_each(|feature| {
+            assert!(
+                line.contains(&format!("\"{feature}\"")),
+                "objc2-ui-kit lacks the {feature} feature: {line}"
+            )
+        });
+        let ios = MANIFEST
+            .split("\n[")
+            .find(|s| s.starts_with("target.'cfg(target_os = \"ios\")'.dependencies]"))
+            .unwrap_or_default();
+        assert!(
+            ios.contains("objc2-ui-kit"),
+            "the iOS dependency section was not found: {ios}"
+        );
+        assert!(
+            !ios.contains("objc2-core-foundation"),
+            "the iOS dependencies pull objc2-core-foundation, which no haptic needs: {ios}"
         );
     }
 

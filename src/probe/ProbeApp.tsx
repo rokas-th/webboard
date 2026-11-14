@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { failure, keyData, probeAlert, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine, windowData, type ProbeData, type ProbeEntry } from "./probes";
+import { failure, keyData, probeAlert, probeAppearance, probeHaptic, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine, windowData, type ProbeData, type ProbeEntry } from "./probes";
 import "./probe.css";
 import { readPlatform } from "../platform";
 
@@ -154,14 +154,13 @@ export default function ProbeApp() {
   const [cover, setCover] = useState(false);
 
   const run = useCallback(
-    (probe: () => Promise<ProbeEntry>) => {
-      void probe()
+    (probe: () => Promise<ProbeEntry>): Promise<void> =>
+      probe()
         .then(([name, data]) => log(name, data))
         .catch((e: unknown) => {
           show(probeLine("probe", { thrown: e instanceof Error ? e.message : String(e) }), true);
           console.error(e);
-        });
-    },
+        }),
     [log, show],
   );
 
@@ -170,9 +169,13 @@ export default function ProbeApp() {
     if (insetEl === null) throw new Error("the probe's inset element is not mounted");
     log("ready", { userAgent: navigator.userAgent, touchPoints: navigator.maxTouchPoints, platform: readPlatform(window) });
     log("window", windowData("mount", insetEl));
-    run(probePaths);
-    run(probeHolidays);
-    if (readPlatform(window).os === "ios") run(probeAlert);
+    void run(probePaths);
+    void run(probeHolidays);
+    if (readPlatform(window).os === "ios") {
+      void run(probeAppearance)
+        .then(() => run(probeHaptic))
+        .then(() => run(probeAlert));
+    }
   }, [log, run]);
 
   useEffect(() => {

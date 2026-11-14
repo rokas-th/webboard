@@ -1,4 +1,5 @@
 import type { InvokeArgs, InvokeOptions } from "@tauri-apps/api/core";
+import { readPlatform } from "../platform";
 
 export interface Call {
   cmd: string;
@@ -15,8 +16,36 @@ export const offeredSettings = (): { v: 1; lastRegion: null; names: Record<strin
   exampleOffered: true,
 });
 
+const UIKIT_COMMANDS: readonly (readonly [cmd: string, key: string, allowed: readonly string[]])[] = [
+  ["appearance_set", "scheme", ["light", "dark", "system"]],
+  ["haptic", "kind", ["selection", "light", "medium", "success", "warning", "error"]],
+];
+
+const refusals: string[] = [];
+
+export const takeRefusals = (): string[] => refusals.splice(0);
+
+const refuse = (text: string): never => {
+  refusals.push(text);
+  throw new Error(text);
+};
+
+const argOf = (args: InvokeArgs | undefined, key: string): unknown =>
+  args !== undefined && !(args instanceof Uint8Array) && !(args instanceof ArrayBuffer) && !Array.isArray(args) ? args[key] : undefined;
+
+const iosOnly =
+  (cmd: string, key: string, allowed: readonly string[]): Answer =>
+  (args) => {
+    const { os } = readPlatform(window);
+    if (os !== "ios") return refuse(`${cmd} was called on ${os}, where only iOS has it`);
+    const value = argOf(args, key);
+    if (typeof value !== "string" || !allowed.includes(value)) return refuse(`${cmd} got ${JSON.stringify(args)}, not a ${key} of ${allowed.join(", ")}`);
+    return null;
+  };
+
 export const DEFAULT_ANSWERS: Readonly<Record<string, Answer>> = {
   sync_status: () => ({ space: null, revoked: false }),
+  ...Object.fromEntries(UIKIT_COMMANDS.map(([cmd, key, allowed]) => [cmd, iosOnly(cmd, key, allowed)])),
 };
 
 export const tauri = {

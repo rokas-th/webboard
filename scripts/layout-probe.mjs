@@ -43,6 +43,7 @@ const IPAD_WINDOWS = [
   { size: [1179, 820], screen: [834, 1194], touch: true, form: "compact" },
   { name: "1180x820-on-834x1194", size: [1180, 820], screen: [834, 1194], touch: true, form: "full" },
 ];
+const IPAD_OWNER = [touch(970, 1389, "compact"), { size: [1389, 970], screen: [970, 1389], touch: true, form: "full" }];
 const MAC_834 = [{ ...cdesk(834, 1194), name: "834x1194-desk" }];
 const TIERS_TS = readFileSync(new URL("../src/ui/shell/planListMode.ts", import.meta.url), "utf8");
 const tierMin = (name) => {
@@ -55,8 +56,8 @@ const BOUNDARY_SPARE = 16;
 const ROOMY_MIN = tierMin("ROOMY_MIN");
 const padWindow = (w, h) => ({ size: [w, h], screen: [834, 1194], touch: true, form: "compact" });
 const IPAD_TIERS = [padWindow(560, 1000), padWindow(MEDIUM_MIN - 1, 1000), padWindow(MEDIUM_MIN, 1000), padWindow(ROOMY_MIN - 1, 820), padWindow(ROOMY_MIN, 820)];
-const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE, ...IPAD_WINDOWS, ...IPAD_TIERS, ...MAC_834];
-const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...IPAD_WINDOWS, ...IPAD_TIERS, ...MAC_834];
+const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE, ...IPAD_WINDOWS, ...IPAD_TIERS, ...IPAD_OWNER, ...MAC_834];
+const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...IPAD_WINDOWS, ...IPAD_TIERS, ...IPAD_OWNER, ...MAC_834];
 const LOAD_MS = 2000;
 
 const nameOf = (v) => v.name ?? `${v.size[0]}x${v.size[1]}`;
@@ -802,7 +803,7 @@ function states() {
     dialog: true,
     actions: [viewExpect("timeline"), ...settingsFromMore, expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), hitChrome("sheetHead", "settingsTabs")],
   });
-  add("ios44/pad-landscape/plan", "mesa-ios-pad", { sizes: "ipad-11-landscape", actions: [...fullShell, hitChrome("toolbar", "planList", "panelActions")] });
+  add("ios44/pad-landscape/plan", "mesa-ios-pad", { sizes: "ipad-landscapes", actions: [...fullShell, hitChrome("toolbar", "planList", "panelActions")] });
   add("ios44/pad-landscape/settings", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
     actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect(".settings-panel h2", "Settings"), settingsOn("Theme"), hitChrome("toolbar", "settingsHead", "settingsTabs")],
@@ -854,11 +855,11 @@ function states() {
     actions: [...overlayOpened, click(TOGGLE), still(), count(".plan-overlay-layer", 0), count("main.main[inert]", 0), count(`${TOGGLE}[aria-expanded="false"]`, 1), kept(".main")],
   });
   add("ipad-overlay/escape", "mesa-ios-pad", {
-    sizes: "ipad-11-portrait",
+    sizes: "ipad-portraits",
     actions: [...overlayOpened, key("Escape", "Escape"), still(), count(".plan-overlay-layer", 0), count(`${TOGGLE}:focus`, 1), count(`${TOGGLE}[aria-expanded="false"]`, 1)],
   });
   add("ipad-overlay/cmd-b", "mesa-ios-pad", {
-    sizes: "ipad-11-portrait",
+    sizes: "ipad-portraits",
     actions: [viewExpect("timeline"), key("b", "KeyB", 4), still(), expect(`${OVERLAY} nav.sidebar`), key("b", "KeyB", 4), still(), count(".plan-overlay-layer", 0)],
   });
   add("ipad-form-sheet/settings", "mesa-ios-pad", {
@@ -866,7 +867,7 @@ function states() {
     dialog: true,
     actions: [viewExpect("timeline"), ...settingsFromMore, expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), style(".sheet", "border-bottom-width", "1px"), style(".sheet", "border-bottom-left-radius", "12px"), style(".sheet", "padding-bottom", "0px"), centredIn(".sheet")],
   });
-  add("ipad-form-sheet/item", "mesa-ios-pad", { sizes: "ipad-11-portrait", dialog: true, actions: [viewExpect("timeline"), ...padItem, style(".sheet", "width", "560px"), centredIn(".sheet")] });
+  add("ipad-form-sheet/item", "mesa-ios-pad", { sizes: "ipad-portraits", dialog: true, actions: [viewExpect("timeline"), ...padItem, style(".sheet", "width", "560px"), centredIn(".sheet")] });
   add("ipad-form-sheet/plans-below-700", "mesa-ios-pad", {
     sizes: "ipad-699",
     dialog: true,
@@ -895,6 +896,7 @@ function states() {
   add("ipad-toolbar/roomy-min", "mesa-ios-pad", { sizes: "ipad-roomy-min", actions: [viewExpect("timeline"), count(MORE, 0), oneLine(".toolbar"), spare(".toolbar", BOUNDARY_SPARE, BOUNDARY_SPARE + 10)] });
   add("ipad-toolbar/medium-min", "mesa-ios-pad", { sizes: "ipad-medium-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 1), oneLine(".toolbar"), spare(".toolbar", BOUNDARY_SPARE, BOUNDARY_SPARE + 10)] });
   add("ipad-toolbar/narrow-min", "mesa-ios-pad", { sizes: "ipad-narrow-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 0), oneLine(".toolbar"), spare(".toolbar", 0)] });
+  add("ipad-toolbar/owner-landscape", "mesa-ios-pad", { sizes: "ipad-owner-landscape", actions: [...fullShell, ...oneRowBar] });
   add("ipad-toolbar/overlay-open", "mesa-ios-pad", {
     sizes: "ipad-overlay-open",
     dialog: true,
@@ -963,15 +965,18 @@ const SIZES = {
   "phone-landscape": namesOf(PHONE_LANDSCAPE),
   "ipad-699": namesOf([IPAD_WINDOWS[1]]),
   "ipad-1179": namesOf([IPAD_WINDOWS[2]]),
-  "ipad-overlay": namesOf([IPAD_WINDOWS[0], IPAD_11[0], IPAD_WINDOWS[2]]),
-  "ipad-overlay-open": namesOf([IPAD_WINDOWS[0], IPAD_11[0]]),
-  "ipad-column": namesOf([LANDSCAPE[0], IPAD_WINDOWS[3], IPAD_11[1]]),
+  "ipad-overlay": namesOf([IPAD_WINDOWS[0], IPAD_11[0], IPAD_WINDOWS[2], IPAD_OWNER[0]]),
+  "ipad-overlay-open": namesOf([IPAD_WINDOWS[0], IPAD_11[0], IPAD_OWNER[0]]),
+  "ipad-column": namesOf([LANDSCAPE[0], IPAD_WINDOWS[3], IPAD_11[1], IPAD_OWNER[1]]),
+  "ipad-portraits": namesOf([IPAD_11[0], IPAD_OWNER[0]]),
+  "ipad-landscapes": namesOf([IPAD_11[1], IPAD_OWNER[1]]),
+  "ipad-owner-landscape": namesOf([IPAD_OWNER[1]]),
   "ipad-all": namesOf([IPAD_WINDOWS[1], IPAD_WINDOWS[0], IPAD_11[0], IPAD_WINDOWS[2], LANDSCAPE[0], IPAD_WINDOWS[3], IPAD_11[1]]),
   "ipad-roomy-min": namesOf([IPAD_TIERS[4]]),
   "ipad-medium-min": namesOf([IPAD_TIERS[2]]),
   "ipad-narrow-min": namesOf([IPAD_TIERS[0]]),
   "ipad-roomy": namesOf([IPAD_TIERS[4], IPAD_WINDOWS[2]]),
-  "ipad-medium": namesOf([IPAD_TIERS[2], IPAD_11[0], IPAD_TIERS[3]]),
+  "ipad-medium": namesOf([IPAD_TIERS[2], IPAD_11[0], IPAD_TIERS[3], IPAD_OWNER[0]]),
   "ipad-narrow": namesOf([IPAD_TIERS[0], IPAD_WINDOWS[1], IPAD_WINDOWS[0], IPAD_TIERS[1]]),
   "mac-834": namesOf(MAC_834),
   "mac-compact": namesOf([...PORTRAIT, ...COMPACT_DESK, ...MAC_834]),

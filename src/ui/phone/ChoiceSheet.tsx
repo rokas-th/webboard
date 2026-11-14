@@ -4,6 +4,7 @@ import type { ResolveOptions } from "../../actions/resolve";
 import type { PlanState } from "../../domain/model";
 import type { UnitKey } from "../../log/types";
 import { sideText, type Choice } from "../../plan/choices";
+import { haptic } from "../../services/haptics";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { unitSubject } from "../choices/describe";
 import { orderedSides } from "../choices/order";
@@ -114,12 +115,23 @@ function Body(p: {
             type="checkbox"
             role="switch"
             checked={opts.pushFromPredecessors}
-            onChange={(e) => setOpts({ ...opts, pushFromPredecessors: e.target.checked })}
+            onChange={(e) => {
+              haptic("light");
+              setOpts({ ...opts, pushFromPredecessors: e.target.checked });
+            }}
           />
           Push from predecessors
         </label>
         <label>
-          <input type="checkbox" role="switch" checked={opts.returnPushed} onChange={(e) => setOpts({ ...opts, returnPushed: e.target.checked })} />
+          <input
+            type="checkbox"
+            role="switch"
+            checked={opts.returnPushed}
+            onChange={(e) => {
+              haptic("light");
+              setOpts({ ...opts, returnPushed: e.target.checked });
+            }}
+          />
           Return the items the other side's push moved
         </label>
       </div>

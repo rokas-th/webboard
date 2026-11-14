@@ -1,4 +1,6 @@
 import { askNative, type NativeAsk } from "../services/alert";
+import { setNativeScheme } from "../services/appearance";
+import { sendHaptic } from "../services/haptics";
 import { AppError, call, callBytes, callName } from "../services/ipc";
 import { unframe } from "../store/file";
 
@@ -82,6 +84,24 @@ export async function probeAlert(): Promise<ProbeEntry> {
     return ["alert", { answer: await askNative(PROBE_ALERT) }];
   } catch (e) {
     return ["alert", failure(e)];
+  }
+}
+
+export async function probeAppearance(): Promise<ProbeEntry> {
+  try {
+    await setNativeScheme("dark");
+    return ["appearance", { set: "dark" }];
+  } catch (e) {
+    return ["appearance", failure(e)];
+  }
+}
+
+export async function probeHaptic(): Promise<ProbeEntry> {
+  try {
+    await sendHaptic("selection");
+    return ["haptic", { sent: "selection" }];
+  } catch (e) {
+    return ["haptic", failure(e)];
   }
 }
 

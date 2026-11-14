@@ -8,6 +8,7 @@ import {
   ThemeSaveError,
   allThemes,
   loadStore,
+  nativeScheme,
   nextMineId,
   parseStore,
   resetSlots,
@@ -128,6 +129,32 @@ describe("theme store", () => {
     expect(shownTheme(s, true).id).toBe("paper");
     expect(shownTheme({ ...s, mode: "system" }, true).id).toBe("phosphor");
     expect(shownTheme({ ...s, mode: "system" }, false).id).toBe("daylight");
+  });
+
+  it("tells UIKit to follow the system only in follow-system with no preview and no draft shown", () => {
+    const rows = (["fixed", "system"] as const).flatMap((mode) =>
+      [false, true].flatMap((previewing) =>
+        [false, true].flatMap((drafting) => (["dark", "light"] as const).map((shown) => [mode, previewing, drafting, shown, nativeScheme(mode, shown, previewing, drafting)])),
+      ),
+    );
+    expect(rows).toEqual([
+      ["fixed", false, false, "dark", "dark"],
+      ["fixed", false, false, "light", "light"],
+      ["fixed", false, true, "dark", "dark"],
+      ["fixed", false, true, "light", "light"],
+      ["fixed", true, false, "dark", "dark"],
+      ["fixed", true, false, "light", "light"],
+      ["fixed", true, true, "dark", "dark"],
+      ["fixed", true, true, "light", "light"],
+      ["system", false, false, "dark", "system"],
+      ["system", false, false, "light", "system"],
+      ["system", false, true, "dark", "dark"],
+      ["system", false, true, "light", "light"],
+      ["system", true, false, "dark", "dark"],
+      ["system", true, false, "light", "light"],
+      ["system", true, true, "dark", "dark"],
+      ["system", true, true, "light", "light"],
+    ]);
   });
 
   it("removing the active saved theme falls back to cyberdeck", () => {

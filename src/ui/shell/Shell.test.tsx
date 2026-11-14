@@ -5,6 +5,8 @@ import type { RegionRef } from "../../domain/calendar";
 import type { PlanId } from "../../domain/model";
 import { sideText } from "../../plan/choices";
 import { fixedClock } from "../../services/clock";
+import { playHaptic } from "../../services/haptics";
+import { messageOf } from "../common/errorText";
 import { AppError } from "../../services/ipc";
 import { decodeAction, encodeAction } from "../../store/doc";
 import { importPlan, type Imported } from "../../store/file";
@@ -31,7 +33,7 @@ import { connectedStubs, withSync } from "../../test/withSync";
 import { paintNative } from "../../theme/apply";
 import { PRESETS, tokensOf, type Theme } from "../../theme/presets";
 import { setCoarsePointer } from "../../test/matchMedia";
-import { LINUX, setPlatform } from "../../test/platform";
+import { IPAD, LINUX, setPlatform } from "../../test/platform";
 import { TAP_HINT } from "./Tray";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -555,6 +557,33 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect(screen.getAllByText("Disk still full.")).toHaveLength(1);
     expect(screen.queryByText("Disk full.")).toBeNull();
     expect(screen.getAllByRole("button", { name: "Try again" })).toHaveLength(1);
+  });
+
+  it("on iOS shows a haptic's own unhandled fault without asking for another haptic, and any other with the error haptic", async () => {
+    Object.defineProperty(window, "__WEBBOARD_PLATFORM__", { configurable: true, writable: true, value: undefined });
+    const fault = await playHaptic("error").catch((x: unknown) => x);
+    setPlatform(IPAD);
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } }).ui));
+    await settle();
+    const from = tauri.calls.length;
+    const haptics = (): unknown[] => tauri.calls.slice(from).filter((c) => c.cmd === "haptic").map((c) => c.args);
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event("unhandledrejection"), { reason: fault }));
+    });
+    await settle();
+    expect(toastTexts()).toEqual([messageOf(fault)]);
+    expect(haptics()).toEqual([]);
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event("unhandledrejection"), { reason: fault }));
+    });
+    await settle();
+    expect(haptics()).toEqual([{ kind: "error" }]);
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event("unhandledrejection"), { reason: new Error("elsewhere") }));
+    });
+    await settle();
+    expect(haptics()).toEqual([{ kind: "error" }, { kind: "error" }]);
   });
 
   it("toasts a window error and an unhandled rejection until unmounted", async () => {
@@ -2092,6 +2121,7 @@ describe("Shell: print (product-8)", () => {
   });
 
   it("offers no Print… on iOS, in the menu or on ⌘P", async () => {
+    setPlatform(IPAD);
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } });
     render(withSync(ui));
@@ -2288,6 +2318,7 @@ describe("the settings panel in the wide shell", () => {
 
   it("does not paint a native background on iOS", async () => {
     vi.mocked(paintNative).mockClear();
+    setPlatform(IPAD);
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } }).ui));
     await settle();

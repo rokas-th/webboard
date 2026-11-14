@@ -125,6 +125,11 @@ export function themeById(s: ThemeStore, id: string): Theme {
 export const shownTheme = (s: ThemeStore, systemDark: boolean): Theme =>
   themeById(s, s.mode === "fixed" ? s.active : systemDark ? s.dark : s.light);
 
+export type NativeScheme = Scheme | "system";
+
+export const nativeScheme = (mode: Mode, shown: Scheme, previewing: boolean, drafting: boolean): NativeScheme =>
+  mode === "system" && !previewing && !drafting ? "system" : shown;
+
 const mineNumber = (id: string): number => {
   const m = MINE_ID.exec(id);
   if (m === null) throw new Error(`Not a saved theme id: ${id}`);

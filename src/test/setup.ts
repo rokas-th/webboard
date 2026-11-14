@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, vi } from "vitest";
 import { installMatchMedia, resetMediaQueries } from "./matchMedia";
 import { setPlatform } from "./platform";
+import { takeRefusals } from "./tauriMock";
 
 vi.mock("../theme/apply", async (importOriginal) => {
   const real = await importOriginal<typeof import("../theme/apply")>();
@@ -59,7 +60,8 @@ export function setScreen(w: number, h: number): void {
 installMatchMedia();
 setPlatform({ os: "macos", idiom: null });
 
-beforeEach(() => {
+beforeEach(async () => {
+  (await import("../services/haptics")).resetHaptics();
   setPlatform({ os: "macos", idiom: null });
   scrollIntoView.mockClear();
   document.documentElement.style.setProperty("--sidebar-w", "284px");
@@ -68,6 +70,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  const refused = takeRefusals();
+  if (refused.length > 0) throw new Error(`the Tauri mock refused UIKit calls the product must never send:\n${refused.join("\n")}`);
   window.localStorage.removeItem("webboard.theme");
   document.documentElement.removeAttribute("style");
   delete document.documentElement.dataset.scheme;

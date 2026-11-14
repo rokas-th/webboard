@@ -27,6 +27,11 @@ type Fixture = ReturnType<typeof buildFixtures>[string];
 
 const FIXTURES = buildFixtures();
 
+const UIKIT = {
+  appearance_set: { __byArg: "scheme", map: { light: null, dark: null, system: null } },
+  haptic: { __byArg: "kind", map: { selection: null, light: null, medium: null, success: null, warning: null, error: null } },
+};
+
 const fixture = (name: string): Fixture => {
   const f = FIXTURES[name];
   if (f === undefined) throw new Error(`no fixture ${name}`);
@@ -344,8 +349,8 @@ describe("layout fixtures", () => {
     const pad = fixture("mesa-ios-pad");
     expect(phone.docs).toEqual(mac.docs);
     expect(pad.docs).toEqual(mac.docs);
-    expect(phone.ipc).toEqual({ ...mac.ipc, device_info: { deviceId: "iphone", platform: "ios" } });
-    expect(pad.ipc).toEqual({ ...mac.ipc, device_info: { deviceId: "ipad", platform: "ios" } });
+    expect(phone.ipc).toEqual({ ...mac.ipc, device_info: { deviceId: "iphone", platform: "ios" }, ...UIKIT });
+    expect(pad.ipc).toEqual({ ...mac.ipc, device_info: { deviceId: "ipad", platform: "ios" }, ...UIKIT });
     expect(phone.platform).toEqual({ os: "ios", idiom: "phone" });
     expect(pad.platform).toEqual({ os: "ios", idiom: "pad" });
   });
@@ -356,14 +361,22 @@ describe("layout fixtures", () => {
     ["choices-ios-pad", "choices", "ipad", { os: "ios", idiom: "pad" }],
   ] as const)("%s is the %s fixture on iOS", (name, of, deviceId, platform) => {
     expect(fixture(name).docs).toEqual(fixture(of).docs);
-    expect(fixture(name).ipc).toEqual({ ...fixture(of).ipc, device_info: { deviceId, platform: "ios" } });
+    expect(fixture(name).ipc).toEqual({ ...fixture(of).ipc, device_info: { deviceId, platform: "ios" }, ...UIKIT });
     expect(fixture(name).platform).toEqual(platform);
   });
 
   it("phone-status-ios is the phone-status fixture on an iPhone", () => {
     expect(fixture("phone-status-ios").docs).toEqual(fixture("phone-status").docs);
-    expect(fixture("phone-status-ios").ipc).toEqual({ ...fixture("phone-status").ipc, device_info: { deviceId: "iphone", platform: "ios" } });
+    expect(fixture("phone-status-ios").ipc).toEqual({ ...fixture("phone-status").ipc, device_info: { deviceId: "iphone", platform: "ios" }, ...UIKIT });
     expect(fixture("phone-status-ios").platform).toEqual({ os: "ios", idiom: "phone" });
+  });
+
+  it("exactly the iOS fixtures answer appearance_set and haptic, so a desktop state that sends either is unreached", () => {
+    Object.entries(FIXTURES).forEach(([name, f]) => {
+      const answered = Object.keys(f.ipc).filter((cmd) => cmd in UIKIT);
+      expect([name, answered]).toEqual([name, f.platform.os === "ios" ? Object.keys(UIKIT) : []]);
+    });
+    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(6);
   });
 
   it("every fixture carries a platform global its device_info agrees with", () => {

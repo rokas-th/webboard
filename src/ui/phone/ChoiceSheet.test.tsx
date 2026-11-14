@@ -8,6 +8,8 @@ import { sideText, type Choice, type ChoiceSide } from "../../plan/choices";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { phoneRegistry } from "../../test/phone";
+import { IPHONE, MAC, setPlatform } from "../../test/platform";
+import { tauri } from "../../test/tauriMock";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { withSync } from "../../test/withSync";
@@ -273,6 +275,34 @@ describe("ChoiceSheet: Step 2's fixture", () => {
     fireEvent.click(apply());
     expect(resolve.mock.calls).toEqual([[c.id, { side: "a1" }, off]]);
     expect(startOf(t, "Build")).toBe("2026-11-23");
+  });
+
+  it("on iOS each switch plays one light haptic, and a radio or a pick plays none", async () => {
+    const { t, c } = await sprint();
+    await shown(t);
+    setPlatform(IPHONE);
+    setUi({ dialog: { t: "choice", id: c.id } });
+    const from = tauri.calls.length;
+    const haptics = (): unknown[] => tauri.calls.slice(from).filter((x) => x.cmd === "haptic").map((x) => x.args);
+    fireEvent.click(switchOf("Push from predecessors"));
+    expect(haptics()).toEqual([{ kind: "light" }]);
+    fireEvent.click(switchOf("Return the items the other side's push moved"));
+    expect(haptics()).toEqual([{ kind: "light" }, { kind: "light" }]);
+    fireEvent.click(within(sheet()).getByRole("radio", { name: "Mac" }));
+    const pick = pickOf(unitSubject(c.units[0], t.session.view().plan));
+    fireEvent.change(pick, { target: { value: pick.options[pick.options.length - 1].value } });
+    expect(haptics()).toEqual([{ kind: "light" }, { kind: "light" }]);
+  });
+
+  it("on macOS a switch plays no haptic", async () => {
+    const { t, c } = await sprint();
+    await shown(t);
+    setUi({ dialog: { t: "choice", id: c.id } });
+    setPlatform(MAC);
+    const from = tauri.calls.length;
+    fireEvent.click(switchOf("Push from predecessors"));
+    expect(switchOf("Push from predecessors").checked).toBe(false);
+    expect(tauri.calls.slice(from).filter((x) => x.cmd === "haptic")).toEqual([]);
   });
 
   it("settled on another device closes the sheet", async () => {
