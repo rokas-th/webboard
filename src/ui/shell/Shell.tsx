@@ -6,6 +6,7 @@ import { AppError } from "../../services/ipc";
 import { SPACE_PREFIX } from "../../store/plan-id";
 import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
+import { openersFrom } from "../common/Dialog";
 import { Sheet } from "../common/Sheet";
 import { detailsOf } from "../common/errorText";
 import { toast, Toasts } from "../common/Toast";
@@ -44,7 +45,10 @@ import { PurgeConfirm } from "./PurgeConfirm";
 import { ReloadConfirm } from "./ReloadConfirm";
 import { moveAllToSpace } from "./moving";
 import { messageOf, restorePlan, usePlanFiles, usePlanSelection } from "./selection";
-import { ExampleButton, NewPlanButton, Sidebar } from "./Sidebar";
+import { ExampleButton, NewPlanButton, PLAN_LIST_ID, Sidebar } from "./Sidebar";
+import { listAttention } from "./sidebarAttention";
+import { SidebarResizer, useSidebarMax } from "./SidebarResizer";
+import { appliedWidth } from "./sidebarWidth";
 import { Toolbar } from "./Toolbar";
 import { Tray } from "./Tray";
 import { useUpdates, useUpdateState } from "./UpdateLine";
@@ -90,12 +94,46 @@ function IndexBanner(p: { registry: Registry; error: AppError }) {
   );
 }
 
+function ShownList(p: { children: ReactNode; onFocusOut(): void }) {
+  const onFocusOut = useRef(p.onFocusOut);
+  useLayoutEffect(() => {
+    onFocusOut.current = p.onFocusOut;
+  });
+  useLayoutEffect(() => {
+    const inList = (el: Element | null): boolean => openersFrom(el).some((x) => x.closest(`#${PLAN_LIST_ID}, .sidebar-resizer`) !== null);
+    let last = inList(document.activeElement);
+    const onFocusIn = (e: FocusEvent): void => {
+      last = inList(e.target instanceof Element ? e.target : null);
+    };
+    const onBlurOut = (e: FocusEvent): void => {
+      if (e.relatedTarget !== null) return;
+      queueMicrotask(() => {
+        const active = document.activeElement;
+        if (active === null || active === document.body) last = false;
+      });
+    };
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onBlurOut);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onBlurOut);
+      const active = document.activeElement;
+      if (active === null || active === document.body ? last : inList(active)) onFocusOut.current();
+    };
+  }, []);
+  return <>{p.children}</>;
+}
+
 function WideBody(p: ShellProps & { compact: boolean }) {
   const registry = p.registry;
   const compact = p.compact;
   const { state: syncState } = useSyncState();
   const updates = useUpdates();
-  useUpdateState(updates);
+  const updateState = useUpdateState(updates);
+  const listMax = useSidebarMax();
+  const sidebarButton = useRef<HTMLButtonElement>(null);
+  const focusLeftList = useRef(false);
+  const appBody = useRef<HTMLDivElement>(null);
   const { ui, setUi } = useUiValue();
   const theme = useTheme();
   const { main, open: openPlan, trashOwn } = usePlanSelection(registry);
@@ -200,6 +238,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     redo: runner === null ? null : runner.redo,
     readOnly,
     mac,
+    full: !compact,
     clock: p.clock,
     select: openPlan,
     newPlan,
@@ -233,7 +272,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
         closeSettings(c.theme, () => c.setUi({ settings: null }));
         return;
       }
-      const id = keyToCommand(e, { mac: c.mac, typing, dialog, selected: c.ui.selected !== null });
+      const id = keyToCommand(e, { mac: c.mac, typing, dialog, selected: c.ui.selected !== null, full: c.full });
       if (id === null) return;
       if (id === "close-dialog" || id === "deselect") {
         c.setUi(id === "close-dialog" ? { dialog: null } : { selected: null });
@@ -400,6 +439,17 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     </>
   );
 
+  const listShown = !compact && ui.sidebarOpen;
+  const listWidth = listShown ? appliedWidth(ui.sidebarWidth, listMax) : null;
+  useLayoutEffect(() => {
+    if (listShown || !focusLeftList.current) return;
+    focusLeftList.current = false;
+    const button = sidebarButton.current;
+    if (button === null) throw new Error("Shell: focus left the plan list, but the toolbar has no plan list button to take it");
+    button.focus();
+  }, [listShown]);
+  const attention = listAttention({ open: ui.sidebarOpen, plans, failures: registry.failures(), selected: sel, update: updateState });
+
   return (
     <OpenChoice.Provider value={openChoice}>
       <div className="app">
@@ -410,10 +460,20 @@ function WideBody(p: ShellProps & { compact: boolean }) {
           setUi={setUi}
           mac={mac}
           onCommand={runCommand}
-          compact={compact ? { onPlans: () => setSheet("plans"), onPlan: () => setSheet("plan") } : null}
+          compact={compact ? { button: sidebarButton, onPlans: () => setSheet("plans"), onPlan: () => setSheet("plan") } : null}
+          sidebar={compact ? null : { open: ui.sidebarOpen, attention, button: sidebarButton, onToggle: () => setUi({ sidebarOpen: !ui.sidebarOpen }) }}
         />
-        <div className="app-body">
-          {!compact && sidebar}
+        <div ref={appBody} className="app-body" style={listWidth === null ? undefined : { "--sidebar-w": `${listWidth}px` }}>
+          {listShown && (
+            <ShownList
+              onFocusOut={() => {
+                focusLeftList.current = true;
+              }}
+            >
+              {sidebar}
+              <SidebarResizer width={listWidth} max={listMax} body={appBody} onCommit={(width) => setUi({ sidebarWidth: width })} />
+            </ShownList>
+          )}
           <main className="main">
             <RemovedBanner session={session} />
             {indexError !== null && <IndexBanner registry={registry} error={indexError} />}

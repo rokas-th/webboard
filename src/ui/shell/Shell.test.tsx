@@ -611,7 +611,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect(screen.getByRole("button", { name: "W" }).getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
     const saved: unknown = JSON.parse(window.localStorage.getItem(PLACE_KEY) ?? "null");
-    expect(saved).toEqual({ plan: t.session.view().plan.id, view: "list", zoom: "W", collapsed: [] });
+    expect(saved).toEqual({ plan: t.session.view().plan.id, view: "list", zoom: "W", collapsed: [], sidebarOpen: true, sidebarWidth: null });
   });
 
   it("reads and keeps a stored fit zoom", async () => {
@@ -625,7 +625,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect([fit.getAttribute("aria-pressed"), fit.title]).toEqual(["true", "Fit the whole plan"]);
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
     const saved: unknown = JSON.parse(window.localStorage.getItem(PLACE_KEY) ?? "null");
-    expect(saved).toEqual({ plan: t.session.view().plan.id, view: "list", zoom: "F", collapsed: [] });
+    expect(saved).toEqual({ plan: t.session.view().plan.id, view: "list", zoom: "F", collapsed: [], sidebarOpen: true, sidebarWidth: null });
   });
 
   it("does not toast a missing webboard.place", async () => {

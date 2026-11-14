@@ -30,6 +30,8 @@ export interface UiState {
   follow: ItemId | null;
   naming: ItemId | null;
   settings: SettingsTab | null;
+  sidebarOpen: boolean;
+  sidebarWidth: number | null;
 }
 
 export const PLACE_KEY = "webboard.place";
@@ -42,6 +44,7 @@ const ZOOMS: readonly string[] = ["W", "M", "Q", "F"];
 const isView = (v: unknown): v is ViewKind => typeof v === "string" && VIEWS.includes(v);
 const isZoom = (v: unknown): v is Zoom => typeof v === "string" && ZOOMS.includes(v);
 const isIds = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+const isWidth = (v: unknown): v is number | null => v === null || (typeof v === "number" && Number.isSafeInteger(v) && v > 0);
 
 const DEFAULTS: UiState = {
   plan: null,
@@ -55,11 +58,13 @@ const DEFAULTS: UiState = {
   follow: null,
   naming: null,
   settings: null,
+  sidebarOpen: true,
+  sidebarWidth: null,
 };
 
-type Place = Pick<UiState, "plan" | "view" | "zoom" | "collapsed">;
+type Place = Pick<UiState, "plan" | "view" | "zoom" | "collapsed" | "sidebarOpen" | "sidebarWidth">;
 
-function parsePlace(raw: string): Place | null {
+export function parsePlace(raw: string): Place | null {
   let v: unknown;
   try {
     v = JSON.parse(raw);
@@ -72,8 +77,11 @@ function parsePlace(raw: string): Place | null {
   const view = "view" in v ? v.view : DEFAULTS.view;
   const zoom = "zoom" in v ? v.zoom : DEFAULTS.zoom;
   const collapsed = "collapsed" in v ? v.collapsed : [];
+  const sidebarOpen = "sidebarOpen" in v ? v.sidebarOpen : DEFAULTS.sidebarOpen;
+  const sidebarWidth = "sidebarWidth" in v ? v.sidebarWidth : DEFAULTS.sidebarWidth;
   if (!(plan === null || typeof plan === "string") || !isView(view) || !isZoom(zoom) || !isIds(collapsed)) return null;
-  return { plan, view, zoom, collapsed: new Set(collapsed) };
+  if (typeof sidebarOpen !== "boolean" || !isWidth(sidebarWidth)) return null;
+  return { plan, view, zoom, collapsed: new Set(collapsed), sidebarOpen, sidebarWidth };
 }
 
 function loadPlace(): { state: UiState; unreadable: boolean } {
@@ -85,7 +93,7 @@ function loadPlace(): { state: UiState; unreadable: boolean } {
 }
 
 const savePlace = (s: UiState): void => {
-  window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: s.plan, view: s.view, zoom: s.zoom, collapsed: [...s.collapsed] }));
+  window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: s.plan, view: s.view, zoom: s.zoom, collapsed: [...s.collapsed], sidebarOpen: s.sidebarOpen, sidebarWidth: s.sidebarWidth }));
 };
 
 export function forgetLastPlan(): void {
@@ -102,7 +110,12 @@ export const holdsNoPlan = (): boolean => window.localStorage.getItem(NO_PLAN_KE
 export const releaseNoPlan = (): void => window.localStorage.removeItem(NO_PLAN_KEY);
 
 const placeChanged = (a: UiState, b: UiState): boolean =>
-  a.plan !== b.plan || a.view !== b.view || a.zoom !== b.zoom || a.collapsed !== b.collapsed;
+  a.plan !== b.plan ||
+  a.view !== b.view ||
+  a.zoom !== b.zoom ||
+  a.collapsed !== b.collapsed ||
+  a.sidebarOpen !== b.sidebarOpen ||
+  a.sidebarWidth !== b.sidebarWidth;
 
 export type SetUi = (patch: Partial<UiState>) => void;
 
@@ -133,7 +146,7 @@ export function useUi(): [UiState, SetUi] {
     if (!placeChanged(saved.current, ui)) return;
     saved.current = ui;
     savePlace(ui);
-  }, [ui.plan, ui.view, ui.zoom, ui.collapsed]);
+  }, [ui.plan, ui.view, ui.zoom, ui.collapsed, ui.sidebarOpen, ui.sidebarWidth]);
   const setUi = useCallback((patch: Partial<UiState>) => {
     setState((prev) => ({ ...prev, ...patch }));
   }, []);

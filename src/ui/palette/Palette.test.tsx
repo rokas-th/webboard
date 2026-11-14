@@ -180,7 +180,7 @@ describe("opening the palette", () => {
     press("k", { metaKey: true });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(document.activeElement).toBe(query());
-    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileCreate the example plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "ViewSettings…", "ViewTheme…", "ViewUse Cyberdeck theme", "HelpCommand palette", "HelpAbout WebBoard"]);
+    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileCreate the example plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "ViewHide the plan list⌘B", "ViewSettings…", "ViewTheme…", "ViewUse Cyberdeck theme", "HelpCommand palette", "HelpAbout WebBoard"]);
     press("Escape", {}, query());
     fireEvent.click(button(bar(), "⌘K"));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
@@ -261,13 +261,13 @@ describe("the palette list", () => {
     await shown(t);
     press("k", { metaKey: true });
     type("view");
-    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewSettings…", "ViewTheme…", "ViewUse Cyberdeck theme"]);
+    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewHide the plan list⌘B", "ViewSettings…", "ViewTheme…", "ViewUse Cyberdeck theme"]);
     expect(highlighted()).toBe("ViewTimeline1");
     press("ArrowUp", {}, query());
     expect(highlighted()).toBe("ViewTimeline1");
     const scrolled = vi.mocked(Element.prototype.scrollIntoView);
     scrolled.mockClear();
-    [1, 2, 3, 4, 5, 6, 7, 8, 9].forEach(() => press("ArrowDown", {}, query()));
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].forEach(() => press("ArrowDown", {}, query()));
     expect(highlighted()).toBe("ViewUse Cyberdeck theme");
     const lastScrolled = (): string | null => {
       const el: unknown = scrolled.mock.contexts[scrolled.mock.contexts.length - 1];
@@ -275,13 +275,13 @@ describe("the palette list", () => {
       expect(el.classList.contains("on")).toBe(true);
       return el.textContent;
     };
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([9, "ViewUse Cyberdeck theme"]);
-    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9].map(() => [{ block: "nearest" }]));
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([10, "ViewUse Cyberdeck theme"]);
+    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(() => [{ block: "nearest" }]));
     press("ArrowDown", {}, query());
     expect(highlighted()).toBe("ViewUse Cyberdeck theme");
-    [1, 2, 3, 4, 5, 6, 7, 8].forEach(() => press("ArrowUp", {}, query()));
+    [1, 2, 3, 4, 5, 6, 7, 8, 9].forEach(() => press("ArrowUp", {}, query()));
     expect(highlighted()).toBe("ViewNow · Next · Later2");
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([17, "ViewNow · Next · Later2"]);
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([19, "ViewNow · Next · Later2"]);
     press("Enter", {}, query());
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(uiNow()[0].view).toBe("board");

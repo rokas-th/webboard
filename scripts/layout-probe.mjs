@@ -84,6 +84,9 @@ const media = (kind) => ({ media: kind });
 const oneRow = (selector, n) => ({ oneRow: [selector, n] });
 const centred = (selector) => ({ centred: selector });
 const nearCentre = (selector) => ({ nearCentre: selector });
+const edgeAt = (selector, side, at) => ({ edgeAt: [selector, side, at] });
+const oneLine = (selector) => ({ oneLine: selector });
+const focus = (selector) => ({ focus: selector });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -631,6 +634,62 @@ function states() {
       within_(".converted-dropped li", ".converted-dropped", 5),
     ],
   });
+  const TOGGLE = '.toolbar button[aria-label="Plan list"]';
+  const hiddenPlace = { view: "timeline", zoom: "W", sidebarOpen: false };
+  const hiddenList = [viewExpect("timeline"), count(".sidebar", 0), count(".sidebar-resizer", 0), count(`${TOGGLE}[aria-expanded="false"]`, 1), oneLine(".toolbar"), edgeAt(".main", "left", 0)];
+  add("plan-list/hidden", "mesa", { place: hiddenPlace, sizes: "full-all", actions: hiddenList });
+  [
+    ["mac", "mesa"],
+    ["linux", "mesa-linux"],
+  ].forEach(([os, fixture]) => {
+    add(`plan-list/hidden-centred/${os}`, fixture, { place: hiddenPlace, sizes: "widest", actions: [...hiddenList, centred(".seg-modes")] });
+    add(`plan-list/hidden-near-centre/${os}`, fixture, { place: hiddenPlace, sizes: "above-break-and-standard", actions: [...hiddenList, nearCentre(".seg-modes")] });
+  });
+  add("plan-list/toggle", "mesa", {
+    sizes: "full-all",
+    actions: [
+      viewExpect("timeline"),
+      count(`${TOGGLE}[aria-expanded="true"]`, 1),
+      expect(".sidebar"),
+      expect(".sidebar-resizer"),
+      click(TOGGLE),
+      count(".sidebar", 0),
+      count(`${TOGGLE}[aria-expanded="false"]`, 1),
+      edgeAt(".main", "left", 0),
+      click(TOGGLE),
+      count(`${TOGGLE}[aria-expanded="true"]`, 1),
+      expect(".sidebar"),
+      oneLine(".toolbar"),
+    ],
+  });
+  add("plan-list/attention", "update-available", {
+    place: hiddenPlace,
+    sizes: "smallest",
+    actions: [viewExpect("timeline"), count(".sidebar", 0), count(`${TOGGLE}[data-attention="true"]`, 1), oneLine(".toolbar")],
+  });
+  const resized = (keyName, size) => [
+    viewExpect("timeline"),
+    focus(".sidebar-resizer"),
+    key(keyName, keyName),
+    width(".sidebar", size, size),
+    expect(`.sidebar-resizer[aria-valuenow="${size}"]`),
+    expect(".slot-panel .panel h2", "Plan"),
+    edgeAt(".slot-panel", "right", "window"),
+    edgeAt(".sidebar", "left", 0),
+    oneLine(".toolbar"),
+  ];
+  add("plan-list/min", "mesa", { sizes: "full-all", actions: resized("Home", 200) });
+  add("plan-list/max", "mesa", { sizes: "full-480", actions: resized("End", 480) });
+  add("plan-list/max-1180", "mesa", { sizes: "full-1180", actions: resized("End", 472) });
+  add("plan-list/no-toggle/compact", "mesa", {
+    sizes: "compact-all",
+    actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(TOGGLE, 0), count(".sidebar-resizer", 0)],
+  });
+  add("plan-list/no-toggle/narrow", "mesa", { sizes: "narrow", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(TOGGLE, 0), count(".sidebar-resizer", 0)] });
+  add("plan-list/no-toggle/phone", "mesa", {
+    sizes: "phone",
+    actions: [expect(".phone-head button", "Plans"), count('button[aria-label="Plan list"]', 0), count(".sidebar-resizer", 0)],
+  });
   add("revert-preview", "mesa", {
     dialog: true,
     actions: [click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), expect(".revert-text p")],
@@ -641,7 +700,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -668,6 +727,9 @@ const SIZES = {
   "compact-desk": namesOf(COMPACT_DESK),
   "compact-all": namesOf([...PORTRAIT, ...COMPACT_DESK]),
   "desktop-and-compact": namesOf([...DESKTOP, ...COMPACT_DESK]),
+  "full-all": namesOf([...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...LANDSCAPE]),
+  "full-480": namesOf([...DESKTOP.slice(1), ...BREAK_EDGE, ...ABOVE_BREAK, LANDSCAPE[1]]),
+  "full-1180": namesOf([DESKTOP[0], LANDSCAPE[0]]),
 };
 
 const sizesOf = (s) => {
@@ -1480,6 +1542,36 @@ window.__probeAct = function (a) {
     if (wide === undefined) return { fail: "no " + a.width[0] + " on screen to measure" };
     var ww = wide.getBoundingClientRect().width;
     if (ww < a.width[1] - 0.5 || ww > a.width[2] + 0.5) return { fail: a.width[0] + " is " + Math.round(ww * 10) / 10 + " px wide, not " + a.width[1] + ".." + a.width[2] };
+    return { ok: true };
+  }
+  if (a.focus !== undefined) {
+    var focused = document.querySelector(a.focus);
+    if (!(focused instanceof HTMLElement)) return { fail: "no " + a.focus + " to focus" };
+    focused.focus();
+    if (document.activeElement !== focused) return { fail: a.focus + " did not take focus" };
+    return { ok: true };
+  }
+  if (a.edgeAt !== undefined) {
+    var edged = Array.prototype.slice.call(document.querySelectorAll(a.edgeAt[0])).filter(onScreen)[0];
+    if (edged === undefined) return { fail: "no " + a.edgeAt[0] + " on screen to measure" };
+    var edgeWant = a.edgeAt[2] === "window" ? window.innerWidth : a.edgeAt[2];
+    var edgeGot = edged.getBoundingClientRect()[a.edgeAt[1]];
+    if (typeof edgeGot !== "number") return { fail: "a box has no " + a.edgeAt[1] + " edge" };
+    if (Math.abs(edgeGot - edgeWant) > 0.5) return { fail: a.edgeAt[0] + " has its " + a.edgeAt[1] + " edge at " + Math.round(edgeGot * 10) / 10 + " px, not " + edgeWant };
+    return { ok: true };
+  }
+  if (a.oneLine !== undefined) {
+    var lineBar = document.querySelector(a.oneLine);
+    if (lineBar === null || !onScreen(lineBar)) return { fail: "no " + a.oneLine + " on screen" };
+    var lineCtls = Array.prototype.slice.call(lineBar.querySelectorAll("button, .seg, .wordmark")).filter(onScreen);
+    var lineTop = lineCtls.filter(function (el) { return !lineCtls.some(function (other) { return other !== el && other.contains(el); }); });
+    if (lineTop.length < 2) return { fail: a.oneLine + " shows " + lineTop.length + " controls, too few to tell a row" };
+    var mids = lineTop.map(function (el) { var r0 = el.getBoundingClientRect(); return (r0.top + r0.bottom) / 2; });
+    var off = lineTop.filter(function (el, i) { return Math.abs(mids[i] - mids[0]) > 1; });
+    if (off.length > 0) return { fail: a.oneLine + " runs onto more than one row: " + off.map(function (el) { return JSON.stringify((el.getAttribute("aria-label") || el.textContent.trim()).slice(0, 20)); }).join(", ") + " sit off the first control's line" };
+    var lineBox = lineBar.getBoundingClientRect();
+    var lineOut = lineTop.filter(function (el) { var r0 = el.getBoundingClientRect(); return r0.left < lineBox.left - 0.5 || r0.right > lineBox.right + 0.5; });
+    if (lineOut.length > 0) return { fail: lineOut.length + " controls spill out of " + a.oneLine };
     return { ok: true };
   }
   if (a.centred !== undefined || a.nearCentre !== undefined) {

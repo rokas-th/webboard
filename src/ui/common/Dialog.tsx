@@ -6,7 +6,7 @@ export const focusables = (root: HTMLElement): HTMLElement[] => [...root.querySe
 
 const openers = new WeakMap<Element, readonly Element[]>();
 
-const openersFrom = (el: Element | null): readonly Element[] => {
+export const openersFrom = (el: Element | null): readonly Element[] => {
   if (el === null) return [];
   const modal = el.closest('[aria-modal="true"]');
   const outer = modal === null ? undefined : openers.get(modal);

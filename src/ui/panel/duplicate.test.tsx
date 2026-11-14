@@ -31,6 +31,8 @@ const UI: UiState = {
   follow: null,
   naming: null,
   settings: null,
+  sidebarOpen: true,
+  sidebarWidth: null,
 };
 
 const SEED: readonly SeedItem[] = [

@@ -46,6 +46,8 @@ function lineOf(s: UpdateState): Line | null {
   }
 }
 
+export const installOffered = (s: UpdateState): boolean => lineOf(s)?.control?.act === "install";
+
 export function UpdateLine(p: { updates: Updates }) {
   const state = useUpdateState(p.updates);
   if (state === null) throw new Error("UpdateLine: the update store gave no state");

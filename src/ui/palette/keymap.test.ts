@@ -3,7 +3,7 @@ import { isTyping, keyToCommand, type KeyInput, type KeyState } from "./keymap";
 
 const k = (key: string, o: Partial<KeyInput> = {}): KeyInput => ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...o });
 
-const MAC: KeyState = { mac: true, typing: false, dialog: false, selected: false };
+const MAC: KeyState = { mac: true, typing: false, dialog: false, selected: false, full: true };
 const PC: KeyState = { ...MAC, mac: false };
 
 describe("keyToCommand on macOS", () => {
@@ -227,5 +227,33 @@ describe("keyToCommand: print (product-8)", () => {
   it("prints on Ctrl+P off macOS", () => {
     expect(keyToCommand(k("p", { ctrlKey: true }), PC)).toBe("print");
     expect(keyToCommand(k("p", { metaKey: true }), PC)).toBeNull();
+  });
+});
+
+describe("keyToCommand: the plan list", () => {
+  it("toggles the list on ⌘B on the Mac and Ctrl+B elsewhere, with or without a selection", () => {
+    expect(keyToCommand(k("b", { metaKey: true }), MAC)).toBe("sidebar");
+    expect(keyToCommand(k("B", { metaKey: true }), { ...MAC, selected: true })).toBe("sidebar");
+    expect(keyToCommand(k("b", { ctrlKey: true }), PC)).toBe("sidebar");
+  });
+
+  it("takes neither the other platform's modifier nor Shift or Alt", () => {
+    expect(keyToCommand(k("b", { ctrlKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("b", { metaKey: true }), PC)).toBeNull();
+    expect(keyToCommand(k("b", { metaKey: true, shiftKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("b", { metaKey: true, altKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("b"), MAC)).toBeNull();
+  });
+
+  it("does nothing while typing or in a dialog", () => {
+    expect(keyToCommand(k("b", { metaKey: true }), { ...MAC, typing: true })).toBeNull();
+    expect(keyToCommand(k("b", { metaKey: true }), { ...MAC, dialog: true })).toBeNull();
+    expect(keyToCommand(k("b", { ctrlKey: true }), { ...PC, typing: true })).toBeNull();
+    expect(keyToCommand(k("b", { ctrlKey: true }), { ...PC, dialog: true })).toBeNull();
+  });
+
+  it("does nothing outside the full form", () => {
+    expect(keyToCommand(k("b", { metaKey: true }), { ...MAC, full: false })).toBeNull();
+    expect(keyToCommand(k("b", { ctrlKey: true }), { ...PC, full: false })).toBeNull();
   });
 });

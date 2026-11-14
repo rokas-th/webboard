@@ -56,7 +56,7 @@ describe("RootBoundary", () => {
       </RootBoundary>,
     );
     fireEvent.click(screen.getByRole("button", { name: OPEN_WITHOUT_PLAN }));
-    expect(JSON.parse(window.localStorage.getItem(PLACE_KEY) ?? "")).toEqual({ plan: null, view: "list", zoom: "M", collapsed: ["g1"] });
+    expect(JSON.parse(window.localStorage.getItem(PLACE_KEY) ?? "")).toEqual({ plan: null, view: "list", zoom: "M", collapsed: ["g1"], sidebarOpen: true, sidebarWidth: null });
     expect(window.localStorage.getItem(NO_PLAN_KEY)).not.toBeNull();
     expect(reload).toHaveBeenCalledTimes(1);
   });

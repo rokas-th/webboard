@@ -3,7 +3,10 @@ import type { PlanListing, Registry } from "../../store/registry";
 import { useSyncState } from "../../sync/SyncProvider";
 import { EntryTag, LocalLine } from "./LocalLine";
 import { canMoveToSpace } from "./moving";
+import { failureShown } from "./sidebarAttention";
 import { UpdateLine, useUpdates } from "./UpdateLine";
+
+export const PLAN_LIST_ID = "plan-list";
 
 export function NewPlanButton(p: { creating: boolean; onNew(): void }) {
   return (
@@ -46,7 +49,7 @@ export function Sidebar(p: SidebarProps) {
   const live = p.plans.filter((l) => !l.trashed);
   const trashed = p.plans.filter((l) => l.trashed);
   return (
-    <nav className="sidebar" aria-label="Plans">
+    <nav id={PLAN_LIST_ID} className="sidebar" aria-label="Plans">
       <div className="sidebar-new">
         <NewPlanButton creating={p.creating} onNew={p.onNew} />
       </div>
@@ -54,7 +57,7 @@ export function Sidebar(p: SidebarProps) {
       <ul className="entries">
         {live.map((l) => {
           const failure = failures.get(l.id);
-          const shown = failure !== undefined && !(l.id === p.selected && l.loaded);
+          const shown = failure !== undefined && failureShown(l, failures, p.selected);
           return (
             <li key={l.id} className={l.id === p.selected ? "entry active" : "entry"}>
               <button type="button" className="entry-open" aria-current={l.id === p.selected ? "page" : undefined} onClick={() => p.onSelect(l.id)}>

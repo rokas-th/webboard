@@ -45,6 +45,8 @@ const UI: UiState = {
   follow: null,
   naming: null,
   settings: null,
+  sidebarOpen: true,
+  sidebarWidth: null,
 };
 
 const SMALL: readonly SeedItem[] = [
@@ -100,6 +102,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     redo: r.redo,
     readOnly: t.session.readOnly,
     mac: true,
+    full: false,
     clock: t.clock,
     select,
     newPlan,
@@ -680,5 +683,41 @@ describe("print (product-8)", () => {
     expect(ids({ ...h.ctx, session: null, run: null, undo: null, redo: null })).not.toContain("print");
     const ipad = harness(t, {}, [], { device: { deviceId: "ipad", name: "iPad", platform: "ios" } });
     expect(ids(ipad.ctx)).not.toContain("print");
+  });
+});
+
+describe("plan list command", () => {
+  it("offers Hide the plan list in the View group with ⌘B in the full form, and hides it", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    const ctx: CommandCtx = { ...h.ctx, full: true };
+    const c = find(ctx, "sidebar");
+    expect([c.group, c.label, c.keys]).toEqual(["View", "Hide the plan list", "⌘B"]);
+    c.run();
+    expect(h.setUi.mock.calls).toEqual([[{ sidebarOpen: false }]]);
+  });
+
+  it("offers Show the plan list with Ctrl B off the Mac for a hidden list, and shows it", async () => {
+    const t = await made(SMALL);
+    const h = harness(t, { sidebarOpen: false });
+    const ctx: CommandCtx = { ...h.ctx, full: true, mac: false };
+    const c = find(ctx, "sidebar");
+    expect([c.group, c.label, c.keys]).toEqual(["View", "Show the plan list", "Ctrl B"]);
+    c.run();
+    expect(h.setUi.mock.calls).toEqual([[{ sidebarOpen: true }]]);
+  });
+
+  it("offers it with no open plan too", async () => {
+    const t = await made(SMALL);
+    const h = harness(t, { plan: null });
+    const ctx: CommandCtx = { ...h.ctx, full: true, session: null, run: null, undo: null, redo: null };
+    expect(find(ctx, "sidebar").label).toBe("Hide the plan list");
+  });
+
+  it("is not listed outside the full form", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    expect(ids(h.ctx).includes("sidebar")).toBe(false);
+    expect(ids({ ...h.ctx, session: null, run: null, undo: null, redo: null }).includes("sidebar")).toBe(false);
   });
 });

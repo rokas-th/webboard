@@ -59,6 +59,7 @@ installMatchMedia();
 
 beforeEach(() => {
   scrollIntoView.mockClear();
+  document.documentElement.style.setProperty("--sidebar-w", "284px");
   setScreen(1440, 900);
   resetSystemDark();
 });

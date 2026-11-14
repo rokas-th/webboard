@@ -1,10 +1,11 @@
-import { useRef } from "react";
+import { useRef, type RefObject } from "react";
 import type { PlanSession } from "../../store/session";
 import { useTheme } from "../../theme/ThemeContext";
 import { useRun } from "../run";
 import type { UiState, ViewKind, Zoom } from "../state";
 import { NewItemMenu } from "../common/NewItemMenu";
 import { closeSettings } from "../settings/SettingsPanel";
+import { PLAN_LIST_ID } from "./Sidebar";
 import { SyncChip } from "./SyncChip";
 import { useToolbarTight } from "./toolbarFit";
 
@@ -45,6 +46,36 @@ function SettingsButton(p: { open: boolean; setUi(patch: Partial<UiState>): void
   );
 }
 
+export interface SidebarToggle {
+  open: boolean;
+  attention: boolean;
+  button: RefObject<HTMLButtonElement | null>;
+  onToggle(): void;
+}
+
+function SidebarButton(p: SidebarToggle & { mac: boolean }) {
+  const title = `${p.open ? "Hide" : "Show"} the plan list (${p.mac ? "⌘B" : "Ctrl B"})${p.attention ? " · needs attention" : ""}`;
+  return (
+    <button
+      ref={p.button}
+      type="button"
+      className="icon-button sidebar-toggle"
+      aria-label="Plan list"
+      aria-expanded={p.open}
+      aria-controls={PLAN_LIST_ID}
+      title={title}
+      data-attention={p.attention ? "true" : undefined}
+      onClick={p.onToggle}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor">
+        <rect x="1.7" y="2.7" width="12.6" height="10.6" rx="1.6" strokeWidth="1.4" />
+        <line x1="6.2" y1="2.7" x2="6.2" y2="13.3" strokeWidth="1.4" />
+        {p.open && <rect className="sidebar-toggle-fill" x="2.4" y="3.4" width="3.8" height="9.2" rx="0.8" fill="currentColor" stroke="none" />}
+      </svg>
+    </button>
+  );
+}
+
 interface ToolbarProps {
   session: PlanSession | null;
   readOnly: boolean;
@@ -52,7 +83,8 @@ interface ToolbarProps {
   setUi(patch: Partial<UiState>): void;
   mac: boolean;
   onCommand(id: string): void;
-  compact: { onPlans(): void; onPlan(): void } | null;
+  compact: { button: RefObject<HTMLButtonElement | null>; onPlans(): void; onPlan(): void } | null;
+  sidebar: SidebarToggle | null;
 }
 
 function ViewTabs(p: { ui: UiState; setUi(patch: Partial<UiState>): void }) {
@@ -114,8 +146,9 @@ export function Toolbar(p: ToolbarProps) {
   return (
     <header ref={bar} className={className} data-tauri-drag-region>
       <div className="toolbar-group toolbar-start" data-tauri-drag-region>
+        {p.sidebar !== null && <SidebarButton {...p.sidebar} mac={p.mac} />}
         {p.compact !== null && (
-          <button type="button" onClick={p.compact.onPlans}>
+          <button ref={p.compact.button} type="button" onClick={p.compact.onPlans}>
             Plans
           </button>
         )}

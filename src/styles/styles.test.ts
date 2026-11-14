@@ -242,6 +242,8 @@ describe("the Cyberdeck look", () => {
       ".theme-pv-today": ".theme-preview",
       ".theme-pv-danger": ".theme-preview",
       ".theme-switch::after": ".theme-switch",
+      ".sidebar-resizer::before": ".sidebar-resizer",
+      '.toolbar .sidebar-toggle[data-attention="true"]::after': ".toolbar .sidebar-toggle",
     };
     const positioned = ["relative", "absolute", "sticky"];
     const absolute = sheet.rules.filter((r) => r.decls["position"] === "absolute" && r.conditions.length === 0).map((r) => r.selector);
@@ -309,6 +311,17 @@ describe("the Cyberdeck look", () => {
     expect(sheet.rules.filter((r) => r.selector.includes(".wordmark") && r.decls["display"] === "none").map((r) => [r.selector, r.conditions])).toEqual([
       ['html[data-form="compact"] .wordmark', []],
     ]);
+  });
+
+  it("lights the resize handle on hover the way its pointer draws the focus accent", () => {
+    const under = (sel: string, conditions: readonly string[]): Decls =>
+      Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.join(" | ") === conditions.join(" | ")).map((r) => r.decls));
+    const coarseAccent = under(".sidebar-resizer:focus-visible::before", ["@media (pointer: coarse)"]);
+    expect(coarseAccent["background"]).toBe("linear-gradient(var(--cyan), var(--cyan)) 9px 0 / 2px 100% no-repeat");
+    expect(under("html.sidebar-dragging .sidebar-resizer::before", ["@media (pointer: coarse)"])).toEqual(coarseAccent);
+    expect(under(".sidebar-resizer::before", ["@media (pointer: coarse)"])["border-left"]).toBe("none");
+    expect(under(".sidebar-resizer:hover::before", ["@media (hover: hover)"])["border-left-color"]).toBe("var(--cyan)");
+    expect(under(".sidebar-resizer:hover::before", ["@media (hover: hover)", "@media (pointer: coarse)"])["background"]).toBe(coarseAccent["background"]);
   });
 
   it("fills each link arrowhead from the token its path is stroked with", () => {

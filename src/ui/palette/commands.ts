@@ -34,6 +34,7 @@ export interface CommandCtx {
   redo: (() => Built | null) | null;
   readOnly: boolean;
   mac: boolean;
+  full: boolean;
   clock: Clock;
   select(id: PlanId): void;
   newPlan(): void;
@@ -310,6 +311,17 @@ export function commands(ctx: CommandCtx): Command[] {
     ctx.theme.preview(null);
     ctx.setUi({ settings: tab });
   };
+  const sidebarCommand: Command[] = ctx.full
+    ? [
+        {
+          id: "sidebar",
+          group: "View",
+          label: ctx.ui.sidebarOpen ? "Hide the plan list" : "Show the plan list",
+          keys: ctx.mac ? "⌘B" : "Ctrl B",
+          run: () => ctx.setUi({ sidebarOpen: !ctx.ui.sidebarOpen }),
+        },
+      ]
+    : [];
   const always: Command[] = [
     { id: "new-plan", group: "File", label: "New plan", run: () => ctx.newPlan() },
     { id: "example-plan", group: "File", label: "Create the example plan", run: () => ctx.newExample() },
@@ -320,6 +332,7 @@ export function commands(ctx: CommandCtx): Command[] {
     { id: "sync-join", group: "File", label: "Join with a code", run: () => ctx.setUi({ dialog: { t: "sync", pane: "join" } }) },
     { id: "sync-devices", group: "File", label: "Sync devices", run: () => ctx.setUi({ dialog: { t: "sync", pane: "devices" } }) },
     ...openPlans,
+    ...sidebarCommand,
     { id: "settings", group: "View", label: "Settings…", run: () => settingsAt("theme") },
     { id: "theme", group: "View", label: "Theme…", run: () => settingsAt("theme") },
     { id: "theme-cyberdeck", group: "View", label: "Use Cyberdeck theme", run: () => ctx.theme.useCyberdeck() },

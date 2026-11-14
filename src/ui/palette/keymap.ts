@@ -5,6 +5,7 @@ export interface KeyState {
   typing: boolean;
   dialog: boolean;
   selected: boolean;
+  full: boolean;
 }
 
 const VIEWS: Readonly<Record<string, string>> = { "1": "view-timeline", "2": "view-board", "3": "view-list" };
@@ -32,6 +33,7 @@ function modified(e: KeyInput, s: KeyState): string | null {
   if (key === "k" && !e.shiftKey) return "palette";
   if (key === "p" && !e.shiftKey) return "print";
   if (s.typing) return null;
+  if (key === "b" && !e.shiftKey) return s.full ? "sidebar" : null;
   if (key === "d" && !e.shiftKey) return s.selected ? "duplicate" : null;
   if (key === "z") return e.shiftKey ? "redo" : "undo";
   if (key === "y" && !s.mac && !e.shiftKey) return "redo";
