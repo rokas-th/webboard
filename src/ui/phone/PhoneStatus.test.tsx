@@ -15,10 +15,11 @@ import { phoneRegistry } from "../../test/phone";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { seededStore, type SeededStore } from "../../test/shell";
-import { tauri, type Answer } from "../../test/tauriMock";
+import { hold, tauri, type Answer } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { CALENDAR_BANNER } from "../choices/CalendarBanner";
 import { CHOICE_TITLE } from "../choices/pick";
+import { STALE_CONFIRM } from "../common/NativeConfirm";
 import { clearToasts } from "../common/Toast";
 import { RELOAD_LABEL, RELOAD_TEXT } from "../shell/ReloadConfirm";
 import { OpenChoice } from "../run";
@@ -275,6 +276,193 @@ describe("PhoneStatus lines (Step 1)", () => {
     await settle();
     expect(reload.mock.calls).toEqual([["ix-sp000000000"]]);
     expect(screen.queryByRole("dialog", { name: RELOAD_LABEL })).toBeNull();
+  });
+
+  const onIphone = (): void => {
+    setPlatform(IPHONE);
+    tauri.answers.device_info = () => ({ deviceId: "iphone", platform: "ios" });
+  };
+
+  const alertAsks = (): unknown[] => tauri.calls.filter((c) => c.cmd === "alert_ask").map((c) => c.args);
+
+  const RELOAD_NATIVE = { ask: { title: RELOAD_LABEL, message: RELOAD_TEXT, confirm: { label: "Load again", destructive: false }, cancel: "Cancel" } };
+
+  it("on iOS a damaged space index asks Load again through the native alert, and confirming reloads once", async () => {
+    const r = await indexShown(["Alpha"]);
+    onIphone();
+    tauri.answers.alert_ask = () => "confirm";
+    const reload = corruptSpace(r.registry);
+    await renderIndex(r, true);
+    openStatus();
+    fireEvent.click(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL }));
+    await settle();
+    expect(alertAsks()).toEqual([RELOAD_NATIVE]);
+    expect(screen.queryByRole("dialog", { name: RELOAD_LABEL })).toBeNull();
+    expect(reload.mock.calls).toEqual([["ix-sp000000000"]]);
+  });
+
+  it("on iOS Cancel in the native alert reloads nothing", async () => {
+    const r = await indexShown(["Alpha"]);
+    onIphone();
+    tauri.answers.alert_ask = () => "cancel";
+    const reload = corruptSpace(r.registry);
+    await renderIndex(r, true);
+    openStatus();
+    fireEvent.click(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL }));
+    await settle();
+    expect(alertAsks()).toHaveLength(1);
+    expect(reload).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual([]);
+    expect(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL })).toHaveProperty("disabled", false);
+  });
+
+  it("on iOS a failed native alert shows its error and reloads nothing", async () => {
+    const r = await indexShown(["Alpha"]);
+    onIphone();
+    tauri.answers.alert_ask = () => {
+      throw { code: "alert.no_controller", message: "The alert cannot be shown: the window has no view controller to present it from." };
+    };
+    const reload = corruptSpace(r.registry);
+    await renderIndex(r, true);
+    openStatus();
+    fireEvent.click(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL }));
+    await settle();
+    expect(reload).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual(["The alert cannot be shown: the window has no view controller to present it from."]);
+  });
+
+  it("on iOS the Load again button stays disabled while the native alert is up", async () => {
+    const r = await indexShown(["Alpha"]);
+    onIphone();
+    const alert = hold("alert_ask");
+    const reload = corruptSpace(r.registry);
+    await renderIndex(r, true);
+    openStatus();
+    fireEvent.click(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL }));
+    await settle();
+    const button = within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL });
+    expect(button).toHaveProperty("disabled", true);
+    fireEvent.click(button);
+    await settle();
+    expect(alertAsks()).toHaveLength(1);
+    act(() => alert.resolve("confirm"));
+    await settle();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("on iOS the native alert is asked once even when the status lines empty while it is up", async () => {
+    const r = await indexShown(["Alpha"]);
+    onIphone();
+    const alert = hold("alert_ask");
+    const reload = corruptSpace(r.registry);
+    const notify: (() => void)[] = [];
+    const subscribe = r.registry.subscribe.bind(r.registry);
+    vi.spyOn(r.registry, "subscribe").mockImplementation((cb) => {
+      notify.push(cb);
+      return subscribe(cb);
+    });
+    await renderIndex(r, true);
+    openStatus();
+    fireEvent.click(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL }));
+    await settle();
+    expect(alertAsks()).toHaveLength(1);
+    vi.mocked(r.registry.indexError).mockReturnValue(null);
+    act(() => notify.forEach((cb) => cb()));
+    await settle();
+    expect(screen.queryByText(CORRUPT_SPACE)).toBeNull();
+    expect(alertAsks()).toHaveLength(1);
+    expect(toastTexts()).toEqual([]);
+    act(() => alert.resolve("confirm"));
+    await settle();
+    expect(reload).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual([STALE_CONFIRM]);
+  });
+
+  it("on iOS a confirm while the space index is still damaged reloads it once", async () => {
+    const r = await indexShown(["Alpha"]);
+    onIphone();
+    const alert = hold("alert_ask");
+    const reload = corruptSpace(r.registry);
+    const notify = notifier(r.registry);
+    await renderIndex(r, true);
+    openStatus();
+    fireEvent.click(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL }));
+    await settle();
+    act(() => notify());
+    await settle();
+    expect(lineOf(CORRUPT_SPACE)).toBeTruthy();
+    act(() => alert.resolve("confirm"));
+    await settle();
+    expect(alertAsks()).toHaveLength(1);
+    expect(reload.mock.calls).toEqual([["ix-sp000000000"]]);
+    expect(toastTexts()).toEqual([]);
+  });
+
+  it("on iOS Try again is disabled while a reload confirmed through the native alert runs, and enabled after", async () => {
+    const r = await indexShown(["Alpha"]);
+    onIphone();
+    tauri.answers.alert_ask = () => "confirm";
+    const reload = corruptSpace(r.registry);
+    let inFlight = false;
+    let finish: () => void = () => {
+      throw new Error("the reload never started");
+    };
+    vi.spyOn(r.registry, "reloading").mockImplementation(() => inFlight);
+    reload.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          inFlight = true;
+          finish = () => {
+            inFlight = false;
+            resolve();
+          };
+        }),
+    );
+    await renderIndex(r, true);
+    openStatus();
+    expect(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", false);
+    fireEvent.click(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL }));
+    await settle();
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", true);
+    act(() => finish());
+    await settle();
+    expect(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", false);
+  });
+
+  it("on macOS Try again stays enabled while a reload runs", async () => {
+    const r = await indexShown(["Alpha"]);
+    vi.spyOn(r.registry, "reloading").mockReturnValue(true);
+    corruptSpace(r.registry);
+    await renderIndex(r, true);
+    openStatus();
+    expect(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", false);
+  });
+
+  it("on iOS a reload that fails after confirming shows its message", async () => {
+    const r = await indexShown(["Alpha"]);
+    onIphone();
+    tauri.answers.alert_ask = () => "confirm";
+    const reload = corruptSpace(r.registry);
+    reload.mockRejectedValue(new AppError("sync.offline", "The server could not be reached."));
+    await renderIndex(r, true);
+    openStatus();
+    fireEvent.click(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL }));
+    await settle();
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(toastTexts()).toEqual(["The server could not be reached."]);
+    expect(screen.queryByRole("dialog", { name: RELOAD_LABEL })).toBeNull();
+  });
+
+  it("on macOS Load again keeps its HTML confirmation and never calls alert_ask", async () => {
+    const r = await indexShown(["Alpha"]);
+    tauri.answers.alert_ask = () => "confirm";
+    corruptSpace(r.registry);
+    await renderIndex(r, true);
+    openStatus();
+    fireEvent.click(within(lineOf(CORRUPT_SPACE)).getByRole("button", { name: RELOAD_LABEL }));
+    expect(screen.getByRole("dialog", { name: RELOAD_LABEL })).toBeTruthy();
+    expect(alertAsks()).toEqual([]);
   });
 
   it("a damaged space index while read-only offers no Load again from the server", async () => {

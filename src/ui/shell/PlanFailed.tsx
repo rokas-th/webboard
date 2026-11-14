@@ -2,6 +2,7 @@ import { useState, type Ref } from "react";
 import type { PlanId } from "../../domain/model";
 import type { AppError } from "../../services/ipc";
 import type { Registry } from "../../store/registry";
+import { usesNativeAlert } from "../../services/alert";
 import { canReload } from "../../sync/reload";
 import { useSyncState } from "../../sync/SyncProvider";
 import { failureActions } from "./failure";
@@ -10,10 +11,10 @@ import { RELOAD_LABEL, ReloadConfirm } from "./ReloadConfirm";
 export const FILES_STAY = "The plan’s files stay on this device.";
 export const NEEDS_CONNECTION = "Needs a connection to the server.";
 
-export function ReloadButton(p: { enabled: boolean; small?: boolean; buttonRef?: Ref<HTMLButtonElement>; onOpen(): void }) {
+export function ReloadButton(p: { enabled: boolean; small?: boolean; asking?: boolean; buttonRef?: Ref<HTMLButtonElement>; onOpen(): void }) {
   return (
     <span className="reload-gate">
-      <button ref={p.buttonRef} type="button" className={p.small === true ? "button-small" : undefined} disabled={!p.enabled} onClick={p.onOpen}>
+      <button ref={p.buttonRef} type="button" className={p.small === true ? "button-small" : undefined} disabled={!p.enabled || p.asking === true} onClick={p.onOpen}>
         {RELOAD_LABEL}
       </button>
       {!p.enabled && <span className="dim">{NEEDS_CONNECTION}</span>}
@@ -30,7 +31,7 @@ export function FailedPlanView(p: {
   onRetry(): void;
   onTrash(id: PlanId): void;
 }) {
-  const [confirm, setConfirm] = useState(false);
+  const [confirm, setConfirm] = useState<PlanId | null>(null);
   const listing = p.registry.plans().find((l) => l.id === p.id);
   if (listing === undefined) throw new Error(`Plan ${p.id} is not listed`);
   const { action, filesStay } = failureActions(p.error, listing.space, p.registry.spaceReadOnly());
@@ -48,17 +49,17 @@ export function FailedPlanView(p: {
             Move to Trash
           </button>
         )}
-        {action === "reload" && <ReloadButton enabled={p.reloadEnabled} onOpen={() => setConfirm(true)} />}
+        {action === "reload" && <ReloadButton enabled={p.reloadEnabled} asking={usesNativeAlert() && (confirm !== null || p.registry.reloading(p.id))} onOpen={() => setConfirm(p.id)} />}
       </div>
       {filesStay && <p className="failed-note">{FILES_STAY}</p>}
-      {confirm && (
+      {confirm !== null && (
         <div
           className="reload-confirm"
           onKeyDown={(e) => {
             if (e.key === "Escape" || e.key === "Tab") e.stopPropagation();
           }}
         >
-          <ReloadConfirm registry={p.registry} docId={p.id} frame={p.frame} onClose={() => setConfirm(false)} />
+          <ReloadConfirm registry={p.registry} docId={confirm} offered={action === "reload" && confirm === p.id} frame={p.frame} onClose={() => setConfirm(null)} />
         </div>
       )}
     </div>

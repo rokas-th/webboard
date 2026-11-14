@@ -182,6 +182,8 @@ pub fn run() {
             commands::sync::sync_mark_revoked,
             commands::sync::sync_reset,
             commands::sync::sync_purge_plan,
+            #[cfg(target_os = "ios")]
+            commands::alert::alert_ask,
             #[cfg(feature = "probe")]
             commands::probe::probe_log
         ])
@@ -459,6 +461,30 @@ mod tests {
         assert!(
             modules.contains("#[cfg(target_os = \"macos\")]\npub mod print;"),
             "commands/mod.rs does not declare the print module under the macOS cfg"
+        );
+    }
+
+    #[test]
+    fn run_offers_the_native_alert_on_ios_only() {
+        let body = run_body();
+        let handler = body
+            .find("commands::alert::alert_ask")
+            .expect("run() does not register alert_ask, so a confirmation on iOS finds no command");
+        let attr = body[..handler]
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or_default();
+        assert_eq!(
+            attr.trim(),
+            "#[cfg(target_os = \"ios\")]",
+            "alert_ask is registered under {attr}, not the iOS cfg: UIAlertController exists only on iOS"
+        );
+        assert_eq!(body.matches("commands::alert::alert_ask").count(), 1);
+        let modules = include_str!("commands/mod.rs");
+        assert!(
+            modules.contains("#[cfg(any(target_os = \"ios\", test))]\npub mod alert;"),
+            "commands/mod.rs does not declare the alert module under the iOS (and test) cfg"
         );
     }
 

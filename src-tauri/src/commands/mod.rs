@@ -1,3 +1,5 @@
+#[cfg(any(target_os = "ios", test))]
+pub mod alert;
 pub mod device;
 pub mod file;
 pub mod holidays;

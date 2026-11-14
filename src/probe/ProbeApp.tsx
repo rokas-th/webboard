@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { failure, keyData, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine, windowData, type ProbeData, type ProbeEntry } from "./probes";
+import { failure, keyData, probeAlert, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine, windowData, type ProbeData, type ProbeEntry } from "./probes";
 import "./probe.css";
 import { readPlatform } from "../platform";
 
@@ -172,6 +172,7 @@ export default function ProbeApp() {
     log("window", windowData("mount", insetEl));
     run(probePaths);
     run(probeHolidays);
+    if (readPlatform(window).os === "ios") run(probeAlert);
   }, [log, run]);
 
   useEffect(() => {

@@ -1158,6 +1158,15 @@ describe("SyncManager: waiting and offline", () => {
   });
 });
 
+const damagePlan = async (w: World, r: Registry, f: FakeFactory): Promise<void> => {
+  w.mem.fail("store_append", "P", { code: "store.corrupt", message: "P: a record is damaged" });
+  const p = prov(f, "P");
+  p.deliver(remoteUpdate(p.ydoc, "bad-1", encodeAction(act("bad-1", headsOf(p.ydoc), [own("pn", "Damaged")], { dev: "dev-B", lbl: "Rename plan" }))));
+  await settle();
+  w.mem.recover("store_append", "P");
+  expect(r.failures().get("P")?.code).toBe("store.corrupt");
+};
+
 describe("SyncManager: loading again from the server", () => {
   it("a corrupt space plan loads again from the server", async () => {
     const remoteState = seedPlan(null, "P", "From server");
@@ -1183,8 +1192,9 @@ describe("SyncManager: loading again from the server", () => {
   });
 
   it("a reloaded doc gets a new provider on its new ydoc", async () => {
-    const { r, f } = await started();
+    const { w, r, f } = await started();
     syncAll(f);
+    await damagePlan(w, r, f);
     const old = prov(f, "P");
     await r.reloadFromServer("P");
     await settle();
@@ -1268,7 +1278,7 @@ describe("SyncManager: loading the space index again", () => {
     const { w, r, f, m } = await started();
     syncAll(f);
     await settle();
-    w.mem.fail("store_append", IX, { code: "store.io", message: "Disk full." });
+    w.mem.fail("store_append", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
     remoteIndex(prov(f, IX), "s-S", [ip("S", false)]);
     await settle();
     expect(errorOf(m.state())).toMatchObject({ code: "local-failed", doc: IX, op: "save" });
@@ -1295,9 +1305,10 @@ describe("SyncManager: loading the space index again", () => {
   });
 
   it("a plan's old provider stops before the plan is released", async () => {
-    const { r, f } = await started();
+    const { w, r, f } = await started();
     syncAll(f);
     await settle();
+    await damagePlan(w, r, f);
     const old = prov(f, "P");
     const held = hold("store_set_aside");
     const reload = r.reloadFromServer("P");
@@ -1319,9 +1330,10 @@ describe("SyncManager: loading the space index again", () => {
   });
 
   it("a reload destroys the old provider while its doc is still open", async () => {
-    const { r, f } = await started();
+    const { w, r, f } = await started();
     syncAll(f);
     await settle();
+    await damagePlan(w, r, f);
     const old = prov(f, "P");
     const d = await r.doc("P");
     const openAtDestroy: boolean[] = [];
@@ -1371,6 +1383,11 @@ describe("SyncManager: loading the space index again", () => {
     two.w.mem.fail("store_append", "local", { code: "store.io", message: "Local disk full." });
     two.r.trashPlan("L");
     await settle();
+    two.w.mem.fail("store_append", IX, { code: "store.corrupt", message: "Bad record in seg-1.log." });
+    remoteIndex(prov(two.f, IX), "s-S", [ip("S", false)]);
+    await settle();
+    two.w.mem.recover("store_append", IX);
+    expect(two.r.indexErrorOf(IX)?.code).toBe("store.corrupt");
     two.w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
     await expect(two.r.reloadFromServer(IX)).rejects.toMatchObject({ code: "store.corrupt" });
     await settle();

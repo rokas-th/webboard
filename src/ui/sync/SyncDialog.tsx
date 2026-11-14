@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { usesNativeAlert } from "../../services/alert";
 import { AppError, syncReset } from "../../services/ipc";
 import { SPACE_PREFIX } from "../../store/plan-id";
 import { chipText, holdsPlan, type SyncState } from "../../sync/manager";
@@ -9,7 +10,7 @@ import { Sheet } from "../common/Sheet";
 import { toast } from "../common/Toast";
 import { ReloadButton } from "../shell/PlanFailed";
 import { exportFlow } from "../shell/fileFlows";
-import { RELOAD_LABEL, ReloadConfirmBody } from "../shell/ReloadConfirm";
+import { NativeReload, RELOAD_LABEL, ReloadConfirmBody } from "../shell/ReloadConfirm";
 import type { SyncPane } from "../state";
 import { DevicesPane } from "./DevicesPane";
 import { JoinPane } from "./JoinPane";
@@ -94,19 +95,19 @@ export function SyncActionButtons(p: { holds: boolean; small?: boolean; onReset?
   );
 }
 
-function IndexActions(p: { cause: string | null; reloadRef: RefObject<HTMLButtonElement | null>; onReload(doc: string): void }) {
+function IndexActions(p: { offer: string | null; asking: boolean; reloadRef: RefObject<HTMLButtonElement | null>; onReload(doc: string): void }) {
   const registry = useSyncRegistry();
   const enabled = canReload(useSyncState().state);
-  const doc = registry.indexErrorDoc();
-  const reloadable = p.cause === "store.corrupt" && doc !== null && !registry.spaceReadOnly();
+  const offer = p.offer;
+  const asking = offer !== null && (p.asking || (usesNativeAlert() && registry.reloading(offer)));
   return (
     <>
       <div className="sync-buttons">
-        <button type="button" onClick={() => void registry.retryIndex()}>
+        <button type="button" disabled={asking} onClick={() => void registry.retryIndex()}>
           Try again
         </button>
       </div>
-      {reloadable && <ReloadButton enabled={enabled} buttonRef={p.reloadRef} onOpen={() => p.onReload(doc)} />}
+      {offer !== null && <ReloadButton enabled={enabled} asking={asking} buttonRef={p.reloadRef} onOpen={() => p.onReload(offer)} />}
     </>
   );
 }
@@ -120,9 +121,11 @@ export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet
   const paneRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
   const confirming = useRef(false);
+  const native = usesNativeAlert();
   useEffect(() => {
     if (confirm !== null) {
       confirming.current = true;
+      if (native) return;
       const root = confirmRef.current;
       if (root === null) throw new Error("Reload confirmation rendered without its element");
       const [first] = focusables(root);
@@ -143,12 +146,14 @@ export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet
   const error = state.kind === "error" ? state : null;
   const indexDoc = error !== null && error.code === "local-failed" && error.doc !== null && error.doc.startsWith(SPACE_PREFIX);
   const holds = error !== null && error.doc !== null && !error.doc.startsWith(SPACE_PREFIX) && holdsPlan(registry, error.doc);
+  const errorDoc = error !== null && indexDoc ? error.doc : null;
+  const offer = errorDoc !== null && registry.indexErrorOf(errorDoc)?.code === "store.corrupt" && !registry.spaceReadOnly() ? errorDoc : null;
   const body = (
     <>
       {error !== null && (
         <div className="sync-status">
           {error.message !== null && <p className="sync-message bad">{error.message}</p>}
-          {indexDoc ? <IndexActions cause={error.cause} reloadRef={reloadRef} onReload={setConfirm} /> : <SyncActionButtons holds={holds} onReset={() => p.onPane("join")} />}
+          {indexDoc ? <IndexActions offer={offer} asking={native && confirm !== null} reloadRef={reloadRef} onReload={setConfirm} /> : <SyncActionButtons holds={holds} onReset={() => p.onPane("join")} />}
         </div>
       )}
       <div className="sync-tabs" role="tablist" aria-label="Sync">
@@ -167,17 +172,20 @@ export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet
     </>
   );
   const cancel = (): void => setConfirm(null);
-  const label = confirm === null ? "Sync" : RELOAD_LABEL;
-  const onClose = confirm === null ? p.onClose : cancel;
+  const html = native ? null : confirm;
+  const asked = native && confirm !== null ? <NativeReload registry={registry} docId={confirm} offered={offer === confirm} onClose={cancel} /> : null;
+  const label = html === null ? "Sync" : RELOAD_LABEL;
+  const onClose = html === null ? p.onClose : cancel;
   if (p.frame === "sheet") {
     return (
       <Sheet open title={label} onClose={onClose}>
-        {confirm !== null && (
+        {asked}
+        {html !== null && (
           <div ref={confirmRef} className="reload-sheet">
-            <ReloadConfirmBody registry={registry} docId={confirm} onClose={cancel} />
+            <ReloadConfirmBody registry={registry} docId={html} onClose={cancel} />
           </div>
         )}
-        <div ref={paneRef} className="sync-sheet" hidden={confirm !== null}>
+        <div ref={paneRef} className="sync-sheet" hidden={html !== null}>
           {body}
         </div>
       </Sheet>
@@ -185,12 +193,13 @@ export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet
   }
   return (
     <Dialog label={label} wide onClose={onClose}>
-      {confirm !== null && (
+      {asked}
+      {html !== null && (
         <div ref={confirmRef}>
-          <ReloadConfirmBody registry={registry} docId={confirm} onClose={cancel} />
+          <ReloadConfirmBody registry={registry} docId={html} onClose={cancel} />
         </div>
       )}
-      <div ref={paneRef} hidden={confirm !== null}>
+      <div ref={paneRef} hidden={html !== null}>
         {body}
       </div>
     </Dialog>

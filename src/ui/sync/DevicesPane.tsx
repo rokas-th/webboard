@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
+import { CANCEL_LABEL, usesNativeAlert, type NativeAsk } from "../../services/alert";
 import { syncDevices, syncRemoveDevice, type DeviceEntry } from "../../services/ipc";
+import { NativeConfirm } from "../common/NativeConfirm";
 import { toast } from "../common/Toast";
 import { PaneFailures, usePaneCommand } from "./command";
 import { dayTime } from "./time";
+
+export const REMOVE_CONFIRM = "Remove device";
+export const REMOVE_TEXT = "It stops syncing at once and keeps its plans read-only.";
+export const removeLabel = (d: DeviceEntry): string => `Remove ${d.name}?`;
+
+export const removeAsk = (d: DeviceEntry): NativeAsk => ({ title: removeLabel(d), message: REMOVE_TEXT, confirm: { label: REMOVE_CONFIRM, destructive: true }, cancel: CANCEL_LABEL });
 
 export function DevicesPane() {
   const [devices, setDevices] = useState<readonly DeviceEntry[] | null>(null);
@@ -12,6 +20,7 @@ export function DevicesPane() {
   useEffect(() => {
     load(async () => setDevices(await syncDevices()));
   }, []);
+  const native = usesNativeAlert();
   const remove = (d: DeviceEntry): void =>
     cmd.run(async () => {
       const removal = await syncRemoveDevice(d.id).then(
@@ -42,7 +51,7 @@ export function DevicesPane() {
               <span className="sync-device-name">{d.name}</span>
               <span className="dim">{d.current ? "This device" : `Last seen ${dayTime(d.lastSeenAt)}`}</span>
               {!d.current && (
-                <button type="button" className="sync-remove danger" onClick={() => setAsking(d)}>
+                <button type="button" className="sync-remove danger" disabled={native && (asking !== null || cmd.busy)} onClick={() => setAsking(d)}>
                   Remove
                 </button>
               )}
@@ -50,15 +59,16 @@ export function DevicesPane() {
           ))}
         </ul>
       )}
-      {asking !== null && (
+      {native && asking !== null && <NativeConfirm ask={removeAsk(asking)} run={() => remove(asking)} onClose={() => setAsking(null)} />}
+      {!native && asking !== null && (
         <div className="sync-confirm">
-          <p>{`Remove ${asking.name}? It stops syncing at once and keeps its plans read-only.`}</p>
+          <p>{`${removeLabel(asking)} ${REMOVE_TEXT}`}</p>
           <div className="sync-buttons">
             <button type="button" onClick={() => setAsking(null)}>
-              Cancel
+              {CANCEL_LABEL}
             </button>
             <button type="button" className="button-danger" disabled={cmd.busy} onClick={() => remove(asking)}>
-              Remove device
+              {REMOVE_CONFIRM}
             </button>
           </div>
         </div>

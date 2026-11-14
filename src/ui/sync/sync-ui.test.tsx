@@ -1,11 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import * as Y from "yjs";
 import { Refused } from "../../actions/intents";
 import { fixedClock } from "../../services/clock";
 import { AppError } from "../../services/ipc";
 import { exportPlan } from "../../store/file";
-import { Registry } from "../../store/registry";
+import { NOT_DAMAGED, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { chipText, SyncManager, type SyncState } from "../../sync/manager";
 import { docName, SyncProvider } from "../../sync/SyncProvider";
@@ -13,10 +13,11 @@ import { fakeFactory, type FakeFactory, type FakeProvider } from "../../test/fak
 import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { shellFor } from "../../test/shell";
 import { IX, itemNamed, ixAct, NOW, own, ip, RESET_HINT, seedIndex, seedPlan, seedSpace, SP, SPACE, syncWorld, TODAY, fail, argsOf, remoteIndex, type SyncWorld } from "../../test/syncWorld";
-import { tauri, type Answer } from "../../test/tauriMock";
+import { hold, tauri, type Answer } from "../../test/tauriMock";
 import { setScreen } from "../../test/setup";
-import { IPAD, IPHONE } from "../../test/platform";
+import { IPAD, IPHONE, setPlatform } from "../../test/platform";
 import { withSync } from "../../test/withSync";
+import { STALE_CONFIRM } from "../common/NativeConfirm";
 import { clearToasts } from "../common/Toast";
 import { exportFlow } from "../shell/fileFlows";
 import { Shell } from "../shell/Shell";
@@ -574,6 +575,90 @@ describe("the sync panes", () => {
     await click(within(pane("Devices")).getByRole("button", { name: "Cancel" }));
     expect(calls("sync_remove_device")).toBe(0);
     expect(within(pane("Devices")).getByText("iPad")).toBeTruthy();
+  });
+
+  describe("on iOS removing a device asks through the native alert", () => {
+    const TWO = [
+      { id: "dev-A", name: "iPad", createdAt: 0, lastSeenAt: NOW, current: true },
+      { id: "dev-I", name: "iPhone", createdAt: 0, lastSeenAt: NOW, current: false },
+    ];
+    const REMOVE_ASK = { ask: { title: "Remove iPhone?", message: "It stops syncing at once and keeps its plans read-only.", confirm: { label: "Remove device", destructive: true }, cancel: "Cancel" } };
+    const asks = (): unknown[] => tauri.calls.filter((c) => c.cmd === "alert_ask").map((c) => c.args);
+    const onIpad = async (answers: Record<string, Answer>): Promise<void> => {
+      const w = await spaceWorld({ answers: { sync_devices: () => TWO, sync_remove_device: () => null, ...answers } });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { f } = await mounted(w);
+      syncAll(f);
+    };
+
+    it("confirming removes the device once, with the same toast and refresh", async () => {
+      await onIpad({ alert_ask: () => "confirm" });
+      const p = await openPane("Devices");
+      await click(within(p).getByRole("button", { name: "Remove" }));
+      await settle();
+      expect(asks()).toEqual([REMOVE_ASK]);
+      expect(pane("Devices").querySelector(".sync-confirm")).toBeNull();
+      expect(tauri.calls.filter((c) => c.cmd === "sync_remove_device").map(argsOf)).toEqual([{ id: "dev-I" }]);
+      expect(calls("sync_devices")).toBe(2);
+      expect(toasts()).toEqual(["iPhone removed"]);
+    });
+
+    it("Cancel removes nothing", async () => {
+      await onIpad({ alert_ask: () => "cancel" });
+      const p = await openPane("Devices");
+      await click(within(p).getByRole("button", { name: "Remove" }));
+      await settle();
+      expect(asks()).toHaveLength(1);
+      expect(calls("sync_remove_device")).toBe(0);
+      expect(toasts()).toEqual([]);
+      expect(within(pane("Devices")).getByRole("button", { name: "Remove" })).toHaveProperty("disabled", false);
+    });
+
+    it("a failed alert shows its error and removes nothing", async () => {
+      await onIpad({
+        alert_ask: () => {
+          throw { code: "alert.dropped", message: 'The alert "Remove iPhone?" closed without an answer.' };
+        },
+      });
+      const p = await openPane("Devices");
+      await click(within(p).getByRole("button", { name: "Remove" }));
+      await settle();
+      expect(calls("sync_remove_device")).toBe(0);
+      expect(badToasts()).toEqual(['The alert "Remove iPhone?" closed without an answer.']);
+    });
+
+    it("keeps Remove disabled while the alert is up", async () => {
+      await onIpad({});
+      const p = await openPane("Devices");
+      const alert = hold("alert_ask");
+      await click(within(p).getByRole("button", { name: "Remove" }));
+      const remove = within(pane("Devices")).getByRole("button", { name: "Remove" });
+      expect(remove).toHaveProperty("disabled", true);
+      await click(remove);
+      expect(asks()).toHaveLength(1);
+      act(() => alert.resolve("cancel"));
+      await settle();
+      expect(calls("sync_remove_device")).toBe(0);
+    });
+  });
+
+  it("on macOS removing keeps its inline question and never calls alert_ask", async () => {
+    const w = await spaceWorld({
+      answers: {
+        sync_devices: () => [
+          { id: "dev-A", name: "Mac", createdAt: 0, lastSeenAt: NOW, current: true },
+          { id: "dev-I", name: "iPad", createdAt: 0, lastSeenAt: NOW, current: false },
+        ],
+        alert_ask: () => "confirm",
+      },
+    });
+    const { f } = await mounted(w);
+    syncAll(f);
+    const p = await openPane("Devices");
+    await click(within(p).getByRole("button", { name: "Remove" }));
+    expect(within(pane("Devices")).getByRole("button", { name: "Remove device" })).toBeTruthy();
+    expect(tauri.calls.filter((c) => c.cmd === "alert_ask")).toEqual([]);
   });
 
   it("the devices list marks this device and last seen", async () => {
@@ -1188,6 +1273,554 @@ describe("loading again from the server", () => {
     expect(document.activeElement).toBe(opener);
     expect(opener.isConnected).toBe(true);
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  describe("the Sync dialog offers Load again for the space index its error names while the local plan list fails too", () => {
+    const bothFailing = async (answers: Record<string, Answer>, ios: boolean): Promise<{ heal(): Promise<void>; reload: MockInstance<Registry["reloadFromServer"]> }> => {
+      const w = await spaceWorld({ answers });
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      if (ios) {
+        setPlatform(IPAD);
+        tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      }
+      const { r } = await mounted(w);
+      w.mem.fail("store_append", "local", { code: "store.io", message: "Local disk full." });
+      act(() => r.trashPlan("L"));
+      await settle();
+      expect(r.indexErrorOf("local")?.code).toBe("store.io");
+      expect(r.indexErrorOf(IX)?.code).toBe("store.corrupt");
+      expect(r.indexErrorDoc()).toBe("local");
+      const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      await openChip();
+      expect(messageText()).toEqual(["Bad record in seg-0.log."]);
+      const heal = async (): Promise<void> => {
+        w.mem.recover("store_append", "local");
+        w.mem.recover("store_load", IX);
+        await act(async () => r.retryIndex());
+        await settle();
+        expect(r.indexError()).toBeNull();
+      };
+      return { heal, reload };
+    };
+
+    it("on macOS through the HTML confirmation", async () => {
+      const { heal, reload } = await bothFailing({}, false);
+      await click(inDialog().getByRole("button", { name: RELOAD }));
+      await click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
+      await settle();
+      expect(reload.mock.calls).toEqual([[IX]]);
+      expect(tauri.calls.filter((c) => c.cmd === "alert_ask")).toEqual([]);
+      await heal();
+    });
+
+    it("on iOS through the native alert", async () => {
+      const { heal, reload } = await bothFailing({ alert_ask: () => "confirm" }, true);
+      await click(inDialog().getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(tauri.calls.filter((c) => c.cmd === "alert_ask")).toHaveLength(1);
+      expect(reload.mock.calls).toEqual([[IX]]);
+      expect(badToasts()).toEqual([]);
+      await heal();
+    });
+  });
+
+  it("Load again confirmed after the space index recovered loads nothing and says why", async () => {
+    const w = await spaceWorld();
+    w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+    const { r } = await mounted(w);
+    await openChip();
+    await click(inDialog().getByRole("button", { name: RELOAD }));
+    const confirmation = screen.getByRole("dialog", { name: RELOAD });
+    w.mem.recover("store_load", IX);
+    await act(async () => r.retryIndex());
+    await settle();
+    expect(r.indexErrorOf(IX)).toBeNull();
+    expect(screen.getByRole("dialog", { name: RELOAD })).toBe(confirmation);
+    const from = tauri.calls.length;
+    await click(within(confirmation).getByRole("button", { name: "Load again" }));
+    await settle();
+    expect(badToasts()).toEqual([NOT_DAMAGED]);
+    expect(tauri.calls.slice(from).filter((c) => c.cmd === "store_set_aside")).toEqual([]);
+    expect(r.reloading(IX)).toBe(false);
+  });
+
+  describe("on iOS Load again asks through the native alert", () => {
+    const RELOAD_ASK = { ask: { title: RELOAD, message: "Changes this device had not sent to the server are not loaded again; the damaged files stay on this device.", confirm: { label: "Load again", destructive: false }, cancel: "Cancel" } };
+    const asks = (): unknown[] => tauri.calls.filter((c) => c.cmd === "alert_ask").map((c) => c.args);
+    const damagedIndexOnIpad = async (answers: Record<string, Answer>): Promise<{ reload: MockInstance<Registry["reloadFromServer"]> }> => {
+      const w = await spaceWorld({ answers });
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r } = await mounted(w);
+      const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      return { reload };
+    };
+
+    it("from the Sync dialog: the dialog stays as it is, and confirming reloads once", async () => {
+      const { reload } = await damagedIndexOnIpad({ alert_ask: () => "confirm" });
+      await openChip();
+      const frame = dialog();
+      await click(within(frame).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toEqual([RELOAD_ASK]);
+      expect(screen.getAllByRole("dialog")).toEqual([frame]);
+      expect(frame.getAttribute("aria-label")).toBe("Sync");
+      expect(reload.mock.calls).toEqual([[IX]]);
+    });
+
+    it("from the Sync dialog: Cancel reloads nothing and gives Load again its focus back", async () => {
+      const { reload } = await damagedIndexOnIpad({ alert_ask: () => "cancel" });
+      await openChip();
+      const frame = dialog();
+      await click(within(frame).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toHaveLength(1);
+      expect(reload).not.toHaveBeenCalled();
+      expect(screen.getAllByRole("dialog")).toEqual([frame]);
+      expect(document.activeElement).toBe(within(frame).getByRole("button", { name: RELOAD }));
+    });
+
+    it("from the Sync dialog: Load again is disabled while the alert is up", async () => {
+      const { reload } = await damagedIndexOnIpad({});
+      await openChip();
+      const alert = hold("alert_ask");
+      await click(within(dialog()).getByRole("button", { name: RELOAD }));
+      const load = within(dialog()).getByRole("button", { name: RELOAD });
+      expect(load).toHaveProperty("disabled", true);
+      await click(load);
+      expect(asks()).toHaveLength(1);
+      act(() => alert.resolve("confirm"));
+      await settle();
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("from the Sync dialog: a failed alert shows its error and reloads nothing", async () => {
+      const { reload } = await damagedIndexOnIpad({
+        alert_ask: () => {
+          throw { code: "alert.busy", message: "The alert cannot be shown: something else is already presented over the window." };
+        },
+      });
+      await openChip();
+      await click(within(dialog()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(reload).not.toHaveBeenCalled();
+      expect(badToasts()).toEqual(["The alert cannot be shown: something else is already presented over the window."]);
+    });
+
+    it("from the index banner: confirming reloads once with no HTML confirmation", async () => {
+      const { reload } = await damagedIndexOnIpad({ alert_ask: () => "confirm" });
+      const banner = screen.getByText("Bad record in seg-0.log.").closest(".banner");
+      if (!(banner instanceof HTMLElement)) throw new Error("no index banner");
+      await click(within(banner).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toEqual([RELOAD_ASK]);
+      expect(screen.queryByRole("dialog", { name: RELOAD })).toBeNull();
+      expect(reload.mock.calls).toEqual([[IX]]);
+    });
+
+    const bannerOf = (): HTMLElement => {
+      const banner = screen.getByText("Bad record in seg-0.log.").closest(".banner");
+      if (!(banner instanceof HTMLElement)) throw new Error("no index banner");
+      return banner;
+    };
+
+    it("from the index banner: Cancel reloads nothing and Load again is enabled again", async () => {
+      const { reload } = await damagedIndexOnIpad({ alert_ask: () => "cancel" });
+      await click(within(bannerOf()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toEqual([RELOAD_ASK]);
+      expect(reload).not.toHaveBeenCalled();
+      expect(toasts()).toEqual([]);
+      expect(within(bannerOf()).getByRole("button", { name: RELOAD })).toHaveProperty("disabled", false);
+    });
+
+    it("from the index banner: a failed alert shows its error and reloads nothing", async () => {
+      const { reload } = await damagedIndexOnIpad({
+        alert_ask: () => {
+          throw { code: "alert.no_controller", message: "The alert cannot be shown: the window has no view controller to present it from." };
+        },
+      });
+      await click(within(bannerOf()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(reload).not.toHaveBeenCalled();
+      expect(badToasts()).toEqual(["The alert cannot be shown: the window has no view controller to present it from."]);
+    });
+
+    it("from the index banner: Load again is disabled while the alert is up", async () => {
+      const { reload } = await damagedIndexOnIpad({});
+      const alert = hold("alert_ask");
+      await click(within(bannerOf()).getByRole("button", { name: RELOAD }));
+      const load = within(bannerOf()).getByRole("button", { name: RELOAD });
+      expect(load).toHaveProperty("disabled", true);
+      await click(load);
+      expect(asks()).toHaveLength(1);
+      act(() => alert.resolve("confirm"));
+      await settle();
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("while a reload confirmed from the index banner runs, the Sync dialog's Load again is disabled", async () => {
+      const w = await spaceWorld({ answers: { alert_ask: () => "confirm" } });
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r } = await mounted(w);
+      let inFlight = false;
+      let finish: () => void = () => {
+        throw new Error("the reload never started");
+      };
+      vi.spyOn(r, "reloading").mockImplementation(() => inFlight);
+      const reload = vi.spyOn(r, "reloadFromServer").mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            inFlight = true;
+            finish = () => {
+              inFlight = false;
+              resolve();
+            };
+          }),
+      );
+      await click(within(bannerOf()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(reload.mock.calls).toEqual([[IX]]);
+      await openChip();
+      const load = within(dialog()).getByRole("button", { name: RELOAD });
+      expect(load).toHaveProperty("disabled", true);
+      await click(load);
+      expect(asks()).toHaveLength(1);
+      act(() => finish());
+      await settle();
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("from the index banner: a Load again answered after the index error cleared reloads nothing", async () => {
+      const w = await spaceWorld();
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r } = await mounted(w);
+      const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      const alert = hold("alert_ask");
+      await click(within(bannerOf()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toEqual([RELOAD_ASK]);
+      w.mem.recover("store_load", IX);
+      await act(async () => {
+        await r.retryIndex();
+      });
+      await settle();
+      expect(r.indexError()).toBeNull();
+      expect(screen.queryByText("Bad record in seg-0.log.")).toBeNull();
+      act(() => alert.resolve("confirm"));
+      await settle();
+      expect(reload).not.toHaveBeenCalled();
+      expect(badToasts()).toEqual([STALE_CONFIRM]);
+    });
+
+    it("from the index banner: a Load again answered after the asked space recovered while another space's index still fails reloads nothing", async () => {
+      const w = await spaceWorld();
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r } = await mounted(w);
+      const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      const alert = hold("alert_ask");
+      await click(within(bannerOf()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toEqual([RELOAD_ASK]);
+      const other = "ix-sp-other";
+      w.mem.recover("store_load", IX);
+      vi.spyOn(r, "indexError").mockReturnValue(new AppError("store.corrupt", "Bad record in seg-0.log."));
+      vi.spyOn(r, "indexErrorDoc").mockReturnValue(other);
+      await act(async () => {
+        await r.retryIndex();
+      });
+      await settle();
+      expect(within(bannerOf()).getByRole("button", { name: RELOAD })).toBeTruthy();
+      act(() => alert.resolve("confirm"));
+      await settle();
+      expect(reload).not.toHaveBeenCalled();
+      expect(badToasts()).toEqual([STALE_CONFIRM]);
+    });
+
+    it("from the Sync dialog: a Load again answered after the index error cleared, with the dialog still open, reloads nothing", async () => {
+      const w = await spaceWorld();
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r } = await mounted(w);
+      const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      await openChip();
+      const frame = dialog();
+      const alert = hold("alert_ask");
+      await click(within(frame).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toEqual([RELOAD_ASK]);
+      w.mem.recover("store_load", IX);
+      await act(async () => {
+        await r.retryIndex();
+      });
+      await settle();
+      expect(r.indexError()).toBeNull();
+      expect(screen.getAllByRole("dialog")).toEqual([frame]);
+      expect(within(frame).queryByRole("button", { name: RELOAD })).toBeNull();
+      act(() => alert.resolve("confirm"));
+      await settle();
+      expect(reload).not.toHaveBeenCalled();
+      expect(badToasts()).toEqual([STALE_CONFIRM]);
+    });
+
+    const reloadHeld = (r: Registry): { reload: MockInstance<Registry["reloadFromServer"]>; finish(ok: boolean): void } => {
+      let inFlight = false;
+      let settleReload: (ok: boolean) => void = () => {
+        throw new Error("the reload never started");
+      };
+      vi.spyOn(r, "reloading").mockImplementation(() => inFlight);
+      const reload = vi.spyOn(r, "reloadFromServer").mockImplementation(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            inFlight = true;
+            settleReload = (ok) => {
+              inFlight = false;
+              if (ok) resolve();
+              else reject(new AppError("sync.offline", "The server could not be reached."));
+            };
+          }),
+      );
+      return { reload, finish: (ok) => settleReload(ok) };
+    };
+
+    it.each([true, false])("from the index banner: Try again is disabled while a confirmed reload runs, and enabled after (succeeds: %s)", async (ok) => {
+      const w = await spaceWorld({ answers: { alert_ask: () => "confirm" } });
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r } = await mounted(w);
+      const { reload, finish } = reloadHeld(r);
+      expect(within(bannerOf()).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", false);
+      await click(within(bannerOf()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(reload.mock.calls).toEqual([[IX]]);
+      expect(within(bannerOf()).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", true);
+      act(() => finish(ok));
+      await settle();
+      expect(within(bannerOf()).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", false);
+    });
+
+    it("from the Sync dialog: Try again is disabled while a confirmed reload runs, and enabled after", async () => {
+      const w = await spaceWorld({ answers: { alert_ask: () => "confirm" } });
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r } = await mounted(w);
+      const { reload, finish } = reloadHeld(r);
+      await openChip();
+      expect(within(dialog()).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", false);
+      await click(within(dialog()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(reload.mock.calls).toEqual([[IX]]);
+      expect(within(dialog()).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", true);
+      act(() => finish(true));
+      await settle();
+      expect(within(dialog()).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", false);
+    });
+
+    it("on macOS the banner's and the Sync dialog's Try again stay enabled while a reload runs", async () => {
+      const w = await spaceWorld();
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      const { r } = await mounted(w);
+      vi.spyOn(r, "reloading").mockReturnValue(true);
+      await click(within(bannerOf()).getByRole("button", { name: RELOAD }));
+      expect(screen.getByRole("dialog", { name: RELOAD })).toBeTruthy();
+      expect(within(bannerOf()).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", false);
+      await click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Cancel" }));
+      await openChip();
+      expect(within(dialog()).getByRole("button", { name: "Try again" })).toHaveProperty("disabled", false);
+    });
+
+    const damagedPlanOnIpad = async (answers: Record<string, Answer>): Promise<{ reload: MockInstance<Registry["reloadFromServer"]>; failed(): HTMLElement }> => {
+      const w = await spaceWorld({ answers });
+      w.mem.fail("store_load", "P", { code: "store.corrupt", message: "The plan file is damaged at record 12." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await settle();
+      await click(within(entry("Launch")).getByRole("button", { name: "Launch" }));
+      const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      const failed = (): HTMLElement => {
+        const view = document.querySelector(".plan-failed");
+        if (!(view instanceof HTMLElement)) throw new Error("no PlanFailed");
+        return view;
+      };
+      return { reload, failed };
+    };
+
+    it("from a damaged plan: Cancel reloads nothing and Load again is enabled again", async () => {
+      const { reload, failed } = await damagedPlanOnIpad({ alert_ask: () => "cancel" });
+      await click(within(failed()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toEqual([RELOAD_ASK]);
+      expect(reload).not.toHaveBeenCalled();
+      expect(toasts()).toEqual([]);
+      expect(within(failed()).getByRole("button", { name: RELOAD })).toHaveProperty("disabled", false);
+    });
+
+    it("from a damaged plan: a failed alert shows its error and reloads nothing", async () => {
+      const { reload, failed } = await damagedPlanOnIpad({
+        alert_ask: () => {
+          throw { code: "alert.busy", message: "The alert cannot be shown: something else is already presented over the window." };
+        },
+      });
+      await click(within(failed()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(reload).not.toHaveBeenCalled();
+      expect(badToasts()).toEqual(["The alert cannot be shown: something else is already presented over the window."]);
+    });
+
+    it("from a damaged plan: Load again is disabled while the alert is up", async () => {
+      const { reload, failed } = await damagedPlanOnIpad({});
+      const alert = hold("alert_ask");
+      await click(within(failed()).getByRole("button", { name: RELOAD }));
+      const load = within(failed()).getByRole("button", { name: RELOAD });
+      expect(load).toHaveProperty("disabled", true);
+      await click(load);
+      expect(asks()).toHaveLength(1);
+      act(() => alert.resolve("confirm"));
+      await settle();
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("from a damaged plan: a Load again answered after the plan's failure stopped offering it reloads nothing", async () => {
+      const w = await spaceWorld();
+      w.mem.fail("store_load", "P", { code: "store.corrupt", message: "The plan file is damaged at record 12." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await settle();
+      await click(within(entry("Launch")).getByRole("button", { name: "Launch" }));
+      const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      const failed = (): HTMLElement => {
+        const view = document.querySelector(".plan-failed");
+        if (!(view instanceof HTMLElement)) throw new Error("no PlanFailed");
+        return view;
+      };
+      const alert = hold("alert_ask");
+      await click(within(failed()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toEqual([RELOAD_ASK]);
+      const view = failed();
+      w.mem.fail("store_load", "P", { code: "store.io", message: "The plan file could not be read." });
+      await act(async () => {
+        await r.retryPlan("P");
+      });
+      await settle();
+      expect(failed()).toBe(view);
+      expect(within(view).queryByRole("button", { name: RELOAD })).toBeNull();
+      expect(within(view).getByRole("button", { name: "Try again" })).toBeTruthy();
+      act(() => alert.resolve("confirm"));
+      await settle();
+      expect(reload).not.toHaveBeenCalled();
+      expect(badToasts()).toEqual([STALE_CONFIRM]);
+    });
+
+    it("from a damaged plan: a Load again answered after the selection moved to another damaged plan reloads nothing", async () => {
+      const w = syncWorld({ names: { P: "Launch", Q: "Quill" } });
+      seedIndex(w.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device")]);
+      seedIndex(w.mem, IX, [ixAct("s-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("s-P", ["s-n"], [ip("P", false)]), ixAct("s-Q", ["s-P"], [ip("Q", false)])]);
+      seedPlan(w.mem, "P", "Launch");
+      seedPlan(w.mem, "Q", "Quill");
+      w.mem.fail("store_load", "P", { code: "store.corrupt", message: "The plan file is damaged at record 12." });
+      w.mem.fail("store_load", "Q", { code: "store.corrupt", message: "The plan file is damaged at record 7." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await settle();
+      await click(within(entry("Launch")).getByRole("button", { name: "Launch" }));
+      expect([r.failures().get("P")?.code, r.failures().get("Q")?.code]).toEqual(["store.corrupt", "store.corrupt"]);
+      const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      const failed = (): HTMLElement => {
+        const view = document.querySelector(".plan-failed");
+        if (!(view instanceof HTMLElement)) throw new Error("no PlanFailed");
+        return view;
+      };
+      const alert = hold("alert_ask");
+      await click(within(failed()).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toEqual([RELOAD_ASK]);
+      const view = failed();
+      expect(within(view).getByText("The plan file is damaged at record 12.")).toBeTruthy();
+      act(() => remoteIndex(prov(f, IX), "s-Pt", [ip("P", true)]));
+      await settle();
+      expect(uiNow()[0].plan).toBe("Q");
+      expect(failed()).toBe(view);
+      expect(within(view).getByText("The plan file is damaged at record 7.")).toBeTruthy();
+      act(() => alert.resolve("confirm"));
+      await settle();
+      expect(reload).not.toHaveBeenCalled();
+      expect(badToasts()).toEqual([STALE_CONFIRM]);
+    });
+
+    it("from a damaged plan: confirming reloads that plan once", async () => {
+      const w = await spaceWorld({ answers: { alert_ask: () => "confirm" } });
+      w.mem.fail("store_load", "P", { code: "store.corrupt", message: "The plan file is damaged at record 12." });
+      setPlatform(IPAD);
+      tauri.answers.device_info = () => ({ deviceId: "dev-A", platform: "ios" });
+      const { r, f } = await mounted(w);
+      syncAll(f);
+      await settle();
+      await click(within(entry("Launch")).getByRole("button", { name: "Launch" }));
+      const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
+      const failed = document.querySelector(".plan-failed");
+      if (!(failed instanceof HTMLElement)) throw new Error("no PlanFailed");
+      await click(within(failed).getByRole("button", { name: RELOAD }));
+      await settle();
+      expect(asks()).toEqual([RELOAD_ASK]);
+      expect(screen.queryByRole("dialog", { name: RELOAD })).toBeNull();
+      expect(reload.mock.calls).toEqual([["P"]]);
+    });
+  });
+
+  describe("on macOS Load again keeps its HTML confirmation and never calls alert_ask", () => {
+    const noAsks = (): void => expect(tauri.calls.filter((c) => c.cmd === "alert_ask")).toEqual([]);
+
+    it("from the Sync dialog", async () => {
+      const w = await spaceWorld({ answers: { alert_ask: () => "confirm" } });
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      await mounted(w);
+      await openChip();
+      await click(within(dialog()).getByRole("button", { name: RELOAD }));
+      expect(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" })).toBeTruthy();
+      noAsks();
+    });
+
+    it("from the index banner", async () => {
+      const w = await spaceWorld({ answers: { alert_ask: () => "confirm" } });
+      w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+      await mounted(w);
+      const banner = screen.getByText("Bad record in seg-0.log.").closest(".banner");
+      if (!(banner instanceof HTMLElement)) throw new Error("no index banner");
+      await click(within(banner).getByRole("button", { name: RELOAD }));
+      expect(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" })).toBeTruthy();
+      noAsks();
+    });
+
+    it("from a damaged plan", async () => {
+      const w = await spaceWorld({ answers: { alert_ask: () => "confirm" } });
+      w.mem.fail("store_load", "P", { code: "store.corrupt", message: "The plan file is damaged at record 12." });
+      const { f } = await mounted(w);
+      syncAll(f);
+      await settle();
+      await click(within(entry("Launch")).getByRole("button", { name: "Launch" }));
+      const failed = document.querySelector(".plan-failed");
+      if (!(failed instanceof HTMLElement)) throw new Error("no PlanFailed");
+      await click(within(failed).getByRole("button", { name: RELOAD }));
+      expect(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" })).toBeTruthy();
+      noAsks();
+    });
   });
 
   it.each([

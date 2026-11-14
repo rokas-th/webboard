@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
 import type { ItemId, PlanId } from "../../domain/model";
+import { usesNativeAlert } from "../../services/alert";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
@@ -315,6 +316,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
             onOpen={openPlan}
             onTrash={trash}
             onPurge={setPurging}
+            asking={usesNativeAlert() && purging !== null}
             onMoveAll={moveAll}
             onSync={openSync}
             onClose={closePlans}

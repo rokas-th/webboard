@@ -1,3 +1,4 @@
+import { askNative, type NativeAsk } from "../services/alert";
 import { AppError, call, callBytes, callName } from "../services/ipc";
 import { unframe } from "../store/file";
 
@@ -71,6 +72,16 @@ export async function probeOpen(): Promise<ProbeEntry> {
     return ["files", { opened: name, read: bytes.length }];
   } catch (e) {
     return ["files", failure(e)];
+  }
+}
+
+export const PROBE_ALERT: NativeAsk = { title: "WebBoard probe alert", message: "Nothing is changed. Tap either button.", confirm: { label: "Confirm", destructive: false }, cancel: "Cancel" };
+
+export async function probeAlert(): Promise<ProbeEntry> {
+  try {
+    return ["alert", { answer: await askNative(PROBE_ALERT) }];
+  } catch (e) {
+    return ["alert", failure(e)];
   }
 }
 

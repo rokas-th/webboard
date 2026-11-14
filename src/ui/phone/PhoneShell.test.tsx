@@ -33,7 +33,7 @@ import { revertText } from "../panel/historyText";
 import type { HistoryEntry } from "../../store/session";
 import { SyncManager, type SyncState } from "../../sync/manager";
 import { fakeFactory, type FakeFactory, type FakeProvider } from "../../test/fakeProvider";
-import { argsOf, fail, IX, ip, ixAct, NOW, own, RESET_HINT, seedIndex, seedPlan, seedSpace, SPACE, syncWorld, TODAY, type SyncWorld } from "../../test/syncWorld";
+import { argsOf, fail, IX, ip, ixAct, NOW, own, remoteIndex, RESET_HINT, seedIndex, seedPlan, seedSpace, SPACE, syncWorld, TODAY, type SyncWorld } from "../../test/syncWorld";
 import type { Answer } from "../../test/tauriMock";
 import { NO_REGION } from "./PhoneStatus";
 import { paintNative } from "../../theme/apply";
@@ -1991,6 +1991,13 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
       });
     });
   };
+  const damageIndex = async (w: SyncWorld, r: Registry, f: FakeFactory): Promise<void> => {
+    w.mem.fail("store_append", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
+    act(() => remoteIndex(prov(f, IX), "s-bad", [own("dn:dev-B", "Phone")]));
+    await deep();
+    w.mem.recover("store_append", IX);
+    expect(r.indexErrorOf(IX)?.code).toBe("store.corrupt");
+  };
   const stubState = (s: SyncState): void => {
     vi.spyOn(SyncManager.prototype, "state").mockReturnValue(s);
   };
@@ -2414,6 +2421,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     syncAll(f);
     await deep();
     await openNamed("Launch");
+    await damageIndex(w, r, f);
     await act(async () => r.reloadFromServer(IX));
     await deep();
     listShows("Alpha");
@@ -2433,6 +2441,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     await deep();
     listShows("Launch");
     expect(r.plans().map((l) => [l.id, l.space])).toEqual([["P", "sp000000000"]]);
+    await damageIndex(w, r, f);
     await act(async () => r.reloadFromServer(IX));
     await deep();
     expect(r.plans()).toEqual([]);

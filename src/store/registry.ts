@@ -54,6 +54,7 @@ export interface GoneNotice {
 
 const READ_ONLY = "This device was removed from the space; its plans are read-only.";
 const NOT_TRASHED = "Move the plan to the Trash first.";
+export const NOT_DAMAGED = "Nothing was loaded again: it is no longer damaged on this device.";
 const ALREADY_GONE = "This plan was already deleted forever.";
 const CONNECT = "Connect to the space to delete this plan forever.";
 const MOVE_READ_ONLY = "This device was removed from the space. Join again to move plans there.";
@@ -1087,6 +1088,8 @@ export class Registry {
     if (docId === LOCAL_INDEX) throw new Error("The local plan list is not loaded from the server");
     const inFlight = this.reloads.get(docId);
     if (inFlight !== undefined) return inFlight;
+    const failure = docId.startsWith(SPACE_PREFIX) ? this.indexErrorOf(docId) : this.failed.get(docId);
+    if (failure?.code !== "store.corrupt") throw new Refused(NOT_DAMAGED);
     const reload = Promise.resolve().then(() => this.reload(docId));
     this.reloads.set(docId, reload);
     this.emit();

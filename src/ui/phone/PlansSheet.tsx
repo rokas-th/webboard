@@ -109,6 +109,7 @@ export function PlansSheet(p: {
   onOpen(id: PlanId): void;
   onTrash(id: PlanId): void;
   onPurge(id: PlanId): void;
+  asking?: boolean;
   onMoveAll(ids: readonly PlanId[]): void;
   onSync(pane: SyncPane): void;
   onClose(): void;
@@ -157,10 +158,10 @@ export function PlansSheet(p: {
                 <li key={l.id} className="entry">
                   <span className="entry-name">{l.name ?? "Loading…"}</span>
                   <div className="entry-actions">
-                    <button type="button" className="button-small" disabled={locked(l)} onClick={() => restorePlan(registry, l.id)}>
+                    <button type="button" className="button-small" disabled={locked(l) || p.asking === true} onClick={() => restorePlan(registry, l.id)}>
                       Restore
                     </button>
-                    <button type="button" className="button-small button-danger" disabled={locked(l)} onClick={() => p.onPurge(l.id)}>
+                    <button type="button" className="button-small button-danger" disabled={locked(l) || p.asking === true} onClick={() => p.onPurge(l.id)}>
                       Delete forever
                     </button>
                   </div>

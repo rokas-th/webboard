@@ -34,6 +34,7 @@ interface SidebarProps {
   onTrash(id: PlanId): void;
   onRestore(id: PlanId): void;
   onPurge(id: PlanId): void;
+  asking?: boolean;
   onMove(id: PlanId): void;
   onMoveAll(ids: readonly PlanId[]): void;
 }
@@ -95,10 +96,10 @@ export function Sidebar(p: SidebarProps) {
               <li key={l.id} className="entry">
                 <span className="entry-name">{l.name ?? "Loading…"}</span>
                 <div className="entry-actions">
-                  <button type="button" className="button-small" disabled={locked(l)} onClick={() => p.onRestore(l.id)}>
+                  <button type="button" className="button-small" disabled={locked(l) || p.asking === true} onClick={() => p.onRestore(l.id)}>
                     Restore
                   </button>
-                  <button type="button" className="button-small button-danger entry-more" disabled={locked(l)} onClick={() => p.onPurge(l.id)}>
+                  <button type="button" className="button-small button-danger entry-more" disabled={locked(l) || p.asking === true} onClick={() => p.onPurge(l.id)}>
                     Delete forever
                   </button>
                 </div>

@@ -24,7 +24,7 @@ import { buildImport } from "./file";
 import { readActions } from "./read-actions";
 import { IndexDoc } from "./index-doc";
 import { openPersisted, type PersistedDoc } from "./persist";
-import { defaultDeviceName, Registry, RegistryClosed } from "./registry";
+import { defaultDeviceName, NOT_DAMAGED, Registry, RegistryClosed } from "./registry";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 vi.mock("./persist", async (importOriginal) => {
@@ -1127,6 +1127,80 @@ describe("Registry: reloadFromServer", () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
+  const refusedNotDamaged = async (r: Registry, doc: string): Promise<void> => {
+    const cb = vi.fn();
+    r.subscribe(cb);
+    const from = tauri.calls.length;
+    const err = await rejection(r.reloadFromServer(doc));
+    expect(err).toBeInstanceOf(Refused);
+    expect(refusedOf(err).message).toBe(NOT_DAMAGED);
+    expect(callsOf(from, "store_set_aside")).toHaveLength(0);
+    expect(r.reloading(doc)).toBe(false);
+    expect(cb).not.toHaveBeenCalled();
+  };
+
+  it("reload refused for a plan that is not damaged", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing());
+    seedIndex(e.mem, "ix-S1", [ixAct("s1", [], [ip("P", false)])]);
+    seedPlan(e.mem, "P", "Alpha");
+    const r = await open();
+    await r.doc("P");
+    await flush();
+    expect(r.failures().has("P")).toBe(false);
+    await refusedNotDamaged(r, "P");
+    expect((await r.session("P")).view().plan.name).toBe("Alpha");
+  });
+
+  it("reload refused for a plan whose failure is not damage", async () => {
+    const e = corruptPlan();
+    e.mem.fail("store_load", "P", { code: "store.io", message: "Disk full." });
+    const r = await open();
+    expect(codeOf(await rejection(r.doc("P")))).toBe("store.io");
+    expect(r.failures().get("P")?.code).toBe("store.io");
+    await refusedNotDamaged(r, "P");
+    expect(r.failures().get("P")?.code).toBe("store.io");
+  });
+
+  it("reload refused for a space index that is not damaged", async () => {
+    const e = env();
+    seedIndex(e.mem, "local", listing());
+    seedIndex(e.mem, "ix-S1", [ixAct("s1", [], [ip("P", false)])]);
+    const r = await open();
+    await flush();
+    expect(r.indexErrorOf("ix-S1")).toBeNull();
+    await refusedNotDamaged(r, "ix-S1");
+  });
+
+  it("a second reload joins the one in flight after the reload cleared the failure", async () => {
+    const e = corruptPlan();
+    const r = await open();
+    await rejection(r.doc("P"));
+    e.mem.recover("store_load", "P");
+    const from = tauri.calls.length;
+    const heldLoad = hold("store_load");
+    const first = r.reloadFromServer("P");
+    await flush();
+    expect(callsOf(from, "store_set_aside").map((c) => c.args)).toEqual([{ doc: "P" }]);
+    expect(r.failures().has("P")).toBe(false);
+    expect(r.reloading("P")).toBe(true);
+    const second = r.reloadFromServer("P");
+    const settled: string[] = [];
+    void second.then(
+      () => settled.push("second"),
+      () => settled.push("second refused"),
+    );
+    await flush();
+    expect(settled).toEqual([]);
+    heldLoad.resolve(e.mem.answers.store_load({ doc: "P" }));
+    await first;
+    await second;
+    expect(settled).toEqual(["second"]);
+    expect(callsOf(from, "store_set_aside")).toHaveLength(1);
+    expect(loadsOf(from, "P")).toBe(1);
+    expect(r.reloading("P")).toBe(false);
+  });
+
   it("reload set-aside fails", async () => {
     const e = corruptPlan();
     const r = await open();
@@ -1164,6 +1238,20 @@ describe("Registry: reloadFromServer", () => {
 
 describe("Registry: lifecycle and failures", () => {
   const REPAIRED = "The last change to the plan list before WebBoard closed was not saved.";
+  const DAMAGED = { code: "store.corrupt", message: "P: a record is damaged" };
+
+  const damaged = async (e: Env, r: Registry): Promise<void> => {
+    expect(codeOf(await rejection(r.doc("P")))).toBe("store.corrupt");
+    e.mem.recover("store_load", "P");
+    expect(r.failures().get("P")?.code).toBe("store.corrupt");
+    vi.mocked(openPersisted).mockClear();
+  };
+
+  const damagedThenLoaded = async (e: Env, r: Registry): Promise<void> => {
+    await damaged(e, r);
+    await r.doc("P");
+    expect(r.failures().get("P")?.code).toBe("store.corrupt");
+  };
 
   it("index repair notice from a space index", async () => {
     const e = env();
@@ -1277,7 +1365,9 @@ describe("Registry: lifecycle and failures", () => {
     const e = env();
     seedIndex(e.mem, "local", listing("P"));
     seedPlan(e.mem, "P", "Alpha");
+    e.mem.fail("store_load", "P", DAMAGED);
     const r = await open();
+    await damagedThenLoaded(e, r);
     await r.warm();
     e.mem.fail("store_compact", "P", { code: "store.io", message: "Disk full." });
     const from = tauri.calls.length;
@@ -1359,7 +1449,9 @@ describe("Registry: lifecycle and failures", () => {
     const e = env();
     seedIndex(e.mem, "local", listing("P"));
     const plan = seedPlan(e.mem, "P", "Alpha");
+    e.mem.fail("store_load", "P", DAMAGED);
     const r = await open();
+    await damaged(e, r);
     const held = hold("store_load");
     const stale = r.doc("P");
     await flush();
@@ -1384,7 +1476,9 @@ describe("Registry: lifecycle and failures", () => {
     const e = env();
     seedIndex(e.mem, "local", listing("P"));
     const plan = seedPlan(e.mem, "P", "Alpha");
+    e.mem.fail("store_load", "P", DAMAGED);
     const r = await open();
+    await damaged(e, r);
     const held = hold("store_load");
     const stale = r.doc("P");
     await flush();
@@ -1407,7 +1501,9 @@ describe("Registry: lifecycle and failures", () => {
     const e = env();
     seedIndex(e.mem, "local", listing("P"));
     seedPlan(e.mem, "P", "Alpha");
+    e.mem.fail("store_load", "P", DAMAGED);
     const r = await open();
+    await damaged(e, r);
     const heldLoad = hold("store_load");
     const stale = r.doc("P");
     await flush();
@@ -1437,8 +1533,9 @@ describe("Registry: lifecycle and failures", () => {
     const e = env();
     seedIndex(e.mem, "local", listing("P"));
     seedPlan(e.mem, "P", "Alpha");
+    e.mem.fail("store_load", "P", DAMAGED);
     const r = await open();
-    await r.doc("P");
+    await damagedThenLoaded(e, r);
     const from = tauri.calls.length;
     const heldAside = hold("store_set_aside");
     const first = r.reloadFromServer("P");
@@ -1458,8 +1555,9 @@ describe("Registry: lifecycle and failures", () => {
     const e = env();
     seedIndex(e.mem, "local", listing("P"));
     seedPlan(e.mem, "P", "Alpha");
+    e.mem.fail("store_load", "P", DAMAGED);
     const r = await open();
-    await r.doc("P");
+    await damagedThenLoaded(e, r);
     const from = tauri.calls.length;
     const heldAside = hold("store_set_aside");
     const reloading = r.reloadFromServer("P");

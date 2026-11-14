@@ -9,7 +9,7 @@ import { IPAD, LINUX, setPlatform } from "../../test/platform";
 import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { shellFor } from "../../test/shell";
-import { resetTauri } from "../../test/tauriMock";
+import { hold, resetTauri, tauri } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { PLACE_KEY } from "../state";
@@ -363,7 +363,7 @@ describe("the plan list overlay on an iPad at 700-1179", () => {
     expect(main().hasAttribute("inert")).toBe(true);
   });
 
-  it("opens Delete forever's dialog above the overlay and stays open behind it", async () => {
+  it("asks Delete forever through the native alert over the overlay, which stays open behind it", async () => {
     const t = await made();
     const id = t.session.view().plan.id;
     const plans: PlanListing[] = [
@@ -372,12 +372,19 @@ describe("the plan list overlay on an iPad at 700-1179", () => {
     ];
     await shown(t, { ...ON_IPAD, plans: () => plans, purgeRefusal: () => null });
     fireEvent.click(toggle());
-    fireEvent.click(within(opened()).getByRole("button", { name: "Delete forever" }));
-    const dialogs = screen.getAllByRole("dialog");
-    expect(dialogs.length).toBe(2);
-    expect(dialogs[0]).toBe(opened());
-    press(dialogs[1], "Escape");
+    const alert = hold("alert_ask");
+    const purge = within(opened()).getByRole("button", { name: "Delete forever" });
+    fireEvent.click(purge);
+    await settle();
+    expect(screen.getAllByRole("dialog")).toEqual([opened()]);
+    expect(tauri.calls.filter((c) => c.cmd === "alert_ask").map((c) => c.args)).toEqual([
+      { ask: { title: "Delete “Other” forever?", message: "“Other” is erased from this device. This cannot be undone.", confirm: { label: "Delete forever", destructive: true }, cancel: "Cancel" } },
+    ]);
+    expect(within(opened()).getByRole("button", { name: "Delete forever" })).toHaveProperty("disabled", true);
+    alert.resolve("cancel");
+    await settle();
     expect(overlay()).not.toBeNull();
+    expect(within(opened()).getByRole("button", { name: "Delete forever" })).toHaveProperty("disabled", false);
   });
 
   it("cycles Tab through the panel and the toolbar button", async () => {

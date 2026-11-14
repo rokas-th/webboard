@@ -1,6 +1,7 @@
 import { useCallback, useContext, useEffect, useReducer, useState, type ReactNode } from "react";
 import type { ItemId } from "../../domain/model";
 import { sideText } from "../../plan/choices";
+import { usesNativeAlert } from "../../services/alert";
 import type { Clock } from "../../services/clock";
 import { noticeText, type HolidayNotice } from "../../services/holidays";
 import type { PlanView } from "../../store/doc";
@@ -54,9 +55,9 @@ const line = (key: string, text: string, tone: Tone, actions: ReactNode = null, 
   actions,
 });
 
-function Act(p: { label: string; onPress(): void }) {
+function Act(p: { label: string; disabled?: boolean; onPress(): void }) {
   return (
-    <button type="button" className="button-small" onClick={p.onPress}>
+    <button type="button" className="button-small" disabled={p.disabled === true} onClick={p.onPress}>
       {p.label}
     </button>
   );
@@ -110,12 +111,15 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
     return [];
   };
 
+  const index = registry.indexError();
+  const indexDoc = registry.indexErrorDoc();
+  const space = index !== null && index.code === "store.corrupt" && indexDoc !== null && indexDoc.startsWith(SPACE_PREFIX) ? indexDoc : null;
+  const spaceReadOnly = registry.spaceReadOnly();
+  const offer = space !== null && !spaceReadOnly ? space : null;
+
   const registryLines = (): Line[] => {
-    const index = registry.indexError();
-    const doc = registry.indexErrorDoc();
-    const space = index !== null && index.code === "store.corrupt" && doc !== null && doc.startsWith(SPACE_PREFIX) ? doc : null;
-    const spaceReadOnly = registry.spaceReadOnly();
     const settings = registry.settingsError();
+    const asking = usesNativeAlert() && offer !== null && (confirm !== null || registry.reloading(offer));
     return [
       ...(index === null
         ? []
@@ -125,8 +129,8 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
               index.message,
               "bad",
               <>
-                <Act label="Try again" onPress={() => void registry.retryIndex()} />
-                {space !== null && !spaceReadOnly && <ReloadButton enabled={reloadable} small onOpen={() => setConfirm(space)} />}
+                <Act label="Try again" disabled={asking} onPress={() => void registry.retryIndex()} />
+                {offer !== null && <ReloadButton enabled={reloadable} small asking={asking} onOpen={() => setConfirm(offer)} />}
               </>,
               space !== null && spaceReadOnly ? FILES_STAY : null,
             ),
@@ -215,7 +219,7 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
   const local = registry.device.name;
   const sheets = (
     <>
-      {open && confirm === null && !showChoices && (
+      {open && (confirm === null || usesNativeAlert()) && !showChoices && (
         <Sheet open title="Status" onClose={() => setOpen(false)}>
           <ul className="status-lines">
             {lines.map((l) => (
@@ -250,21 +254,23 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
           </ul>
         </Sheet>
       )}
-      {confirm !== null && <ReloadConfirm registry={registry} docId={confirm} frame="sheet" onClose={closeConfirm} />}
+      {confirm !== null && <ReloadConfirm registry={registry} docId={confirm} offered={offer === confirm} frame="sheet" onClose={closeConfirm} />}
       {review !== null && session !== null && (
         <CalendarSheet session={session} registry={registry} clock={p.clock} review={review} onClose={() => setReview(null)} />
       )}
     </>
   );
-  if (first === undefined) return confirm === null && review === null ? null : sheets;
+  if (first === undefined && confirm === null && review === null) return null;
   return (
     <>
-      <div className="phone-status">
-        <button type="button" className={`status-strip ${first.tone}`} aria-haspopup="dialog" onClick={() => setOpen(true)}>
-          <span className="status-text">{first.text}</span>
-          {lines.length > 1 && <span className="status-more">{` · +${lines.length - 1} more`}</span>}
-        </button>
-      </div>
+      {first !== undefined && (
+        <div className="phone-status">
+          <button type="button" className={`status-strip ${first.tone}`} aria-haspopup="dialog" onClick={() => setOpen(true)}>
+            <span className="status-text">{first.text}</span>
+            {lines.length > 1 && <span className="status-more">{` · +${lines.length - 1} more`}</span>}
+          </button>
+        </div>
+      )}
       {sheets}
     </>
   );

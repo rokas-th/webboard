@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { Refused } from "../../actions/intents";
 import type { ItemId, PlanId } from "../../domain/model";
+import { usesNativeAlert } from "../../services/alert";
 import type { Clock } from "../../services/clock";
 import { AppError } from "../../services/ipc";
 import { SPACE_PREFIX } from "../../store/plan-id";
@@ -86,14 +87,16 @@ function IndexBanner(p: { registry: Registry; error: AppError }) {
   const doc = p.registry.indexErrorDoc();
   const space = p.error.code === "store.corrupt" && doc !== null && doc.startsWith(SPACE_PREFIX) ? doc : null;
   const readOnly = p.registry.spaceReadOnly();
+  const offer = space !== null && !readOnly ? space : null;
+  const asking = usesNativeAlert() && offer !== null && (confirm !== null || p.registry.reloading(offer));
   return (
     <Banner message={p.error.message}>
-      <button type="button" className="button-small" onClick={() => void p.registry.retryIndex()}>
+      <button type="button" className="button-small" disabled={asking} onClick={() => void p.registry.retryIndex()}>
         Try again
       </button>
-      {space !== null && !readOnly && <ReloadButton enabled={reloadable} small onOpen={() => setConfirm(space)} />}
+      {offer !== null && <ReloadButton enabled={reloadable} small asking={asking} onOpen={() => setConfirm(offer)} />}
       {space !== null && readOnly && <span className="banner-note">{FILES_STAY}</span>}
-      {confirm !== null && <ReloadConfirm registry={p.registry} docId={confirm} onClose={() => setConfirm(null)} />}
+      {confirm !== null && <ReloadConfirm registry={p.registry} docId={confirm} offered={offer === confirm} onClose={() => setConfirm(null)} />}
     </Banner>
   );
 }
@@ -413,6 +416,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
       onTrash={(id) => void trashOwn(id)}
       onRestore={(id) => restorePlan(registry, id)}
       onPurge={setPurging}
+      asking={usesNativeAlert() && purging !== null}
       onMove={moveToSpace}
       onMoveAll={moveAll}
     />

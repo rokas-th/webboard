@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { framed } from "../test/fixtures/framed";
 import { resetTauri, tauri } from "../test/tauriMock";
-import { failure, PROBE_BYTES, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine } from "./probes";
+import { IPAD, setPlatform } from "../test/platform";
+import { failure, PROBE_ALERT, PROBE_BYTES, probeAlert, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine } from "./probes";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 
@@ -132,5 +133,29 @@ describe("failure", () => {
   it("reports a rejection that is not an AppError as thrown", () => {
     expect(failure(new TypeError("x"))).toEqual({ thrown: "TypeError: x" });
     expect(failure("s")).toEqual({ thrown: "s" });
+  });
+});
+
+describe("probeAlert", () => {
+  it("asks UIKit with the probe title and message and reports the answer", async () => {
+    setPlatform(IPAD);
+    tauri.answers.alert_ask = () => "cancel";
+    await expect(probeAlert()).resolves.toEqual(["alert", { answer: "cancel" }]);
+    expect(tauri.calls).toEqual([
+      {
+        cmd: "alert_ask",
+        args: { ask: { title: "WebBoard probe alert", message: "Nothing is changed. Tap either button.", confirm: { label: "Confirm", destructive: false }, cancel: "Cancel" } },
+        options: undefined,
+      },
+    ]);
+    expect(PROBE_ALERT.title).toBe("WebBoard probe alert");
+  });
+
+  it("reports a failed alert as its error, not as an answer", async () => {
+    setPlatform(IPAD);
+    tauri.answers.alert_ask = () => {
+      throw { code: "alert.busy", message: "busy" };
+    };
+    await expect(probeAlert()).resolves.toEqual(["alert", { error: "alert.busy", message: "busy" }]);
   });
 });

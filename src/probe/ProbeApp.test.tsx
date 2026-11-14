@@ -82,6 +82,37 @@ describe("ProbeApp", () => {
     expect(logged()[0]).toMatch(/^ready \{"userAgent":.*"platform":\{"os":"ios","idiom":"pad"\}\}$/);
   });
 
+  it("on iOS asks the probe alert by itself and logs its answer", async () => {
+    setPlatform({ os: "ios", idiom: "pad" });
+    tauri.answers.alert_ask = () => "confirm";
+    mount();
+    await settle();
+    expect(tauri.calls.filter((c) => c.cmd === "alert_ask").map((c) => c.args)).toEqual([
+      { ask: { title: "WebBoard probe alert", message: "Nothing is changed. Tap either button.", confirm: { label: "Confirm", destructive: false }, cancel: "Cancel" } },
+    ]);
+    expect(logged()).toContain('alert {"answer":"confirm"}');
+  });
+
+  it("on iOS logs a failed probe alert as a bad line", async () => {
+    setPlatform({ os: "ios", idiom: "phone" });
+    tauri.answers.alert_ask = () => {
+      throw { code: "alert.no_controller", message: "no controller" };
+    };
+    mount();
+    await settle();
+    const line = 'alert {"error":"alert.no_controller","message":"no controller"}';
+    expect(screen.getByText(line)).toHaveProperty("className", "probe-bad");
+    expect(logged()).toContain(line);
+  });
+
+  it("does not ask the probe alert off iOS", async () => {
+    tauri.answers.alert_ask = () => "confirm";
+    mount();
+    await settle();
+    expect(tauri.calls.filter((c) => c.cmd === "alert_ask")).toEqual([]);
+    expect(logged().filter((l) => l.startsWith("alert "))).toEqual([]);
+  });
+
   it("logs a keydown with its modifiers", async () => {
     mount();
     await settle();
