@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { failure, keyData, probeAlert, probeAppearance, probeHaptic, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine, windowData, type ProbeData, type ProbeEntry } from "./probes";
+import { failure, keyData, probeAlert, probeAppearance, probeHaptic, probeHolidays, probeLine, probeMenu, probeOpen, probePaths, probeSave, sendLine, windowData, type ProbeData, type ProbeEntry } from "./probes";
 import "./probe.css";
 import { readPlatform } from "../platform";
 
@@ -41,6 +41,7 @@ function useProbeLog(): {
   lines: readonly Shown[];
   log: (name: string, data: ProbeData) => void;
   show: (line: string, bad: boolean) => void;
+  say: (line: string) => void;
 } {
   const [lines, setLines] = useState<readonly Shown[]>([]);
   const chain = useRef<Promise<void>>(Promise.resolve());
@@ -50,15 +51,16 @@ function useProbeLog(): {
     const n = count.current;
     setLines((prev) => [{ n, line, bad }, ...prev].slice(0, 200));
   }, []);
-  const log = useCallback(
-    (name: string, data: ProbeData) => {
-      const line = probeLine(name, data);
-      show(line, isFailure(data));
+  const forward = useCallback(
+    (line: string, bad: boolean) => {
+      show(line, bad);
       chain.current = chain.current.then(() => sendLine(line).catch((e: unknown) => show(probeLine("probe_log", failure(e)), true)));
     },
     [show],
   );
-  return { lines, log, show };
+  const log = useCallback((name: string, data: ProbeData) => forward(probeLine(name, data), isFailure(data)), [forward]);
+  const say = useCallback((line: string) => forward(line, false), [forward]);
+  return { lines, log, show, say };
 }
 
 function TouchBar({ bar, label, log }: { bar: Bar; label: string; log: (name: string, data: ProbeData) => void }) {
@@ -147,7 +149,7 @@ function TouchBar({ bar, label, log }: { bar: Bar; label: string; log: (name: st
 }
 
 export default function ProbeApp() {
-  const { lines, log, show } = useProbeLog();
+  const { lines, log, show, say } = useProbeLog();
   const insetRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   const shippedViewport = useRef<string | null>(null);
@@ -164,6 +166,19 @@ export default function ProbeApp() {
     [log, show],
   );
 
+  const runMenu = useCallback(
+    (): Promise<void> =>
+      probeMenu(say)
+        .then((entry) => {
+          if (entry !== null) log(...entry);
+        })
+        .catch((e: unknown) => {
+          show(probeLine("probe", { thrown: e instanceof Error ? e.message : String(e) }), true);
+          console.error(e);
+        }),
+    [log, say, show],
+  );
+
   useEffect(() => {
     const insetEl = insetRef.current;
     if (insetEl === null) throw new Error("the probe's inset element is not mounted");
@@ -174,9 +189,10 @@ export default function ProbeApp() {
     if (readPlatform(window).os === "ios") {
       void run(probeAppearance)
         .then(() => run(probeHaptic))
+        .then(runMenu)
         .then(() => run(probeAlert));
     }
-  }, [log, run]);
+  }, [log, run, runMenu]);
 
   useEffect(() => {
     const insetEl = insetRef.current;

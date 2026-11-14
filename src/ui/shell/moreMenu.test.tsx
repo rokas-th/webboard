@@ -2,19 +2,21 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
-import { IPAD, MAC, setPlatform } from "../../test/platform";
+import { IPAD, MAC, setPlatform, stubVisualViewport } from "../../test/platform";
 import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { shellFor } from "../../test/shell";
-import { resetTauri } from "../../test/tauriMock";
+import { emitFromRust, resetTauri, tauri } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { PLACE_KEY } from "../state";
 import { MEDIUM_MIN, ROOMY_MIN } from "./planListMode";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("@tauri-apps/api/event", () => import("../../test/tauriMock"));
 
 const sessions: PlanSession[] = [];
+let unstub = (): void => undefined;
 const ON_IPAD: Partial<Registry> = { device: { deviceId: "ipad", name: "iPad", platform: "ios" } };
 const BOARD = "Now · Next · Later";
 
@@ -22,9 +24,11 @@ beforeEach(() => {
   window.localStorage.clear();
   resetTauri({});
   setPlatform(IPAD);
+  unstub = stubVisualViewport();
 });
 
 afterEach(async () => {
+  unstub();
   cleanup();
   clearToasts();
   vi.restoreAllMocks();
@@ -57,26 +61,46 @@ const bar = (): HTMLElement => {
 };
 
 const inline = (): string[] =>
-  Array.from(bar().querySelectorAll<HTMLElement>(".seg, button:not(.seg button):not(.plan-menu-list button)")).map((el) =>
+  Array.from(bar().querySelectorAll<HTMLElement>(".seg, button:not(.seg button)")).map((el) =>
     el.classList.contains("seg") ? `[${el.getAttribute("aria-label") ?? ""}]` : (el.getAttribute("aria-label") ?? el.textContent ?? ""),
   );
 
 const more = (): HTMLElement => within(bar()).getByRole("button", { name: "More" });
 
-const menu = (): HTMLElement => screen.getByRole("menu", { name: "More" });
+interface Asked {
+  token: string;
+  sections: { title: string | null; rows: { id: string; title: string; checked: boolean }[] }[];
+}
 
-const opened = (): HTMLElement => {
-  fireEvent.click(more());
-  return menu();
+const lastAsk = (): Asked => {
+  const all = tauri.calls.filter((c) => c.cmd === "menu_show").map((c) => (c.args as { menu: Asked }).menu);
+  const last = all[all.length - 1];
+  if (last === undefined) throw new Error("More sent no menu_show");
+  return last;
 };
 
-const rows = (m: HTMLElement): string[] =>
-  Array.from(m.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"], [role="group"]')).map((el) =>
-    el.getAttribute("role") === "group" ? `group ${el.getAttribute("aria-label") ?? ""}` : (el.textContent ?? ""),
-  );
+const opened = async (): Promise<Asked> => {
+  fireEvent.click(more());
+  await settle();
+  expect(screen.queryByRole("menu")).toBeNull();
+  return lastAsk();
+};
+
+const rows = (m: Asked): string[] => m.sections.flatMap((s) => [...(s.title === null ? [] : [`group ${s.title}`]), ...s.rows.map((r) => r.title)]);
+
+const checks = (m: Asked): boolean[] => m.sections.filter((s) => s.title === "Zoom").flatMap((s) => s.rows.map((r) => r.checked));
+
+const choose = (m: Asked, title: string): void => {
+  const row = m.sections.flatMap((s) => s.rows).find((r) => r.title === title);
+  if (row === undefined) throw new Error(`More has no row ${title}`);
+  act(() => {
+    emitFromRust("menu-ended", { token: m.token });
+    emitFromRust("menu-chosen", { token: m.token, id: row.id });
+  });
+};
 
 const gone = (): void => {
-  expect(screen.queryByRole("menu", { name: "More" })).toBeNull();
+  expect(screen.queryByRole("menu")).toBeNull();
   expect(more().getAttribute("aria-expanded")).toBe("false");
 };
 
@@ -100,7 +124,7 @@ describe("the iPad toolbar tiers", () => {
       ["Board", BOARD, BOARD],
       ["List", "List", "List"],
     ]);
-    expect(rows(opened())).toEqual(["Settings", "Plan"]);
+    expect(rows(await opened())).toEqual(["Settings", "Plan"]);
   });
 
   it("is the medium tier at 834 and at MEDIUM_MIN", async () => {
@@ -115,20 +139,20 @@ describe("the iPad toolbar tiers", () => {
     await at(MEDIUM_MIN - 1);
     expect(inline()).toEqual(["Plan list", "[Views]", "Undo", "Redo", "+ New", "Local only", "More"]);
     expect([tab(BOARD).textContent, tab(BOARD).title]).toEqual(["Board", BOARD]);
-    const m = opened();
+    const m = await opened();
     expect(rows(m)).toEqual(["group Zoom", "Week", "Month", "Quarter", "Fit", "Go to today", "Settings", "Plan"]);
-    expect(Array.from(m.querySelectorAll('[role="menuitemradio"]')).map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false", "false", "false"]);
+    expect(checks(m)).toEqual([true, false, false, false]);
   });
 
   it("leads with Plans below 700 in the narrow tier", async () => {
     await at(600);
     expect(inline()).toEqual(["Plans", "[Views]", "Undo", "Redo", "+ New", "Local only", "More"]);
-    expect(rows(opened())).toEqual(["group Zoom", "Week", "Month", "Quarter", "Fit", "Go to today", "Settings", "Plan"]);
+    expect(rows(await opened())).toEqual(["group Zoom", "Week", "Month", "Quarter", "Fit", "Go to today", "Settings", "Plan"]);
   });
 
   it("leaves out the zoom rows off the timeline, as the toolbar leaves out the zoom", async () => {
     await at(760, { place: { view: "board" } });
-    expect(rows(opened())).toEqual(["Go to today", "Settings", "Plan"]);
+    expect(rows(await opened())).toEqual(["Go to today", "Settings", "Plan"]);
   });
 
   it("leaves out the plan rows with no plan open", async () => {
@@ -138,7 +162,7 @@ describe("the iPad toolbar tiers", () => {
     render(withSync(shellFor(t, { ...ON_IPAD, plans: () => [] }).ui));
     await settle();
     expect(inline()).toEqual(["Plan list", "Local only", "More"]);
-    expect(rows(opened())).toEqual(["Settings"]);
+    expect(rows(await opened())).toEqual(["Settings"]);
   });
 
   it("keeps the toolbar untouched on macOS at the same widths", async () => {
@@ -164,69 +188,54 @@ describe("the iPad toolbar tiers", () => {
 });
 
 describe("the More menu", () => {
-  it("is an ellipsis button that opens a menu with its first row focused", async () => {
+  it("is an ellipsis button that asks for a native menu and renders no HTML list", async () => {
     await at(834);
     const b = more();
     expect([b.textContent, b.getAttribute("aria-haspopup"), b.getAttribute("aria-expanded")]).toEqual(["⋯", "menu", "false"]);
-    const m = opened();
+    await opened();
     expect(more().getAttribute("aria-expanded")).toBe("true");
-    expect(m.classList.contains("plan-menu-list")).toBe(true);
-    expect(document.activeElement).toBe(within(m).getByRole("menuitem", { name: "Settings" }));
+    expect(document.querySelector(".plan-menu-list")).toBeNull();
   });
 
-  it("moves with the arrow keys and closes on Escape, giving the button focus", async () => {
-    await at(MEDIUM_MIN - 1);
-    const m = opened();
-    const items = Array.from(m.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]'));
-    expect(document.activeElement).toBe(items[0]);
-    fireEvent.keyDown(items[0], { key: "ArrowDown" });
-    expect(document.activeElement).toBe(items[1]);
-    fireEvent.keyDown(items[1], { key: "ArrowUp" });
-    fireEvent.keyDown(items[0], { key: "ArrowUp" });
-    expect(document.activeElement).toBe(items[items.length - 1]);
-    fireEvent.keyDown(items[items.length - 1], { key: "Escape" });
-    gone();
-    expect(document.activeElement).toBe(more());
-  });
-
-  it("closes on a tap outside", async () => {
+  it("goes back to closed when the menu ends without a choice", async () => {
     await at(834);
-    opened();
-    fireEvent.pointerDown(document.body);
+    const m = await opened();
+    act(() => emitFromRust("menu-ended", { token: m.token }));
     gone();
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
   });
 
-  it("sets the zoom from a Zoom row and closes, and aria-checked follows", async () => {
+  it("sets the zoom from a Zoom row, and the check follows", async () => {
     await at(MEDIUM_MIN - 1);
-    fireEvent.click(within(opened()).getByRole("menuitemradio", { name: "Quarter" }));
+    choose(await opened(), "Quarter");
     gone();
-    expect(document.activeElement).toBe(more());
-    expect(Array.from(opened().querySelectorAll('[role="menuitemradio"]')).map((r) => [r.textContent, r.getAttribute("aria-checked")])).toEqual([
-      ["Week", "false"],
-      ["Month", "false"],
-      ["Quarter", "true"],
-      ["Fit", "false"],
+    const again = await opened();
+    expect(again.sections[0].rows.map((r) => [r.title, r.checked])).toEqual([
+      ["Week", false],
+      ["Month", false],
+      ["Quarter", true],
+      ["Fit", false],
     ]);
   });
 
-  it("runs Go to today as the Today button does, and closes", async () => {
+  it("runs Go to today as the Today button does", async () => {
     await at(MEDIUM_MIN - 1, { place: { view: "board" } });
     expect(tab(BOARD).getAttribute("aria-selected")).toBe("true");
-    fireEvent.click(within(opened()).getByRole("menuitem", { name: "Go to today" }));
+    choose(await opened(), "Go to today");
     gone();
     expect(tab("Timeline").getAttribute("aria-selected")).toBe("true");
   });
 
-  it("opens Settings from its row once, and closes", async () => {
+  it("opens Settings from its row once", async () => {
     await at(834);
-    fireEvent.click(within(opened()).getByRole("menuitem", { name: "Settings" }));
+    choose(await opened(), "Settings");
     gone();
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
   });
 
-  it("opens the Plan sheet from its row, and closes", async () => {
+  it("opens the Plan sheet from its row", async () => {
     await at(834);
-    fireEvent.click(within(opened()).getByRole("menuitem", { name: "Plan" }));
+    choose(await opened(), "Plan");
     gone();
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Plan"]);
   });
@@ -235,14 +244,14 @@ describe("the More menu", () => {
     await at(834);
     fireEvent.click(within(bar()).getByRole("button", { name: "Plan list" }));
     expect(screen.getByRole("dialog", { name: "Plans" })).toBeTruthy();
-    fireEvent.click(within(opened()).getByRole("menuitem", { name: "Settings" }));
+    choose(await opened(), "Settings");
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Plans", "Settings"]);
   });
 
-  it("spends a tap on the plan list's scrim on closing itself, and leaves the plan list open", async () => {
+  it("keeps the plan list open when a tap reaches its scrim while the native menu is up", async () => {
     await at(834);
     fireEvent.click(within(bar()).getByRole("button", { name: "Plan list" }));
-    opened();
+    const m = await opened();
     const scrim = document.querySelector(".plan-overlay-scrim");
     if (!(scrim instanceof HTMLElement)) throw new Error("no scrim");
     const under = vi.spyOn(document, "elementFromPoint").mockReturnValue(scrim);
@@ -250,25 +259,31 @@ describe("the More menu", () => {
     fireEvent.pointerUp(scrim, { button: 0, pointerType: "touch", clientX: 600, clientY: 400 });
     fireEvent.click(scrim, { button: 0, clientX: 600, clientY: 400 });
     under.mockRestore();
-    gone();
     expect(within(bar()).getByRole("button", { name: "Plan list" }).getAttribute("aria-expanded")).toBe("true");
-  });
-
-  it("closes and gives the More button focus when a resize takes its zoom rows away", async () => {
-    await at(800);
-    const m = opened();
-    expect(document.activeElement).toBe(within(m).getByRole("menuitemradio", { name: "Week" }));
-    act(() => setScreen(900, 1194));
+    act(() => emitFromRust("menu-ended", { token: m.token }));
     gone();
-    expect(document.activeElement).toBe(more());
   });
 
-  it("hands focus to the Settings button when a resize takes the More button away", async () => {
+  it("dismisses its menu when a resize takes its zoom rows away, and drops a late choice", async () => {
+    await at(800);
+    const m = await opened();
+    act(() => setScreen(900, 1194));
+    await settle();
+    expect(tauri.calls.filter((c) => c.cmd === "menu_dismiss").map((c) => c.args)).toEqual([{ token: m.token }]);
+    choose(m, "Settings");
+    gone();
+    expect(screen.queryAllByRole("dialog")).toEqual([]);
+  });
+
+  it("hands focus to the Settings button when a resize takes the focused More button away, and dismisses its menu", async () => {
     await at(900);
-    opened();
+    more().focus();
+    const m = await opened();
     act(() => setScreen(ROOMY_MIN, 1194));
+    await settle();
     expect(within(bar()).queryByRole("button", { name: "More" })).toBeNull();
     expect(document.activeElement).toBe(within(bar()).getByRole("button", { name: "Settings" }));
+    expect(tauri.calls.filter((c) => c.cmd === "menu_dismiss").map((c) => c.args)).toEqual([{ token: m.token }]);
   });
 });
 

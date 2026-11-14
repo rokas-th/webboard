@@ -1,10 +1,11 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setPlatform } from "../test/platform";
-import { hold, resetTauri, tauri } from "../test/tauriMock";
+import { emitFromRust, hold, resetTauri, tauri } from "../test/tauriMock";
 import ProbeApp from "./ProbeApp";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
+vi.mock("@tauri-apps/api/event", () => import("../test/tauriMock"));
 
 const ORIGINAL_VIEWPORT = "width=device-width, initial-scale=2.0, user-scalable=no";
 
@@ -53,6 +54,10 @@ beforeEach(() => {
     store_append: () => null,
     store_list: () => ["probe"],
     holidays_year: () => ({ days: [{ date: "2027-01-01" }], fetchedAt: "x", fromCache: true, coverage: null }),
+    menu_dismiss: (args) => {
+      emitFromRust("menu-ended", { token: (args as { token: string }).token });
+      return null;
+    },
   });
 });
 
@@ -105,10 +110,40 @@ describe("ProbeApp", () => {
     expect(logged()).toContain(line);
   });
 
+  it("on iOS shows and dismisses the probe menu after the haptic and before the alert, logging both ends", async () => {
+    setPlatform({ os: "ios", idiom: "pad" });
+    tauri.answers.alert_ask = () => "cancel";
+    mount();
+    await settle();
+    await settle();
+    const native = tauri.calls.map((c) => c.cmd).filter((c) => ["appearance_set", "haptic", "menu_show", "menu_dismiss", "alert_ask"].includes(c));
+    expect(native).toEqual(["appearance_set", "haptic", "menu_show", "menu_dismiss", "alert_ask"]);
+    const lines = logged();
+    expect(lines.indexOf("menu ended")).toBeGreaterThan(lines.indexOf("menu shown"));
+    expect(lines.indexOf("menu shown")).toBeGreaterThan(lines.indexOf('haptic {"sent":"selection"}'));
+    expect(lines.indexOf('alert {"answer":"cancel"}')).toBeGreaterThan(lines.indexOf("menu ended"));
+  });
+
+  it("on iOS logs a refused probe menu as a bad line and still asks the alert", async () => {
+    setPlatform({ os: "ios", idiom: "phone" });
+    tauri.answers.alert_ask = () => "cancel";
+    tauri.answers.menu_show = () => {
+      throw { code: "menu.not_shown", message: "not shown" };
+    };
+    mount();
+    await settle();
+    await settle();
+    const line = 'menu {"error":"menu.not_shown","message":"not shown"}';
+    expect(screen.getByText(line)).toHaveProperty("className", "probe-bad");
+    expect(logged()).toContain(line);
+    expect(tauri.calls.filter((c) => c.cmd === "alert_ask")).toHaveLength(1);
+  });
+
   it("on iOS sets the dark appearance and plays the selection haptic before it asks the alert", async () => {
     setPlatform({ os: "ios", idiom: "pad" });
     tauri.answers.alert_ask = () => "cancel";
     mount();
+    await settle();
     await settle();
     const native = tauri.calls.map((c) => c.cmd).filter((c) => c === "appearance_set" || c === "haptic" || c === "alert_ask");
     expect(native).toEqual(["appearance_set", "haptic", "alert_ask"]);

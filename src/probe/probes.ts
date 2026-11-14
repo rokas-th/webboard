@@ -2,6 +2,7 @@ import { askNative, type NativeAsk } from "../services/alert";
 import { setNativeScheme } from "../services/appearance";
 import { sendHaptic } from "../services/haptics";
 import { AppError, call, callBytes, callName } from "../services/ipc";
+import { dismissNativeMenu, showNativeMenu, type NativeMenuAnchor, type NativeMenuSection } from "../services/nativeMenu";
 import { unframe } from "../store/file";
 
 export type ProbeData = Record<string, unknown>;
@@ -74,6 +75,47 @@ export async function probeOpen(): Promise<ProbeEntry> {
     return ["files", { opened: name, read: bytes.length }];
   } catch (e) {
     return ["files", failure(e)];
+  }
+}
+
+export const PROBE_MENU: readonly NativeMenuSection[] = [
+  {
+    title: null,
+    rows: [
+      { id: "probe-one", title: "Probe row one", checked: false },
+      { id: "probe-two", title: "Probe row two", checked: true },
+    ],
+  },
+];
+
+export const PROBE_MENU_ANCHOR: NativeMenuAnchor = { x: 16, y: 16, width: 44, height: 44 };
+
+export const MENU_END_MS = 5000;
+
+function endedWithin(ended: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new AppError("probe.menu_ended", `menu-ended did not arrive within ${MENU_END_MS} ms of menu_dismiss`)), MENU_END_MS);
+  });
+  return Promise.race([ended, late]).finally(() => {
+    if (timer !== null) clearTimeout(timer);
+  });
+}
+
+export async function probeMenu(say: (line: string) => void): Promise<ProbeEntry | null> {
+  try {
+    let end = (): void => undefined;
+    const ended = new Promise<void>((resolve) => {
+      end = resolve;
+    });
+    const token = await showNativeMenu(PROBE_MENU, PROBE_MENU_ANCHOR, { chosen: (id) => say(`menu chosen ${id}`), ended: () => end() });
+    say("menu shown");
+    await dismissNativeMenu(token);
+    await endedWithin(ended);
+    say("menu ended");
+    return null;
+  } catch (e) {
+    return ["menu", failure(e)];
   }
 }
 

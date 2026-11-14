@@ -75,7 +75,6 @@ export const CHROME = Object.freeze({
   sync: [`.sync-tabs ${CONTROL}`, `.sync-buttons ${CONTROL}`],
   banners: [`.banner ${CONTROL}`],
   choiceBanners: [`.choice-banner ${CONTROL}`],
-  menus: [`.plan-menu-list ${CONTROL}`],
 });
 const hitChrome = (...groups) => ({ hit44: groups.flatMap((g) => CHROME[g]) });
 const READY_MS = 5000;
@@ -135,6 +134,9 @@ const centredIn = (selector) => ({ centredIn: selector });
 const inWindow = (selector) => ({ inWindow: selector });
 const uncovered = (selector) => ({ uncovered: selector });
 const still = () => ({ still: true });
+const asked = (titles) => ({ nativeMenu: titles });
+const askedExactly = (byWidth) => ({ nativeMenu: [], byWidth });
+const chooseNative = (title) => ({ choose: title });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -749,7 +751,9 @@ function states() {
   const phoneSettings = [click(".phone-head button", "Plans"), click(".plans-sheet button.settings-row", "Settings…"), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme")];
   add("ios-fields/phone-item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, fontMin(FIELDS, 16)] });
   add("ios-fields/phone-settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, fontMin(FIELDS, 16)] });
-  const settingsFromMore = [click('.toolbar button[aria-label="More"]'), click('.toolbar .plan-menu-list[aria-label="More"] [role="menuitem"]', "Settings")];
+  const settingsFromMore = [click('.toolbar button[aria-label="More"]'), chooseNative("Settings")];
+  const NEW_ROWS = ["New task", "New milestone", "New group"];
+  const PLAN_ROWS = ["Export plan…", "Import plan…"];
   const padItem = [click(".tl-row .name", PICKED), expect('.sheet[role="dialog"] .panel .kind', "TASK")];
   add("ios44/phone/plan", "mesa-ios-phone", { sizes: "phone", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
   add("ios44/phone/plans", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [click(".phone-head button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), hitChrome("sheetHead", "planList")] });
@@ -763,7 +767,7 @@ function states() {
   });
   add("ios44/phone/new-menu", "mesa-ios-phone", {
     sizes: "phone",
-    actions: [click(".phone-head button.phone-add", "+"), expect('.phone-head .plan-menu-list [role="menuitem"]', "New task"), hitChrome("phoneBars", "menus")],
+    actions: [click(".phone-head button.phone-add", "+"), asked(NEW_ROWS), hitChrome("phoneBars")],
   });
   add("ios44/phone/plan-sheet", "mesa-ios-phone", {
     sizes: "phone",
@@ -778,11 +782,11 @@ function states() {
   });
   add("ios44/pad-portrait/new-menu", "mesa-ios-pad", {
     sizes: "ipad-11-portrait",
-    actions: [viewExpect("timeline"), click(".toolbar button", "+ New"), expect('.toolbar .plan-menu-list [role="menuitem"]', "New task"), hitChrome("toolbar", "menus")],
+    actions: [viewExpect("timeline"), click(".toolbar button", "+ New"), asked(NEW_ROWS), hitChrome("toolbar")],
   });
   add("ios44/pad-landscape/plan-menu", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
-    actions: [...fullShell, click('.plan-head button[aria-label="Plan menu"]'), expect('.plan-head .plan-menu-list [role="menuitem"]', "Export plan…"), hitChrome("menus")],
+    actions: [...fullShell, click('.plan-head button[aria-label="Plan menu"]'), asked(PLAN_ROWS)],
   });
   add("ios44/phone-landscape/plan", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
   add("ios44/phone/status-strip", "phone-status-ios", { sizes: "phone", actions: [expect(".phone-status .status-strip .status-text", STATUS_FIRST), hitChrome("phoneBars", "phoneStatus")] });
@@ -875,14 +879,13 @@ function states() {
   });
   add("ipad-menus/new", "mesa-ios-pad", {
     sizes: "ipad-all",
-    actions: [viewExpect("timeline"), click(".toolbar button", "+ New"), expect('.toolbar .plan-menu-list [role="menuitem"]', "New task"), inWindow(".toolbar .plan-menu-list"), inWindow('.toolbar .plan-menu-list [role="menuitem"]'), hitChrome("menus")],
+    actions: [viewExpect("timeline"), click(".toolbar button", "+ New"), asked(NEW_ROWS)],
   });
   add("ipad-menus/plan", "mesa-ios-pad", {
     sizes: "ipad-all",
-    actions: [viewExpect("timeline"), click('.plan-head button[aria-label="Plan menu"]'), expect('.plan-head .plan-menu-list [role="menuitem"]', "Export plan…"), inWindow(".plan-head .plan-menu-list"), inWindow('.plan-head .plan-menu-list [role="menuitem"]'), hitChrome("menus")],
+    actions: [viewExpect("timeline"), click('.plan-head button[aria-label="Plan menu"]'), asked(PLAN_ROWS)],
   });
   const MORE = '.toolbar button[aria-label="More"]';
-  const moreRows = '.toolbar .plan-menu-list[aria-label="More"] [role^="menuitem"]';
   const oneRowBar = [oneLine(".toolbar"), hitChrome("toolbar")];
   add("ipad-toolbar/roomy", "mesa-ios-pad", { sizes: "ipad-roomy", actions: [viewExpect("timeline"), oneLine(".toolbar"), count(MORE, 0), count(".toolbar .seg-zoom", 1), expect(".toolbar .sync-chip-text"), expect('.toolbar button[aria-label="Settings"]'), ...oneRowBar] });
   add("ipad-toolbar/medium", "mesa-ios-pad", {
@@ -902,17 +905,21 @@ function states() {
     dialog: true,
     actions: [...overlayOpened, still(), uncovered(MORE), ...oneRowBar],
   });
+  const MORE_ROWS = [
+    [0, ["group Zoom", "Week ✓", "Month", "Quarter", "Fit", "Go to today", "Settings", "Plan"]],
+    [MEDIUM_MIN, ["Settings", "Plan"]],
+  ];
   add("ipad-toolbar/more-open", "mesa-ios-pad", {
     sizes: "ipad-overlay-open",
-    actions: [viewExpect("timeline"), click(MORE), expect(moreRows, "Settings"), inWindow('.toolbar .plan-menu-list[aria-label="More"]'), inWindow(moreRows), uncovered(moreRows), hitChrome("menus")],
+    actions: [viewExpect("timeline"), click(MORE), askedExactly(MORE_ROWS)],
   });
-  const fromMoreOverOverlay = (row) => [...overlayOpened, click(MORE), click(moreRows, row), expect('.sheet[role="dialog"] .sheet-title', row), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), uncovered(`.sheet-head ${CONTROL}`)];
+  const fromMoreOverOverlay = (row) => [...overlayOpened, click(MORE), chooseNative(row), expect('.sheet[role="dialog"] .sheet-title', row), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), uncovered(`.sheet-head ${CONTROL}`)];
   add("ipad-toolbar/settings-over-overlay", "mesa-ios-pad", { sizes: "ipad-overlay-open", actions: fromMoreOverOverlay("Settings") });
   add("ipad-toolbar/plan-over-overlay", "mesa-ios-pad", { sizes: "ipad-overlay-open", actions: fromMoreOverOverlay("Plan") });
   add("ipad-toolbar/more-over-overlay", "mesa-ios-pad", {
     sizes: "ipad-overlay-open",
     dialog: true,
-    actions: [...overlayOpened, click(MORE), expect(moreRows, "Settings"), inWindow('.toolbar .plan-menu-list[aria-label="More"]'), inWindow(moreRows), uncovered(moreRows), hitChrome("menus")],
+    actions: [...overlayOpened, click(MORE), count(`${TOGGLE}[aria-expanded="true"]`, 1), askedExactly(MORE_ROWS)],
   });
   add("ipad-mode/mac-compact", "mesa", { sizes: "mac-compact", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(TOGGLE, 0), count(".plan-overlay-layer", 0), expect(".toolbar .kbd-button", "⌘K"), expect(".toolbar button", "Undo")] });
   add("ipad-mode/mac-834-plans", "mesa", {
@@ -930,7 +937,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.inWindow === undefined && last.uncovered === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -997,6 +1004,8 @@ const SHIM = String.raw`
   if (P.theme !== null) localStorage.setItem("webboard.theme", JSON.stringify(P.theme));
   window.__PROBE_MISSING__ = [];
   window.__PROBE_TICKETS__ = {};
+  window.__PROBE_MENUS__ = [];
+  window.__PROBE_LISTENERS__ = {};
   var RealDate = Date;
   var pin = new RealDate(2026, 10, 9, 9, 0, 0, 0).getTime();
   var started = performance.now();
@@ -1032,6 +1041,12 @@ const SHIM = String.raw`
     return Promise.reject({ code: "probe.missing", message: "The layout probe has no answer for " + cmd + " (" + why + ")" });
   }
   function answer(cmd, args) {
+    if (cmd === "plugin:event|listen") {
+      var heard = window.__PROBE_LISTENERS__[args.event] || [];
+      heard.push(args.handler);
+      window.__PROBE_LISTENERS__[args.event] = heard;
+    }
+    if (cmd === "menu_show") window.__PROBE_MENUS__.push(JSON.parse(JSON.stringify(args.menu)));
     if (cmd === "sync_ticket") {
       var ticketDoc = String(args ? args.doc : undefined);
       var asked = (window.__PROBE_TICKETS__[ticketDoc] || 0) + 1;
@@ -1937,6 +1952,61 @@ window.__probeAct = function (a) {
         return labelOf(o.p) + " and " + labelOf(o.q) + " have hit areas that overlap by " + o.w + "x" + o.h + " px";
       }) };
     }
+    return { ok: true };
+  }
+  function lastMenu() {
+    var sent = window.__PROBE_MENUS__;
+    return sent.length === 0 ? null : sent[sent.length - 1];
+  }
+  function menuLines(menu) {
+    var out = [];
+    menu.sections.forEach(function (s) {
+      if (s.title !== null) out.push("group " + s.title);
+      s.rows.forEach(function (r) {
+        out.push(r.checked ? r.title + " ✓" : r.title);
+      });
+    });
+    return out;
+  }
+  if (a.nativeMenu !== undefined) {
+    var nm = lastMenu();
+    if (nm === null) return { fail: "no menu_show was sent, so no native menu asked for " + JSON.stringify(a.nativeMenu) };
+    var nmLines = menuLines(nm);
+    if (a.byWidth !== undefined) {
+      var nmWant = a.byWidth.filter(function (e) { return window.innerWidth >= e[0]; }).map(function (e) { return e[1]; }).pop();
+      if (nmWant === undefined) return { fail: "no expected native menu for the width " + window.innerWidth };
+      if (JSON.stringify(nmLines) !== JSON.stringify(nmWant)) return { fail: "menu_show sent " + JSON.stringify(nmLines) + " at width " + window.innerWidth + ", not exactly " + JSON.stringify(nmWant) };
+    }
+    var nmAt = 0;
+    var nmMissing = a.nativeMenu.filter(function (want) {
+      var at = nmLines.indexOf(want, nmAt);
+      if (at < 0) return true;
+      nmAt = at + 1;
+      return false;
+    });
+    if (nmMissing.length > 0) return { fail: "menu_show sent " + JSON.stringify(nmLines) + ", without " + JSON.stringify(nmMissing) + " in order" };
+    var nmLists = document.querySelectorAll(".plan-menu-list").length;
+    if (nmLists > 0) return { fail: "a native menu was asked for, but the page also renders " + nmLists + " HTML .plan-menu-list" };
+    var an = nm.anchor;
+    if (!(an.width > 0 && an.height > 0 && an.x >= -0.5 && an.y >= -0.5 && an.x + an.width <= window.innerWidth + 0.5 && an.y + an.height <= window.innerHeight + 0.5)) {
+      return { fail: "the native menu's anchor " + JSON.stringify(an) + " is not a box inside the " + window.innerWidth + "x" + window.innerHeight + " window" };
+    }
+    return { ok: true };
+  }
+  if (a.choose !== undefined) {
+    var cm = lastMenu();
+    if (cm === null) return { fail: "no menu_show was sent to choose " + JSON.stringify(a.choose) + " from" };
+    var cmRow = cm.sections.reduce(function (found, s) {
+      return found !== null ? found : s.rows.filter(function (r) { return r.title === a.choose; })[0] || null;
+    }, null);
+    if (cmRow === null) return { fail: "the native menu has no row " + JSON.stringify(a.choose) + " (has " + JSON.stringify(menuLines(cm)) + ")" };
+    var cmHeard = window.__PROBE_LISTENERS__;
+    if (!cmHeard["menu-ended"] || !cmHeard["menu-chosen"]) return { fail: "the page listens to no menu-ended or menu-chosen event" };
+    [["menu-ended", { token: cm.token }], ["menu-chosen", { token: cm.token, id: cmRow.id }]].forEach(function (ev) {
+      cmHeard[ev[0]].forEach(function (handler) {
+        window["_" + handler]({ event: ev[0], id: 0, payload: ev[1] });
+      });
+    });
     return { ok: true };
   }
   if (a.expect !== undefined) {

@@ -33,10 +33,11 @@ import { connectedStubs, withSync } from "../../test/withSync";
 import { paintNative } from "../../theme/apply";
 import { PRESETS, tokensOf, type Theme } from "../../theme/presets";
 import { setCoarsePointer } from "../../test/matchMedia";
-import { IPAD, LINUX, setPlatform } from "../../test/platform";
+import { IPAD, LINUX, setPlatform, stubVisualViewport } from "../../test/platform";
 import { TAP_HINT } from "./Tray";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("@tauri-apps/api/event", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../store/file")>();
   return { ...m, exportPlan: vi.fn(m.exportPlan), importPlan: vi.fn(m.importPlan) };
@@ -2124,10 +2125,18 @@ describe("Shell: print (product-8)", () => {
     setPlatform(IPAD);
     const t = await made(MESA_SEED);
     const { ui } = shellFor(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } });
-    render(withSync(ui));
-    await settle();
-    fireEvent.click(menuToggle());
-    expect(menuItems().map((b) => b.textContent)).toEqual(["Export plan…", "Import plan…"]);
+    const unstub = stubVisualViewport();
+    try {
+      render(withSync(ui));
+      await settle();
+      fireEvent.click(menuToggle());
+      await settle();
+      expect(screen.queryByRole("menu", { name: "Plan" })).toBeNull();
+      const asked = tauri.calls.filter((c) => c.cmd === "menu_show").map((c) => (c.args as { menu: { sections: { rows: { title: string }[] }[] } }).menu.sections.flatMap((s) => s.rows.map((r) => r.title)));
+      expect(asked).toEqual([["Export plan…", "Import plan…"]]);
+    } finally {
+      unstub();
+    }
     pressPrint();
     await settle();
     expect(printNow).not.toHaveBeenCalled();

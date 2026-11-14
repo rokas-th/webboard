@@ -14,7 +14,7 @@ import { phoneRegistry } from "../../test/phone";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { seededStore, shellFor, type SeededStore } from "../../test/shell";
-import { offeredSettings, resetTauri, tauri } from "../../test/tauriMock";
+import { emitFromRust, offeredSettings, resetTauri, tauri } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { OpenChoice } from "../run";
@@ -39,10 +39,11 @@ import { NO_REGION } from "./PhoneStatus";
 import { paintNative } from "../../theme/apply";
 import { PRESETS, tokensOf } from "../../theme/presets";
 import { Shell } from "../shell/Shell";
-import { IPHONE, MAC, setPlatform } from "../../test/platform";
+import { IPHONE, MAC, setPlatform, stubVisualViewport } from "../../test/platform";
 import type { Platform } from "../../platform";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("@tauri-apps/api/event", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../store/file")>();
   return { ...m, importPlan: vi.fn(m.importPlan) };
@@ -84,12 +85,16 @@ vi.mock("./PhoneList", async (importOriginal) => {
 const sessions: PlanSession[] = [];
 const registries: Registry[] = [];
 
+let unstub = (): void => undefined;
+
 beforeEach(() => {
   window.localStorage.clear();
   setScreen(390, 844);
+  unstub = stubVisualViewport();
 });
 
 afterEach(async () => {
+  unstub();
   vi.useRealTimers();
   cleanup();
   clearToasts();
@@ -1220,6 +1225,35 @@ describe("PhoneShell undo and redo (Step 2)", () => {
   });
 });
 
+interface NewAsk {
+  token: string;
+  sections: { title: string | null; rows: { id: string; title: string }[] }[];
+}
+
+const newAsk = (): NewAsk => {
+  const all = tauri.calls.filter((c) => c.cmd === "menu_show").map((c) => (c.args as { menu: NewAsk }).menu);
+  const last = all[all.length - 1];
+  if (last === undefined) throw new Error("+ sent no menu_show");
+  return last;
+};
+
+const openPlus = async (): Promise<NewAsk> => {
+  fireEvent.click(within(topBar()).getByRole("button", { name: "+" }));
+  await settle();
+  return newAsk();
+};
+
+const pickNew = async (label: string): Promise<void> => chooseNew(await openPlus(), label);
+
+const chooseNew = (ask: NewAsk, label: string): void => {
+  const row = ask.sections.flatMap((s) => s.rows).find((r) => r.title === label);
+  if (row === undefined) throw new Error(`the + menu has no row ${label}`);
+  act(() => {
+    emitFromRust("menu-ended", { token: ask.token });
+    emitFromRust("menu-chosen", { token: ask.token, id: row.id });
+  });
+};
+
 describe("PhoneShell new items (Step 3)", () => {
   it.each([
     ["New task", { t: "create", kind: "task", name: "New task", parent: null, after: null, start: "2026-11-10", dur: 3 }, "Added task “New task”"],
@@ -1230,10 +1264,11 @@ describe("PhoneShell new items (Step 3)", () => {
     sessions.push(t.session);
     const apply = vi.spyOn(t.session, "apply");
     await shown(t);
-    fireEvent.click(within(topBar()).getByRole("button", { name: "+" }));
-    const menu = screen.getByRole("menu");
-    expect(within(menu).getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["New task", "New milestone", "New group"]);
-    fireEvent.click(within(menu).getByRole("menuitem", { name: label }));
+    const ask = await openPlus();
+    expect(ask.sections.flatMap((s) => s.rows.map((r) => r.title))).toEqual(["New task", "New milestone", "New group"]);
+    expect(screen.queryByRole("menu")).toBeNull();
+    chooseNew(ask, label);
+    expect(tauri.calls.filter((c) => c.cmd === "menu_show")).toHaveLength(1);
     expect(apply.mock.calls).toEqual([[intent]]);
     expect(t.session.history()[0]?.label).toBe(history);
     const created = builtOf(apply).action.w.find((w) => w.u.startsWith("e:"));
@@ -1248,52 +1283,45 @@ describe("PhoneShell new items (Step 3)", () => {
   });
 });
 
-describe("PhoneShell + menu under a WebKit tap (C9)", () => {
-  const tap = (el: HTMLElement): void => {
-    if (fireEvent.mouseDown(el)) {
-      const focused = document.activeElement;
-      if (focused instanceof HTMLElement && focused !== document.body) act(() => focused.blur());
-    }
-    if (el.isConnected) fireEvent.click(el);
-  };
+describe("PhoneShell + as a native menu", () => {
   const plus = (): HTMLElement => within(topBar()).getByRole("button", { name: "+" });
-  const item = (name: string): HTMLElement => within(screen.getByRole("menu")).getByRole("menuitem", { name });
 
-  it.each(["New task", "New milestone", "New group"])("a tap on %s after the focused first item blurs creates it once", async (label) => {
+  it.each(["New task", "New milestone", "New group"])("a choice of %s creates it once, after the menu is gone", async (label) => {
     const t = await made();
     const apply = vi.spyOn(t.session, "apply");
     await shown(t);
-    tap(plus());
-    expect(document.activeElement).toBe(item("New task"));
-    tap(item(label));
+    await pickNew(label);
     expect(apply).toHaveBeenCalledTimes(1);
     expect(apply.mock.calls[0]?.[0]).toMatchObject({ t: "create", name: label });
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(plus().getAttribute("aria-expanded")).toBe("false");
     expect(screen.getByRole("dialog", { name: label })).toBeTruthy();
   });
 
-  it("a tap on + dismisses its own menu and leaves focus on +", async () => {
+  it("a menu that ends with no choice creates nothing", async () => {
     const t = await made();
     const apply = vi.spyOn(t.session, "apply");
     await shown(t);
-    tap(plus());
-    expect(screen.getByRole("menu")).toBeTruthy();
-    tap(plus());
+    const ask = await openPlus();
+    expect(plus().getAttribute("aria-expanded")).toBe("true");
     expect(screen.queryByRole("menu")).toBeNull();
-    expect(document.activeElement).toBe(plus());
+    act(() => emitFromRust("menu-ended", { token: ask.token }));
+    expect(plus().getAttribute("aria-expanded")).toBe("false");
     expect(apply).not.toHaveBeenCalled();
   });
 
-  it("a touch outside the menu closes it without creating anything", async () => {
+  it("a second tap replaces the open menu, and only the newer menu's choice creates", async () => {
     const t = await made();
     const apply = vi.spyOn(t.session, "apply");
     await shown(t);
-    tap(plus());
-    const list = document.querySelector(".phone-list");
-    if (!(list instanceof HTMLElement)) throw new Error("no phone list");
-    fireEvent.pointerDown(list);
-    expect(screen.queryByRole("menu")).toBeNull();
-    expect(apply).not.toHaveBeenCalled();
+    const first = await openPlus();
+    const second = await openPlus();
+    expect(second.token).not.toBe(first.token);
+    act(() => emitFromRust("menu-ended", { token: first.token }));
+    expect(plus().getAttribute("aria-expanded")).toBe("true");
+    chooseNew(second, "New milestone");
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply.mock.calls[0]?.[0]).toMatchObject({ t: "create", kind: "milestone" });
+    expect(plus().getAttribute("aria-expanded")).toBe("false");
   });
 });
 
@@ -1361,8 +1389,7 @@ describe("PhoneShell item sheet (Step 4)", () => {
     const t = await testSession(EDIT_SEED);
     sessions.push(t.session);
     await shown(t);
-    fireEvent.click(within(topBar()).getByRole("button", { name: "+" }));
-    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "New task" }));
+    await pickNew("New task");
     expect(screen.getByRole("dialog", { name: "New task" })).toBeTruthy();
     clearToasts();
     const undo = vi.spyOn(t.session, "undo");

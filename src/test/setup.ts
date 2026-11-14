@@ -62,6 +62,7 @@ setPlatform({ os: "macos", idiom: null });
 
 beforeEach(async () => {
   (await import("../services/haptics")).resetHaptics();
+  (await import("../services/nativeMenu")).resetNativeMenus();
   setPlatform({ os: "macos", idiom: null });
   scrollIntoView.mockClear();
   document.documentElement.style.setProperty("--sidebar-w", "284px");

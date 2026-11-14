@@ -1,10 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { framed } from "../test/fixtures/framed";
-import { resetTauri, tauri } from "../test/tauriMock";
+import { emitFromRust, resetTauri, tauri } from "../test/tauriMock";
 import { IPAD, setPlatform } from "../test/platform";
-import { failure, PROBE_ALERT, PROBE_BYTES, probeAlert, probeAppearance, probeHaptic, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine } from "./probes";
+import {
+  failure,
+  MENU_END_MS,
+  PROBE_ALERT,
+  PROBE_BYTES,
+  PROBE_MENU,
+  PROBE_MENU_ANCHOR,
+  probeAlert,
+  probeAppearance,
+  probeHaptic,
+  probeHolidays,
+  probeLine,
+  probeMenu,
+  probeOpen,
+  probePaths,
+  probeSave,
+  sendLine,
+} from "./probes";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
+vi.mock("@tauri-apps/api/event", () => import("../test/tauriMock"));
 
 const loadAnswer = (lastSeq: number): ArrayBuffer => {
   const bytes = new Uint8Array(17);
@@ -165,6 +183,49 @@ describe("probeHaptic", () => {
       throw { code: "haptic.no_view", message: "no view" };
     };
     await expect(probeHaptic()).resolves.toEqual(["haptic", { error: "haptic.no_view", message: "no view" }]);
+  });
+});
+
+describe("probeMenu", () => {
+  const menuCalls = (): unknown[][] => tauri.calls.filter((c) => c.cmd === "menu_show" || c.cmd === "menu_dismiss").map((c) => [c.cmd, c.args]);
+
+  it("shows the two-row menu, says so, dismisses it and says when it ended", async () => {
+    setPlatform(IPAD);
+    const said: string[] = [];
+    tauri.answers.menu_dismiss = (args) => {
+      emitFromRust("menu-ended", { token: (args as { token: string }).token });
+      return null;
+    };
+    await expect(probeMenu((line) => said.push(line))).resolves.toBeNull();
+    const calls = menuCalls();
+    const token = (calls[0][1] as { menu: { token: string } }).menu.token;
+    expect(calls).toEqual([
+      ["menu_show", { menu: { token, anchor: PROBE_MENU_ANCHOR, sections: PROBE_MENU } }],
+      ["menu_dismiss", { token }],
+    ]);
+    expect(PROBE_MENU.flatMap((s) => s.rows.map((r) => r.title))).toEqual(["Probe row one", "Probe row two"]);
+    expect(said).toEqual(["menu shown", "menu ended"]);
+  });
+
+  it("reports a refused menu as its error and says nothing", async () => {
+    setPlatform(IPAD);
+    tauri.answers.menu_show = () => {
+      throw { code: "menu.not_shown", message: "not shown" };
+    };
+    const said: string[] = [];
+    await expect(probeMenu((line) => said.push(line))).resolves.toEqual(["menu", { error: "menu.not_shown", message: "not shown" }]);
+    expect(said).toEqual([]);
+  });
+
+  it("reports a menu whose end never arrives by name", async () => {
+    setPlatform(IPAD);
+    vi.useFakeTimers();
+    const said: string[] = [];
+    const done = probeMenu((line) => said.push(line));
+    await vi.advanceTimersByTimeAsync(MENU_END_MS);
+    await expect(done).resolves.toEqual(["menu", { error: "probe.menu_ended", message: `menu-ended did not arrive within ${MENU_END_MS} ms of menu_dismiss` }]);
+    expect(said).toEqual(["menu shown"]);
+    vi.useRealTimers();
   });
 });
 

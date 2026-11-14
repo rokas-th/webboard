@@ -30,6 +30,8 @@ const FIXTURES = buildFixtures();
 const UIKIT = {
   appearance_set: { __byArg: "scheme", map: { light: null, dark: null, system: null } },
   haptic: { __byArg: "kind", map: { selection: null, light: null, medium: null, success: null, warning: null, error: null } },
+  menu_show: null,
+  menu_dismiss: null,
 };
 
 const fixture = (name: string): Fixture => {
@@ -371,7 +373,7 @@ describe("layout fixtures", () => {
     expect(fixture("phone-status-ios").platform).toEqual({ os: "ios", idiom: "phone" });
   });
 
-  it("exactly the iOS fixtures answer appearance_set and haptic, so a desktop state that sends either is unreached", () => {
+  it("exactly the iOS fixtures answer appearance_set, haptic, menu_show and menu_dismiss, so a desktop state that sends any is unreached", () => {
     Object.entries(FIXTURES).forEach(([name, f]) => {
       const answered = Object.keys(f.ipc).filter((cmd) => cmd in UIKIT);
       expect([name, answered]).toEqual([name, f.platform.os === "ios" ? Object.keys(UIKIT) : []]);

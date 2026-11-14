@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
-import { readPlatform } from "../../platform";
+import { useCallback, useEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
+import { AppError } from "../../services/ipc";
+import { anchorOf, dismissNativeMenu, showNativeMenu, type NativeMenuSection } from "../../services/nativeMenu";
+import { detailsOf } from "./errorText";
+import { toast } from "./Toast";
 
 export function moved(key: string, at: number, n: number): number | null {
   if (key === "Home") return 0;
@@ -9,21 +12,7 @@ export function moved(key: string, at: number, n: number): number | null {
   return null;
 }
 
-const MENU_LIST = "plan-menu-list";
-const MENU_LIST_START = "plan-menu-list plan-menu-list-start";
-
-export function useMenuList(open: boolean, toggle: RefObject<HTMLElement | null>): string {
-  const [start, setStart] = useState(false);
-  useLayoutEffect(() => {
-    if (!open) return;
-    const button = toggle.current;
-    if (button === null) throw new Error("menu: open without its toggle");
-    const p = readPlatform(window);
-    const box = button.getBoundingClientRect();
-    setStart(p.os === "ios" && p.idiom === "pad" && box.left + box.right < window.innerWidth);
-  }, [open, toggle]);
-  return start ? MENU_LIST_START : MENU_LIST;
-}
+export const MENU_LIST = "plan-menu-list";
 
 export const OPEN_MENU = '[aria-haspopup="menu"][aria-expanded="true"]';
 
@@ -33,7 +22,6 @@ export interface Menu {
   onToggle(): void;
   toggle: RefObject<HTMLButtonElement | null>;
   list: RefObject<HTMLDivElement | null>;
-  listClass: string;
   box: {
     ref: RefObject<HTMLDivElement | null>;
     onKeyDown(e: KeyboardEvent<HTMLDivElement>): void;
@@ -48,7 +36,6 @@ export function useMenu(name: string, rows: string, enabled: boolean): Menu {
   const box = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const listClass = useMenuList(open, toggle);
   useEffect(() => {
     if (!open) return;
     const first = list.current?.querySelector<HTMLElement>(rows) ?? null;
@@ -94,7 +81,99 @@ export function useMenu(name: string, rows: string, enabled: boolean): Menu {
     onToggle: () => (open ? close() : setAsked(true)),
     toggle,
     list,
-    listClass,
     box: { ref: box, onKeyDown, onBlur, onMouseDown: (e) => e.preventDefault() },
   };
+}
+
+export interface NativeMenu {
+  open: boolean;
+  show(toggle: HTMLElement | null, sections: readonly NativeMenuSection[], onChosen: (id: string) => void): void;
+  dismiss(): void;
+}
+
+interface Asked {
+  token: string | null;
+  withdrawn: boolean;
+  ended: boolean;
+  replaced: boolean;
+}
+
+function failed(e: unknown): void {
+  if (!(e instanceof AppError)) throw e;
+  console.error(e);
+  toast(e.message, "bad", `${e.code}\n${detailsOf(e)}`);
+}
+
+function withdraw(asked: Asked): void {
+  if (asked.withdrawn || asked.ended) return;
+  asked.withdrawn = true;
+  if (asked.token !== null) dismissNativeMenu(asked.token).catch(failed);
+}
+
+export function useNativeMenu(name: string): NativeMenu {
+  const [open, setOpen] = useState(false);
+  const live = useRef<Asked | null>(null);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      const asked = live.current;
+      if (asked !== null) withdraw(asked);
+    };
+  }, []);
+  const show = useCallback(
+    (toggle: HTMLElement | null, sections: readonly NativeMenuSection[], onChosen: (id: string) => void): void => {
+      if (toggle === null) throw new Error(`${name}: shown without its toggle`);
+      const view = window.visualViewport ?? null;
+      if (view === null) throw new Error(`${name}: the window has no visual viewport to place the menu in`);
+      const prior = live.current;
+      if (prior !== null) {
+        prior.withdrawn = true;
+        prior.ended = true;
+        prior.replaced = true;
+      }
+      const asked: Asked = { token: null, withdrawn: false, ended: false, replaced: false };
+      live.current = asked;
+      setOpen(true);
+      const settle = (): void => {
+        if (live.current !== asked) return;
+        live.current = null;
+        if (mounted.current) setOpen(false);
+      };
+      showNativeMenu(sections, anchorOf(toggle.getBoundingClientRect(), view), {
+        chosen: (id) => {
+          if (asked.withdrawn || !mounted.current) {
+            console.info(`${name}: dropped the native choice ${id}, the menu was withdrawn`);
+            return;
+          }
+          onChosen(id);
+        },
+        ended: () => {
+          asked.ended = true;
+          settle();
+        },
+      }).then(
+        (token) => {
+          asked.token = token;
+          if (asked.withdrawn && !asked.ended) dismissNativeMenu(token).catch(failed);
+        },
+        (e: unknown) => {
+          asked.ended = true;
+          if (asked.replaced && e instanceof AppError) {
+            console.info(`${name}: a menu replaced by a newer one was not shown`, e);
+            return;
+          }
+          settle();
+          failed(e);
+        },
+      );
+    },
+    [name],
+  );
+  const dismiss = useCallback((): void => {
+    const asked = live.current;
+    if (asked !== null) withdraw(asked);
+  }, []);
+  return { open, show, dismiss };
 }

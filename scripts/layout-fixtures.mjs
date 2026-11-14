@@ -536,6 +536,8 @@ const onLinux = (f) => ({ ...f, platform: { os: "linux", idiom: null }, ipc: { .
 const UIKIT_ANSWERS = {
   appearance_set: { __byArg: "scheme", map: { light: null, dark: null, system: null } },
   haptic: { __byArg: "kind", map: { selection: null, light: null, medium: null, success: null, warning: null, error: null } },
+  menu_show: null,
+  menu_dismiss: null,
 };
 const onIosPhone = (f) => ({ ...f, platform: { os: "ios", idiom: "phone" }, ipc: { ...f.ipc, device_info: { deviceId: "iphone", platform: "ios" }, ...UIKIT_ANSWERS } });
 const onIosPad = (f) => ({ ...f, platform: { os: "ios", idiom: "pad" }, ipc: { ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" }, ...UIKIT_ANSWERS } });

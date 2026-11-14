@@ -1,8 +1,9 @@
-import { useEffect, useRef, type FocusEvent, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent } from "react";
 import type { PlanId } from "../../domain/model";
+import { usesNativeMenu, type NativeMenuSection } from "../../services/nativeMenu";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
-import { moved, useMenuList } from "../common/menu";
+import { MENU_LIST, moved, useNativeMenu } from "../common/menu";
 import { exportFlow, importFlow } from "./fileFlows";
 
 const mounted = (b: HTMLButtonElement | null, missing: string): HTMLButtonElement => {
@@ -10,21 +11,80 @@ const mounted = (b: HTMLButtonElement | null, missing: string): HTMLButtonElemen
   return b;
 };
 
-export function PlanMenu(p: {
+type Props = {
   session: PlanSession;
   registry: Registry;
   open: boolean;
   onOpenChange(open: boolean): void;
   onOpen(id: PlanId): void;
   onPrint?: () => void;
-}) {
+};
+
+const PLAN_ROWS: readonly NativeMenuSection[] = [
+  {
+    title: null,
+    rows: [
+      { id: "export", title: "Export plan…", checked: false },
+      { id: "import", title: "Import plan…", checked: false },
+    ],
+  },
+];
+
+function runRow(p: Props, id: string): void {
+  if (id === "export") void exportFlow(p.session);
+  else if (id === "import") void importFlow(p.registry, p.onOpen);
+  else throw new Error(`PlanMenu: the native menu chose ${JSON.stringify(id)}, which is no row of the Plan menu`);
+}
+
+function NativePlanMenu(p: Props) {
+  const menu = useNativeMenu("PlanMenu");
+  const toggle = useRef<HTMLButtonElement>(null);
+  const latest = useRef(p);
+  useLayoutEffect(() => {
+    latest.current = p;
+  });
+  const { open, onOpenChange } = p;
+  const { open: shown, dismiss } = menu;
+  const wasShown = useRef(false);
+  useEffect(() => {
+    if (wasShown.current && !shown) onOpenChange(false);
+    wasShown.current = shown;
+  }, [shown, onOpenChange]);
+  useEffect(() => {
+    if (!open && shown) dismiss();
+  }, [open, shown, dismiss]);
+  return (
+    <div className="plan-menu">
+      <button
+        type="button"
+        ref={toggle}
+        className="button-small"
+        aria-label="Plan menu"
+        aria-haspopup="menu"
+        aria-expanded={shown}
+        onClick={() => {
+          onOpenChange(true);
+          try {
+            menu.show(toggle.current, PLAN_ROWS, (id) => runRow(latest.current, id));
+          } catch (e) {
+            onOpenChange(false);
+            throw e;
+          }
+        }}
+      >
+        ⋯
+      </button>
+    </div>
+  );
+}
+
+function HtmlPlanMenu(p: Props) {
   const { open, onOpenChange } = p;
   const toggle = useRef<HTMLButtonElement>(null);
   const exportItem = useRef<HTMLButtonElement>(null);
   const importItem = useRef<HTMLButtonElement>(null);
   const printItem = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
-  const listClass = useMenuList(open, toggle);
 
   const items = (): HTMLButtonElement[] => [
     mounted(exportItem.current, "PlanMenu opened without its first item"),
@@ -105,7 +165,7 @@ export function PlanMenu(p: {
         ⋯
       </button>
       {open && (
-        <div className={listClass} role="menu" aria-label="Plan">
+        <div className={MENU_LIST} role="menu" aria-label="Plan">
           <button type="button" role="menuitem" ref={exportItem} className="choice-row" onClick={exportPlan}>
             Export plan…
           </button>
@@ -121,4 +181,8 @@ export function PlanMenu(p: {
       )}
     </div>
   );
+}
+
+export function PlanMenu(p: Props) {
+  return usesNativeMenu() ? <NativePlanMenu {...p} /> : <HtmlPlanMenu {...p} />;
 }

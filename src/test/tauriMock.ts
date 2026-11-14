@@ -43,9 +43,47 @@ const iosOnly =
     return null;
   };
 
+const record = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+
+const exactly = (x: unknown, keys: readonly string[]): x is Record<string, unknown> =>
+  record(x) && Object.keys(x).length === keys.length && keys.every((k) => k in x);
+
+const filled = (x: unknown): boolean => typeof x === "string" && x.trim() !== "";
+
+const finite = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
+
+const goodAnchor = (a: unknown): boolean =>
+  exactly(a, ["x", "y", "width", "height"]) && finite(a.x) && finite(a.y) && finite(a.width) && finite(a.height) && a.width >= 0 && a.height >= 0;
+
+const goodRow = (r: unknown): r is { id: string } => exactly(r, ["id", "title", "checked"]) && filled(r.id) && filled(r.title) && typeof r.checked === "boolean";
+
+const rowsOf = (s: unknown): readonly unknown[] | null =>
+  exactly(s, ["title", "rows"]) && (s.title === null || filled(s.title)) && Array.isArray(s.rows) && s.rows.length > 0 ? s.rows : null;
+
+function goodMenu(m: unknown): boolean {
+  if (!exactly(m, ["token", "anchor", "sections"]) || !filled(m.token) || !goodAnchor(m.anchor) || !Array.isArray(m.sections) || m.sections.length === 0) return false;
+  const rows = m.sections.map(rowsOf);
+  if (rows.some((r) => r === null)) return false;
+  const all = rows.flatMap((r) => r ?? []);
+  if (!all.every(goodRow)) return false;
+  const ids = all.filter(goodRow).map((r) => r.id);
+  return new Set(ids).size === ids.length;
+}
+
+const iosShaped =
+  (cmd: string, key: string, good: (value: unknown) => boolean, shape: string): Answer =>
+  (args) => {
+    const { os } = readPlatform(window);
+    if (os !== "ios") return refuse(`${cmd} was called on ${os}, where only iOS has it`);
+    if (!good(argOf(args, key))) return refuse(`${cmd} got ${JSON.stringify(args)}, not a ${key} that is ${shape}`);
+    return null;
+  };
+
 export const DEFAULT_ANSWERS: Readonly<Record<string, Answer>> = {
   sync_status: () => ({ space: null, revoked: false }),
   ...Object.fromEntries(UIKIT_COMMANDS.map(([cmd, key, allowed]) => [cmd, iosOnly(cmd, key, allowed)])),
+  menu_show: iosShaped("menu_show", "menu", goodMenu, "a menu menu.rs accepts"),
+  menu_dismiss: iosShaped("menu_dismiss", "token", filled, "a non-empty string"),
 };
 
 export const tauri = {
@@ -98,7 +136,18 @@ type EventHandler = (event: { payload: never }) => void;
 
 const subscriptions = new Map<string, Set<EventHandler>>();
 
+const listenFailures = new Map<string, unknown>();
+
+export function failNextListen(name: string, e: unknown): void {
+  listenFailures.set(name, e);
+}
+
 export function listen(name: string, handler: EventHandler): Promise<() => void> {
+  if (listenFailures.has(name)) {
+    const e = listenFailures.get(name);
+    listenFailures.delete(name);
+    return Promise.reject(e);
+  }
   let open = subscriptions.get(name);
   if (open === undefined) {
     open = new Set();
@@ -173,6 +222,7 @@ export async function requestWindowClose(): Promise<{ prevented: boolean }> {
 
 export function resetTauri(answers: Record<string, Answer>): void {
   subscriptions.clear();
+  listenFailures.clear();
   closeHandlers.clear();
   windowState.destroyed = 0;
   windowState.destroyFailure = null;

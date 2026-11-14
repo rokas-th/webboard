@@ -7,6 +7,8 @@ pub mod file;
 #[cfg(any(target_os = "ios", test))]
 pub mod haptic;
 pub mod holidays;
+#[cfg(any(target_os = "ios", test))]
+pub mod menu;
 #[cfg(target_os = "macos")]
 pub mod print;
 #[cfg(feature = "probe")]
@@ -106,7 +108,7 @@ pub(crate) mod main_thread {
     }
 
     #[cfg(target_os = "ios")]
-    fn report(fault: Option<String>) {
+    pub(crate) fn report(fault: Option<String>) {
         use std::io::Write;
         if let Some(fault) = fault {
             let _ = writeln!(std::io::stderr(), "{fault}");
@@ -117,7 +119,7 @@ pub(crate) mod main_thread {
     fn on_main<A, T, W>(webview: &tauri::webview::PlatformWebview, asked: A, work: W) -> Result<T>
     where
         A: Asked,
-        W: FnOnce(&objc2_ui_kit::UIViewController) -> Result<T>,
+        W: FnOnce(&objc2_ui_kit::UIViewController, Option<&objc2_ui_kit::UIView>) -> Result<T>,
     {
         if objc2::MainThreadMarker::new().is_none() {
             return Err(asked.off_main());
@@ -130,7 +132,8 @@ pub(crate) mod main_thread {
         }) else {
             return Err(asked.no_controller());
         };
-        work(controller)
+        let web = unsafe { webview.inner().cast::<objc2_ui_kit::UIView>().as_ref() };
+        work(controller, web)
     }
 
     #[cfg(target_os = "ios")]
@@ -139,6 +142,22 @@ pub(crate) mod main_thread {
         A: Asked,
         T: Send + 'static,
         W: FnOnce(&objc2_ui_kit::UIViewController) -> Result<T> + Send + 'static,
+    {
+        run_with_view(window, asked, move |controller, _| work(controller)).await
+    }
+
+    #[cfg(target_os = "ios")]
+    pub(crate) async fn run_with_view<A, T, W>(
+        window: &tauri::WebviewWindow,
+        asked: A,
+        work: W,
+    ) -> Result<T>
+    where
+        A: Asked,
+        T: Send + 'static,
+        W: FnOnce(&objc2_ui_kit::UIViewController, Option<&objc2_ui_kit::UIView>) -> Result<T>
+            + Send
+            + 'static,
     {
         let (sender, done) = std::sync::mpsc::channel();
         window

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Platform } from "../../platform";
-import { IPAD, IPHONE, LINUX, MAC, setPlatform } from "../../test/platform";
+import { LINUX, MAC, setPlatform } from "../../test/platform";
 import { NewItemMenu } from "./NewItemMenu";
 
 afterEach(() => {
@@ -22,19 +22,7 @@ const opened = (): HTMLElement => {
 };
 
 describe("a menu's side", () => {
-  it("opens leading-aligned on an iPad when its button sits in the leading half of the window", () => {
-    setPlatform(IPAD);
-    at(100);
-    expect(opened().className).toBe("plan-menu-list plan-menu-list-start");
-  });
-
-  it("stays trailing-aligned on an iPad when its button sits in the trailing half", () => {
-    setPlatform(IPAD);
-    at(1000);
-    expect(opened().className).toBe("plan-menu-list");
-  });
-
-  it.each<Platform>([MAC, LINUX, IPHONE])("stays trailing-aligned on %o wherever its button sits", (platform) => {
+  it.each<Platform>([MAC, LINUX])("stays trailing-aligned on %o wherever its button sits", (platform) => {
     setPlatform(platform);
     at(100);
     expect(opened().className).toBe("plan-menu-list");
