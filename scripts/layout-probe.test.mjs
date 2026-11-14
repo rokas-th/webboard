@@ -277,3 +277,76 @@ test("hit44 fails when no visible element matches, so a mistyped selector does n
   const got = await hit44('<button class="b" style="width: 30px; height: 30px; display: none">Gone</button>', [".b", ".missing"]);
   assert.equal(got.fail, "no visible element matches .b, .missing, so no hit area was measured");
 });
+
+async function actAll(body, actions) {
+  const { frameTree } = await page.cdp.send("Page.getFrameTree", {}, page.sessionId);
+  await page.cdp.send("Page.setDocumentContent", { frameId: frameTree.frame.id, html: `<!doctype html><html><head><style>${CSS}</style></head><body>${body}</body></html>` }, page.sessionId);
+  await evaluate(page.cdp, page.sessionId, ACT);
+  const out = [];
+  for (const a of actions) {
+    if (typeof a === "string") await evaluate(page.cdp, page.sessionId, a);
+    else out.push(await evaluate(page.cdp, page.sessionId, `window.__probeAct(${JSON.stringify(a)})`, true));
+  }
+  return out;
+}
+
+test("inWindow passes a box inside the window and fails one past its edge, naming it", async () => {
+  assert.deepEqual(await act('<div class="m" style="position: absolute; left: 10px; top: 10px; width: 100px; height: 40px">In</div>', { inWindow: ".m" }), { ok: true });
+  const got = await act('<div class="m" style="position: absolute; left: -50px; top: 10px; width: 100px; height: 40px">Out</div>', { inWindow: ".m" });
+  assert.equal(got.fail, '.m: "Out" lies at -50,10 to 50,50, outside the window');
+});
+
+test("inWindow fails a row an ancestor's overflow clips, and passes one the ancestor holds", async () => {
+  const clip = (left) => `<div class="c" style="position: absolute; left: 10px; top: 10px; width: 100px; height: 100px; overflow: hidden"><div class="r" style="position: absolute; left: ${left}px; top: 0; width: 80px; height: 20px">Row</div></div>`;
+  assert.deepEqual(await act(clip(10), { inWindow: ".r" }), { ok: true });
+  assert.equal((await act(clip(60), { inWindow: ".r" })).fail, '.r: "Row" is clipped by div.c');
+});
+
+test("inWindow fails when nothing matches", async () => {
+  assert.equal((await act("<p>x</p>", { inWindow: ".none" })).fail, "no .none on screen to measure");
+});
+
+test("centredIn passes a centred box and fails one 2 px off", async () => {
+  const box = (left) => `<div class="s" style="position: absolute; left: ${left}px; top: 100px; width: 200px; height: 100px">S</div>`;
+  assert.deepEqual(await act(box(100), { centredIn: ".s" }), { ok: true });
+  assert.equal((await act(box(102), { centredIn: ".s" })).fail, ".s sits 2 px across and 0 px down from the window's centre");
+});
+
+test("kept passes a box that stayed and names the edges of one that moved", async () => {
+  const body = '<div class="k" style="position: absolute; left: 10px; top: 10px; width: 100px; height: 40px">K</div>';
+  assert.deepEqual(await actAll(body, [{ keep: ".k" }, { kept: ".k" }]), [{ ok: true }, { ok: true }]);
+  const moved = await actAll(body, [{ keep: ".k" }, 'document.querySelector(".k").style.left = "30px"', { kept: ".k" }]);
+  assert.equal(moved[1].fail, ".k moved: left 10 -> 30, right 110 -> 130");
+  assert.equal((await act('<div class="j">J</div>', { kept: ".j" })).fail, ".j was never kept");
+});
+
+test("meets passes edges that touch and fails a gap", async () => {
+  const body = (top) => `<div class="a" style="position: absolute; left: 0; top: 0; width: 100px; height: 40px">A</div><div class="b" style="position: absolute; left: 0; top: ${top}px; width: 100px; height: 40px">B</div>`;
+  assert.deepEqual(await act(body(40), { meets: [".b", "top", ".a", "bottom"] }), { ok: true });
+  assert.equal((await act(body(44), { meets: [".b", "top", ".a", "bottom"] })).fail, ".b has its top edge at 44 px, not at .a's bottom edge, 40 px");
+});
+
+test("uncovered passes buttons on top and fails one under another box", async () => {
+  const body = (z) => `<button class="u" style="position: absolute; left: 10px; top: 10px; width: 60px; height: 30px">Go</button><div style="position: absolute; left: 0; top: 0; width: 200px; height: 100px; z-index: ${z}; background: black"></div>`;
+  assert.deepEqual(await act(body(-1), { uncovered: ".u" }), { ok: true });
+  assert.equal((await act(body(1), { uncovered: ".u" })).fail, '1 of 1 .u are covered at their centre: "Go"');
+});
+
+test("still waits for a running transition to finish", async () => {
+  const body = '<style>.t { position: absolute; left: 0; top: 0; width: 50px; height: 50px; transition: transform 300ms linear; } .t.on { transform: translateX(100px); }</style><div class="t">T</div>';
+  const got = await actAll(body, ['document.querySelector(".t").getBoundingClientRect(); document.querySelector(".t").classList.add("on"); void document.querySelector(".t").getBoundingClientRect()', { still: true }]);
+  assert.deepEqual(got, [{ ok: true }]);
+  const left = await evaluate(page.cdp, page.sessionId, 'document.querySelector(".t").getBoundingClientRect().left');
+  assert.equal(left, 100);
+});
+
+test("still waits for a transition beside an infinite animation, and does not wait on the infinite one", async () => {
+  const body =
+    '<style>@keyframes pulse { from { opacity: 1; } to { opacity: 0.5; } } .p { animation: pulse 1s ease-in-out infinite; } .t { position: absolute; left: 0; top: 0; width: 50px; height: 50px; transition: transform 300ms linear; } .t.on { transform: translateX(100px); }</style><div class="p">P</div><div class="t">T</div>';
+  const started = Date.now();
+  const got = await actAll(body, ['document.querySelector(".t").getBoundingClientRect(); document.querySelector(".t").classList.add("on"); void document.querySelector(".t").getBoundingClientRect()', { still: true }]);
+  assert.deepEqual(got, [{ ok: true }]);
+  assert.ok(Date.now() - started < 5000);
+  const left = await evaluate(page.cdp, page.sessionId, 'document.querySelector(".t").getBoundingClientRect().left');
+  assert.equal(left, 100);
+});

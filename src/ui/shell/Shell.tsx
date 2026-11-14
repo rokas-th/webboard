@@ -37,10 +37,11 @@ import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
 import { RemovedBanner } from "../sync/RemovedBanner";
 import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
-import { useFormFactor } from "./formFactor";
 import { FILES_STAY, PlanFailed, ReloadButton } from "./PlanFailed";
 import { PlanHead } from "./PlanHead";
 import { PlanMenu } from "./PlanMenu";
+import { PLAN_OVERLAY_CLASS, PlanOverlay } from "./PlanOverlay";
+import { usePlanListMode, type PlanListMode } from "./planListMode";
 import { ConvertedReport } from "./ConvertedReport";
 import { PurgeConfirm } from "./PurgeConfirm";
 import { ReloadConfirm } from "./ReloadConfirm";
@@ -61,6 +62,8 @@ export interface ShellProps {
 }
 
 type CompactSheet = "plans" | "plan" | null;
+
+type WideMode = Exclude<PlanListMode, "phone">;
 
 function itemName(s: PlanSession, id: ItemId): string {
   const it = s.view().plan.items.get(id);
@@ -125,9 +128,10 @@ function ShownList(p: { children: ReactNode; onFocusOut(): void }) {
   return <>{p.children}</>;
 }
 
-function WideBody(p: ShellProps & { compact: boolean }) {
+function WideBody(p: ShellProps & { listMode: WideMode }) {
   const registry = p.registry;
-  const compact = p.compact;
+  const listMode = p.listMode;
+  const compact = listMode !== "column";
   const { state: syncState } = useSyncState();
   const updates = useUpdates();
   const updateState = useUpdateState(updates);
@@ -141,12 +145,24 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   const files = usePlanFiles(registry, openPlan);
   const { creating, importing, importPlan } = files;
   const [namingPlan, setNamingPlan] = useState<PlanId | null>(null);
-  const newPlan = (): void => files.newPlan("New plan", (message) => toast(message, "bad"), setNamingPlan);
+  const newPlan = (made?: () => void): void =>
+    files.newPlan("New plan", (message) => toast(message, "bad"), (id) => {
+      setNamingPlan(id);
+      made?.();
+    });
   const newExample = (): void => files.newExample((message) => toast(message, "bad"));
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
   const [sheet, setSheet] = useState<CompactSheet>(null);
   const [printing, setPrinting] = useState(false);
   const [purging, setPurging] = useState<PlanId | null>(null);
+  const [overlayAsked, setOverlayAsked] = useState(false);
+  const overlayOpen = listMode === "overlay" && overlayAsked;
+  const toggleOverlay = useCallback(() => setOverlayAsked((open) => !open), []);
+  const closeOverlay = useCallback(() => setOverlayAsked(false), []);
+  const overlayDroppedFocus = useRef(false);
+  useEffect(() => {
+    if (listMode !== "overlay") setOverlayAsked(false);
+  }, [listMode]);
   const selectedItem = useRef<ItemId | null>(ui.selected);
 
   const session = main.k === "open" && main.id === ui.plan ? main.session : null;
@@ -240,7 +256,8 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     redo: runner === null ? null : runner.redo,
     readOnly,
     command,
-    full: !compact,
+    listMode,
+    overlay: { open: overlayOpen, toggle: toggleOverlay },
     clock: p.clock,
     select: openPlan,
     newPlan,
@@ -268,14 +285,14 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       const target = e.target instanceof Element ? e.target : null;
       if (target !== null && target.closest('[role="menu"]') !== null && e.key !== "Escape") return;
       const typing = isTyping(e.target, e.key);
-      const dialog = c.ui.dialog !== null || document.querySelector('[aria-modal="true"]') !== null;
+      const dialog = c.ui.dialog !== null || document.querySelector(`[aria-modal="true"]:not(.${PLAN_OVERLAY_CLASS})`) !== null;
       if (e.key === "Escape" && c.ui.settings !== null && !dialog && !typing) {
         e.preventDefault();
         closeSettings(c.theme, () => c.setUi({ settings: null }));
         return;
       }
-      const id = keyToCommand(e, { command: c.command, typing, dialog, selected: c.ui.selected !== null, full: c.full });
-      if (id === null) return;
+      const id = keyToCommand(e, { command: c.command, typing, dialog, selected: c.ui.selected !== null, listMode: c.listMode });
+      if (id === null || (c.overlay.open && !dialog && id !== "sidebar" && id !== "palette")) return;
       if (id === "close-dialog" || id === "deselect") {
         c.setUi(id === "close-dialog" ? { dialog: null } : { selected: null });
         return;
@@ -294,7 +311,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       return (
         <div className="empty-state">
           <div className="empty-actions">
-            <NewPlanButton creating={creating} onNew={newPlan} />
+            <NewPlanButton creating={creating} onNew={() => newPlan()} />
             <ExampleButton creating={creating} onExample={newExample} />
             <button type="button" disabled={importing} onClick={importPlan}>
               {importing ? <span className="dim">Importing…</span> : "Import plan…"}
@@ -384,11 +401,12 @@ function WideBody(p: ShellProps & { compact: boolean }) {
       creating={creating}
       onNew={() => {
         setSheet(null);
-        newPlan();
+        newPlan(closeOverlay);
       }}
       onSelect={(id) => {
         setSheet(null);
         openPlan(id);
+        closeOverlay();
       }}
       onTrash={(id) => void trashOwn(id)}
       onRestore={(id) => restorePlan(registry, id)}
@@ -409,6 +427,9 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   useEffect(() => {
     if (!compact) setSheet(null);
   }, [compact]);
+  useEffect(() => {
+    if (listMode !== "sheet" && sheet === "plans") setSheet(null);
+  }, [listMode, sheet]);
   useEffect(() => {
     if (compact && ui.settings !== null) setSheet(null);
   }, [compact, ui.settings]);
@@ -450,7 +471,21 @@ function WideBody(p: ShellProps & { compact: boolean }) {
     if (button === null) throw new Error("Shell: focus left the plan list, but the toolbar has no plan list button to take it");
     button.focus();
   }, [listShown]);
-  const attention = listAttention({ open: ui.sidebarOpen, plans, failures: registry.failures(), selected: sel, update: updateState });
+  useLayoutEffect(() => {
+    if (!overlayDroppedFocus.current) return;
+    overlayDroppedFocus.current = false;
+    const button = sidebarButton.current;
+    if (button === null) throw new Error("Shell: the plan list overlay left with focus, but the toolbar has no plan list button to take it");
+    button.focus();
+  }, [listMode]);
+  const listOpen = listMode === "overlay" ? overlayOpen : ui.sidebarOpen;
+  const attention = listAttention({ open: listOpen, plans, failures: registry.failures(), selected: sel, update: updateState });
+  const sidebarToggle =
+    listMode === "column"
+      ? { open: ui.sidebarOpen, attention, button: sidebarButton, onToggle: () => setUi({ sidebarOpen: !ui.sidebarOpen }) }
+      : listMode === "overlay"
+        ? { open: overlayOpen, attention, button: sidebarButton, onToggle: toggleOverlay }
+        : null;
 
   return (
     <OpenChoice.Provider value={openChoice}>
@@ -463,8 +498,9 @@ function WideBody(p: ShellProps & { compact: boolean }) {
           mac={mac}
           command={command}
           onCommand={runCommand}
+          listMode={listMode}
           compact={compact ? { button: sidebarButton, onPlans: () => setSheet("plans"), onPlan: () => setSheet("plan") } : null}
-          sidebar={compact ? null : { open: ui.sidebarOpen, attention, button: sidebarButton, onToggle: () => setUi({ sidebarOpen: !ui.sidebarOpen }) }}
+          sidebar={sidebarToggle}
         />
         <div ref={appBody} className="app-body" style={listWidth === null ? undefined : { "--sidebar-w": `${listWidth}px` }}>
           {listShown && (
@@ -477,7 +513,7 @@ function WideBody(p: ShellProps & { compact: boolean }) {
               <SidebarResizer width={listWidth} max={listMax} body={appBody} onCommit={(width) => setUi({ sidebarWidth: width })} />
             </ShownList>
           )}
-          <main className="main">
+          <main className="main" inert={overlayOpen}>
             <RemovedBanner session={session} />
             {indexError !== null && <IndexBanner registry={registry} error={indexError} />}
             {registry.indexUnreadable().map((line) => (
@@ -494,6 +530,18 @@ function WideBody(p: ShellProps & { compact: boolean }) {
             )}
             {content}
           </main>
+          {listMode === "overlay" && (
+            <PlanOverlay
+              open={overlayOpen}
+              button={sidebarButton}
+              onClose={closeOverlay}
+              onFocusDropped={() => {
+                overlayDroppedFocus.current = true;
+              }}
+            >
+              {sidebar}
+            </PlanOverlay>
+          )}
           {!compact && (session !== null || ui.settings !== null) && (
             <div className="slot slot-panel" data-slot="panel">
               {ui.settings !== null ? (
@@ -535,18 +583,18 @@ function WideBody(p: ShellProps & { compact: boolean }) {
   );
 }
 
-function WideShell(p: ShellProps & { compact: boolean }) {
+function WideShell(p: ShellProps & { listMode: WideMode }) {
   const [ui, setUi] = useUi();
   const uiValue = useMemo(() => ({ ui, setUi }), [ui, setUi]);
   return (
     <UiContext.Provider value={uiValue}>
-      <WideBody registry={p.registry} clock={p.clock} compact={p.compact} />
+      <WideBody registry={p.registry} clock={p.clock} listMode={p.listMode} />
     </UiContext.Provider>
   );
 }
 
 export function Shell(p: ShellProps) {
-  const form = useFormFactor();
+  const listMode = usePlanListMode();
   useNativeBackground(p.registry.device.platform);
   useEffect(() => {
     const onError = (e: ErrorEvent): void => {
@@ -564,6 +612,6 @@ export function Shell(p: ShellProps) {
       window.removeEventListener("unhandledrejection", onRejection);
     };
   }, []);
-  if (form === "phone") return <PhoneShell registry={p.registry} clock={p.clock} />;
-  return <WideShell registry={p.registry} clock={p.clock} compact={form === "compact"} />;
+  if (listMode === "phone") return <PhoneShell registry={p.registry} clock={p.clock} />;
+  return <WideShell registry={p.registry} clock={p.clock} listMode={listMode} />;
 }

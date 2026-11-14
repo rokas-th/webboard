@@ -3,7 +3,7 @@ import { isTyping, keyToCommand, type KeyInput, type KeyState } from "./keymap";
 
 const k = (key: string, o: Partial<KeyInput> = {}): KeyInput => ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...o });
 
-const MAC: KeyState = { command: true, typing: false, dialog: false, selected: false, full: true };
+const MAC: KeyState = { command: true, typing: false, dialog: false, selected: false, listMode: "column" };
 const PC: KeyState = { ...MAC, command: false };
 
 describe("keyToCommand on macOS", () => {
@@ -253,7 +253,13 @@ describe("keyToCommand: the plan list", () => {
   });
 
   it("does nothing outside the full form", () => {
-    expect(keyToCommand(k("b", { metaKey: true }), { ...MAC, full: false })).toBeNull();
-    expect(keyToCommand(k("b", { ctrlKey: true }), { ...PC, full: false })).toBeNull();
+    expect(keyToCommand(k("b", { metaKey: true }), { ...MAC, listMode: "sheet" })).toBeNull();
+    expect(keyToCommand(k("b", { ctrlKey: true }), { ...PC, listMode: "sheet" })).toBeNull();
+    expect(keyToCommand(k("b", { metaKey: true }), { ...MAC, listMode: "phone" })).toBeNull();
+  });
+
+  it("toggles the iPad overlay as it toggles the column", () => {
+    expect(keyToCommand(k("b", { metaKey: true }), { ...MAC, listMode: "overlay" })).toBe("sidebar");
+    expect(keyToCommand(k("b", { metaKey: true }), { ...MAC, listMode: "overlay", dialog: true })).toBeNull();
   });
 });

@@ -1,10 +1,12 @@
 import { useRef, type RefObject } from "react";
+import { readPlatform } from "../../platform";
 import type { PlanSession } from "../../store/session";
 import { useTheme } from "../../theme/ThemeContext";
 import { useRun } from "../run";
 import type { UiState, ViewKind, Zoom } from "../state";
 import { NewItemMenu } from "../common/NewItemMenu";
 import { closeSettings } from "../settings/SettingsPanel";
+import type { PlanListMode } from "./planListMode";
 import { PLAN_LIST_ID } from "./Sidebar";
 import { SyncChip } from "./SyncChip";
 import { useToolbarTight } from "./toolbarFit";
@@ -84,6 +86,7 @@ interface ToolbarProps {
   mac: boolean;
   command: boolean;
   onCommand(id: string): void;
+  listMode: Exclude<PlanListMode, "phone">;
   compact: { button: RefObject<HTMLButtonElement | null>; onPlans(): void; onPlan(): void } | null;
   sidebar: SidebarToggle | null;
 }
@@ -107,7 +110,7 @@ function ViewTabs(p: { ui: UiState; setUi(patch: Partial<UiState>): void }) {
   );
 }
 
-function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState; setUi(patch: Partial<UiState>): void; onCommand(id: string): void }) {
+function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState; setUi(patch: Partial<UiState>): void; onCommand(id: string): void; glyphs: boolean }) {
   const { undo, redo } = useRun(p.session);
   return (
     <>
@@ -130,12 +133,25 @@ function PlanControls(p: { session: PlanSession; readOnly: boolean; ui: UiState;
       <button type="button" title="Jump to today" onClick={() => p.onCommand("today")}>
         Today
       </button>
-      <button type="button" disabled={p.readOnly || !p.session.canUndo()} onClick={() => undo()}>
-        Undo
-      </button>
-      <button type="button" disabled={p.readOnly || !p.session.canRedo()} onClick={() => redo()}>
-        Redo
-      </button>
+      {p.glyphs ? (
+        <>
+          <button type="button" className="glyph-button" aria-label="Undo" title="Undo" disabled={p.readOnly || !p.session.canUndo()} onClick={() => undo()}>
+            ↶
+          </button>
+          <button type="button" className="glyph-button" aria-label="Redo" title="Redo" disabled={p.readOnly || !p.session.canRedo()} onClick={() => redo()}>
+            ↷
+          </button>
+        </>
+      ) : (
+        <>
+          <button type="button" disabled={p.readOnly || !p.session.canUndo()} onClick={() => undo()}>
+            Undo
+          </button>
+          <button type="button" disabled={p.readOnly || !p.session.canRedo()} onClick={() => redo()}>
+            Redo
+          </button>
+        </>
+      )}
     </>
   );
 }
@@ -144,11 +160,13 @@ export function Toolbar(p: ToolbarProps) {
   const bar = useRef<HTMLElement>(null);
   const tight = useToolbarTight(bar);
   const className = ["toolbar", ...(p.mac ? ["toolbar-mac"] : []), ...(tight ? ["toolbar-tight"] : [])].join(" ");
+  const platform = readPlatform(window);
+  const trimmed = platform.os === "ios" && platform.idiom === "pad" && p.listMode !== "column";
   return (
     <header ref={bar} className={className} data-tauri-drag-region>
       <div className="toolbar-group toolbar-start" data-tauri-drag-region>
         {p.sidebar !== null && <SidebarButton {...p.sidebar} command={p.command} />}
-        {p.compact !== null && (
+        {p.sidebar === null && p.compact !== null && (
           <button ref={p.compact.button} type="button" onClick={p.compact.onPlans}>
             Plans
           </button>
@@ -158,10 +176,12 @@ export function Toolbar(p: ToolbarProps) {
       {p.session !== null && <ViewTabs ui={p.ui} setUi={p.setUi} />}
       <div className="toolbar-group toolbar-end" data-tauri-drag-region>
         <span className="toolbar-spacer" />
-        {p.session !== null && <PlanControls session={p.session} readOnly={p.readOnly} ui={p.ui} setUi={p.setUi} onCommand={p.onCommand} />}
-        <button type="button" className="kbd-button" title="Command palette" onClick={() => p.onCommand("palette")}>
-          {p.command ? "⌘K" : "Ctrl K"}
-        </button>
+        {p.session !== null && <PlanControls session={p.session} readOnly={p.readOnly} ui={p.ui} setUi={p.setUi} onCommand={p.onCommand} glyphs={trimmed} />}
+        {!trimmed && (
+          <button type="button" className="kbd-button" title="Command palette" onClick={() => p.onCommand("palette")}>
+            {p.command ? "⌘K" : "Ctrl K"}
+          </button>
+        )}
         {p.session !== null && (
           <NewItemMenu label="+ New" className="button-primary" disabled={p.readOnly} onPick={(kind) => p.onCommand(`new-${kind}`)} />
         )}

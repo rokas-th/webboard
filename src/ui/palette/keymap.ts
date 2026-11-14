@@ -1,3 +1,5 @@
+import type { PlanListMode } from "../shell/planListMode";
+
 export type KeyInput = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">;
 
 export interface KeyState {
@@ -5,7 +7,7 @@ export interface KeyState {
   typing: boolean;
   dialog: boolean;
   selected: boolean;
-  full: boolean;
+  listMode: PlanListMode;
 }
 
 const VIEWS: Readonly<Record<string, string>> = { "1": "view-timeline", "2": "view-board", "3": "view-list" };
@@ -33,7 +35,7 @@ function modified(e: KeyInput, s: KeyState): string | null {
   if (key === "k" && !e.shiftKey) return "palette";
   if (key === "p" && !e.shiftKey) return "print";
   if (s.typing) return null;
-  if (key === "b" && !e.shiftKey) return s.full ? "sidebar" : null;
+  if (key === "b" && !e.shiftKey) return s.listMode === "column" || s.listMode === "overlay" ? "sidebar" : null;
   if (key === "d" && !e.shiftKey) return s.selected ? "duplicate" : null;
   if (key === "z") return e.shiftKey ? "redo" : "undo";
   if (key === "y" && !s.command && !e.shiftKey) return "redo";

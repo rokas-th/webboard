@@ -69,6 +69,7 @@ interface Harness {
   open: ReturnType<typeof vi.fn<(choice: string, side?: string) => void>>;
   useCyberdeck: ReturnType<typeof vi.fn<() => void>>;
   preview: ReturnType<typeof vi.fn<(id: string | null) => void>>;
+  toggleOverlay: ReturnType<typeof vi.fn<() => void>>;
 }
 
 function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly string[] = [], more: Partial<Registry> = {}): Harness {
@@ -78,6 +79,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
   const newExample = vi.fn<() => void>();
   const reveal = vi.fn<(target: string) => void>();
   const print = vi.fn<() => void>();
+  const toggleOverlay = vi.fn<() => void>();
   const open = vi.fn<(choice: string, side?: string) => void>();
   const useCyberdeck = vi.fn<() => void>();
   const preview = vi.fn<(id: string | null) => void>();
@@ -102,7 +104,8 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     redo: r.redo,
     readOnly: t.session.readOnly,
     command: true,
-    full: false,
+    listMode: "sheet",
+    overlay: { open: false, toggle: toggleOverlay },
     clock: t.clock,
     select,
     newPlan,
@@ -112,7 +115,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     updates: null,
     theme,
   };
-  return { ctx, setUi, select, newPlan, newExample, reveal, print, open, useCyberdeck, preview };
+  return { ctx, setUi, select, newPlan, newExample, reveal, print, open, useCyberdeck, preview, toggleOverlay };
 }
 
 const find = (ctx: CommandCtx, id: string) => {
@@ -690,7 +693,7 @@ describe("plan list command", () => {
   it("offers Hide the plan list in the View group with ⌘B in the full form, and hides it", async () => {
     const t = await made(SMALL);
     const h = harness(t);
-    const ctx: CommandCtx = { ...h.ctx, full: true };
+    const ctx: CommandCtx = { ...h.ctx, listMode: "column" };
     const c = find(ctx, "sidebar");
     expect([c.group, c.label, c.keys]).toEqual(["View", "Hide the plan list", "⌘B"]);
     c.run();
@@ -700,7 +703,7 @@ describe("plan list command", () => {
   it("offers Show the plan list with Ctrl B off the Mac for a hidden list, and shows it", async () => {
     const t = await made(SMALL);
     const h = harness(t, { sidebarOpen: false });
-    const ctx: CommandCtx = { ...h.ctx, full: true, command: false };
+    const ctx: CommandCtx = { ...h.ctx, listMode: "column", command: false };
     const c = find(ctx, "sidebar");
     expect([c.group, c.label, c.keys]).toEqual(["View", "Show the plan list", "Ctrl B"]);
     c.run();
@@ -710,7 +713,7 @@ describe("plan list command", () => {
   it("offers it with no open plan too", async () => {
     const t = await made(SMALL);
     const h = harness(t, { plan: null });
-    const ctx: CommandCtx = { ...h.ctx, full: true, session: null, run: null, undo: null, redo: null };
+    const ctx: CommandCtx = { ...h.ctx, listMode: "column", session: null, run: null, undo: null, redo: null };
     expect(find(ctx, "sidebar").label).toBe("Hide the plan list");
   });
 
@@ -719,5 +722,18 @@ describe("plan list command", () => {
     const h = harness(t);
     expect(ids(h.ctx).includes("sidebar")).toBe(false);
     expect(ids({ ...h.ctx, session: null, run: null, undo: null, redo: null }).includes("sidebar")).toBe(false);
+    expect(ids({ ...h.ctx, listMode: "phone" }).includes("sidebar")).toBe(false);
+  });
+
+  it("toggles the iPad overlay by its own open state, never the saved column", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    const shown = find({ ...h.ctx, listMode: "overlay" }, "sidebar");
+    expect([shown.group, shown.label, shown.keys]).toEqual(["View", "Show the plan list", "⌘B"]);
+    shown.run();
+    const hidden = find({ ...h.ctx, listMode: "overlay", overlay: { open: true, toggle: h.toggleOverlay } }, "sidebar");
+    expect(hidden.label).toBe("Hide the plan list");
+    hidden.run();
+    expect([h.toggleOverlay.mock.calls.length, h.setUi.mock.calls]).toEqual([2, []]);
   });
 });

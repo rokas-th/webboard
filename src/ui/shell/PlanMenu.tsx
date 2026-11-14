@@ -2,7 +2,7 @@ import { useEffect, useRef, type FocusEvent, type KeyboardEvent } from "react";
 import type { PlanId } from "../../domain/model";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
-import { moved } from "../common/menu";
+import { moved, useMenuList } from "../common/menu";
 import { exportFlow, importFlow } from "./fileFlows";
 
 const mounted = (b: HTMLButtonElement | null, missing: string): HTMLButtonElement => {
@@ -24,6 +24,7 @@ export function PlanMenu(p: {
   const importItem = useRef<HTMLButtonElement>(null);
   const printItem = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
+  const listClass = useMenuList(open, toggle);
 
   const items = (): HTMLButtonElement[] => [
     mounted(exportItem.current, "PlanMenu opened without its first item"),
@@ -104,7 +105,7 @@ export function PlanMenu(p: {
         ⋯
       </button>
       {open && (
-        <div className="plan-menu-list" role="menu" aria-label="Plan">
+        <div className={listClass} role="menu" aria-label="Plan">
           <button type="button" role="menuitem" ref={exportItem} className="choice-row" onClick={exportPlan}>
             Export plan…
           </button>

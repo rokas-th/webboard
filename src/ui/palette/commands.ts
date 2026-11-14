@@ -13,6 +13,7 @@ import { countedConflicts, goToFirstPatch } from "../choices/HeadCounts";
 import { baselineDefault } from "../panel/Baselines";
 import { placeStep } from "../panel/placeStep";
 import { exportFlow, importFlow } from "../shell/fileFlows";
+import type { PlanListMode } from "../shell/planListMode";
 import type { SettingsTab, UiState, ViewKind, Zoom } from "../state";
 import { timelineRows } from "../timeline/rows";
 
@@ -34,7 +35,8 @@ export interface CommandCtx {
   redo: (() => Built | null) | null;
   readOnly: boolean;
   command: boolean;
-  full: boolean;
+  listMode: PlanListMode;
+  overlay: { open: boolean; toggle(): void };
   clock: Clock;
   select(id: PlanId): void;
   newPlan(): void;
@@ -311,17 +313,15 @@ export function commands(ctx: CommandCtx): Command[] {
     ctx.theme.preview(null);
     ctx.setUi({ settings: tab });
   };
-  const sidebarCommand: Command[] = ctx.full
-    ? [
-        {
-          id: "sidebar",
-          group: "View",
-          label: ctx.ui.sidebarOpen ? "Hide the plan list" : "Show the plan list",
-          keys: ctx.command ? "⌘B" : "Ctrl B",
-          run: () => ctx.setUi({ sidebarOpen: !ctx.ui.sidebarOpen }),
-        },
-      ]
-    : [];
+  const listToggle = (open: boolean, run: () => void): Command[] => [
+    { id: "sidebar", group: "View", label: open ? "Hide the plan list" : "Show the plan list", keys: ctx.command ? "⌘B" : "Ctrl B", run },
+  ];
+  const sidebarCommand: Command[] =
+    ctx.listMode === "column"
+      ? listToggle(ctx.ui.sidebarOpen, () => ctx.setUi({ sidebarOpen: !ctx.ui.sidebarOpen }))
+      : ctx.listMode === "overlay"
+        ? listToggle(ctx.overlay.open, () => ctx.overlay.toggle())
+        : [];
   const always: Command[] = [
     { id: "new-plan", group: "File", label: "New plan", run: () => ctx.newPlan() },
     { id: "example-plan", group: "File", label: "Create the example plan", run: () => ctx.newExample() },

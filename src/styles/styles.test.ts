@@ -258,6 +258,9 @@ describe("the Cyberdeck look", () => {
       'html[data-os="ios"] .sync-buttons button::before': 'html[data-os="ios"] .sync-buttons button',
       'html[data-os="ios"] .banner button::before': 'html[data-os="ios"] .banner button',
       'html[data-os="ios"] .choice-banner button::before': 'html[data-os="ios"] .choice-banner button',
+      'html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer': 'html[data-os="ios"][data-idiom="pad"] .app-body',
+      'html[data-os="ios"][data-idiom="pad"] .plan-overlay-scrim': 'html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer',
+      'html[data-os="ios"][data-idiom="pad"] .plan-overlay': 'html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer',
     };
     const positioned = ["relative", "absolute", "sticky"];
     const absolute = sheet.rules.filter((r) => r.decls["position"] === "absolute" && r.conditions.length === 0).map((r) => r.selector);

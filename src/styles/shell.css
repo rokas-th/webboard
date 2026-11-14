@@ -1062,7 +1062,96 @@ html[data-form="compact"] .wordmark {
 }
 
 html[data-os="ios"] .seg-zoom {
-  gap: 8px;
+  gap: 0;
+}
+
+html[data-os="ios"] .seg-zoom button {
+  min-width: 44px;
+}
+
+html[data-os="ios"][data-idiom="pad"] .toolbar .glyph-button {
+  min-width: 40px;
+  padding: 6px 8px;
+  font-family: var(--prose);
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+html[data-os="ios"][data-idiom="pad"] .plan-menu-list.plan-menu-list-start {
+  right: auto;
+  left: 0;
+}
+
+html[data-os="ios"][data-idiom="pad"] .toolbar {
+  z-index: 31;
+}
+
+html[data-os="ios"][data-idiom="pad"] .app-body {
+  position: relative;
+}
+
+html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+}
+
+html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer:not([data-shown="true"]) {
+  pointer-events: none;
+}
+
+html[data-os="ios"][data-idiom="pad"] .plan-overlay-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  opacity: 0;
+}
+
+html[data-os="ios"][data-idiom="pad"] .plan-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: calc(min(320px, 85vw) + env(safe-area-inset-left));
+  padding: 0 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  box-shadow: 0 -16px 48px rgba(var(--shadow-rgb), 0.55);
+  transform: translateX(-100%);
+}
+
+html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer[data-shown="true"] .plan-overlay-scrim {
+  opacity: 1;
+}
+
+html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer[data-shown="true"] .plan-overlay {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html[data-os="ios"][data-idiom="pad"] .plan-overlay-scrim {
+    transition: opacity 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  html[data-os="ios"][data-idiom="pad"] .plan-overlay {
+    transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
+html[data-os="ios"][data-idiom="pad"] .plan-overlay .sidebar {
+  flex: 1 1 0;
+  min-height: 0;
+  width: auto;
+  background: none;
+  border-right: none;
+}
+
+html[data-os="ios"][data-idiom="pad"] .plan-overlay:focus-visible {
+  outline: none;
 }
 
 html[data-os="ios"][data-form="compact"] .toolbar {

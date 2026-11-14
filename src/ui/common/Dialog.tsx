@@ -23,7 +23,7 @@ export function useModalFocus(ref: RefObject<HTMLElement | null>, what: string, 
     if (!root.contains(document.activeElement)) (itself ? root : (focusables(root)[0] ?? root)).focus();
     return () => {
       openers.delete(root);
-      back.find((el): el is HTMLElement => el instanceof HTMLElement && el.isConnected && !root.contains(el))?.focus();
+      back.find((el): el is HTMLElement => el instanceof HTMLElement && el.isConnected && !root.contains(el) && el.closest("[inert]") === null)?.focus();
     };
   }, [ref, what, back, itself]);
 }

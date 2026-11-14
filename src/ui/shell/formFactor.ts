@@ -10,15 +10,15 @@ export function formFactor(m: { width: number; screenShort: number }): FormFacto
   return m.width >= FULL_MIN_WIDTH ? "full" : "compact";
 }
 
-const measure = (): FormFactor => formFactor({ width: window.innerWidth, screenShort: Math.min(window.screen.width, window.screen.height) });
+export const measuredForm = (): FormFactor => formFactor({ width: window.innerWidth, screenShort: Math.min(window.screen.width, window.screen.height) });
 
-export function useFormFactor(): FormFactor {
-  const [form, setForm] = useState<FormFactor>(measure);
+export function useWindowValue<T>(read: () => T, same: (a: T, b: T) => boolean): T {
+  const [value, setValue] = useState<T>(read);
   useLayoutEffect(() => {
-    document.documentElement.dataset.form = form;
-  }, [form]);
-  useLayoutEffect(() => {
-    const update = (): void => setForm(measure());
+    const update = (): void => {
+      const next = read();
+      setValue((was) => (same(was, next) ? was : next));
+    };
     update();
     window.addEventListener("resize", update);
     const observer = new ResizeObserver(update);
@@ -27,6 +27,12 @@ export function useFormFactor(): FormFactor {
       window.removeEventListener("resize", update);
       observer.disconnect();
     };
-  }, []);
-  return form;
+  }, [read, same]);
+  return value;
+}
+
+export function useStampForm(form: FormFactor): void {
+  useLayoutEffect(() => {
+    document.documentElement.dataset.form = form;
+  }, [form]);
 }

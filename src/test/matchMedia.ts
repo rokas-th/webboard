@@ -1,14 +1,17 @@
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 const COARSE_QUERY = "(pointer: coarse)";
+const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
 
 type Listener = (e: MediaQueryListEvent) => void;
 
 const listeners = new Map<string, Set<Listener>>([
   [DARK_QUERY, new Set<Listener>()],
   [COARSE_QUERY, new Set<Listener>()],
+  [REDUCED_QUERY, new Set<Listener>()],
 ]);
 let dark = true;
 let coarse = false;
+let reduced = false;
 
 const listenersOf = (query: string): Set<Listener> | undefined => listeners.get(query);
 
@@ -28,6 +31,7 @@ const list = (query: string): MediaQueryList => {
   const mql = {
     get matches() {
       if (query === COARSE_QUERY) return coarse;
+      if (query === REDUCED_QUERY) return reduced;
       return query === DARK_QUERY ? dark : false;
     },
     media: query,
@@ -61,11 +65,17 @@ export function setSystemDark(next: boolean): void {
 export function resetMediaQueries(): void {
   dark = true;
   coarse = false;
+  reduced = false;
 }
 
 export function setCoarsePointer(next: boolean): void {
   coarse = next;
   tell(COARSE_QUERY, next);
+}
+
+export function setReducedMotion(next: boolean): void {
+  reduced = next;
+  tell(REDUCED_QUERY, next);
 }
 
 export const darkListenerCount = (): number => listenersOf(DARK_QUERY)?.size ?? 0;

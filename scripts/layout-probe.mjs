@@ -37,11 +37,18 @@ const LANDSCAPE = [touch(1180, 820, "full"), touch(1366, 1024, "full")];
 const NARROW = [{ size: [500, 820], screen: [820, 1180], touch: true, form: "compact" }];
 const IPAD_11 = [touch(834, 1194, "compact"), { size: [1194, 834], screen: [834, 1194], touch: true, form: "full" }];
 const PHONE_LANDSCAPE = [{ size: [844, 390], screen: [390, 844], touch: true, form: "phone" }];
-const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE];
-const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11];
+const IPAD_WINDOWS = [
+  { size: [700, 1000], screen: [834, 1194], touch: true, form: "compact" },
+  { size: [699, 1000], screen: [834, 1194], touch: true, form: "compact" },
+  { size: [1179, 820], screen: [834, 1194], touch: true, form: "compact" },
+  { name: "1180x820-on-834x1194", size: [1180, 820], screen: [834, 1194], touch: true, form: "full" },
+];
+const MAC_834 = [{ ...cdesk(834, 1194), name: "834x1194-desk" }];
+const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE, ...IPAD_WINDOWS, ...MAC_834];
+const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...IPAD_WINDOWS, ...MAC_834];
 const LOAD_MS = 2000;
 
-const nameOf = (v) => `${v.size[0]}x${v.size[1]}`;
+const nameOf = (v) => v.name ?? `${v.size[0]}x${v.size[1]}`;
 const CONTROL = ":is(button, a[href], select, summary)";
 export const CHROME = Object.freeze({
   toolbar: [`.toolbar ${CONTROL}:not(.overlay *)`],
@@ -108,6 +115,13 @@ const edgeAt = (selector, side, at) => ({ edgeAt: [selector, side, at] });
 const oneLine = (selector) => ({ oneLine: selector });
 const focus = (selector) => ({ focus: selector });
 const fontMin = (selector, px) => ({ fontMin: [selector, px] });
+const keep = (selector) => ({ keep: selector });
+const kept = (selector) => ({ kept: selector });
+const meets = (selector, side, other, otherSide) => ({ meets: [selector, side, other, otherSide] });
+const centredIn = (selector) => ({ centredIn: selector });
+const inWindow = (selector) => ({ inWindow: selector });
+const uncovered = (selector) => ({ uncovered: selector });
+const still = () => ({ still: true });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -714,7 +728,7 @@ function states() {
   const stamped = (os, idiom) => [count(`html[data-os="${os}"]`, 1), count(idiom === null ? "html[data-idiom]" : `html[data-idiom="${idiom}"]`, idiom === null ? 0 : 1)];
   add("platform/macos", "mesa", { sizes: "standard", actions: [viewExpect("timeline"), ...stamped("macos", null)] });
   add("platform/linux", "mesa-linux", { sizes: "standard", actions: [viewExpect("timeline"), ...stamped("linux", null)] });
-  add("platform/ipad-11-portrait", "mesa-ios-pad", { sizes: "ipad-11-portrait", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(".sidebar", 0), ...stamped("ios", "pad")] });
+  add("platform/ipad-11-portrait", "mesa-ios-pad", { sizes: "ipad-11-portrait", actions: [viewExpect("timeline"), count(`${TOGGLE}[aria-expanded="false"]`, 1), none(".toolbar button", "Plans"), count(".sidebar", 0), ...stamped("ios", "pad")] });
   add("platform/ipad-11-landscape", "mesa-ios-pad", { sizes: "ipad-11-landscape", actions: [...fullShell, ...stamped("ios", "pad")] });
   add("platform/iphone-landscape", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), ...stamped("ios", "phone")] });
   const FIELDS = '.sheet input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), .sheet select, .sheet textarea';
@@ -767,7 +781,7 @@ function states() {
   add("ios44/pad-portrait/plans", "mesa-ios-pad", {
     sizes: "ipad-11-portrait",
     dialog: true,
-    actions: [viewExpect("timeline"), click(".toolbar button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), hitChrome("sheetHead", "planList")],
+    actions: [viewExpect("timeline"), click(TOGGLE), still(), expect('.plan-overlay[role="dialog"] .sidebar'), hitChrome("toolbar", "planList")],
   });
   add("ios44/pad-portrait/item", "mesa-ios-pad", { sizes: "ipad-11-portrait", dialog: true, actions: [viewExpect("timeline"), ...padItem, hitChrome("sheetHead", "panelActions")] });
   add("ios44/pad-portrait/settings", "mesa-ios-pad", {
@@ -780,6 +794,85 @@ function states() {
     sizes: "ipad-11-landscape",
     actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect(".settings-panel h2", "Settings"), settingsOn("Theme"), hitChrome("toolbar", "settingsHead", "settingsTabs")],
   });
+  const OVERLAY = '.plan-overlay[role="dialog"][aria-label="Plans"]';
+  add("ipad-mode/overlay", "mesa-ios-pad", {
+    sizes: "ipad-overlay",
+    actions: [
+      viewExpect("timeline"),
+      count(`${TOGGLE}[aria-expanded="false"]`, 1),
+      none(".toolbar button", "Plans"),
+      count(".sidebar", 0),
+      count(".sidebar-resizer", 0),
+      count(".plan-overlay-layer", 0),
+      count(".toolbar .kbd-button", 0),
+      count('.toolbar button.glyph-button[aria-label="Undo"]', 1),
+      count('.toolbar button.glyph-button[aria-label="Redo"]', 1),
+      hitChrome("toolbar"),
+    ],
+  });
+  add("ipad-mode/one-row", "mesa-ios-pad", { sizes: "ipad-1179", actions: [viewExpect("timeline"), oneLine(".toolbar")] });
+  add("ipad-mode/sheet", "mesa-ios-pad", { sizes: "ipad-699", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(TOGGLE, 0), count(".sidebar", 0), count(".plan-overlay-layer", 0), hitChrome("toolbar")] });
+  add("ipad-mode/column", "mesa-ios-pad", {
+    sizes: "ipad-column",
+    actions: [...fullShell, count(`${TOGGLE}[aria-expanded="true"]`, 1), expect(".sidebar-resizer"), count(".plan-overlay-layer", 0), expect(".toolbar .kbd-button", "⌘K"), expect(".toolbar button", "Undo")],
+  });
+  const overlayOpened = [viewExpect("timeline"), keep(".main"), keep(".toolbar"), click(TOGGLE), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), expect(`${OVERLAY} nav.sidebar`)];
+  add("ipad-overlay/open", "mesa-ios-pad", {
+    sizes: "ipad-overlay-open",
+    dialog: true,
+    actions: [
+      ...overlayOpened,
+      count(".plan-overlay-layer[data-shown]", 1),
+      count("main.main[inert]", 1),
+      edgeAt(OVERLAY, "left", 0),
+      meets(OVERLAY, "top", ".toolbar", "bottom"),
+      meets(".plan-overlay-scrim", "top", ".toolbar", "bottom"),
+      edgeAt(".plan-overlay-scrim", "right", "window"),
+      kept(".toolbar"),
+      kept(".main"),
+      uncovered(".toolbar button"),
+      inWindow(OVERLAY),
+      width(OVERLAY, 320, 320),
+    ],
+  });
+  add("ipad-overlay/hit44", "mesa-ios-pad", { sizes: "ipad-overlay-open", dialog: true, actions: [...overlayOpened, hitChrome("toolbar", "planList")] });
+  add("ipad-overlay/closed", "mesa-ios-pad", {
+    sizes: "ipad-overlay-open",
+    actions: [...overlayOpened, click(TOGGLE), still(), count(".plan-overlay-layer", 0), count("main.main[inert]", 0), count(`${TOGGLE}[aria-expanded="false"]`, 1), kept(".main")],
+  });
+  add("ipad-overlay/escape", "mesa-ios-pad", {
+    sizes: "ipad-11-portrait",
+    actions: [...overlayOpened, key("Escape", "Escape"), still(), count(".plan-overlay-layer", 0), count(`${TOGGLE}:focus`, 1), count(`${TOGGLE}[aria-expanded="false"]`, 1)],
+  });
+  add("ipad-overlay/cmd-b", "mesa-ios-pad", {
+    sizes: "ipad-11-portrait",
+    actions: [viewExpect("timeline"), key("b", "KeyB", 4), still(), expect(`${OVERLAY} nav.sidebar`), key("b", "KeyB", 4), still(), count(".plan-overlay-layer", 0)],
+  });
+  add("ipad-form-sheet/settings", "mesa-ios-pad", {
+    sizes: "ipad-overlay-open",
+    dialog: true,
+    actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), style(".sheet", "border-bottom-width", "1px"), style(".sheet", "border-bottom-left-radius", "12px"), style(".sheet", "padding-bottom", "0px"), centredIn(".sheet")],
+  });
+  add("ipad-form-sheet/item", "mesa-ios-pad", { sizes: "ipad-11-portrait", dialog: true, actions: [viewExpect("timeline"), ...padItem, style(".sheet", "width", "560px"), centredIn(".sheet")] });
+  add("ipad-form-sheet/plans-below-700", "mesa-ios-pad", {
+    sizes: "ipad-699",
+    dialog: true,
+    actions: [viewExpect("timeline"), click(".toolbar button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), hitChrome("sheetHead", "planList"), style(".sheet", "border-bottom-width", "0px"), edgeAt(".sheet", "bottom", 1000)],
+  });
+  add("ipad-menus/new", "mesa-ios-pad", {
+    sizes: "ipad-all",
+    actions: [viewExpect("timeline"), click(".toolbar button", "+ New"), expect('.toolbar .plan-menu-list [role="menuitem"]', "New task"), inWindow(".toolbar .plan-menu-list"), inWindow('.toolbar .plan-menu-list [role="menuitem"]'), hitChrome("menus")],
+  });
+  add("ipad-menus/plan", "mesa-ios-pad", {
+    sizes: "ipad-all",
+    actions: [viewExpect("timeline"), click('.plan-head button[aria-label="Plan menu"]'), expect('.plan-head .plan-menu-list [role="menuitem"]', "Export plan…"), inWindow(".plan-head .plan-menu-list"), inWindow('.plan-head .plan-menu-list [role="menuitem"]'), hitChrome("menus")],
+  });
+  add("ipad-mode/mac-compact", "mesa", { sizes: "mac-compact", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(TOGGLE, 0), count(".plan-overlay-layer", 0), expect(".toolbar .kbd-button", "⌘K"), expect(".toolbar button", "Undo")] });
+  add("ipad-mode/mac-834-plans", "mesa", {
+    sizes: "mac-834",
+    dialog: true,
+    actions: [viewExpect("timeline"), click(".toolbar button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), count(".plan-overlay-layer", 0), style(".sheet", "border-bottom-width", "0px"), edgeAt(".sheet", "bottom", 1194)],
+  });
   add("revert-preview", "mesa", {
     dialog: true,
     actions: [click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), expect(".revert-text p")],
@@ -790,7 +883,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.hit44 === undefined && last.fontMin === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.inWindow === undefined && last.uncovered === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -823,6 +916,14 @@ const SIZES = {
   "ipad-11-portrait": namesOf([IPAD_11[0]]),
   "ipad-11-landscape": namesOf([IPAD_11[1]]),
   "phone-landscape": namesOf(PHONE_LANDSCAPE),
+  "ipad-699": namesOf([IPAD_WINDOWS[1]]),
+  "ipad-1179": namesOf([IPAD_WINDOWS[2]]),
+  "ipad-overlay": namesOf([IPAD_WINDOWS[0], IPAD_11[0], IPAD_WINDOWS[2]]),
+  "ipad-overlay-open": namesOf([IPAD_WINDOWS[0], IPAD_11[0]]),
+  "ipad-column": namesOf([LANDSCAPE[0], IPAD_WINDOWS[3], IPAD_11[1]]),
+  "ipad-all": namesOf([IPAD_WINDOWS[1], IPAD_WINDOWS[0], IPAD_11[0], IPAD_WINDOWS[2], LANDSCAPE[0], IPAD_WINDOWS[3], IPAD_11[1]]),
+  "mac-834": namesOf(MAC_834),
+  "mac-compact": namesOf([...PORTRAIT, ...COMPACT_DESK, ...MAC_834]),
 };
 
 const sizesOf = (s) => {
@@ -1333,7 +1434,7 @@ const MEASURE = String.raw`
     return out.slice(0, 12);
   }
 
-  var POPUPS = ".overlay, .choice-list, .plan-menu-list";
+  var POPUPS = ".overlay, .choice-list, .plan-menu-list, .plan-overlay-layer";
   var ON_TOP = [".tl-head", ".tl-corner", "table.list th", ".col-head"];
   function coveredUp() {
     var out = [];
@@ -1827,6 +1928,95 @@ window.__probeAct = function (a) {
     var edgeGot = edged.getBoundingClientRect()[a.edgeAt[1]];
     if (typeof edgeGot !== "number") return { fail: "a box has no " + a.edgeAt[1] + " edge" };
     if (Math.abs(edgeGot - edgeWant) > 0.5) return { fail: a.edgeAt[0] + " has its " + a.edgeAt[1] + " edge at " + Math.round(edgeGot * 10) / 10 + " px, not " + edgeWant };
+    return { ok: true };
+  }
+  function firstShown(selector) {
+    return Array.prototype.slice.call(document.querySelectorAll(selector)).filter(onScreen)[0];
+  }
+  function boxOf(el) {
+    var r = el.getBoundingClientRect();
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  }
+  function tenth(n) {
+    return Math.round(n * 10) / 10;
+  }
+  if (a.still !== undefined) {
+    var ending = document.getAnimations().filter(function (an) { return an.effect === null || an.effect.getComputedTiming().iterations !== Infinity; });
+    return Promise.all(ending.map(function (an) { return an.finished.catch(function () { return null; }); })).then(function () {
+      return new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(function () { r({ ok: true }); }); }); });
+    });
+  }
+  if (a.keep !== undefined) {
+    var keepEl = firstShown(a.keep);
+    if (keepEl === undefined) return { fail: "no " + a.keep + " on screen to keep" };
+    window.__probeKept = window.__probeKept || {};
+    window.__probeKept[a.keep] = boxOf(keepEl);
+    return { ok: true };
+  }
+  if (a.kept !== undefined) {
+    var keptWas = (window.__probeKept || {})[a.kept];
+    if (keptWas === undefined) return { fail: a.kept + " was never kept" };
+    var keptEl = firstShown(a.kept);
+    if (keptEl === undefined) return { fail: "no " + a.kept + " on screen to compare" };
+    var keptNow = boxOf(keptEl);
+    var keptMoved = ["left", "top", "right", "bottom"].filter(function (k) { return Math.abs(keptNow[k] - keptWas[k]) > 0.5; });
+    if (keptMoved.length > 0) return { fail: a.kept + " moved: " + keptMoved.map(function (k) { return k + " " + tenth(keptWas[k]) + " -> " + tenth(keptNow[k]); }).join(", ") };
+    return { ok: true };
+  }
+  if (a.meets !== undefined) {
+    var meetA = firstShown(a.meets[0]);
+    var meetB = firstShown(a.meets[2]);
+    if (meetA === undefined || meetB === undefined) return { fail: "no " + (meetA === undefined ? a.meets[0] : a.meets[2]) + " on screen to measure" };
+    var meetGot = meetA.getBoundingClientRect()[a.meets[1]];
+    var meetWant = meetB.getBoundingClientRect()[a.meets[3]];
+    if (Math.abs(meetGot - meetWant) > 0.5) return { fail: a.meets[0] + " has its " + a.meets[1] + " edge at " + tenth(meetGot) + " px, not at " + a.meets[2] + "'s " + a.meets[3] + " edge, " + tenth(meetWant) + " px" };
+    return { ok: true };
+  }
+  if (a.centredIn !== undefined) {
+    var cEl = firstShown(a.centredIn);
+    if (cEl === undefined) return { fail: "no " + a.centredIn + " on screen to measure" };
+    var cb = boxOf(cEl);
+    var offX = (cb.left + cb.right) / 2 - window.innerWidth / 2;
+    var offY = (cb.top + cb.bottom) / 2 - window.innerHeight / 2;
+    if (Math.abs(offX) > 1 || Math.abs(offY) > 1) return { fail: a.centredIn + " sits " + tenth(offX) + " px across and " + tenth(offY) + " px down from the window's centre" };
+    if (cb.left < -0.5 || cb.top < -0.5 || cb.right > window.innerWidth + 0.5 || cb.bottom > window.innerHeight + 0.5) return { fail: a.centredIn + " runs out of the window" };
+    return { ok: true };
+  }
+  if (a.inWindow !== undefined) {
+    var winEls = Array.prototype.slice.call(document.querySelectorAll(a.inWindow)).filter(onScreen);
+    if (winEls.length === 0) return { fail: "no " + a.inWindow + " on screen to measure" };
+    var winBad = [];
+    winEls.forEach(function (el) {
+      var raw = boxOf(el);
+      var label = JSON.stringify((el.getAttribute("aria-label") || el.textContent.trim()).slice(0, 30));
+      if (raw.left < -0.5 || raw.top < -0.5 || raw.right > window.innerWidth + 0.5 || raw.bottom > window.innerHeight + 0.5) {
+        winBad.push(label + " lies at " + tenth(raw.left) + "," + tenth(raw.top) + " to " + tenth(raw.right) + "," + tenth(raw.bottom) + ", outside the window");
+        return;
+      }
+      for (var up = el.parentElement; up !== null && up !== document.documentElement; up = up.parentElement) {
+        var us = getComputedStyle(up);
+        if (us.overflowX === "visible" && us.overflowY === "visible") continue;
+        var ub = up.getBoundingClientRect();
+        var inX = us.overflowX === "visible" || (raw.left >= ub.left + parseFloat(us.borderLeftWidth) - 0.5 && raw.right <= ub.right - parseFloat(us.borderRightWidth) + 0.5);
+        var inY = us.overflowY === "visible" || (raw.top >= ub.top + parseFloat(us.borderTopWidth) - 0.5 && raw.bottom <= ub.bottom - parseFloat(us.borderBottomWidth) + 0.5);
+        if (!inX || !inY) {
+          winBad.push(label + " is clipped by " + up.tagName.toLowerCase() + (up.classList.length > 0 ? "." + up.classList[0] : ""));
+          return;
+        }
+      }
+    });
+    if (winBad.length > 0) return { fail: a.inWindow + ": " + winBad.slice(0, 6).join("; ") };
+    return { ok: true };
+  }
+  if (a.uncovered !== undefined) {
+    var covEls = Array.prototype.slice.call(document.querySelectorAll(a.uncovered)).filter(onScreen);
+    if (covEls.length === 0) return { fail: "no " + a.uncovered + " on screen to check" };
+    var covBad = covEls.filter(function (el) {
+      var r = el.getBoundingClientRect();
+      var front = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+      return front === null || !(front === el || el.contains(front));
+    });
+    if (covBad.length > 0) return { fail: covBad.length + " of " + covEls.length + " " + a.uncovered + " are covered at their centre: " + covBad.slice(0, 6).map(function (el) { return JSON.stringify((el.getAttribute("aria-label") || el.textContent.trim()).slice(0, 20)); }).join(", ") };
     return { ok: true };
   }
   if (a.oneLine !== undefined) {

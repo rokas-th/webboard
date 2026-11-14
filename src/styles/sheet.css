@@ -57,6 +57,17 @@
   border-right: none;
 }
 
+html[data-os="ios"][data-idiom="pad"][data-width="regular"] .overlay.sheet-overlay {
+  align-items: center;
+  padding: calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
+}
+
+html[data-os="ios"][data-idiom="pad"][data-width="regular"] .sheet {
+  border-bottom: 1px solid var(--line);
+  border-radius: 12px;
+  padding-bottom: 0;
+}
+
 html[data-os="ios"] .sheet-head {
   gap: 4px;
   padding: 4px 8px;

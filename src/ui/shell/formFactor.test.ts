@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formFactor, useFormFactor, type FormFactor } from "./formFactor";
+import { formFactor, type FormFactor } from "./formFactor";
+import { usePlanListMode } from "./planListMode";
 
 describe("formFactor", () => {
   const cases: readonly (readonly [number, number, FormFactor])[] = [
@@ -21,7 +22,7 @@ describe("formFactor", () => {
   });
 });
 
-describe("useFormFactor", () => {
+describe("the window measure behind usePlanListMode", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -41,12 +42,12 @@ describe("useFormFactor", () => {
     }
     vi.stubGlobal("ResizeObserver", Watch);
     expect(document.getElementById("root")).toBeNull();
-    const { result } = renderHook(() => useFormFactor());
-    expect(result.current).toBe("full");
+    const { result } = renderHook(() => usePlanListMode());
+    expect(result.current).toBe("column");
     expect(observed).toEqual([document.documentElement]);
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 820 });
     act(() => callbacks.forEach((cb) => cb()));
-    expect(result.current).toBe("compact");
+    expect(result.current).toBe("sheet");
     expect(document.documentElement.dataset.form).toBe("compact");
   });
 });

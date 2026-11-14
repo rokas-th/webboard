@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import type { ItemKind } from "../../domain/model";
 import { NEW_NAME } from "../palette/commands";
-import { moved } from "./menu";
+import { moved, useMenuList } from "./menu";
 
 const KINDS: readonly ItemKind[] = ["task", "milestone", "group"];
 
@@ -12,6 +12,7 @@ export function NewItemMenu(p: { label: string; className: string; disabled: boo
   const first = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const shown = open && !p.disabled;
+  const listClass = useMenuList(shown, toggle);
   useEffect(() => {
     if (!shown) return;
     if (first.current === null) throw new Error("NewItemMenu: open without its first item");
@@ -64,7 +65,7 @@ export function NewItemMenu(p: { label: string; className: string; disabled: boo
         {p.label}
       </button>
       {shown && (
-        <div ref={list} className="plan-menu-list" role="menu" aria-label="New item">
+        <div ref={list} className={listClass} role="menu" aria-label="New item">
           {KINDS.map((kind, i) => (
             <button
               key={kind}
