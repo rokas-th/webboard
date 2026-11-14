@@ -54,6 +54,7 @@
 		D6E02C53A5C0A3CC34A56104 /* platform.rs */ = {isa = PBXFileReference; path = platform.rs; sourceTree = "<group>"; };
 		DA0B2AE1E1171C281D09BB99 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		E371ED94914CD2C005BF25C5 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		F323AF100168BD9EAE8D7C5E /* menu.rs */ = {isa = PBXFileReference; path = menu.rs; sourceTree = "<group>"; };
 		F646E1A2C386CB2F64094685 /* probe.rs */ = {isa = PBXFileReference; path = probe.rs; sourceTree = "<group>"; };
 		F7F3A34AB47882D1E92C1AFB /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		FDEC6815A98DE7E7475DE412 /* alert.rs */ = {isa = PBXFileReference; path = alert.rs; sourceTree = "<group>"; };
@@ -181,6 +182,7 @@
 				3C03A1D554590B0F54CE22F2 /* file.rs */,
 				83DDBED907AE644F2E9CB689 /* haptic.rs */,
 				82BF278D4A1F3E5219BC3916 /* holidays.rs */,
+				F323AF100168BD9EAE8D7C5E /* menu.rs */,
 				89B44342A863F79F3C1F62DB /* mod.rs */,
 				6F8772FCA17A65788448F0D6 /* print.rs */,
 				F646E1A2C386CB2F64094685 /* probe.rs */,
