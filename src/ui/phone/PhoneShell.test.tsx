@@ -39,6 +39,8 @@ import { NO_REGION } from "./PhoneStatus";
 import { paintNative } from "../../theme/apply";
 import { PRESETS, tokensOf } from "../../theme/presets";
 import { Shell } from "../shell/Shell";
+import { IPHONE, MAC, setPlatform } from "../../test/platform";
+import type { Platform } from "../../platform";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
@@ -383,6 +385,7 @@ const showIndex = async (r: { registry: Registry; clock: Clock }, connected = fa
 
 const emptyIndex = async (): Promise<{ registry: Registry; clock: Clock }> => {
   resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "ios" }) });
+  setPlatform(IPHONE);
   return indexOpen();
 };
 
@@ -1952,7 +1955,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     listShows(name);
   };
   const world = (o: Parameters<typeof seedSpace>[1] & { answers?: Record<string, Answer> } = {}): SyncWorld => {
-    const w = syncWorld({ names: NAMES, platform: "ios", answers: o.answers });
+    const w = syncWorld({ names: NAMES, platform: IPHONE, answers: o.answers });
     seedSpace(w, o);
     return w;
   };
@@ -2046,7 +2049,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     listShows("Alpha");
     expect(names(removedBanner(), ["Export…", "Join with a code", "Set up sync"])).toEqual(["Join with a code", "Set up sync"]);
     await fresh();
-    const v = syncWorld({ platform: "ios" });
+    const v = syncWorld({ platform: IPHONE });
     v.status = () => ({ space: SPACE, revoked: true });
     await mounted(v);
     expect(emptyState()).not.toBeNull();
@@ -2264,7 +2267,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
       [4413, "Too large to sync: a plan", TOO_LARGE_MISSING],
       [1007, "The server refused a change from this device — update WebBoard", REJECTED],
     ])("a plan that never arrived offers no export (%s)", async (code, line, message) => {
-      const w = syncWorld({ names: NAMES, platform: "ios" });
+      const w = syncWorld({ names: NAMES, platform: IPHONE });
       seedIndex(w.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("l-L", ["l-n"], [ip("L", false)])]);
       seedPlan(w.mem, "L", "Alpha");
       seedIndex(w.mem, IX, [ixAct("s-S", [], [ip("S", false)], "dev-B")]);
@@ -2288,7 +2291,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
   });
 
   it("a plan that will not arrive says why on the phone", async () => {
-    const w = syncWorld({ names: { L: "Alpha" }, platform: "ios" });
+    const w = syncWorld({ names: { L: "Alpha" }, platform: IPHONE });
     seedIndex(w.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("l-L", ["l-n"], [ip("L", false)])]);
     seedPlan(w.mem, "L", "Alpha");
     seedIndex(w.mem, IX, [ixAct("s-S", [], [ip("S", false)], "dev-B")]);
@@ -2318,7 +2321,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     await tap(within(stopped()).getByRole("button", { name: "Open sync" }));
     expect(syncSheet()).toBeTruthy();
     await fresh();
-    const io = syncWorld({ names: { L: "Alpha" }, platform: "ios" });
+    const io = syncWorld({ names: { L: "Alpha" }, platform: IPHONE });
     seedIndex(io.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("l-L", ["l-n"], [ip("L", false)])]);
     seedPlan(io.mem, "L", "Alpha");
     seedIndex(io.mem, IX, [ixAct("s-S", [], [ip("S", false)], "dev-B")]);
@@ -2349,7 +2352,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
   });
 
   it("the device name is checked on the phone", async () => {
-    const w = syncWorld({ platform: "ios", answers: { sync_pair_join: () => SPACE } });
+    const w = syncWorld({ platform: IPHONE, answers: { sync_pair_join: () => SPACE } });
     w.status = () => ({ space: null, revoked: false });
     await mounted(w);
     await tap(within(topBar()).getByRole("button", { name: "Plans" }));
@@ -2391,7 +2394,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
   });
 
   it("the empty state shows sync", async () => {
-    const w = syncWorld({ platform: "ios" });
+    const w = syncWorld({ platform: IPHONE });
     w.ticket = fail({ code: "keychain.missing", message: NO_KEY });
     await mounted(w);
     const empty = emptyState();
@@ -2421,7 +2424,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
   });
 
   it("a space index reload that drops the only plan reaches the empty state", async () => {
-    const w = syncWorld({ names: { P: "Launch" }, platform: "ios" });
+    const w = syncWorld({ names: { P: "Launch" }, platform: IPHONE });
     seedIndex(w.mem, "local", [ixAct("l-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device")]);
     seedIndex(w.mem, IX, [ixAct("s-n", [], [own("dn:dev-A", "Mac")], "dev-A", "Name device"), ixAct("s-P", ["s-n"], [ip("P", false)])]);
     seedPlan(w.mem, "P", "Launch");
@@ -2500,9 +2503,10 @@ describe("the settings sheet on the phone", () => {
     expect(dialogs()).toEqual(["Review"]);
   });
 
-  const shellOn = async (platform: "ios" | "macos"): Promise<void> => {
+  const shellOn = async (platform: Platform): Promise<void> => {
     const t = await made();
-    tauri.answers.device_info = () => ({ deviceId: "mac", platform });
+    tauri.answers.device_info = () => ({ deviceId: "mac", platform: platform.os });
+    setPlatform(platform);
     const registry = await phoneRegistry(t);
     registries.push(registry);
     vi.mocked(paintNative).mockClear();
@@ -2525,7 +2529,7 @@ describe("the settings sheet on the phone", () => {
   };
 
   it("does not paint a native background through Shell on iOS, even after choosing a theme", async () => {
-    await shellOn("ios");
+    await shellOn(IPHONE);
     expect(dialogs()).toEqual(["Settings"]);
     await choosePaper();
     expect(document.documentElement.style.getPropertyValue("--void")).toBe(groundOf("paper"));
@@ -2533,7 +2537,7 @@ describe("the settings sheet on the phone", () => {
   });
 
   it("paints the native background through the same Shell harness on macOS, and again after choosing a theme", async () => {
-    await shellOn("macos");
+    await shellOn(MAC);
     expect(dialogs()).toEqual(["Settings"]);
     expect(vi.mocked(paintNative).mock.calls).toEqual([[groundOf("cyberdeck")]]);
     await choosePaper();

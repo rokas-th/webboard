@@ -503,6 +503,7 @@ function fixtureOf(plans, o = { trashed: false }) {
   };
   return {
     docs,
+    platform: { os: "macos", idiom: null },
     ipc: {
       device_info: { deviceId: "mac", platform: "macos" },
       settings_read: { v: 1, lastRegion: { ...ZH }, names: Object.fromEntries(plans.map((p) => [p.id, p.name])), exampleOffered: true },
@@ -527,11 +528,13 @@ function firstStart() {
   return { ...f, newDoc: encodeLoad({ lastSeq: 0 }), ipc: { ...f.ipc, settings_read: settings } };
 }
 
-const copyOf = (f) => ({ docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, b.slice()])), ipc: JSON.parse(JSON.stringify(f.ipc)) });
+const copyOf = (f) => ({ docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, b.slice()])), platform: { ...f.platform }, ipc: JSON.parse(JSON.stringify(f.ipc)) });
 
 const mesa = (log) => ({ id: PLAN_IDS.mesa, name: "MESA 1.0", log });
 
-const onLinux = (f) => ({ ...f, ipc: { ...f.ipc, device_info: { deviceId: "linux", platform: "linux" } } });
+const onLinux = (f) => ({ ...f, platform: { os: "linux", idiom: null }, ipc: { ...f.ipc, device_info: { deviceId: "linux", platform: "linux" } } });
+const onIosPhone = (f) => ({ ...f, platform: { os: "ios", idiom: "phone" }, ipc: { ...f.ipc, device_info: { deviceId: "iphone", platform: "ios" } } });
+const onIosPad = (f) => ({ ...f, platform: { os: "ios", idiom: "pad" }, ipc: { ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" } } });
 
 const PROBE_SPACE = { server: "https://probe.invalid", spaceId: "sp000000000", deviceId: "mac", deviceName: "Mac" };
 const SPACE_INDEX = "ix-sp000000000";
@@ -551,7 +554,7 @@ const UPDATE_FOUND = {
   rawJson: {},
 };
 
-const withUpdate = (f, answers) => ({ docs: copyOf(f).docs, ipc: { ...copyOf(f).ipc, ...answers } });
+const withUpdate = (f, answers) => ({ ...copyOf(f), ipc: { ...copyOf(f).ipc, ...answers } });
 
 function spaceIndex(plans) {
   const log = new Log("ixSpc", START);
@@ -632,7 +635,7 @@ function syncLocal() {
     { id: PLAN_IDS.longRtl, name: LONG.rtlPlan, log: rtlLog() },
   ]);
   const names = { ...f.ipc.settings_read.names, [space.id]: space.name };
-  const withSpacePlan = { docs: { ...f.docs, [space.id]: frame(space.log.doc()) }, ipc: { ...f.ipc, settings_read: { ...f.ipc.settings_read, names } } };
+  const withSpacePlan = { docs: { ...f.docs, [space.id]: frame(space.log.doc()) }, platform: f.platform, ipc: { ...f.ipc, settings_read: { ...f.ipc.settings_read, names } } };
   return inSpace(withSpacePlan, false, [space.id]);
 }
 
@@ -640,6 +643,7 @@ function inSpace(f, revoked, plans = []) {
   const docs = { ...f.docs, [SPACE_INDEX]: frame(spaceIndex(plans)) };
   return {
     docs,
+    platform: f.platform,
     ipc: { ...f.ipc, store_list: Object.keys(docs), sync_status: { space: { ...PROBE_SPACE }, revoked }, sync_ticket: { ...PROBE_TICKET } },
   };
 }
@@ -655,6 +659,8 @@ export function buildFixtures() {
     "blank-plan": fixtureOf([{ id: PLAN_IDS.blank, name: "Blank plan", log: blankLog() }]),
     mesa: mesaOnMac,
     "mesa-linux": onLinux(mesaOnMac),
+    "mesa-ios-phone": onIosPhone(mesaOnMac),
+    "mesa-ios-pad": onIosPad(mesaOnMac),
     scale,
     "scale-print": { ...scale, ipc: { ...scale.ipc, print_window: null } },
     choices: fixtureOf([mesa(choicesLog())]),

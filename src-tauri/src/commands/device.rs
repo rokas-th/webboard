@@ -23,11 +23,11 @@ struct Stored {
 }
 
 #[cfg(target_os = "ios")]
-const PLATFORM: &str = "ios";
+pub(crate) const PLATFORM: &str = "ios";
 #[cfg(target_os = "macos")]
-const PLATFORM: &str = "macos";
+pub(crate) const PLATFORM: &str = "macos";
 #[cfg(target_os = "linux")]
-const PLATFORM: &str = "linux";
+pub(crate) const PLATFORM: &str = "linux";
 
 const FILE: &str = "device.json";
 

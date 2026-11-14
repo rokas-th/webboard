@@ -13,6 +13,7 @@ import { closeListenerCount, requestWindowClose, resetTauri, tauri, windowState 
 import { Dialog } from "./ui/common/Dialog";
 import { clearToasts, Toasts } from "./ui/common/Toast";
 import { PLACE_KEY } from "./ui/state";
+import { IPHONE, setPlatform } from "./test/platform";
 
 vi.mock("@tauri-apps/api/core", () => import("./test/tauriMock"));
 vi.mock("@tauri-apps/api/window", () => import("./test/tauriMock"));
@@ -405,6 +406,7 @@ describe("updates", () => {
   it("neither checks nor shows the line or the commands on a phone or iPad", async () => {
     const seeded = await seededStore(["Alpha"]);
     resetTauri({ ...seeded.answers, device_info: () => ({ deviceId: "mac", platform: "ios" }) });
+    setPlatform(IPHONE);
     spyOpen();
     render(themed(<App />));
     await settle();

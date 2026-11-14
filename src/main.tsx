@@ -25,9 +25,17 @@ import { applyTokens } from "./theme/apply";
 import { tokensOf } from "./theme/presets";
 import { loadStore, shownTheme } from "./theme/store";
 import { ThemeProvider } from "./theme/ThemeContext";
+import { readPlatform, stampPlatform } from "./platform";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("index.html has no #root element");
+
+try {
+  stampPlatform(document.documentElement, readPlatform(window));
+} catch (e) {
+  root.textContent = `WebBoard could not start: it could not tell which platform it runs on (${e instanceof Error ? e.message : String(e)}).`;
+  throw e;
+}
 
 const loadTheme = (): ReturnType<typeof loadStore> => {
   try {

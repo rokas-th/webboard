@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, vi } from "vitest";
 import { installMatchMedia, resetSystemDark } from "./matchMedia";
+import { setPlatform } from "./platform";
 
 vi.mock("../theme/apply", async (importOriginal) => {
   const real = await importOriginal<typeof import("../theme/apply")>();
@@ -56,8 +57,10 @@ export function setScreen(w: number, h: number): void {
 }
 
 installMatchMedia();
+setPlatform({ os: "macos", idiom: null });
 
 beforeEach(() => {
+  setPlatform({ os: "macos", idiom: null });
   scrollIntoView.mockClear();
   document.documentElement.style.setProperty("--sidebar-w", "284px");
   setScreen(1440, 900);

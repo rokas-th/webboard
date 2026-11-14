@@ -16,6 +16,8 @@ import { CH_ZH_2026, CH_ZH_2027, FETCHED_AT } from "../test/fixtures/calendars";
 import { encodeLoad, memoryStore, type MemoryStore } from "../test/fixtures/store";
 import { ctxOf } from "../test/planCtx";
 import { hold, offeredSettings, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
+import { IPAD, IPHONE, LINUX, MAC, setPlatform } from "../test/platform";
+import type { Platform } from "../platform";
 import { VALID_WEBBOARD } from "../test/fixtures/webboard";
 import { decodeAction, encodeAction, PlanDoc } from "./doc";
 import { buildImport } from "./file";
@@ -63,8 +65,9 @@ interface Env {
   state: { settings: unknown; writeFail: Err | null };
 }
 
-function env(o: { settings?: unknown; platform?: "macos" | "linux" | "ios"; holidays?: Answer; answers?: Record<string, Answer>; mem?: MemoryStore } = {}): Env {
+function env(o: { settings?: unknown; platform?: Platform; holidays?: Answer; answers?: Record<string, Answer>; mem?: MemoryStore } = {}): Env {
   const mem = o.mem ?? memoryStore();
+  setPlatform(o.platform ?? MAC);
   const state: Env["state"] = { settings: "settings" in o ? o.settings : offeredSettings(), writeFail: null };
   resetTauri({
     ...mem.answers,
@@ -74,7 +77,7 @@ function env(o: { settings?: unknown; platform?: "macos" | "linux" | "ios"; holi
       state.settings = settingsOf({ cmd: "settings_write", args, options: undefined });
       return null;
     },
-    device_info: () => ({ deviceId: "dev-A", platform: o.platform ?? "macos" }),
+    device_info: () => ({ deviceId: "dev-A", platform: (o.platform ?? MAC).os }),
     holidays_year: o.holidays ?? offline,
     ...o.answers,
   });
@@ -555,7 +558,7 @@ describe("Registry: sessions and devices", () => {
   });
 
   it("device name", async () => {
-    const e = env({ platform: "ios" });
+    const e = env({ platform: IPHONE });
     setScreen(430, 932);
     const r = await open();
     expect(r.device).toEqual({ deviceId: "dev-A", name: "iPhone", platform: "ios" });
@@ -572,7 +575,7 @@ describe("Registry: sessions and devices", () => {
     expect(again.device.name).toBe("iPhone");
     expect(e.mem.docs.has("local")).toBe(true);
     await closeAll();
-    env({ platform: "ios" });
+    env({ platform: IPAD });
     const pad = await open();
     expect(pad.device.name).toBe("iPad");
   });
@@ -1624,6 +1627,7 @@ describe("Registry: spaces", () => {
     forget(mine);
     await mine.close();
     const p = env({ settings: SPACE_SETTINGS, answers: { device_info: () => ({ deviceId: "dev-B", platform: "linux" }) } });
+    setPlatform(LINUX);
     p.mem.seed(IX, update);
     const r = await open();
     await r.attachSpace(SP);
@@ -2567,5 +2571,22 @@ describe("Registry: the example plan", () => {
     env({ settings: { ...FRESH, exampleOffered: "yes" } });
     const err = appErrorOf(await rejection(Registry.open()));
     expect([err.code, err.message]).toEqual(["settings.corrupt", "settings.json does not hold WebBoard settings: exampleOffered is not true or false."]);
+  });
+});
+
+describe("Registry: the platform stamp", () => {
+  it("opens when device_info answers the stamped platform", async () => {
+    env({ platform: IPAD });
+    const r = await open();
+    expect(r.device.platform).toBe("ios");
+  });
+
+  it("refuses to open when device_info answers another platform than the page was stamped with", async () => {
+    env({ answers: { device_info: () => ({ deviceId: "dev-A", platform: "linux" }) } });
+    const err = appErrorOf(await rejection(Registry.open()));
+    expect([err.code, err.message]).toEqual([
+      "platform.mismatch",
+      'device_info answered the platform "linux", but the page was stamped "macos" before it started.',
+    ]);
   });
 });

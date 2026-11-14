@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -34,8 +35,10 @@ const PHONE = [touch(390, 844, "phone")];
 const PORTRAIT = [touch(820, 1180, "compact")];
 const LANDSCAPE = [touch(1180, 820, "full"), touch(1366, 1024, "full")];
 const NARROW = [{ size: [500, 820], screen: [820, 1180], touch: true, form: "compact" }];
-const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
-const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW];
+const IPAD_11 = [touch(834, 1194, "compact"), { size: [1194, 834], screen: [834, 1194], touch: true, form: "full" }];
+const PHONE_LANDSCAPE = [{ size: [844, 390], screen: [390, 844], touch: true, form: "phone" }];
+const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE];
+const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11];
 const LOAD_MS = 2000;
 
 const nameOf = (v) => `${v.size[0]}x${v.size[1]}`;
@@ -690,6 +693,12 @@ function states() {
     sizes: "phone",
     actions: [expect(".phone-head button", "Plans"), count('button[aria-label="Plan list"]', 0), count(".sidebar-resizer", 0)],
   });
+  const stamped = (os, idiom) => [count(`html[data-os="${os}"]`, 1), count(idiom === null ? "html[data-idiom]" : `html[data-idiom="${idiom}"]`, idiom === null ? 0 : 1)];
+  add("platform/macos", "mesa", { sizes: "standard", actions: [viewExpect("timeline"), ...stamped("macos", null)] });
+  add("platform/linux", "mesa-linux", { sizes: "standard", actions: [viewExpect("timeline"), ...stamped("linux", null)] });
+  add("platform/ipad-11-portrait", "mesa-ios-pad", { sizes: "ipad-11-portrait", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(".sidebar", 0), ...stamped("ios", "pad")] });
+  add("platform/ipad-11-landscape", "mesa-ios-pad", { sizes: "ipad-11-landscape", actions: [...fullShell, ...stamped("ios", "pad")] });
+  add("platform/iphone-landscape", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), ...stamped("ios", "phone")] });
   add("revert-preview", "mesa", {
     dialog: true,
     actions: [click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), expect(".revert-text p")],
@@ -700,7 +709,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.hit44 === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -730,6 +739,9 @@ const SIZES = {
   "full-all": namesOf([...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...LANDSCAPE]),
   "full-480": namesOf([...DESKTOP.slice(1), ...BREAK_EDGE, ...ABOVE_BREAK, LANDSCAPE[1]]),
   "full-1180": namesOf([DESKTOP[0], LANDSCAPE[0]]),
+  "ipad-11-portrait": namesOf([IPAD_11[0]]),
+  "ipad-11-landscape": namesOf([IPAD_11[1]]),
+  "phone-landscape": namesOf(PHONE_LANDSCAPE),
 };
 
 const sizesOf = (s) => {
@@ -741,6 +753,7 @@ const sizesOf = (s) => {
 const SHIM = String.raw`
 (function () {
   var P = window.__PROBE__;
+  Object.defineProperty(window, "__WEBBOARD_PLATFORM__", { value: Object.freeze(P.fixture.platform), enumerable: true });
   localStorage.clear();
   if (P.place !== null) localStorage.setItem("webboard.place", JSON.stringify(P.place));
   if (P.theme !== null) localStorage.setItem("webboard.theme", JSON.stringify(P.theme));
@@ -1437,6 +1450,7 @@ const MEASURE = String.raw`
   return {
     chain: chain(),
     form: document.documentElement.getAttribute("data-form"),
+    stamp: { os: document.documentElement.getAttribute("data-os"), idiom: document.documentElement.getAttribute("data-idiom"), want: P.fixture.platform },
     scope: { name: ".app", found: scopeFound },
     fonts: P.fonts.map(function (f) {
       var faces = [];
@@ -1472,7 +1486,7 @@ const MEASURE = String.raw`
 })()
 `;
 
-const ACT = String.raw`
+export const ACT = String.raw`
 window.__probeAct = function (a) {
   function matching(selector, text) {
     var nodes = Array.prototype.slice.call(document.querySelectorAll(selector));
@@ -1511,6 +1525,149 @@ window.__probeAct = function (a) {
   }
   if (a.raise !== undefined) {
     window.dispatchEvent(new ErrorEvent("error", { error: new Error(a.raise), message: "Uncaught Error: " + a.raise }));
+    return { ok: true };
+  }
+  if (a.hit44 !== undefined) {
+    var HIT_MIN = 44;
+    function nameOf(node) {
+      var tag = node.tagName.toLowerCase();
+      if (node.classList.length > 0) return tag + "." + node.classList[0];
+      if (node.id !== "") return tag + "#" + node.id;
+      return tag;
+    }
+    function sameBox(p, q) {
+      return p.left === q.left && p.top === q.top && p.right === q.right && p.bottom === q.bottom;
+    }
+    function clippedByAncestors(box, el) {
+      var out = { box: { left: box.left, top: box.top, right: box.right, bottom: box.bottom }, by: null };
+      for (var up = el.parentElement; up !== null && up !== document.body && up !== document.documentElement; up = up.parentElement) {
+        var next = clipped(out.box, up);
+        if (out.by === null && !sameBox(next, out.box)) out.by = up;
+        out.box = next;
+      }
+      return out;
+    }
+    function translationOf(s, what) {
+      var bad = null;
+      var shift = { tx: 0, ty: 0 };
+      if (s.transform !== "none") {
+        var m = /^matrix\(([^)]*)\)$/.exec(s.transform);
+        if (m === null) {
+          bad = s.transform;
+        } else {
+          var n = m[1].split(",").map(function (part) { return parseFloat(part); });
+          if (n.length !== 6 || !n.every(isFinite)) throw new Error("hit44: " + what + " has a transform that cannot be read: " + s.transform);
+          if (n[0] === 1 && n[1] === 0 && n[2] === 0 && n[3] === 1) shift = { tx: n[4], ty: n[5] };
+          else bad = s.transform;
+        }
+      }
+      if (bad === null && s.scale !== "none") bad = "scale: " + s.scale;
+      if (bad === null && s.rotate !== "none") bad = "rotate: " + s.rotate;
+      if (bad === null && s.zoom !== undefined && s.zoom !== "1" && s.zoom !== "normal") bad = "zoom: " + s.zoom;
+      return bad === null ? shift : { bad: bad };
+    }
+    function requireTranslationChain(el) {
+      for (var node = el; node !== null; node = node.parentElement) {
+        var t = translationOf(getComputedStyle(node), nameOf(node));
+        if (t.bad !== undefined) throw new Error("hit44: " + nameOf(node) + " has a transform (" + t.bad + ") that changes the size of " + el.tagName.toLowerCase() + "'s pseudo-elements; their computed boxes do not show it");
+        if (node === document.documentElement) return;
+      }
+    }
+    var targets = [];
+    var unmatched = [];
+    a.hit44.forEach(function (selector) {
+      var found = Array.prototype.slice.call(document.querySelectorAll(selector)).filter(function (el) {
+        return el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible";
+      }).map(function (el) {
+        var raw = el.getBoundingClientRect();
+        var c = clippedByAncestors(raw, el);
+        return { el: el, raw: raw, box: c.box, by: c.by };
+      }).filter(function (t) {
+        return t.by === null || (t.box.right > t.box.left && t.box.bottom > t.box.top);
+      });
+      if (found.length === 0) unmatched.push(selector);
+      found.forEach(function (t) {
+        targets.push({ selector: selector, el: t.el, raw: t.raw, box: t.box, by: t.by });
+      });
+    });
+    if (unmatched.length > 0) return { fail: "no visible element matches " + unmatched.join(", ") + ", so no hit area was measured" };
+    function paddingBox(node) {
+      var r = node.getBoundingClientRect();
+      var s = getComputedStyle(node);
+      return {
+        left: r.left + parseFloat(s.borderLeftWidth),
+        top: r.top + parseFloat(s.borderTopWidth),
+        right: r.right - parseFloat(s.borderRightWidth),
+        bottom: r.bottom - parseFloat(s.borderBottomWidth),
+      };
+    }
+    function clips(node) {
+      var s = getComputedStyle(node);
+      return { x: s.overflowX !== "visible", y: s.overflowY !== "visible" };
+    }
+    function clipped(box, node) {
+      var c = clips(node);
+      if (!c.x && !c.y) return box;
+      var p = paddingBox(node);
+      return {
+        left: c.x ? Math.max(box.left, p.left) : box.left,
+        top: c.y ? Math.max(box.top, p.top) : box.top,
+        right: c.x ? Math.min(box.right, p.right) : box.right,
+        bottom: c.y ? Math.min(box.bottom, p.bottom) : box.bottom,
+      };
+    }
+    function candidates(t) {
+      var el = t.el;
+      var box = t.box;
+      var list = [box];
+      var own = getComputedStyle(el);
+      if (own.position === "static") return list;
+      var originX = t.raw.left + parseFloat(own.borderLeftWidth);
+      var originY = t.raw.top + parseFloat(own.borderTopWidth);
+      var chainChecked = false;
+      ["::before", "::after"].forEach(function (which) {
+        var ps = getComputedStyle(el, which);
+        if (ps.content === "none" || ps.content === "normal" || ps.display === "none" || ps.position !== "absolute" || ps.pointerEvents === "none" || ps.visibility !== "visible") return;
+        var tag = el.tagName.toLowerCase();
+        var shift = translationOf(ps, which + " of " + tag);
+        if (shift.bad !== undefined) throw new Error("hit44: " + which + " of " + tag + " has a transform (" + shift.bad + "), which its computed box does not show");
+        if (!chainChecked) {
+          requireTranslationChain(el);
+          chainChecked = true;
+        }
+        var outer = ps.boxSizing === "border-box" ? 0 : parseFloat(ps.paddingLeft) + parseFloat(ps.paddingRight) + parseFloat(ps.borderLeftWidth) + parseFloat(ps.borderRightWidth);
+        var outerY = ps.boxSizing === "border-box" ? 0 : parseFloat(ps.paddingTop) + parseFloat(ps.paddingBottom) + parseFloat(ps.borderTopWidth) + parseFloat(ps.borderBottomWidth);
+        var left = originX + parseFloat(ps.left) + parseFloat(ps.marginLeft) + shift.tx;
+        var top = originY + parseFloat(ps.top) + parseFloat(ps.marginTop) + shift.ty;
+        var w = parseFloat(ps.width) + outer;
+        var h = parseFloat(ps.height) + outerY;
+        if (![left, top, w, h].every(isFinite)) throw new Error("hit44: " + which + " of " + tag + " has no resolved box: left " + ps.left + " top " + ps.top + " width " + ps.width + " height " + ps.height);
+        var pb = clippedByAncestors(clipped({ left: left, top: top, right: left + w, bottom: top + h }, el), el).box;
+        if (pb.right <= pb.left || pb.bottom <= pb.top) return;
+        if (pb.left > box.right || pb.right < box.left || pb.top > box.bottom || pb.bottom < box.top) return;
+        list.push(pb);
+      });
+      return list;
+    }
+    function measure(r) {
+      return { w: Math.round((r.right - r.left) * 10) / 10, h: Math.round((r.bottom - r.top) * 10) / 10 };
+    }
+    function fits(s) {
+      return s.w >= HIT_MIN - 0.01 && s.h >= HIT_MIN - 0.01;
+    }
+    var small = targets.map(function (t) {
+      var sizes = candidates(t).map(measure);
+      if (sizes.some(fits)) return null;
+      var best = sizes.reduce(function (p, q) { return q.w * q.h > p.w * p.h ? q : p; });
+      return { t: t, w: best.w, h: best.h };
+    }).filter(function (m) { return m !== null; });
+    if (small.length > 0) {
+      return { fail: small.slice(0, 6).map(function (m) {
+        var label = m.t.el.textContent.trim() || m.t.el.getAttribute("aria-label") || "";
+        var note = m.t.by === null ? "" : " (clipped by " + nameOf(m.t.by) + ")";
+        return m.t.selector + " " + JSON.stringify(label.slice(0, 40)) + " has a hit area of " + m.w + "x" + m.h + " px, under " + HIT_MIN + "x" + HIT_MIN + note;
+      }).join("; ") + (small.length > 6 ? "; and " + (small.length - 6) + " more" : "") };
+    }
     return { ok: true };
   }
   if (a.expect !== undefined) {
@@ -1796,7 +1953,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const tailOf = (text) => (text.length > 4000 ? `…${text.slice(-4000)}` : text);
 
-class Cdp {
+export class Cdp {
   constructor(ws) {
     this.ws = ws;
     this.next = 1;
@@ -1888,7 +2045,7 @@ async function revisions(base) {
   return names.filter((n) => n.startsWith("chromium_headless_shell-")).sort().reverse();
 }
 
-async function findShell() {
+export async function findShell() {
   for (const base of SHELL_CANDIDATES) {
     for (const rev of await revisions(base)) {
       for (const dir of ["chrome-headless-shell-mac-arm64", "chrome-headless-shell-mac-x64", "chrome-headless-shell-linux64"]) {
@@ -1955,7 +2112,7 @@ function serve(indexHtml, traffic) {
 const exitOf = (child) => `code ${child.exitCode}, signal ${child.signalCode}`;
 const exited = (child) => child.exitCode !== null || child.signalCode !== null;
 
-async function devtoolsUrl(child, profile, stderrOf, startError) {
+export async function devtoolsUrl(child, profile, stderrOf, startError) {
   const file = join(profile, "DevToolsActivePort");
   const deadline = Date.now() + DEVTOOLS_MS;
   while (Date.now() < deadline) {
@@ -1971,7 +2128,7 @@ async function devtoolsUrl(child, profile, stderrOf, startError) {
   throw new NotMeasured(`chrome-headless-shell wrote no ${file} within ${DEVTOOLS_MS / 1000} s; its stderr:\n${tailOf(stderrOf())}`);
 }
 
-async function evaluate(cdp, sessionId, expression, awaitPromise = false) {
+export async function evaluate(cdp, sessionId, expression, awaitPromise = false) {
   const { result, exceptionDetails } = await cdp.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise }, sessionId);
   if (exceptionDetails !== undefined) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
   return result.value;
@@ -2066,6 +2223,8 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
 function judge(state, viewport, r, errors, notFound) {
   const problems = [];
   if (r.form !== viewport.form) problems.push(`html[data-form] is ${JSON.stringify(r.form)}, not ${JSON.stringify(viewport.form)}`);
+  if (r.stamp.os !== r.stamp.want.os) problems.push(`html[data-os] is ${JSON.stringify(r.stamp.os)}, not the fixture's ${JSON.stringify(r.stamp.want.os)}`);
+  if (r.stamp.idiom !== r.stamp.want.idiom) problems.push(`html[data-idiom] is ${JSON.stringify(r.stamp.idiom)}, not the fixture's ${JSON.stringify(r.stamp.want.idiom)}`);
   if (r.doc.overY > 1) problems.push(`document scrolls ${r.doc.overY}px vertically`);
   if (r.doc.overX > 1) problems.push(`document scrolls ${r.doc.overX}px horizontally`);
   if (r.doc.alreadyScrolledTo.top !== 0 || r.doc.alreadyScrolledTo.left !== 0) {
@@ -2148,7 +2307,7 @@ function printTable(rows) {
 
 const base64 = (bytes) => Buffer.from(bytes).toString("base64");
 
-async function stopChild(child) {
+export async function stopChild(child) {
   if (child.pid === undefined || exited(child)) return;
   await new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -2287,7 +2446,7 @@ async function main() {
     [...new Set(picked.map((s) => s.fixture))].map((name) => {
       const f = built[name];
       if (f === undefined) throw new Error(`layout-probe: no fixture ${name}`);
-      return [name, { docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, base64(b)])), ipc: f.ipc, newDoc: f.newDoc === undefined ? null : base64(f.newDoc) }];
+      return [name, { docs: Object.fromEntries(Object.entries(f.docs).map(([id, b]) => [id, base64(b)])), platform: f.platform, ipc: f.ipc, newDoc: f.newDoc === undefined ? null : base64(f.newDoc) }];
     }),
   );
 
@@ -2374,14 +2533,16 @@ async function main() {
   return 0;
 }
 
-main().then(
-  (code) => process.exit(code),
-  (e) => {
-    if (e instanceof NotMeasured) {
-      process.stderr.write(`layout-probe: not measured: ${e.message}\n`);
-      process.exit(2);
-    }
-    process.stderr.write(`layout-probe: crashed: ${e instanceof Error ? e.stack : String(e)}\n`);
-    process.exit(3);
-  },
-);
+if (process.argv[1] !== undefined && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().then(
+    (code) => process.exit(code),
+    (e) => {
+      if (e instanceof NotMeasured) {
+        process.stderr.write(`layout-probe: not measured: ${e.message}\n`);
+        process.exit(2);
+      }
+      process.stderr.write(`layout-probe: crashed: ${e instanceof Error ? e.stack : String(e)}\n`);
+      process.exit(3);
+    },
+  );
+}

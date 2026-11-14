@@ -2,6 +2,7 @@ mod commands;
 mod keychain;
 #[cfg(target_os = "macos")]
 pub mod menu;
+mod platform;
 
 #[cfg(all(not(debug_assertions), any(target_os = "macos", target_os = "linux")))]
 fn raise_running_window(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -136,8 +137,12 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
 
+    let stamp = platform::stamp()
+        .unwrap_or_else(|e| panic!("WebBoard could not tell which device it runs on: {e}"));
+
     builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(stamp)
         .setup(|app| {
             use tauri::Manager;
             let built = services(
@@ -366,6 +371,28 @@ mod tests {
         assert!(
             !setup.contains('?'),
             "the setup hook still returns early with ?, so a failure panics in tauri before any window exists:\n{setup}"
+        );
+    }
+
+    #[test]
+    fn run_injects_the_platform_global_on_every_platform() {
+        let body = run_body();
+        let at = body.find("platform::stamp()").expect(
+            "run() does not register platform::stamp, so the page finds no __WEBBOARD_PLATFORM__ and refuses to start",
+        );
+        let line_above = body[..at]
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or_default();
+        assert!(
+            !line_above.trim_start().starts_with("#["),
+            "platform::stamp is registered under {line_above}, but every platform needs the global"
+        );
+        assert_eq!(body.matches("platform::stamp()").count(), 1);
+        assert!(
+            body.contains(".plugin(stamp)"),
+            "run() builds platform::stamp but does not register it as a plugin"
         );
     }
 

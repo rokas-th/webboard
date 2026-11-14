@@ -17,6 +17,9 @@ import { Registry } from "../store/registry";
 import { encodeLoad } from "./fixtures/store";
 import { MESA_SEED } from "./session";
 import { resetTauri, type Answer } from "./tauriMock";
+import { parsePlatform } from "../platform";
+import { setPlatform } from "./platform";
+import { setScreen } from "./setup";
 
 vi.mock("@tauri-apps/api/core", () => import("./tauriMock"));
 
@@ -130,6 +133,8 @@ function decoded(f: Fixture, doc: string) {
   return { ydoc, actions, log, plan, cs, held: heldItems(cs, plan) };
 }
 
+const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad" };
+
 const openRegistries: Registry[] = [];
 
 afterEach(async () => {
@@ -196,6 +201,8 @@ describe("layout fixtures", () => {
       "example",
       "long-names",
       "mesa",
+      "mesa-ios-pad",
+      "mesa-ios-phone",
       "mesa-linux",
       "phone-choice",
       "phone-plans",
@@ -325,6 +332,29 @@ describe("layout fixtures", () => {
     expect(linux.docs).toEqual(mac.docs);
     expect(linux.ipc).toEqual({ ...mac.ipc, device_info: { deviceId: "linux", platform: "linux" } });
     expect(mac.ipc.device_info).toEqual({ deviceId: "mac", platform: "macos" });
+  });
+
+  it("the iOS variants are the mesa plan on an iPhone and an iPad, each with the matching platform global", () => {
+    const mac = fixture("mesa");
+    const phone = fixture("mesa-ios-phone");
+    const pad = fixture("mesa-ios-pad");
+    expect(phone.docs).toEqual(mac.docs);
+    expect(pad.docs).toEqual(mac.docs);
+    expect(phone.ipc).toEqual({ ...mac.ipc, device_info: { deviceId: "iphone", platform: "ios" } });
+    expect(pad.ipc).toEqual({ ...mac.ipc, device_info: { deviceId: "ipad", platform: "ios" } });
+    expect(phone.platform).toEqual({ os: "ios", idiom: "phone" });
+    expect(pad.platform).toEqual({ os: "ios", idiom: "pad" });
+  });
+
+  it("every fixture carries a platform global its device_info agrees with", () => {
+    expect(fixture("mesa").platform).toEqual({ os: "macos", idiom: null });
+    expect(fixture("empty").platform).toEqual({ os: "macos", idiom: null });
+    expect(fixture("mesa-linux").platform).toEqual({ os: "linux", idiom: null });
+    Object.entries(FIXTURES).forEach(([name, f]) => {
+      expect([name, parsePlatform(Object.freeze({ ...f.platform }))]).toEqual([name, f.platform]);
+      const device = ipcOf(f, "device_info");
+      expect([name, isRecord(device) ? device.platform : device]).toEqual([name, f.platform.os]);
+    });
   });
 
   it("frames every doc as store_load with flags 0 and lastSeq the entry count", () => {
@@ -586,9 +616,12 @@ describe("layout fixtures", () => {
   it("opens every plan through the Registry with the fixture's answers, the plan names cached", async () => {
     for (const [name, f] of Object.entries(FIXTURES).filter(([n]) => n !== "example")) {
       resetTauri(answersOf(f));
+      setPlatform(f.platform);
+      if (name === "mesa-ios-phone") setScreen(390, 844);
+      if (name === "mesa-ios-pad") setScreen(834, 1194);
       const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
       try {
-        expect(registry.device.name).toBe(name === "mesa-linux" ? "Linux" : "Mac");
+        expect(registry.device.name).toBe(DEVICE_NAMES[name] ?? "Mac");
         if ("ix-sp000000000" in f.docs) await registry.attachSpace("sp000000000");
         expect(registry.plans().map((p) => p.id).sort()).toEqual(planDocs(f).sort());
         for (const doc of planDocs(f)) {

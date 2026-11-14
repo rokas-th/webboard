@@ -15,6 +15,7 @@ import { shellFor } from "../../test/shell";
 import { IX, itemNamed, ixAct, NOW, own, ip, RESET_HINT, seedIndex, seedPlan, seedSpace, SP, SPACE, syncWorld, TODAY, fail, argsOf, remoteIndex, type SyncWorld } from "../../test/syncWorld";
 import { tauri, type Answer } from "../../test/tauriMock";
 import { setScreen } from "../../test/setup";
+import { IPAD, IPHONE } from "../../test/platform";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { exportFlow } from "../shell/fileFlows";
@@ -446,11 +447,11 @@ describe("the sync panes", () => {
       Object.defineProperty(window, "screen", { configurable: true, value: { width, height } });
     };
     try {
-      for (const [w0, h0, want] of [
-        [430, 932, "iPhone"],
-        [744, 1133, "iPad"],
+      for (const [w0, h0, want, platform] of [
+        [430, 932, "iPhone", IPHONE],
+        [744, 1133, "iPad", IPAD],
       ] as const) {
-        const w = syncWorld({ platform: "ios" });
+        const w = syncWorld({ platform });
         w.status = () => ({ space: null, revoked: false });
         setScreen(w0, h0);
         const r = await Registry.open({ clock: fixedClock(TODAY, NOW) });

@@ -25,6 +25,7 @@ import { OpenChoice } from "../run";
 import { UiContext, useUi, type UiState } from "../state";
 import { PhoneShell } from "./PhoneShell";
 import { NO_REGION, PhoneStatus } from "./PhoneStatus";
+import { IPHONE, MAC, setPlatform } from "../../test/platform";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -79,6 +80,7 @@ const made = async (seed: readonly SeedItem[], opts?: TestSessionOpts): Promise<
 
 const shown = async (t: TestSession, opts?: { holidays?: HolidayService; device?: "mac" | "iphone" }): Promise<Registry> => {
   tauri.answers.device_info = () => (opts?.device === "iphone" ? { deviceId: "iphone", platform: "ios" } : { deviceId: "mac", platform: "macos" });
+  setPlatform(opts?.device === "iphone" ? IPHONE : MAC);
   const registry = await phoneRegistry(t, { holidays: opts?.holidays });
   registries.push(registry);
   render(withSync(<PhoneShell registry={registry} clock={t.clock} />));

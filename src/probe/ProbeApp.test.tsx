@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setPlatform } from "../test/platform";
 import { resetTauri, tauri } from "../test/tauriMock";
 import ProbeApp from "./ProbeApp";
 
@@ -72,6 +73,13 @@ describe("ProbeApp", () => {
     expect(lines.indexOf('paths {"appended":1,"docs":["probe"],"listed":true}')).toBeGreaterThan(1);
     expect(lines.indexOf('holidays {"days":1,"fromCache":true,"first":"2027-01-01"}')).toBeGreaterThan(1);
     expect(lines).toHaveLength(4);
+  });
+
+  it("reports the injected platform global in its ready line", async () => {
+    setPlatform({ os: "ios", idiom: "pad" });
+    mount();
+    await settle();
+    expect(logged()[0]).toMatch(/^ready \{"userAgent":.*"platform":\{"os":"ios","idiom":"pad"\}\}$/);
   });
 
   it("logs a keydown with its modifiers", async () => {

@@ -9,6 +9,7 @@ import { newId } from "../log/ids";
 import { LogState } from "../log/state";
 import type { Action, ActionId, DeviceId } from "../log/types";
 import { PlanIncomplete, projectPlan } from "../plan/project";
+import { readPlatform } from "../platform";
 import { planRules } from "../plan/rules";
 import { region as regionCodec, validateWrite } from "../plan/units";
 import { collected, notifyEach, systemClock, type Clock } from "../services/clock";
@@ -231,6 +232,10 @@ export class Registry {
     const clock = opts?.clock ?? systemClock;
     const settings = parseSettings(await call<unknown>("settings_read"));
     const device = parseDevice(await call<unknown>("device_info"));
+    const stamped = readPlatform(window).os;
+    if (device.platform !== stamped) {
+      throw new AppError("platform.mismatch", `device_info answered the platform "${device.platform}", but the page was stamped "${stamped}" before it started.`);
+    }
     const r = new Registry(clock, opts?.holidays ?? new HolidayService(() => clock.now()), settings, device, opts?.followWaitMs ?? FOLLOW_WAIT_MS);
     try {
       await r.start();

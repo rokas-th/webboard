@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { failure, keyData, probeHolidays, probeLine, probeOpen, probePaths, probeSave, sendLine, windowData, type ProbeData, type ProbeEntry } from "./probes";
 import "./probe.css";
+import { readPlatform } from "../platform";
 
 type Bar = "A" | "B" | "C";
 const BARS: readonly { bar: Bar; label: string }[] = [
@@ -167,7 +168,7 @@ export default function ProbeApp() {
   useEffect(() => {
     const insetEl = insetRef.current;
     if (insetEl === null) throw new Error("the probe's inset element is not mounted");
-    log("ready", { userAgent: navigator.userAgent, touchPoints: navigator.maxTouchPoints });
+    log("ready", { userAgent: navigator.userAgent, touchPoints: navigator.maxTouchPoints, platform: readPlatform(window) });
     log("window", windowData("mount", insetEl));
     run(probePaths);
     run(probeHolidays);

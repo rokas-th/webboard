@@ -5,6 +5,7 @@ import { Registry } from "../../store/registry";
 import { SyncManager } from "../../sync/manager";
 import { fakeFactory } from "../../test/fakeProvider";
 import { setScreen } from "../../test/setup";
+import { IPHONE, MAC } from "../../test/platform";
 import { seededStore } from "../../test/shell";
 import * as Y from "yjs";
 import { encodeAction } from "../../store/doc";
@@ -96,7 +97,7 @@ async function localMounted(form: Form, failDelete = false): Promise<{ r: Regist
 
 async function spaceMounted(form: Form, answers: Record<string, Answer> = {}): Promise<{ r: Registry; w: SyncWorld }> {
   if (form === "phone") setScreen(390, 844);
-  const w = syncWorld({ names: { P: "Launch", L: "Alpha", P2: "Pod" }, platform: form === "phone" ? "ios" : "macos", answers });
+  const w = syncWorld({ names: { P: "Launch", L: "Alpha", P2: "Pod" }, platform: form === "phone" ? IPHONE : MAC, answers });
   seedSpace(w, { trashedP2: true });
   const clock = fixedClock(TODAY, NOW);
   const r = await Registry.open({ clock });

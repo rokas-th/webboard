@@ -26,6 +26,7 @@ import {
   type SyncWorld,
 } from "../test/syncWorld";
 import { setScreen } from "../test/setup";
+import { IPHONE } from "../test/platform";
 import { requestWindowClose, tauri } from "../test/tauriMock";
 import { themed } from "../test/theme";
 import { clearToasts } from "../ui/common/Toast";
@@ -529,7 +530,7 @@ describe("SyncProvider on the phone", () => {
   const EMPTY = ["New plan", "Show an example plan", "Import plan…", "Join with a code", "Set up sync"];
 
   it("joining shows the space's plans without a remount", async () => {
-    const w = syncWorld({ platform: "ios", names: { L: "Alpha" }, answers: { sync_pair_join: () => SPACE } });
+    const w = syncWorld({ platform: IPHONE, names: { L: "Alpha" }, answers: { sync_pair_join: () => SPACE } });
     w.status = () => ({ space: null, revoked: false });
     seedIndex(w.mem, "local", localIndex(ixAct("l-L", ["l-n"], [ip("L", false)])));
     seedPlan(w.mem, "L", "Alpha");
@@ -560,7 +561,7 @@ describe("SyncProvider on the phone", () => {
   });
 
   it("a fresh iPhone joins from the empty state", async () => {
-    const w = syncWorld({ platform: "ios", answers: { sync_pair_join: () => SPACE } });
+    const w = syncWorld({ platform: IPHONE, answers: { sync_pair_join: () => SPACE } });
     w.status = () => ({ space: null, revoked: false });
     spyOpen();
     render(themed(<App />));
@@ -613,7 +614,7 @@ describe("SyncProvider on the phone", () => {
   });
 
   it("a plan trashed on a peer leaves the open phone plan", async () => {
-    const w = syncWorld({ platform: "ios", names: { P: "Plan P", R: "Plan R" } });
+    const w = syncWorld({ platform: IPHONE, names: { P: "Plan P", R: "Plan R" } });
     spaceStore(w, [
       ["P", "Plan P"],
       ["R", "Plan R"],
@@ -638,7 +639,7 @@ describe("SyncProvider on the phone", () => {
   });
 
   it("an item trashed on a peer closes the sheet", async () => {
-    const w = syncWorld({ platform: "ios", names: { P: "Plan P" } });
+    const w = syncWorld({ platform: IPHONE, names: { P: "Plan P" } });
     spaceStore(w, [["P", "Plan P"]]);
     const registry = spyOpen();
     render(themed(<App />));
@@ -663,7 +664,7 @@ describe("SyncProvider on the phone", () => {
 
   it("resetting sync, then joining, re-attaches on the phone", async () => {
     const message = "Could not read the sync state: invalid JSON";
-    const w = syncWorld({ platform: "ios", names: { P: "Plan P" }, answers: { sync_reset: () => null, sync_pair_join: () => SPACE } });
+    const w = syncWorld({ platform: IPHONE, names: { P: "Plan P" }, answers: { sync_reset: () => null, sync_pair_join: () => SPACE } });
     seedIndex(w.mem, "local", localIndex(ixAct("l-P", ["l-n"], [ip("P", false)]), ixAct("l-Pt", ["l-P"], [ip("P", true)], "dev-A", "Move plan to Trash")));
     seedIndex(w.mem, IX, [ixAct("s-P", [], [ip("P", false)])]);
     seedPlan(w.mem, "P", "Plan P");

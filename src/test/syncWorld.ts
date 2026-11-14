@@ -14,6 +14,8 @@ import type { FakeProvider } from "./fakeProvider";
 import { memoryStore, type MemoryStore } from "./fixtures/store";
 import { ctxOf } from "./planCtx";
 import { offeredSettings, resetTauri, type Answer, type Call } from "./tauriMock";
+import { MAC, setPlatform } from "./platform";
+import type { Platform } from "../platform";
 
 export const SP = "sp000000000";
 export const IX = "ix-" + SP;
@@ -50,8 +52,9 @@ export const fail =
 export const argsOf = (c: Pick<Call, "args">): Record<string, unknown> =>
   c.args !== undefined && !(c.args instanceof Uint8Array) && !(c.args instanceof ArrayBuffer) && !Array.isArray(c.args) ? (c.args as Record<string, unknown>) : {};
 
-export function syncWorld(o: { names?: Record<string, string>; platform?: "macos" | "linux" | "ios"; answers?: Record<string, Answer> } = {}): SyncWorld {
+export function syncWorld(o: { names?: Record<string, string>; platform?: Platform; answers?: Record<string, Answer> } = {}): SyncWorld {
   const mem = memoryStore();
+  setPlatform(o.platform ?? MAC);
   const w: SyncWorld = {
     mem,
     settings: { value: { ...offeredSettings(), names: o.names ?? {} } },
@@ -71,7 +74,7 @@ export function syncWorld(o: { names?: Record<string, string>; platform?: "macos
       w.settings.value = argsOf({ args }).settings;
       return null;
     },
-    device_info: () => ({ deviceId: "dev-A", platform: o.platform ?? "macos" }),
+    device_info: () => ({ deviceId: "dev-A", platform: (o.platform ?? MAC).os }),
     holidays_year: fail({ code: "holidays.offline", message: "No connection to the holiday source." }),
     sync_status: () => w.status(),
     sync_ticket: (args) => {
