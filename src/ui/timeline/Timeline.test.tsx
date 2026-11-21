@@ -12,8 +12,10 @@ import { EMPTY_PLAN } from "../copy";
 import { OpenChoice } from "../run";
 import { UiContext, useUi, type UiState } from "../state";
 import { geometry, leadFor } from "./geometry";
-import { Timeline } from "./Timeline";
+import { Timeline, usePhoneOutline, type OutlineControl } from "./Timeline";
 import { withSync } from "../../test/withSync";
+import { seedPanesClosed } from "../../test/panes";
+import { PANES_KEY, parsePanes, type PaneState } from "../shell/panes";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -125,12 +127,37 @@ const noChoice = (): void => {
   throw new Error("Bare: no choice dialog");
 };
 
+const BARE_OUTLINE: OutlineControl = {
+  open: true,
+  width: 300,
+  stored: null,
+  min: 160,
+  max: 700,
+  def: 300,
+  phone: false,
+  onCommit: () => {
+    throw new Error("Bare: no outline commit");
+  },
+};
+
 function Bare(p: { session: PlanSession }) {
   const [ui, setUi] = useUi();
   return (
     <UiContext.Provider value={{ ui, setUi }}>
       <OpenChoice.Provider value={noChoice}>
-        <Timeline session={p.session} />
+        <Timeline session={p.session} outline={BARE_OUTLINE} />
+      </OpenChoice.Provider>
+    </UiContext.Provider>
+  );
+}
+
+function PhoneBare(p: { session: PlanSession }) {
+  const [ui, setUi] = useUi();
+  const outline = usePhoneOutline();
+  return (
+    <UiContext.Provider value={{ ui, setUi }}>
+      <OpenChoice.Provider value={noChoice}>
+        <Timeline session={p.session} outline={outline} readOnly />
       </OpenChoice.Provider>
     </UiContext.Provider>
   );
@@ -162,7 +189,7 @@ describe("Review Focus 5: only the rows in view are mounted", () => {
     );
     await shown(SEED);
     const scroll = one('[data-slot="timeline"] .tl-scroll');
-    expect(observed.filter((el) => el.closest("header.toolbar") === null)).toEqual([document.documentElement, scroll]);
+    expect(observed.filter((el) => el.closest("header.toolbar") === null)).toEqual([document.documentElement, scroll, one("#timeline-outline")]);
     const indices = (): number[] => all(".tl-row").map((r) => Number(r.dataset.index));
     expect(indices()).toEqual(Array.from({ length: 29 }, (_, i) => i));
     act(() => {
@@ -1270,5 +1297,201 @@ describe("fit zoom", () => {
     pointer(chip, "move", 120);
     pointer(chip, "up", 500);
     expect(apply.mock.calls).toEqual([[{ t: "schedule", item: "u", set: { start: toIso(g.dayAt(500)) } }]]);
+  });
+});
+
+describe("the outline", () => {
+  const SEED: SeedItem[] = [
+    { id: "g", name: "Optics", kind: "group" },
+    { id: "a", name: "A", parent: "g", start: "2026-12-01", dur: 2 },
+    { id: "b", name: "B", parent: "g", start: "2026-12-14", dur: 5 },
+    { id: "c", name: "C", start: "2026-12-03", dur: 3 },
+  ];
+  const frame = (): HTMLElement => one(".tl-frame");
+  const gridW = (): string => frame().style.getPropertyValue("--grid-w");
+  const resizer = (): HTMLElement => screen.getByRole("separator", { name: "Resize the outline" });
+  const strip = (): HTMLElement => screen.getByRole("button", { name: "Show the outline" });
+  const saved = (): PaneState => {
+    const raw = window.localStorage.getItem(PANES_KEY);
+    if (raw === null) throw new Error("no saved panes");
+    const record = parsePanes(raw);
+    if (record === null) throw new Error("the saved panes do not parse");
+    return record.desk.outline;
+  };
+  const press = (el: Element, kind: "down" | "move" | "up", x: number): void => {
+    act(() => {
+      if (kind === "down") fireEvent.pointerDown(el, { button: 0, pointerId: 7, clientX: x });
+      else if (kind === "move") fireEvent.pointerMove(el, { pointerId: 7, clientX: x });
+      else fireEvent.pointerUp(el, { pointerId: 7, clientX: x });
+    });
+  };
+
+  afterEach(() => {
+    document.documentElement.classList.remove("outline-dragging");
+  });
+
+  it("the outline resizes, collapses to the strip and returns", async () => {
+    await shown(SEED, { today: "2026-11-10" });
+    expect([frame().dataset.outline, gridW(), one("#timeline-outline").classList.contains("tl-grid")]).toEqual(["open", "300px", true]);
+    const h = resizer();
+    expect([h.className, h.getAttribute("aria-controls"), h.getAttribute("aria-valuemin"), h.getAttribute("aria-valuenow"), h.parentElement]).toEqual([
+      "outline-resizer",
+      "timeline-outline",
+      "160",
+      "300",
+      frame(),
+    ]);
+    expect(document.querySelector(".outline-strip")).toBeNull();
+    press(h, "down", 300);
+    expect(document.documentElement.classList.contains("outline-dragging")).toBe(true);
+    press(h, "move", 260);
+    expect([gridW(), h.getAttribute("aria-valuenow")]).toEqual(["260px", "260"]);
+    expect(window.localStorage.getItem(PANES_KEY)).not.toContain('"w":260');
+    press(h, "up", 260);
+    expect(document.documentElement.classList.contains("outline-dragging")).toBe(false);
+    expect(saved()).toEqual({ open: true, w: 260 });
+    expect([gridW(), resizer().getAttribute("aria-valuenow")]).toEqual(["260px", "260"]);
+    press(resizer(), "down", 260);
+    press(resizer(), "move", 260 - 160 - 49);
+    expect(frame().getAttribute("data-pane-snap")).toBe("outline");
+    press(resizer(), "up", 260 - 160 - 49);
+    expect(saved()).toEqual({ open: false, w: 260 });
+    expect([frame().dataset.outline, gridW(), frame().hasAttribute("data-pane-snap")]).toEqual(["collapsed", "8px", false]);
+    expect(screen.queryByRole("separator", { name: "Resize the outline" })).toBeNull();
+    expect([strip().className, strip().textContent, strip().getAttribute("aria-controls")]).toEqual(["outline-strip", "›", "timeline-outline"]);
+    act(() => {
+      fireEvent.click(strip());
+    });
+    expect(saved()).toEqual({ open: true, w: 260 });
+    expect([frame().dataset.outline, gridW()]).toEqual(["open", "260px"]);
+    expect(document.querySelector(".outline-strip")).toBeNull();
+  });
+
+  it("fit zoom re-measures on release, not per frame", async () => {
+    const resized: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          resized.push(cb);
+        }
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+    widths.scroll = 300 + 640;
+    const t = await shown(SEED, { today: "2026-11-10" });
+    act(() => {
+      fireEvent.click(within(one(".seg-zoom")).getByRole("button", { name: "F" }));
+    });
+    const FIRST = toDay("2026-12-01") - 7;
+    const before = geometry(t.session.view(), "F", 640);
+    expect(barOf("a").style.left).toBe(`${before.x(toDay("2026-12-01"))}px`);
+    press(resizer(), "down", 300);
+    press(resizer(), "move", 200);
+    widths.grid = 200;
+    act(() => resized.forEach((cb) => cb()));
+    expect(barOf("a").style.left).toBe(`${before.x(toDay("2026-12-01"))}px`);
+    press(resizer(), "up", 200);
+    const after = geometry(t.session.view(), "F", 740);
+    expect(after.ppd).not.toBe(before.ppd);
+    expect(barOf("a").style.left).toBe(`${after.x(toDay("2026-12-01"))}px`);
+    expect(one(".tl-scroll").scrollLeft).toBe(after.x(FIRST));
+    widths.scroll = 300 + 800;
+    act(() => resized.forEach((cb) => cb()));
+    expect(barOf("a").style.left).toBe(`${geometry(t.session.view(), "F", 900).x(toDay("2026-12-01"))}px`);
+  });
+
+  it("group names beside bars when collapsed", async () => {
+    seedPanesClosed(["outline"]);
+    const t = await shown(SEED, { today: "2026-11-10" });
+    expect(frame().dataset.outline).toBe("collapsed");
+    const labels = all(".bar-label.group-label");
+    expect(labels.map((l) => l.textContent)).toEqual(["Optics"]);
+    const g = geometry(t.session.view(), "W");
+    const end = g.x(toDay("2026-12-18")) + g.ppd;
+    expect([labels[0].style.left, labels[0].style.top]).toEqual([`${end + 10}px`, "8px"]);
+    act(() => {
+      fireEvent.click(strip());
+    });
+    expect(all(".bar-label.group-label")).toEqual([]);
+  });
+
+  it("keeps the collapsed width when ⌥⌘L hides the outline in the middle of a drag", async () => {
+    await shown(SEED, { today: "2026-11-10" });
+    press(resizer(), "down", 300);
+    press(resizer(), "move", 240);
+    expect(gridW()).toBe("240px");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "¬", code: "KeyL", metaKey: true, altKey: true });
+    });
+    expect([frame().dataset.outline, gridW(), document.documentElement.classList.contains("outline-dragging")]).toEqual(["collapsed", "8px", false]);
+    expect(saved()).toEqual({ open: false, w: null });
+  });
+
+  it.each<readonly [string, (h: HTMLElement) => void]>([
+    ["Esc", () => fireEvent.keyDown(window, { key: "Escape" })],
+    ["pointercancel", (h) => fireEvent.pointerCancel(h, { pointerId: 7 })],
+    ["a lost capture", (h) => fireEvent.lostPointerCapture(h, { pointerId: 7 })],
+  ])("restores the width and commits nothing on %s", async (_, end) => {
+    await shown(SEED, { today: "2026-11-10" });
+    const before = window.localStorage.getItem(PANES_KEY);
+    press(resizer(), "down", 300);
+    press(resizer(), "move", 100);
+    expect(frame().getAttribute("data-pane-snap")).toBe("outline");
+    act(() => end(resizer()));
+    expect([gridW(), frame().getAttribute("data-pane-snap"), resizer().getAttribute("aria-valuenow"), document.documentElement.classList.contains("outline-dragging")]).toEqual([
+      "300px",
+      null,
+      "300",
+      false,
+    ]);
+    press(resizer(), "up", 100);
+    expect(window.localStorage.getItem(PANES_KEY)).toBe(before);
+  });
+
+  it("steps by the arrows, goes to its limits on Home and End and resets on Enter", async () => {
+    await shown(SEED, { today: "2026-11-10" });
+    const key = (k: string, shiftKey = false): void => {
+      act(() => {
+        fireEvent.keyDown(resizer(), { key: k, shiftKey });
+      });
+    };
+    key("ArrowLeft");
+    expect([saved(), gridW()]).toEqual([{ open: true, w: 284 }, "284px"]);
+    key("ArrowLeft", true);
+    expect(saved()).toEqual({ open: true, w: 220 });
+    key("ArrowRight");
+    expect([saved(), gridW()]).toEqual([{ open: true, w: 236 }, "236px"]);
+    key("Home");
+    expect([saved(), gridW()]).toEqual([{ open: true, w: 160 }, "160px"]);
+    key("End");
+    const max = Number(resizer().getAttribute("aria-valuemax"));
+    expect(max).toBeGreaterThan(300);
+    expect([saved(), gridW()]).toEqual([{ open: true, w: max }, `${max}px`]);
+    key("Enter");
+    expect([saved(), gridW()]).toEqual([{ open: true, w: null }, "300px"]);
+  });
+
+  it("the phone only collapses", async () => {
+    const t = await made(SEED, { today: "2026-11-10" });
+    render(<PhoneBare session={t.session} />);
+    await settle();
+    expect([frame().dataset.outline, gridW()]).toEqual(["open", "132px"]);
+    expect(document.querySelector(".outline-resizer")).toBeNull();
+    const hide = within(one(".tl-corner")).getByRole("button", { name: "Hide the outline" });
+    expect([hide.className, hide.textContent]).toEqual(["outline-collapse", "‹"]);
+    act(() => {
+      fireEvent.click(hide);
+    });
+    expect([frame().dataset.outline, gridW()]).toEqual(["collapsed", "8px"]);
+    expect(screen.queryByRole("button", { name: "Hide the outline" })).toBeNull();
+    act(() => {
+      fireEvent.click(strip());
+    });
+    expect([frame().dataset.outline, gridW()]).toEqual(["open", "132px"]);
+    expect(document.querySelector(".outline-resizer")).toBeNull();
+    expect(window.localStorage.getItem(PANES_KEY)).toBeNull();
   });
 });

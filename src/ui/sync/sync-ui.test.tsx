@@ -471,6 +471,7 @@ describe("the sync panes", () => {
         const r = await Registry.open({ clock: fixedClock(TODAY, NOW) });
         registries.push(r);
         setScreen(1440, 900);
+        setPlatform(IPAD);
         const el = withSync(<Shell registry={r} clock={fixedClock(TODAY, NOW)} />, { factory: fakeFactory() });
         render(el);
         await settle();

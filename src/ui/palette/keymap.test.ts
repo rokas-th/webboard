@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { isTyping, keyToCommand, type KeyInput, type KeyState } from "./keymap";
 
-const k = (key: string, o: Partial<KeyInput> = {}): KeyInput => ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...o });
+const codeOf = (key: string): string => (/^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : /^[0-9]$/.test(key) ? `Digit${key}` : key);
+
+const k = (key: string, o: Partial<KeyInput> = {}): KeyInput => ({ key, code: codeOf(key), metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...o });
 
 const MAC: KeyState = { command: true, typing: false, dialog: false, selected: false, listMode: "column" };
 const PC: KeyState = { ...MAC, command: false };
@@ -261,5 +263,36 @@ describe("keyToCommand: the plan list", () => {
   it("toggles the iPad overlay as it toggles the column", () => {
     expect(keyToCommand(k("b", { metaKey: true }), { ...MAC, listMode: "overlay" })).toBe("sidebar");
     expect(keyToCommand(k("b", { metaKey: true }), { ...MAC, listMode: "overlay", dialog: true })).toBeNull();
+  });
+});
+
+describe("keyToCommand: the inspector and the outline", () => {
+  it("toggles the inspector on ⌥⌘I and the outline on ⌥⌘L on the Mac, by the physical key", () => {
+    expect(keyToCommand(k("ˆ", { code: "KeyI", metaKey: true, altKey: true }), MAC)).toBe("inspector");
+    expect(keyToCommand(k("¬", { code: "KeyL", metaKey: true, altKey: true }), MAC)).toBe("outline");
+    expect(keyToCommand(k("i", { metaKey: true, altKey: true }), { ...MAC, selected: true, listMode: "overlay" })).toBe("inspector");
+  });
+
+  it("takes Ctrl Alt I and Ctrl Alt L off the Mac, and not the other platform's modifier", () => {
+    expect(keyToCommand(k("i", { ctrlKey: true, altKey: true }), PC)).toBe("inspector");
+    expect(keyToCommand(k("l", { ctrlKey: true, altKey: true }), PC)).toBe("outline");
+    expect(keyToCommand(k("i", { metaKey: true, altKey: true }), PC)).toBeNull();
+    expect(keyToCommand(k("i", { ctrlKey: true, altKey: true }), MAC)).toBeNull();
+  });
+
+  it("does nothing with Shift, while typing, in a dialog, in the sheet form or for other keys", () => {
+    expect(keyToCommand(k("i", { metaKey: true, altKey: true, shiftKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("i", { metaKey: true, altKey: true }), { ...MAC, typing: true })).toBeNull();
+    expect(keyToCommand(k("l", { metaKey: true, altKey: true }), { ...MAC, dialog: true })).toBeNull();
+    expect(keyToCommand(k("i", { metaKey: true, altKey: true }), { ...MAC, listMode: "sheet" })).toBeNull();
+    expect(keyToCommand(k("l", { metaKey: true, altKey: true }), { ...MAC, listMode: "phone" })).toBeNull();
+    expect(keyToCommand(k("k", { metaKey: true, altKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("i", { metaKey: true }), MAC)).toBeNull();
+  });
+
+  it("keeps ⌥⌘L and Ctrl Alt L for the outline in the sheet form, which offers the outline command there", () => {
+    expect(keyToCommand(k("¬", { code: "KeyL", metaKey: true, altKey: true }), { ...MAC, listMode: "sheet" })).toBe("outline");
+    expect(keyToCommand(k("l", { ctrlKey: true, altKey: true }), { ...PC, listMode: "sheet" })).toBe("outline");
+    expect(keyToCommand(k("l", { ctrlKey: true, altKey: true }), { ...PC, listMode: "sheet", typing: true })).toBeNull();
   });
 });

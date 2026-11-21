@@ -5,7 +5,16 @@ import { OPEN_MENU } from "../common/menu";
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
-export const PLAN_OVERLAY_CLASS = "plan-overlay";
+export type PaneOverlayKind = "plan" | "inspector";
+
+const CLASSES: Readonly<Record<PaneOverlayKind, { panel: string; layer: string; scrim: string }>> = {
+  plan: { panel: "plan-overlay", layer: "plan-overlay-layer", scrim: "plan-overlay-scrim" },
+  inspector: { panel: "inspector-overlay", layer: "inspector-overlay-layer", scrim: "inspector-overlay-scrim" },
+};
+
+export const NOT_A_PANE_OVERLAY = Object.values(CLASSES)
+  .map((c) => `:not(.${c.panel})`)
+  .join("");
 
 type Phase = "gone" | "mounted" | "shown" | "leaving";
 
@@ -17,11 +26,24 @@ function nextPhase(phase: Phase, open: boolean, reduced: boolean): Phase {
 }
 
 function mounted<T>(el: T | null, what: string): T {
-  if (el === null) throw new Error(`PlanOverlay: ${what}`);
+  if (el === null) throw new Error(`PaneOverlay: ${what}`);
   return el;
 }
 
-export function PlanOverlay(p: { open: boolean; button: RefObject<HTMLButtonElement | null>; onClose(): void; onFocusDropped(): void; children: ReactNode }) {
+export interface PaneOverlayProps {
+  kind: PaneOverlayKind;
+  label: string;
+  open: boolean;
+  button: RefObject<HTMLButtonElement | null>;
+  width: number;
+  onClose(): void;
+  onFocusDropped(): void;
+  children: ReactNode;
+}
+
+export function PaneOverlay(p: PaneOverlayProps) {
+  const classes = CLASSES[p.kind];
+  const panelClass = classes.panel;
   const [phase, setPhase] = useState<Phase>(() => (p.open ? "mounted" : "gone"));
   const panel = useRef<HTMLDivElement>(null);
   const onClose = useRef(p.onClose);
@@ -33,9 +55,9 @@ export function PlanOverlay(p: { open: boolean; button: RefObject<HTMLButtonElem
   useLayoutEffect(
     () => () => {
       const active = document.activeElement;
-      if (active !== null && active.closest(`.${PLAN_OVERLAY_CLASS}`) !== null) onFocusDropped.current();
+      if (active !== null && active.closest(`.${panelClass}`) !== null) onFocusDropped.current();
     },
-    [],
+    [panelClass],
   );
   const next = nextPhase(phase, p.open, window.matchMedia(REDUCED_MOTION).matches);
   if (next !== phase) setPhase(next);
@@ -103,7 +125,7 @@ export function PlanOverlay(p: { open: boolean; button: RefObject<HTMLButtonElem
       const at = active === root ? (e.shiftKey ? 1 : first - 1) : active === null ? -1 : cycle.indexOf(active);
       e.preventDefault();
       const to = at === -1 ? cycle[e.shiftKey ? cycle.length - 1 : first] : cycle[(at + (e.shiftKey ? -1 : 1) + cycle.length) % cycle.length];
-      if (!(to instanceof HTMLElement)) throw new Error("PlanOverlay: a focus stop is not an HTML element");
+      if (!(to instanceof HTMLElement)) throw new Error("PaneOverlay: a focus stop is not an HTML element");
       to.focus();
     };
     document.addEventListener("keydown", onKey);
@@ -124,9 +146,18 @@ export function PlanOverlay(p: { open: boolean; button: RefObject<HTMLButtonElem
     if (phase === "leaving") setPhase("gone");
   };
   return (
-    <div className="plan-overlay-layer" data-shown={phase === "shown" ? "true" : undefined} inert={!p.open}>
-      <div className="plan-overlay-scrim" {...scrim} />
-      <div ref={panel} className={PLAN_OVERLAY_CLASS} role="dialog" aria-modal="true" aria-label="Plans" tabIndex={-1} onTransitionEnd={onEnd}>
+    <div className={classes.layer} data-shown={phase === "shown" ? "true" : undefined} inert={!p.open}>
+      <div className={classes.scrim} {...scrim} />
+      <div
+        ref={panel}
+        className={panelClass}
+        role="dialog"
+        aria-modal="true"
+        aria-label={p.label}
+        tabIndex={-1}
+        style={{ "--drawer-w": `${p.width}px` }}
+        onTransitionEnd={onEnd}
+      >
         <div className="drawer-head">
           <CloseButton className="drawer-close" onPress={() => onClose.current()} />
         </div>

@@ -85,7 +85,7 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
   );
 }
 
-export function Grid(p: { mounted: readonly Placed[]; count: number; view: PlanView; geo: Geometry; marks: Marks; ui: UiState; setUi: SetUi }) {
+export function Grid(p: { id: string; mounted: readonly Placed[]; count: number; view: PlanView; geo: Geometry; marks: Marks; ui: UiState; setUi: SetUi }) {
   const stop = p.mounted.some((m) => m.row.id === p.ui.selected) ? p.ui.selected : p.mounted.length === 0 ? null : p.mounted[0].row.id;
   const list = useRef<HTMLDivElement>(null);
   const selected = p.ui.selected;
@@ -96,7 +96,7 @@ export function Grid(p: { mounted: readonly Placed[]; count: number; view: PlanV
     if (row !== undefined && row !== document.activeElement) row.focus({ preventScroll: true });
   }, [selected, p.mounted]);
   return (
-    <div className="tl-grid">
+    <div id={p.id} className="tl-grid">
       <div className="tl-rows" ref={list} role="listbox" aria-label="Plan rows" style={{ height: p.count * ROW }}>
         {p.mounted.map((placed) => (
           <GridRow key={placed.row.id} placed={placed} view={p.view} geo={p.geo} marks={p.marks} ui={p.ui} setUi={p.setUi} tabStop={placed.row.id === stop} />

@@ -45,6 +45,7 @@ export interface TempLink {
 }
 
 const MS_HALF = 7;
+const GROUP_LABEL_GAP = 10;
 
 const fmt = (d: Day): string => fmtShort(toIso(d));
 
@@ -75,6 +76,7 @@ interface ChartProps {
   view: PlanView;
   geo: Geometry;
   zoom: Zoom;
+  outlineOpen: boolean;
   ui: UiState;
   setUi: SetUi;
   mounted: readonly Placed[];
@@ -370,7 +372,18 @@ function Bar(p: ChartProps & { placed: Placed; slip: ReadonlyMap<ItemId, number>
   if (row.kind === "group") {
     const group = geo.span(row.id);
     if (group === null) return null;
-    return <div className="gbar" style={{ left: geo.x(group.start), width: geo.x(group.end) - geo.x(group.start) + geo.ppd, top: y + 14 }} />;
+    const left = geo.x(group.start);
+    const width = geo.x(group.end) - left + geo.ppd;
+    return (
+      <>
+        <div className="gbar" data-gbar={row.id} style={{ left, width, top: y + 14 }} />
+        {!p.outlineOpen && (
+          <div className="bar-label group-label" data-group-label={row.id} style={{ left: left + width + GROUP_LABEL_GAP, top: y + 8 }}>
+            {item.name}
+          </div>
+        )}
+      </>
+    );
   }
   const span = spanOf(geo, row.id);
   const status = view.derived.status.get(row.id);

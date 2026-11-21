@@ -8,6 +8,8 @@ import { UpdateLine, useUpdates } from "./UpdateLine";
 
 export const PLAN_LIST_ID = "plan-list";
 
+export const INSPECTOR_ID = "inspector";
+
 export function NewPlanButton(p: { creating: boolean; onNew(): void }) {
   return (
     <button type="button" className="button-primary new-plan" disabled={p.creating} onClick={p.onNew}>

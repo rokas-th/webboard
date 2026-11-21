@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Refused, type Intent } from "../../actions/intents";
 import { toDay, type Day } from "../../domain/dates";
 import { haptic } from "../../services/haptics";
@@ -8,6 +8,9 @@ import { usePlanView, type PlanSession } from "../../store/session";
 import { EMPTY_PLAN } from "../copy";
 import { useRun } from "../run";
 import { useUiValue, type Zoom } from "../state";
+import { PaneDivider } from "../shell/PaneDivider";
+import { PHONE_OUTLINE } from "../shell/paneLayout";
+import type { PaneState } from "../shell/panes";
 import { Chart, itemOf, rowAt, type DropGhost, type Point, type TempLink, type TouchHost } from "./Chart";
 import { fitSpan, geometry, leadFor, ROW, type Geometry } from "./geometry";
 import { gestureIntent, isClick, startIntent } from "./gesture";
@@ -41,6 +44,36 @@ const marksOf = (view: PlanView): Marks => {
     early.set(c.succ, { pred: c.pred, type: link.type, doneOrDoing: c.succLock === "done" || c.succLock === "doing" });
   });
   return { early, badLinks, dayoff };
+};
+
+export interface OutlineControl {
+  open: boolean;
+  width: number;
+  stored: number | null;
+  min: number;
+  max: number;
+  def: number;
+  phone: boolean;
+  onCommit(next: PaneState): void;
+}
+
+export const OUTLINE_ID = "timeline-outline";
+export const OUTLINE_STRIP = 8;
+const OUTLINE_DRAGGING = "outline-dragging";
+
+export function usePhoneOutline(): OutlineControl {
+  const [open, setOpen] = useState(true);
+  const onCommit = useCallback((next: PaneState) => setOpen(next.open), []);
+  return useMemo(
+    () => ({ open, width: PHONE_OUTLINE, stored: null, min: PHONE_OUTLINE, max: PHONE_OUTLINE, def: PHONE_OUTLINE, phone: true, onCommit }),
+    [open, onCommit],
+  );
+}
+
+const outlineGrid = (scroller: HTMLElement): HTMLElement => {
+  const grid = scroller.querySelector(`#${OUTLINE_ID}`);
+  if (!(grid instanceof HTMLElement)) throw new Error(`outline pane: the Timeline has no #${OUTLINE_ID} grid to observe`);
+  return grid;
 };
 
 export const chartWidth = (scroller: HTMLElement): number => {
@@ -97,8 +130,11 @@ function landing(geo: Geometry, view: PlanView, item: ItemId, intent: Intent): {
   throw new Error(`Timeline: a ${intent.t} drag has no landing`);
 }
 
-export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
+export function Timeline(p: { session: PlanSession; outline: OutlineControl; readOnly?: boolean }) {
   const readOnly = p.readOnly ?? false;
+  const outline = p.outline;
+  const outlineW = outline.open ? outline.width : OUTLINE_STRIP;
+  const frame = useRef<HTMLDivElement>(null);
   const view = usePlanView(p.session);
   const { ui, setUi } = useUiValue();
   const { run } = useRun(p.session);
@@ -126,10 +162,14 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
       if (!empty) setWidth(chartWidth(el));
     };
     measure();
-    const observer = new ResizeObserver(measure);
+    const observer = new ResizeObserver(() => {
+      if (document.documentElement.classList.contains(OUTLINE_DRAGGING)) return;
+      measure();
+    });
     observer.observe(el);
+    if (!empty) observer.observe(outlineGrid(el));
     return () => observer.disconnect();
-  }, [empty]);
+  }, [empty, outlineW]);
 
   const today = toDay(view.today);
   const planId = view.plan.id;
@@ -337,49 +377,88 @@ export function Timeline(p: { session: PlanSession; readOnly?: boolean }) {
     if (intent !== null) run(intent);
   };
 
+  const { open: outlineOpen, phone, stored: outlineStored, onCommit: commitOutline } = outline;
+  const hideOutline = useMemo(
+    () => (phone && outlineOpen ? () => commitOutline({ open: false, w: outlineStored }) : null),
+    [phone, outlineOpen, outlineStored, commitOutline],
+  );
+
   return (
-    <div
-      className="tl-scroll"
-      ref={scroller}
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        setScrollTop(el.scrollTop);
-        const at = place.current;
-        if (at !== null) place.current = { ...at, left: el.scrollLeft };
-      }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={(e) => {
-        if (e.pointerType !== "touch") cancel();
-      }}
-    >
-      {empty ? (
-        <p className="tl-empty">{EMPTY_PLAN}</p>
-      ) : (
-        <div className="tl-canvas" style={{ width: `calc(var(--grid-w) + ${geo.width}px)` }}>
-          <Scale geo={geo} today={today} missing={view.derived.missingYears} />
-          <div className="tl-body">
-            <Grid mounted={mounted} count={rows.length} view={view} geo={geo} marks={marks} ui={ui} setUi={setUi} />
-            <Chart
-              view={view}
-              geo={geo}
-              zoom={ui.zoom}
-              ui={ui}
-              setUi={setUi}
-              mounted={mounted}
-              index={index}
-              range={[first, last]}
-              count={rows.length}
-              marks={marks}
-              readOnly={readOnly}
-              dragging={dragging}
-              ghost={ghost}
-              temp={temp}
-              touch={touch}
-            />
+    <div className="tl-frame" ref={frame} data-outline={outline.open ? "open" : "collapsed"} style={{ "--grid-w": `${outlineW}px` }}>
+      <div
+        className="tl-scroll"
+        ref={scroller}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          setScrollTop(el.scrollTop);
+          const at = place.current;
+          if (at !== null) place.current = { ...at, left: el.scrollLeft };
+        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={(e) => {
+          if (e.pointerType !== "touch") cancel();
+        }}
+      >
+        {empty ? (
+          <p className="tl-empty">{EMPTY_PLAN}</p>
+        ) : (
+          <div className="tl-canvas" style={{ width: `calc(var(--grid-w) + ${geo.width}px)` }}>
+            <Scale geo={geo} today={today} missing={view.derived.missingYears} onHide={hideOutline} />
+            <div className="tl-body">
+              <Grid id={OUTLINE_ID} mounted={mounted} count={rows.length} view={view} geo={geo} marks={marks} ui={ui} setUi={setUi} />
+              <Chart
+                view={view}
+                geo={geo}
+                zoom={ui.zoom}
+                outlineOpen={outline.open}
+                ui={ui}
+                setUi={setUi}
+                mounted={mounted}
+                index={index}
+                range={[first, last]}
+                count={rows.length}
+                marks={marks}
+                readOnly={readOnly}
+                dragging={dragging}
+                ghost={ghost}
+                temp={temp}
+                touch={touch}
+              />
+            </div>
           </div>
-        </div>
+        )}
+      </div>
+      {!empty && outline.open && !outline.phone && (
+        <PaneDivider
+          pane="outline"
+          side="start"
+          label="Resize the outline"
+          controls={OUTLINE_ID}
+          className="outline-resizer"
+          draggingClass={OUTLINE_DRAGGING}
+          cssVar="--grid-w"
+          host={frame}
+          width={outline.width}
+          stored={outline.stored}
+          min={outline.min}
+          max={outline.max}
+          def={outline.def}
+          onCommit={outline.onCommit}
+        />
+      )}
+      {!empty && !outline.open && (
+        <button
+          type="button"
+          className="outline-strip"
+          aria-label="Show the outline"
+          aria-controls={OUTLINE_ID}
+          title="Show the outline"
+          onClick={() => outline.onCommit({ open: true, w: outline.stored })}
+        >
+          ›
+        </button>
       )}
     </div>
   );

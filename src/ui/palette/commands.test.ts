@@ -13,6 +13,7 @@ import type { UiState } from "../state";
 import type { UpdateState, Updates } from "../../store/updates";
 import type { ThemeApi } from "../../theme/ThemeContext";
 import { commands, createdItem, type CommandCtx } from "./commands";
+import { keyToCommand } from "./keymap";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../shell/fileFlows", () => ({ exportFlow: vi.fn(async () => undefined), importFlow: vi.fn(async () => undefined) }));
@@ -69,7 +70,7 @@ interface Harness {
   open: ReturnType<typeof vi.fn<(choice: string, side?: string) => void>>;
   useCyberdeck: ReturnType<typeof vi.fn<() => void>>;
   preview: ReturnType<typeof vi.fn<(id: string | null) => void>>;
-  toggleOverlay: ReturnType<typeof vi.fn<() => void>>;
+  toggleList: ReturnType<typeof vi.fn<() => void>>;
 }
 
 function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly string[] = [], more: Partial<Registry> = {}): Harness {
@@ -79,7 +80,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
   const newExample = vi.fn<() => void>();
   const reveal = vi.fn<(target: string) => void>();
   const print = vi.fn<() => void>();
-  const toggleOverlay = vi.fn<() => void>();
+  const toggleList = vi.fn<() => void>();
   const open = vi.fn<(choice: string, side?: string) => void>();
   const useCyberdeck = vi.fn<() => void>();
   const preview = vi.fn<(id: string | null) => void>();
@@ -105,7 +106,9 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     readOnly: t.session.readOnly,
     command: true,
     listMode: "sheet",
-    overlay: { open: false, toggle: toggleOverlay },
+    list: { open: false, toggle: toggleList },
+    inspector: null,
+    outline: null,
     clock: t.clock,
     select,
     newPlan,
@@ -115,7 +118,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     updates: null,
     theme,
   };
-  return { ctx, setUi, select, newPlan, newExample, reveal, print, open, useCyberdeck, preview, toggleOverlay };
+  return { ctx, setUi, select, newPlan, newExample, reveal, print, open, useCyberdeck, preview, toggleList };
 }
 
 const find = (ctx: CommandCtx, id: string) => {
@@ -690,30 +693,30 @@ describe("print (product-8)", () => {
 });
 
 describe("plan list command", () => {
-  it("offers Hide the plan list in the View group with ⌘B in the full form, and hides it", async () => {
+  it("offers Hide the plan list in the View group with ⌘B in the full form, and toggles the pane", async () => {
     const t = await made(SMALL);
     const h = harness(t);
-    const ctx: CommandCtx = { ...h.ctx, listMode: "column" };
+    const ctx: CommandCtx = { ...h.ctx, listMode: "column", list: { open: true, toggle: h.toggleList } };
     const c = find(ctx, "sidebar");
     expect([c.group, c.label, c.keys]).toEqual(["View", "Hide the plan list", "⌘B"]);
     c.run();
-    expect(h.setUi.mock.calls).toEqual([[{ sidebarOpen: false }]]);
+    expect([h.toggleList.mock.calls.length, h.setUi.mock.calls]).toEqual([1, []]);
   });
 
-  it("offers Show the plan list with Ctrl B off the Mac for a hidden list, and shows it", async () => {
+  it("offers Show the plan list with Ctrl B off the Mac for a hidden list, and toggles the pane", async () => {
     const t = await made(SMALL);
-    const h = harness(t, { sidebarOpen: false });
+    const h = harness(t);
     const ctx: CommandCtx = { ...h.ctx, listMode: "column", command: false };
     const c = find(ctx, "sidebar");
     expect([c.group, c.label, c.keys]).toEqual(["View", "Show the plan list", "Ctrl B"]);
     c.run();
-    expect(h.setUi.mock.calls).toEqual([[{ sidebarOpen: true }]]);
+    expect([h.toggleList.mock.calls.length, h.setUi.mock.calls]).toEqual([1, []]);
   });
 
   it("offers it with no open plan too", async () => {
     const t = await made(SMALL);
     const h = harness(t, { plan: null });
-    const ctx: CommandCtx = { ...h.ctx, listMode: "column", session: null, run: null, undo: null, redo: null };
+    const ctx: CommandCtx = { ...h.ctx, listMode: "column", list: { open: true, toggle: h.toggleList }, session: null, run: null, undo: null, redo: null };
     expect(find(ctx, "sidebar").label).toBe("Hide the plan list");
   });
 
@@ -731,9 +734,50 @@ describe("plan list command", () => {
     const shown = find({ ...h.ctx, listMode: "overlay" }, "sidebar");
     expect([shown.group, shown.label, shown.keys]).toEqual(["View", "Show the plan list", "⌘B"]);
     shown.run();
-    const hidden = find({ ...h.ctx, listMode: "overlay", overlay: { open: true, toggle: h.toggleOverlay } }, "sidebar");
+    const hidden = find({ ...h.ctx, listMode: "overlay", list: { open: true, toggle: h.toggleList } }, "sidebar");
     expect(hidden.label).toBe("Hide the plan list");
     hidden.run();
-    expect([h.toggleOverlay.mock.calls.length, h.setUi.mock.calls]).toEqual([2, []]);
+    expect([h.toggleList.mock.calls.length, h.setUi.mock.calls]).toEqual([2, []]);
+  });
+});
+
+describe("inspector and outline commands", () => {
+  it("offers Show and Hide the inspector with ⌥⌘I outside the sheet form with a plan open, and toggles it", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    const toggle = vi.fn<() => void>();
+    const shown = find({ ...h.ctx, listMode: "column", inspector: { open: true, toggle } }, "inspector");
+    expect([shown.group, shown.label, shown.keys]).toEqual(["View", "Hide the inspector", "⌥⌘I"]);
+    shown.run();
+    expect(toggle).toHaveBeenCalledTimes(1);
+    const hidden = find({ ...h.ctx, listMode: "overlay", command: false, inspector: { open: false, toggle } }, "inspector");
+    expect([hidden.label, hidden.keys]).toEqual(["Show the inspector", "Ctrl Alt I"]);
+    expect(ids({ ...h.ctx, listMode: "sheet", inspector: { open: true, toggle } }).includes("inspector")).toBe(false);
+    expect(ids({ ...h.ctx, listMode: "column" }).includes("inspector")).toBe(false);
+    expect(ids({ ...h.ctx, listMode: "column", inspector: { open: false, toggle }, session: null, run: null, undo: null, redo: null }).includes("inspector")).toBe(false);
+  });
+
+  it("offers Show and Hide the outline with ⌥⌘L on the Timeline only", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    const toggle = vi.fn<() => void>();
+    const ctx: CommandCtx = { ...h.ctx, listMode: "column", outline: { open: false, toggle } };
+    const c = find(ctx, "outline");
+    expect([c.group, c.label, c.keys]).toEqual(["View", "Show the outline", "⌥⌘L"]);
+    c.run();
+    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(find({ ...ctx, command: false, outline: { open: true, toggle } }, "outline").label).toBe("Hide the outline");
+    expect(find({ ...ctx, command: false }, "outline").keys).toBe("Ctrl Alt L");
+    expect(ids({ ...ctx, ui: { ...ctx.ui, view: "board" } }).includes("outline")).toBe(false);
+    expect(ids({ ...ctx, session: null, run: null, undo: null, redo: null }).includes("outline")).toBe(false);
+  });
+
+  it("offers the outline with its key in the sheet form too, where the key works", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    const toggle = vi.fn<() => void>();
+    const c = find({ ...h.ctx, listMode: "sheet", outline: { open: true, toggle } }, "outline");
+    expect([c.label, c.keys]).toEqual(["Hide the outline", "⌥⌘L"]);
+    expect(keyToCommand({ key: "¬", code: "KeyL", metaKey: true, ctrlKey: false, shiftKey: false, altKey: true }, { command: true, typing: false, dialog: false, selected: false, listMode: "sheet" })).toBe(c.id);
   });
 });

@@ -6,6 +6,7 @@ import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { setReducedMotion } from "../../test/matchMedia";
 import { IPAD, LINUX, setPlatform } from "../../test/platform";
+import { seedPanesClosed } from "../../test/panes";
 import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { shellFor } from "../../test/shell";
@@ -131,7 +132,7 @@ describe("the plan list overlay on an iPad at 700-1179", () => {
     expect([b.className, b.getAttribute("aria-expanded"), b.getAttribute("aria-controls"), b.title]).toEqual(["icon-button sidebar-toggle", "false", "plan-list", "Show the plan list (⌘B)"]);
     expect(within(bar()).queryByRole("button", { name: "Plans" })).toBeNull();
     expect(screen.queryByRole("navigation", { name: "Plans" })).toBeNull();
-    expect(screen.queryByRole("separator")).toBeNull();
+    expect(screen.queryAllByRole("separator").map((s) => s.getAttribute("aria-label"))).toEqual(["Resize the outline"]);
     expect(layer()).toBeNull();
   });
 
@@ -473,7 +474,9 @@ describe("the plan list overlay on an iPad at 700-1179", () => {
 
   it("shows the column in its saved state and no leftover scrim on a rotation to the full form", async () => {
     const t = await made();
-    await shown(t, ON_IPAD, { sidebarOpen: false });
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, sidebarOpen: false }));
+    seedPanesClosed(["outline"]);
+    await shown(t, ON_IPAD);
     fireEvent.click(toggle());
     expect(document.activeElement).toBe(opened());
     act(() => setScreen(1194, 834));
@@ -493,6 +496,7 @@ describe("the plan list overlay on an iPad at 700-1179", () => {
   });
 
   it("shows the column open on a rotation when that is the saved state", async () => {
+    seedPanesClosed(["outline"]);
     await shown(await made());
     fireEvent.click(toggle());
     act(() => setScreen(1194, 834));
@@ -535,6 +539,97 @@ describe("the plan list overlay on an iPad at 700-1179", () => {
     expect(document.querySelector(".sheet")).toBeNull();
     expect(overlay()).toBeNull();
     expect(toggle().getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
+describe("the leading edge swipe on an iPad in drawer mode", () => {
+  const edge = (): HTMLElement => {
+    const el = document.querySelector(".app-body > div.list-edge");
+    if (!(el instanceof HTMLElement)) throw new Error("no list edge");
+    return el;
+  };
+  const swipe = (el: HTMLElement, path: readonly (readonly [number, number])[], pointerType = "touch"): void => {
+    const [x0, y0] = path[0] ?? [0, 0];
+    fireEvent.pointerDown(el, { pointerId: 7, button: 0, clientX: x0, clientY: y0, pointerType });
+    path.slice(1).forEach(([x, y]) => fireEvent.pointerMove(el, { pointerId: 7, clientX: x, clientY: y, pointerType }));
+    const [xn, yn] = path[path.length - 1] ?? [x0, y0];
+    fireEvent.pointerUp(el, { pointerId: 7, button: 0, clientX: xn, clientY: yn, pointerType });
+  };
+
+  it("is a 20 pt strip at the leading edge, hidden from assistive tech", async () => {
+    await shown(await made());
+    const el = edge();
+    expect(el.getAttribute("aria-hidden")).toBe("true");
+    expect(el.previousElementSibling).toBeNull();
+    expect(el.closest("main")).toBeNull();
+  });
+
+  it("opens the list drawer on a rightward touch move of 24 px", async () => {
+    await shown(await made());
+    swipe(edge(), [
+      [6, 400],
+      [18, 404],
+      [30, 408],
+    ]);
+    expect(opened()).toBe(document.activeElement);
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    expect(main().hasAttribute("inert")).toBe(true);
+  });
+
+  it("does not open short of 24 px, on a mostly vertical move, leftward, or by mouse", async () => {
+    await shown(await made());
+    swipe(edge(), [
+      [6, 400],
+      [29, 400],
+    ]);
+    swipe(edge(), [
+      [6, 400],
+      [36, 440],
+    ]);
+    swipe(edge(), [
+      [18, 400],
+      [-12, 400],
+    ]);
+    swipe(
+      edge(),
+      [
+        [6, 400],
+        [60, 400],
+      ],
+      "mouse",
+    );
+    expect(overlay()).toBeNull();
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("opens once per swipe and is gone while the drawer is open", async () => {
+    await shown(await made());
+    const el = edge();
+    fireEvent.pointerDown(el, { pointerId: 7, button: 0, clientX: 4, clientY: 400, pointerType: "touch" });
+    fireEvent.pointerMove(el, { pointerId: 7, clientX: 40, clientY: 400, pointerType: "touch" });
+    fireEvent.pointerMove(el, { pointerId: 7, clientX: 80, clientY: 400, pointerType: "touch" });
+    expect(overlay()).not.toBeNull();
+    expect(document.querySelector(".list-edge")).toBeNull();
+    fireEvent.click(toggle());
+    closed();
+    expect(edge()).toBeTruthy();
+  });
+
+  it("is absent in the column form, below 700 and off iOS", async () => {
+    setScreen(1194, 834);
+    seedPanesClosed(["outline"]);
+    await shown(await made());
+    expect(document.querySelector(".list-edge")).toBeNull();
+    cleanup();
+    setScreen(699, 1000);
+    await shown(await made());
+    expect(document.querySelector(".list-edge")).toBeNull();
+    cleanup();
+    setPlatform(LINUX);
+    setScreen(1100, 800);
+    await shown(await made(), { device: { deviceId: "pc", name: "PC", platform: "linux" } });
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    expect(document.querySelector(".list-edge")).toBeNull();
   });
 });
 

@@ -23,7 +23,7 @@ interface Month {
   m: number;
 }
 
-export const Scale = memo(function Scale(p: { geo: Geometry; today: Day; missing: readonly number[] }) {
+export const Scale = memo(function Scale(p: { geo: Geometry; today: Day; missing: readonly number[]; onHide: (() => void) | null }) {
   const { geo } = p;
   const last = geo.origin + geo.days;
   const days = Array.from({ length: geo.days }, (_, i) => geo.origin + i);
@@ -41,6 +41,11 @@ export const Scale = memo(function Scale(p: { geo: Geometry; today: Day; missing
       <div className="tl-corner">
         <span>Task</span>
         <span className="days">Days</span>
+        {p.onHide !== null && (
+          <button type="button" className="outline-collapse" aria-label="Hide the outline" title="Hide the outline" onClick={p.onHide}>
+            ‹
+          </button>
+        )}
       </div>
       <div className="tl-scale" style={{ width: geo.width }}>
         {months.map((mo) => {

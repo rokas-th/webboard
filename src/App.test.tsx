@@ -13,7 +13,8 @@ import { closeListenerCount, requestWindowClose, resetTauri, tauri, windowState 
 import { Dialog } from "./ui/common/Dialog";
 import { clearToasts, Toasts } from "./ui/common/Toast";
 import { PLACE_KEY } from "./ui/state";
-import { IPHONE, setPlatform } from "./test/platform";
+import { IPAD, IPHONE, setPlatform } from "./test/platform";
+import { setScreen } from "./test/setup";
 
 vi.mock("@tauri-apps/api/core", () => import("./test/tauriMock"));
 vi.mock("@tauri-apps/api/window", () => import("./test/tauriMock"));
@@ -403,10 +404,23 @@ describe("updates", () => {
     expect(document.querySelector(".palette")?.textContent).toContain("Check for updates");
   });
 
-  it("neither checks nor shows the line or the commands on a phone or iPad", async () => {
+  it("neither checks nor shows the line on a phone", async () => {
     const seeded = await seededStore(["Alpha"]);
     resetTauri({ ...seeded.answers, device_info: () => ({ deviceId: "mac", platform: "ios" }) });
     setPlatform(IPHONE);
+    setScreen(390, 844);
+    spyOpen();
+    render(themed(<App />));
+    await settle();
+    expect([document.documentElement.dataset.form, toolbar()]).toEqual(["phone", null]);
+    expect(checkUpdate).not.toHaveBeenCalled();
+    expect(document.querySelector(".update-line")).toBeNull();
+  });
+
+  it("neither checks nor shows the line or the commands on an iPad", async () => {
+    const seeded = await seededStore(["Alpha"]);
+    resetTauri({ ...seeded.answers, device_info: () => ({ deviceId: "mac", platform: "ios" }) });
+    setPlatform(IPAD);
     spyOpen();
     render(themed(<App />));
     await settle();

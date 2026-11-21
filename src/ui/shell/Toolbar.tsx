@@ -7,7 +7,7 @@ import { NewItemMenu } from "../common/NewItemMenu";
 import { closeSettings } from "../settings/SettingsPanel";
 import { MoreMenu } from "./MoreMenu";
 import type { ToolbarTier } from "./planListMode";
-import { PLAN_LIST_ID } from "./Sidebar";
+import { INSPECTOR_ID, PLAN_LIST_ID } from "./Sidebar";
 import { SyncChip } from "./SyncChip";
 import { useToolbarTight } from "./toolbarFit";
 import { ZOOMS } from "./zooms";
@@ -75,6 +75,34 @@ function SidebarButton(p: SidebarToggle & { command: boolean }) {
   );
 }
 
+export interface InspectorToggle {
+  open: boolean;
+  button: RefObject<HTMLButtonElement | null>;
+  onToggle(): void;
+}
+
+function InspectorButton(p: InspectorToggle & { command: boolean }) {
+  const title = `${p.open ? "Hide" : "Show"} the inspector (${p.command ? "⌥⌘I" : "Ctrl Alt I"})`;
+  return (
+    <button
+      ref={p.button}
+      type="button"
+      className="icon-button inspector-toggle"
+      aria-label="Inspector"
+      aria-expanded={p.open}
+      aria-controls={INSPECTOR_ID}
+      title={title}
+      onClick={p.onToggle}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor">
+        <rect x="1.7" y="2.7" width="12.6" height="10.6" rx="1.6" strokeWidth="1.4" />
+        <line x1="9.8" y1="2.7" x2="9.8" y2="13.3" strokeWidth="1.4" />
+        {p.open && <rect className="inspector-toggle-fill" x="9.8" y="3.4" width="3.8" height="9.2" rx="0.8" fill="currentColor" stroke="none" />}
+      </svg>
+    </button>
+  );
+}
+
 interface ToolbarProps {
   session: PlanSession | null;
   readOnly: boolean;
@@ -86,6 +114,7 @@ interface ToolbarProps {
   tier: ToolbarTier | null;
   compact: { button: RefObject<HTMLButtonElement | null>; onPlans(): void; onPlan(): void } | null;
   sidebar: SidebarToggle | null;
+  inspector: InspectorToggle | null;
 }
 
 function ViewTabs(p: { ui: UiState; setUi(patch: Partial<UiState>): void; short: boolean }) {
@@ -234,6 +263,7 @@ export function Toolbar(p: ToolbarProps) {
             }}
           />
         )}
+        {p.session !== null && p.inspector !== null && <InspectorButton {...p.inspector} command={p.command} />}
       </div>
     </header>
   );

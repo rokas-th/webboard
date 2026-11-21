@@ -45,6 +45,7 @@ const IPAD_WINDOWS = [
 ];
 const IPAD_OWNER = [touch(970, 1389, "compact"), { size: [1389, 970], screen: [970, 1389], touch: true, form: "full" }];
 const MAC_834 = [{ ...cdesk(834, 1194), name: "834x1194-desk" }];
+const SHEET_DESK = [cdesk(820, 760), ...MAC_834];
 const TIERS_TS = readFileSync(new URL("../src/ui/shell/planListMode.ts", import.meta.url), "utf8");
 const tierMin = (name) => {
   const m = TIERS_TS.match(new RegExp(`^export const ${name} = (\\d+);$`, "m"));
@@ -56,8 +57,8 @@ const BOUNDARY_SPARE = 16;
 const ROOMY_MIN = tierMin("ROOMY_MIN");
 const padWindow = (w, h) => ({ size: [w, h], screen: [834, 1194], touch: true, form: "compact" });
 const IPAD_TIERS = [padWindow(560, 1000), padWindow(MEDIUM_MIN - 1, 1000), padWindow(MEDIUM_MIN, 1000), padWindow(ROOMY_MIN - 1, 820), padWindow(ROOMY_MIN, 820)];
-const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE, ...IPAD_WINDOWS, ...IPAD_TIERS, ...IPAD_OWNER, ...MAC_834];
-const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...IPAD_WINDOWS, ...IPAD_TIERS, ...IPAD_OWNER, ...MAC_834];
+const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE, ...IPAD_WINDOWS, ...IPAD_TIERS, ...IPAD_OWNER, ...SHEET_DESK];
+const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...IPAD_WINDOWS, ...IPAD_TIERS, ...IPAD_OWNER, ...SHEET_DESK];
 const LOAD_MS = 2000;
 
 const nameOf = (v) => v.name ?? `${v.size[0]}x${v.size[1]}`;
@@ -106,6 +107,7 @@ const count = (selector, n) => ({ count: [selector, n] });
 const loaded = (selector) => ({ loaded: selector });
 const click = (selector, text) => ({ click: text === undefined ? [selector] : [selector, text] });
 const tap = (selector, text) => ({ tap: [selector, text] });
+const swipe = (selector, dx, dy) => ({ swipe: [selector, dx, dy] });
 const none = (selector, text) => ({ none: [selector, text] });
 const key = (k, code, modifiers) => ({ key: { key: k, code, modifiers } });
 const reveal = (selector, text) => ({ reveal: [selector, text] });
@@ -114,6 +116,8 @@ const todayShown = () => ({ today: true });
 const edges = () => ({ edges: true });
 const shown = (selector, n) => ({ shown: [selector, n] });
 const width = (selector, min, max) => ({ width: [selector, min, max] });
+const chart = (min) => ({ chart: min });
+const aligned = () => ({ aligned: true });
 const style = (selector, prop, value, pseudo) => ({ style: pseudo === undefined ? [selector, prop, value] : [selector, prop, value, pseudo] });
 const valued = (selector, text) => ({ valued: [selector, text] });
 const ellipsed = (selector) => ({ ellipsed: selector });
@@ -150,6 +154,17 @@ const VIEWS = [
   ["list", { view: "list", zoom: "W" }, ".list .list-name"],
 ];
 
+const PANE_OPEN = { open: true, w: null };
+const panesFor = (place, o) => {
+  const closed = o.closed ?? [];
+  const sized = o.w ?? {};
+  const listBase = { open: place === null || place.sidebarOpen === undefined ? true : place.sidebarOpen, w: place === null || place.sidebarWidth === undefined ? null : place.sidebarWidth };
+  const pane = (key, base) => ({ open: base.open && !closed.includes(key), w: sized[key] ?? base.w });
+  const set = { list: pane("list", listBase), outline: pane("outline", PANE_OPEN), inspector: pane("inspector", PANE_OPEN) };
+  return { v: 1, desk: set, padLandscape: set, padPortrait: set };
+};
+const OUTLINE_CLOSED = { closed: ["outline"] };
+
 const viewExpect = (view) =>
   view === "timeline" ? expect(".tl-canvas") : view === "board" ? count(".nnl .col", 3) : expect("table.list tbody tr");
 
@@ -169,6 +184,7 @@ function states() {
       net: { ws: o.net?.ws ?? "none", online: o.net?.online ?? true },
       shotMedia: o.shotMedia ?? null,
       theme: o.theme ?? null,
+      panes: o.panes === undefined ? null : panesFor(o.place === undefined ? { view: "timeline", zoom: "W" } : o.place, o.panes),
     });
 
   add("empty", "empty", {
@@ -223,6 +239,7 @@ function states() {
   VIEWS.forEach(([slug, place]) =>
     add(`long-names/${slug}`, "long-names", {
       place,
+      ...(place.view === "timeline" ? { panes: OUTLINE_CLOSED } : {}),
       clip: true,
       actions: [
         viewExpect(place.view),
@@ -341,7 +358,7 @@ function states() {
       actions: [
         viewExpect("timeline"),
         click('.toolbar button[aria-label="Settings"]'),
-        width(".slot-panel", 316, 316),
+        width(".slot-panel", 360, 360),
         click(SETTINGS_TAB, label),
         settingsOn(label),
         oneRow(SETTINGS_TAB, DESK_TABS.length),
@@ -482,17 +499,20 @@ function states() {
   add("toast/uncaught", "mesa", {
     actions: [viewExpect("timeline"), raise(UNCAUGHT), expect('.toast-bad [role="alert"]', UNCAUGHT), width(".toast-bad .toast", TOAST_TEXT_MIN, 640)],
   });
-  add("update/current", "mesa", { actions: [viewExpect("timeline"), expect(".sidebar .update-line .update-status", "Up to date · checked 09:00")] });
+  add("update/current", "mesa", { panes: OUTLINE_CLOSED, actions: [viewExpect("timeline"), expect(".sidebar .update-line .update-status", "Up to date · checked 09:00")] });
   add("update/available", "update-available", {
+    panes: OUTLINE_CLOSED,
     clip: [UPDATE_AVAILABLE],
     actions: [viewExpect("timeline"), expect(".sidebar .update-line button", "Install and restart"), expect(".sidebar .update-line .update-status.amber", UPDATE_AVAILABLE)],
   });
   add("update/check-failed", "update-check-failed", {
+    panes: OUTLINE_CLOSED,
     clip: [UPDATE_FAILED],
     logs: [UPDATE_CHECK_FAILED],
     actions: [viewExpect("timeline"), expect(".sidebar .update-line button", "Try again"), expect(".sidebar .update-line .update-status.bad", UPDATE_FAILED)],
   });
   add("update/downloading", "update-downloading", {
+    panes: OUTLINE_CLOSED,
     clip: [UPDATE_DOWNLOADING],
     actions: [viewExpect("timeline"), click(".sidebar .update-line button", "Install and restart"), expect(".sidebar .update-line .update-status", UPDATE_DOWNLOADING)],
   });
@@ -580,8 +600,8 @@ function states() {
     ],
   });
   const fullShell = [viewExpect("timeline"), expect(".sidebar"), expect(".slot-panel .panel h2", "Plan")];
-  add("touch/full", "mesa", { sizes: "landscape", actions: fullShell });
-  add("desk/full-1180", "mesa", { sizes: "smallest", actions: [...fullShell, expect("header.toolbar .wordmark", "WebBoard"), count('.toolbar button[aria-label="Settings"]', 1), width(".main", 628, 628)] });
+  add("touch/full", "mesa", { sizes: "landscape", panes: OUTLINE_CLOSED, actions: fullShell });
+  add("desk/full-1180", "mesa", { sizes: "smallest", panes: OUTLINE_CLOSED, actions: [...fullShell, expect("header.toolbar .wordmark", "WebBoard"), count('.toolbar button[aria-label="Settings"]', 1), width(".main", 582, 582)] });
   add("touch/nub", "mesa", {
     sizes: "ipad-pro",
     actions: [viewExpect("timeline"), click(".tl-row .name", PICKED), expect(".bar.selected .nub"), nubs(60), expect(".slot-panel .panel .kind", "TASK")],
@@ -623,7 +643,7 @@ function states() {
   add("narrow-dialog", "mesa", { sizes: "narrow", dialog: true, actions: calendarFromSheet });
   const syncDialog = [click(".toolbar .sync-chip", "Local only"), expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"), expect('[role="dialog"] button', "Create or join space")];
   add("narrow-sync-dialog", "sync-dialog", { sizes: "narrow", dialog: true, actions: syncDialog });
-  add("compact-desk/sync-dialog", "sync-dialog", { sizes: "compact-desk", dialog: true, actions: syncDialog });
+  add("compact-desk/sync-dialog", "sync-dialog", { sizes: "sheet-desk", dialog: true, actions: syncDialog });
   add("long-names/compact/list", "long-names", {
     sizes: "compact-all",
     place: { view: "list", zoom: "W" },
@@ -639,6 +659,7 @@ function states() {
   const localTags = [count(".entry-open .entry-tag", 3), within_(".entry-tag", ".entry-open", 3), expect(".local-line button", "Move both")];
   add("sync-local", "sync-local", {
     place: { plan: PLAN_IDS.long, view: "timeline", zoom: "W" },
+    panes: OUTLINE_CLOSED,
     net: { ws: "sync" },
     clip: true,
     actions: [viewExpect("timeline"), ...localTags],
@@ -701,17 +722,18 @@ function states() {
   });
   const TOGGLE = '.toolbar button[aria-label="Plan list"]';
   const hiddenPlace = { view: "timeline", zoom: "W", sidebarOpen: false };
-  const hiddenList = [viewExpect("timeline"), count(".sidebar", 0), count(".sidebar-resizer", 0), count(`${TOGGLE}[aria-expanded="false"]`, 1), oneLine(".toolbar"), edgeAt(".main", "left", 0)];
-  add("plan-list/hidden", "mesa", { place: hiddenPlace, sizes: "full-all", actions: hiddenList });
+  const hiddenList = [viewExpect("timeline"), count(".sidebar", 0), count(".sidebar-resizer", 0), count(".plan-overlay-layer", 0), count(`${TOGGLE}[aria-expanded="false"]`, 1), oneLine(".toolbar"), edgeAt(".main", "left", 0)];
+  add("plan-list/hidden", "mesa", { place: hiddenPlace, panes: OUTLINE_CLOSED, sizes: "full-all", actions: hiddenList });
   [
     ["mac", "mesa"],
     ["linux", "mesa-linux"],
   ].forEach(([os, fixture]) => {
-    add(`plan-list/hidden-centred/${os}`, fixture, { place: hiddenPlace, sizes: "widest", actions: [...hiddenList, centred(".seg-modes")] });
-    add(`plan-list/hidden-near-centre/${os}`, fixture, { place: hiddenPlace, sizes: "above-break-and-standard", actions: [...hiddenList, nearCentre(".seg-modes")] });
+    add(`plan-list/hidden-centred/${os}`, fixture, { place: hiddenPlace, panes: OUTLINE_CLOSED, sizes: "widest", actions: [...hiddenList, centred(".seg-modes")] });
+    add(`plan-list/hidden-near-centre/${os}`, fixture, { place: hiddenPlace, panes: OUTLINE_CLOSED, sizes: "above-break-and-standard", actions: [...hiddenList, nearCentre(".seg-modes")] });
   });
   add("plan-list/toggle", "mesa", {
     sizes: "full-all",
+    panes: OUTLINE_CLOSED,
     actions: [
       viewExpect("timeline"),
       count(`${TOGGLE}[aria-expanded="true"]`, 1),
@@ -729,9 +751,21 @@ function states() {
   });
   add("plan-list/attention", "update-available", {
     place: hiddenPlace,
+    panes: OUTLINE_CLOSED,
     sizes: "smallest",
     actions: [viewExpect("timeline"), count(".sidebar", 0), count(`${TOGGLE}[data-attention="true"]`, 1), oneLine(".toolbar")],
   });
+  const resizedBare = (keyName, size) => [
+    viewExpect("timeline"),
+    focus(".sidebar-resizer"),
+    key(keyName, keyName),
+    width(".sidebar", size, size),
+    expect(`.sidebar-resizer[aria-valuenow="${size}"]`),
+    count(".slot-panel", 0),
+    edgeAt(".main", "right", "window"),
+    edgeAt(".sidebar", "left", 0),
+    oneLine(".toolbar"),
+  ];
   const resized = (keyName, size) => [
     viewExpect("timeline"),
     focus(".sidebar-resizer"),
@@ -743,11 +777,12 @@ function states() {
     edgeAt(".sidebar", "left", 0),
     oneLine(".toolbar"),
   ];
-  add("plan-list/min", "mesa", { sizes: "full-all", actions: resized("Home", 200) });
-  add("plan-list/max", "mesa", { sizes: "full-480", actions: resized("End", 480) });
-  add("plan-list/max-1180", "mesa", { sizes: "full-1180", actions: resized("End", 472) });
+  add("plan-list/min", "mesa", { sizes: "full-all", panes: OUTLINE_CLOSED, actions: resized("Home", 200) });
+  add("plan-list/max", "mesa", { sizes: "full-480", panes: { closed: ["outline", "inspector"] }, actions: resizedBare("End", 480) });
+  add("plan-list/max-1180", "mesa", { sizes: "full-1180", panes: { closed: ["outline", "inspector"] }, actions: resizedBare("End", 472) });
   add("plan-list/no-toggle/compact", "mesa", {
     sizes: "compact-all",
+    panes: OUTLINE_CLOSED,
     actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(TOGGLE, 0), count(".sidebar-resizer", 0)],
   });
   add("plan-list/no-toggle/narrow", "mesa", { sizes: "narrow", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(TOGGLE, 0), count(".sidebar-resizer", 0)] });
@@ -759,7 +794,7 @@ function states() {
   add("platform/macos", "mesa", { sizes: "standard", actions: [viewExpect("timeline"), ...stamped("macos", null)] });
   add("platform/linux", "mesa-linux", { sizes: "standard", actions: [viewExpect("timeline"), ...stamped("linux", null)] });
   add("platform/ipad-11-portrait", "mesa-ios-pad", { sizes: "ipad-11-portrait", actions: [viewExpect("timeline"), count(`${TOGGLE}[aria-expanded="false"]`, 1), none(".toolbar button", "Plans"), count(".sidebar", 0), ...stamped("ios", "pad")] });
-  add("platform/ipad-11-landscape", "mesa-ios-pad", { sizes: "ipad-11-landscape", actions: [...fullShell, ...stamped("ios", "pad")] });
+  add("platform/ipad-11-landscape", "mesa-ios-pad", { sizes: "ipad-11-landscape", panes: OUTLINE_CLOSED, actions: [...fullShell, ...stamped("ios", "pad")] });
   add("platform/iphone-landscape", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), ...stamped("ios", "phone")] });
   const FIELDS = '.sheet input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), .sheet select, .sheet textarea';
   const phoneItemSheet = [click(".phone-list .prow"), expect('.sheet[role="dialog"] .isheet')];
@@ -769,7 +804,8 @@ function states() {
   const settingsFromMore = [click('.toolbar button[aria-label="More"]'), chooseNative("Settings")];
   const NEW_ROWS = ["New task", "New milestone", "New group"];
   const PLAN_ROWS = ["Export plan…", "Import plan…"];
-  const padItem = [click(".tl-row .name", PICKED), expect('.sheet[role="dialog"] .panel .kind', "TASK")];
+  const INSPECTOR_DRAWER = '.inspector-overlay[role="dialog"][aria-label="Inspector"]';
+  const padItem = [click(".tl-row .name", PICKED), still(), expect(`${INSPECTOR_DRAWER} .panel .kind`, "TASK"), count(".sheet", 0)];
   add("ios44/phone/plan", "mesa-ios-phone", { sizes: "phone", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
   add("ios44/phone/plans", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [click(".phone-head button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), hitChrome("sheetHead", "planList")] });
   add("ios44/phone/item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal(".isheet .actions button", "Move up"), hitChrome("sheetHead", "panelActions")] });
@@ -801,12 +837,14 @@ function states() {
   });
   add("ios44/pad-landscape/plan-menu", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
+    panes: OUTLINE_CLOSED,
     actions: [...fullShell, click('.plan-head button[aria-label="Plan menu"]'), asked(PLAN_ROWS)],
   });
   add("ios44/phone-landscape/plan", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
   add("ios44/phone/status-strip", "phone-status-ios", { sizes: "phone", actions: [expect(".phone-status .status-strip .status-text", STATUS_FIRST), hitChrome("phoneBars", "phoneStatus")] });
   add("ios44/pad-landscape/dialog", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
+    panes: OUTLINE_CLOSED,
     dialog: true,
     actions: [...fullShell, click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), hitChrome("dialogActions", "dialogHead")],
   });
@@ -816,13 +854,13 @@ function states() {
     dialog: true,
     actions: [viewExpect("timeline"), click(TOGGLE), still(), expect('.plan-overlay[role="dialog"] .sidebar'), hitChrome("toolbar", "planList")],
   });
-  add("ios44/pad-portrait/item", "mesa-ios-pad", { sizes: "ipad-11-portrait", dialog: true, actions: [viewExpect("timeline"), ...padItem, hitChrome("sheetHead", "panelActions")] });
+  add("ios44/pad-portrait/item", "mesa-ios-pad", { sizes: "ipad-11-portrait", dialog: true, actions: [viewExpect("timeline"), ...padItem, hitChrome("drawerHead", "panelActions")] });
   add("ios44/pad-portrait/settings", "mesa-ios-pad", {
     sizes: "ipad-11-portrait",
     dialog: true,
     actions: [viewExpect("timeline"), ...settingsFromMore, expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), hitChrome("sheetHead", "settingsTabs")],
   });
-  add("ios44/pad-landscape/plan", "mesa-ios-pad", { sizes: "ipad-landscapes", actions: [...fullShell, hitChrome("toolbar", "planList", "panelActions")] });
+  add("ios44/pad-landscape/plan", "mesa-ios-pad", { sizes: "ipad-landscapes", panes: OUTLINE_CLOSED, actions: [...fullShell, hitChrome("toolbar", "planList", "panelActions")] });
   add("ios44/pad-landscape/settings", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
     actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect(".settings-panel h2", "Settings"), settingsOn("Theme"), hitChrome("toolbar", "settingsHead", "settingsTabs")],
@@ -847,6 +885,7 @@ function states() {
   add("ipad-mode/sheet", "mesa-ios-pad", { sizes: "ipad-699", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), count(TOGGLE, 0), count(".sidebar", 0), count(".plan-overlay-layer", 0), hitChrome("toolbar")] });
   add("ipad-mode/column", "mesa-ios-pad", {
     sizes: "ipad-column",
+    panes: OUTLINE_CLOSED,
     actions: [...fullShell, count(`${TOGGLE}[aria-expanded="true"]`, 1), expect(".sidebar-resizer"), count(".plan-overlay-layer", 0), expect(".toolbar .kbd-button", "⌘K"), expect(".toolbar button", "Undo")],
   });
   const overlayOpened = [viewExpect("timeline"), keep(".main"), keep(".toolbar"), click(TOGGLE), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), expect(`${OVERLAY} nav.sidebar`)];
@@ -886,7 +925,11 @@ function states() {
     dialog: true,
     actions: [viewExpect("timeline"), ...settingsFromMore, expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), style(".sheet", "border-bottom-width", "1px"), style(".sheet", "border-bottom-left-radius", "12px"), style(".sheet", "padding-bottom", "0px"), centredIn(".sheet")],
   });
-  add("ipad-form-sheet/item", "mesa-ios-pad", { sizes: "ipad-portraits", dialog: true, actions: [viewExpect("timeline"), ...padItem, style(".sheet", "width", "560px"), centredIn(".sheet")] });
+  add("ipad-form-sheet/item", "mesa-ios-pad", {
+    sizes: "ipad-portraits",
+    dialog: true,
+    actions: [viewExpect("timeline"), ...padItem, count(`${INSPECTOR_DRAWER} > .drawer-head:first-child > .drawer-close`, 1), edgeAt(INSPECTOR_DRAWER, "right", "window"), width(INSPECTOR_DRAWER, 360, 360), hitChrome("drawerHead")],
+  });
   add("ipad-form-sheet/plans-below-700", "mesa-ios-pad", {
     sizes: "ipad-699",
     dialog: true,
@@ -901,6 +944,7 @@ function states() {
     actions: [viewExpect("timeline"), click('.plan-head button[aria-label="Plan menu"]'), asked(PLAN_ROWS)],
   });
   const MORE = '.toolbar button[aria-label="More"]';
+  const INSPECTOR_TOGGLE = '.toolbar button[aria-label="Inspector"]';
   const oneRowBar = [oneLine(".toolbar"), hitChrome("toolbar")];
   add("ipad-toolbar/roomy", "mesa-ios-pad", { sizes: "ipad-roomy", actions: [viewExpect("timeline"), oneLine(".toolbar"), count(MORE, 0), count(".toolbar .seg-zoom", 1), expect(".toolbar .sync-chip-text"), expect('.toolbar button[aria-label="Settings"]'), ...oneRowBar] });
   add("ipad-toolbar/medium", "mesa-ios-pad", {
@@ -914,15 +958,15 @@ function states() {
   add("ipad-toolbar/roomy-min", "mesa-ios-pad", { sizes: "ipad-roomy-min", actions: [viewExpect("timeline"), count(MORE, 0), oneLine(".toolbar"), spare(".toolbar", BOUNDARY_SPARE, BOUNDARY_SPARE + 10)] });
   add("ipad-toolbar/medium-min", "mesa-ios-pad", { sizes: "ipad-medium-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 1), oneLine(".toolbar"), spare(".toolbar", BOUNDARY_SPARE, BOUNDARY_SPARE + 10)] });
   add("ipad-toolbar/narrow-min", "mesa-ios-pad", { sizes: "ipad-narrow-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 0), oneLine(".toolbar"), spare(".toolbar", 0)] });
-  add("ipad-toolbar/owner-landscape", "mesa-ios-pad", { sizes: "ipad-owner-landscape", actions: [...fullShell, ...oneRowBar] });
+  add("ipad-toolbar/owner-landscape", "mesa-ios-pad", { sizes: "ipad-owner-landscape", panes: OUTLINE_CLOSED, actions: [...fullShell, ...oneRowBar] });
   add("ipad-toolbar/overlay-open", "mesa-ios-pad", {
     sizes: "ipad-overlay-open",
     dialog: true,
     actions: [...overlayOpened, still(), uncovered(MORE), ...oneRowBar],
   });
   const MORE_ROWS = [
-    [0, ["group Zoom", "Week ✓", "Month", "Quarter", "Fit", "Go to today", "Settings", "Plan"]],
-    [MEDIUM_MIN, ["Settings", "Plan"]],
+    [0, ["group Zoom", "Week ✓", "Month", "Quarter", "Fit", "Go to today", "Settings"]],
+    [MEDIUM_MIN, ["Settings"]],
   ];
   add("ipad-toolbar/more-open", "mesa-ios-pad", {
     sizes: "ipad-overlay-open",
@@ -930,7 +974,11 @@ function states() {
   });
   const fromMoreOverOverlay = (row) => [...overlayOpened, click(MORE), chooseNative(row), expect('.sheet[role="dialog"] .sheet-title', row), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), uncovered(`.sheet-head ${CONTROL}`)];
   add("ipad-toolbar/settings-over-overlay", "mesa-ios-pad", { sizes: "ipad-overlay-open", actions: fromMoreOverOverlay("Settings") });
-  add("ipad-toolbar/plan-over-overlay", "mesa-ios-pad", { sizes: "ipad-overlay-open", actions: fromMoreOverOverlay("Plan") });
+  add("ipad-toolbar/inspector-over-overlay", "mesa-ios-pad", {
+    sizes: "ipad-overlay-open",
+    dialog: true,
+    actions: [...overlayOpened, click(INSPECTOR_TOGGLE), still(), count(".plan-overlay-layer", 0), count(`${INSPECTOR_TOGGLE}[aria-expanded="true"]`, 1), expect(`${INSPECTOR_DRAWER} .panel h2`, "Plan"), count("main.main[inert]", 1), uncovered(INSPECTOR_TOGGLE)],
+  });
   add("ipad-toolbar/more-over-overlay", "mesa-ios-pad", {
     sizes: "ipad-overlay-open",
     dialog: true,
@@ -941,6 +989,204 @@ function states() {
     sizes: "mac-834",
     dialog: true,
     actions: [viewExpect("timeline"), click(".toolbar button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), count(".plan-overlay-layer", 0), style(".sheet", "border-bottom-width", "0px"), edgeAt(".sheet", "bottom", 1194)],
+  });
+  const PANE_TOGGLE = '.toolbar button[aria-label="Inspector"]';
+  [
+    [1024, false, 183],
+    [1100, false, 259],
+    [1180, false, 300],
+    [1280, false, 300],
+    [1440, true, 300],
+  ].forEach(([w, listColumn, grid]) => {
+    add(`panes/budget-${w}`, "mesa", {
+      sizes: `panes-${w}`,
+      actions: [
+        viewExpect("timeline"),
+        count(".sidebar", listColumn ? 1 : 0),
+        count(`${TOGGLE}[aria-expanded="${listColumn ? "true" : "false"}"]`, 1),
+        width(".slot-panel", 360, 360),
+        edgeAt(".slot-panel", "right", "window"),
+        chart(480),
+        oneLine(".toolbar"),
+        width(".tl-grid", grid, grid),
+      ],
+    });
+  });
+  add("panes/budget-linux-1024", "mesa-linux", {
+    sizes: "panes-1024",
+    actions: [viewExpect("timeline"), count(".sidebar", 0), width(".slot-panel", 360, 360), chart(480), oneLine(".toolbar"), width(".tl-grid", 183, 183)],
+  });
+  add("panes/board-1180", "mesa", {
+    place: { view: "board", zoom: "W" },
+    sizes: "panes-1180",
+    actions: [viewExpect("board"), width(".sidebar", 236, 236), width(".slot-panel", 360, 360), width(".main", 582, 582)],
+  });
+  add("panes/inspector-collapsed", "mesa", {
+    sizes: "panes-1440",
+    panes: { closed: ["outline", "inspector"] },
+    actions: [viewExpect("timeline"), count(".slot-panel", 0), count(".inspector-resizer", 0), count(`${PANE_TOGGLE}[aria-expanded="false"]`, 1), edgeAt(".main", "right", "window"), oneLine(".toolbar")],
+  });
+  [
+    ["Home", 300],
+    ["End", 640],
+  ].forEach(([keyName, size]) => {
+    add(`panes/inspector-${keyName.toLowerCase()}`, "mesa", {
+      sizes: "panes-1440",
+      panes: OUTLINE_CLOSED,
+      actions: [
+        viewExpect("timeline"),
+        focus(".inspector-resizer"),
+        key(keyName, keyName),
+        width(".slot-panel", size, size),
+        expect(`.inspector-resizer[aria-valuenow="${size}"]`),
+        edgeAt(".slot-panel", "right", "window"),
+        expect(".sidebar"),
+      ],
+    });
+  });
+  add("panes/inspector-drawer", "mesa-ios-pad", {
+    sizes: "ipad-11-portrait",
+    dialog: true,
+    actions: [viewExpect("timeline"), click(PANE_TOGGLE), still(), count("main.main[inert]", 1), edgeAt(".inspector-overlay", "right", "window"), meets(".inspector-overlay", "top", ".toolbar", "bottom"), width(".inspector-overlay", 360, 360), inWindow(".inspector-overlay")],
+  });
+  add("panes/inspector-drawer-85", "mesa-ios-pad", {
+    sizes: "ipad-700",
+    dialog: true,
+    panes: { w: { inspector: 640 } },
+    actions: [viewExpect("timeline"), click(PANE_TOGGLE), still(), edgeAt(".inspector-overlay", "right", "window"), width(".inspector-overlay", 595, 595)],
+  });
+  add("panes/list-edge", "mesa-ios-pad", {
+    sizes: "ipad-portraits",
+    dialog: true,
+    actions: [
+      viewExpect("timeline"),
+      count(".app-body > .list-edge:first-child", 1),
+      width(".list-edge", 20, 20),
+      edgeAt(".list-edge", "left", 0),
+      meets(".list-edge", "top", ".toolbar", "bottom"),
+      style(".list-edge", "touch-action", "pan-y"),
+      count(`${TOGGLE}[aria-expanded="false"]`, 1),
+      swipe(".list-edge", 60, 6),
+      still(),
+      expect(`${OVERLAY} nav.sidebar`),
+      count(`${TOGGLE}[aria-expanded="true"]`, 1),
+      count("main.main[inert]", 1),
+      count(".list-edge", 0),
+      width(OVERLAY, 320, 320),
+    ],
+  });
+  add("panes/list-edge-vertical", "mesa-ios-pad", {
+    sizes: "ipad-11-portrait",
+    actions: [viewExpect("timeline"), swipe(".list-edge", 10, 90), still(), count(".plan-overlay-layer", 0), count(`${TOGGLE}[aria-expanded="false"]`, 1), count(".list-edge", 1)],
+  });
+  add("panes/list-edge-column", "mesa-ios-pad", { sizes: "ipad-column", panes: OUTLINE_CLOSED, actions: [...fullShell, count(".list-edge", 0)] });
+  add("panes/list-edge-landscape-yield", "mesa-ios-pad", {
+    sizes: "ipad-owner-landscape",
+    dialog: true,
+    actions: [
+      viewExpect("timeline"),
+      count(".sidebar", 0),
+      count(`${TOGGLE}[aria-expanded="false"]`, 1),
+      count(".app-body > .list-edge:first-child", 1),
+      width(".list-edge", 20, 20),
+      swipe(".list-edge", 60, 6),
+      still(),
+      expect(`${OVERLAY} nav.sidebar`),
+      count(".list-edge", 0),
+    ],
+  });
+  add("panes/pad-dividers-44", "mesa-ios-pad", {
+    sizes: "ipad-landscapes",
+    panes: OUTLINE_CLOSED,
+    actions: [
+      ...fullShell,
+      style('[data-pane-divider="list"]', "width", "44px", "::before"),
+      style('[data-pane-divider="list"]', "left", "-22px", "::before"),
+      style('[data-pane-divider="inspector"]', "width", "44px", "::before"),
+      style('[data-pane-divider="inspector"]', "left", "-22px", "::before"),
+      style('[data-pane-divider="list"]', "touch-action", "none"),
+    ],
+  });
+  add("panes/pad-outline-divider-44", "mesa-ios-pad", {
+    sizes: "ipad-11-landscape",
+    actions: [viewExpect("timeline"), chart(480), style('[data-pane-divider="outline"]', "width", "44px", "::before")],
+  });
+  const OUTLINE_DIVIDER = '[data-pane-divider="outline"]';
+  [
+    ["Home", 160],
+    ["End", 314],
+  ].forEach(([keyName, size]) => {
+    add(`panes/outline-${keyName.toLowerCase()}`, "mesa", {
+      sizes: "panes-1440",
+      actions: [
+        viewExpect("timeline"),
+        focus(OUTLINE_DIVIDER),
+        key(keyName, keyName),
+        width(".tl-grid", size, size),
+        width(".tl-corner", size, size),
+        expect(`${OUTLINE_DIVIDER}[aria-valuenow="${size}"]`),
+        chart(480),
+        expect(".sidebar"),
+        width(".slot-panel", 360, 360),
+        ...(size >= 220 ? [style(".tl-row .days", "display", "block"), style(".tl-corner .days", "display", "block"), style(".tl-row .dot", "display", "block")] : [shown(".tl-row .days", 0), shown(".tl-row .dot", 0)]),
+        aligned(),
+      ],
+    });
+  });
+  add("panes/outline-200", "mesa", {
+    sizes: "panes-1440",
+    panes: { w: { outline: 200 } },
+    actions: [viewExpect("timeline"), width(".tl-grid", 200, 200), shown(".tl-row .days", 0), shown(".tl-corner .days", 0), style(".tl-row .dot", "display", "block"), expect(".tl-row .name"), aligned()],
+  });
+  add("panes/outline-170", "mesa", {
+    sizes: "panes-1440",
+    panes: { w: { outline: 170 } },
+    actions: [viewExpect("timeline"), width(".tl-grid", 170, 170), shown(".tl-row .days", 0), shown(".tl-corner .days", 0), shown(".tl-row .dot", 0), expect(".tl-row .name"), aligned()],
+  });
+  add("panes/outline-strip", "mesa", {
+    sizes: "panes-1440",
+    panes: OUTLINE_CLOSED,
+    actions: [
+      viewExpect("timeline"),
+      count('.tl-frame[data-outline="collapsed"]', 1),
+      count(OUTLINE_DIVIDER, 0),
+      width(".outline-strip", 8, 8),
+      shown(".tl-row", 0),
+      expect(".bar-label.group-label"),
+      chart(480),
+      aligned(),
+      click(".outline-strip"),
+      count('.tl-frame[data-outline="open"]', 1),
+      width(".tl-grid", 300, 300),
+      count(".outline-strip", 0),
+      count(".bar-label.group-label", 0),
+      aligned(),
+    ],
+  });
+  add("panes/outline-strip-over-edge", "mesa-ios-pad", {
+    sizes: "ipad-portraits",
+    panes: OUTLINE_CLOSED,
+    actions: [viewExpect("timeline"), count(".list-edge", 1), count('.tl-frame[data-outline="collapsed"]', 1), uncovered(".outline-strip"), click(".outline-strip"), count('.tl-frame[data-outline="open"]', 1), count(".plan-overlay-layer", 0)],
+  });
+  add("panes/outline-phone", "mesa-ios-phone", {
+    sizes: "phone",
+    actions: [
+      click('.phone-views [role="tab"]', "Timeline"),
+      expect(".tl-canvas"),
+      width(".tl-grid", 132, 132),
+      width(".tl-corner", 132, 132),
+      count(OUTLINE_DIVIDER, 0),
+      width(".outline-collapse", 44, 44),
+      style(".tl-row .dot", "display", "block"),
+      aligned(),
+      click(".outline-collapse"),
+      width(".outline-strip", 8, 8),
+      count(".outline-collapse", 0),
+      count(OUTLINE_DIVIDER, 0),
+      click(".outline-strip"),
+      width(".tl-grid", 132, 132),
+      count(OUTLINE_DIVIDER, 0),
+    ],
   });
   add("close/dialog", "mesa", {
     dialog: true,
@@ -997,7 +1243,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.aligned === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -1021,8 +1267,8 @@ const SIZES = {
   narrow: namesOf(NARROW),
   "touch-wide": namesOf([...PORTRAIT, ...LANDSCAPE, ...NARROW]),
   timeline: namesOf([...DESKTOP, ...PORTRAIT, ...LANDSCAPE, ...NARROW]),
-  "compact-desk": namesOf(COMPACT_DESK),
-  "compact-all": namesOf([...PORTRAIT, ...COMPACT_DESK]),
+  "sheet-desk": namesOf(SHEET_DESK),
+  "compact-all": namesOf([...PORTRAIT, ...SHEET_DESK]),
   "desktop-and-compact": namesOf([...DESKTOP, ...COMPACT_DESK]),
   "full-all": namesOf([...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...LANDSCAPE]),
   "full-480": namesOf([...DESKTOP.slice(1), ...BREAK_EDGE, ...ABOVE_BREAK, LANDSCAPE[1]]),
@@ -1043,10 +1289,16 @@ const SIZES = {
   "ipad-medium-min": namesOf([IPAD_TIERS[2]]),
   "ipad-narrow-min": namesOf([IPAD_TIERS[0]]),
   "ipad-roomy": namesOf([IPAD_TIERS[4], IPAD_WINDOWS[2]]),
-  "ipad-medium": namesOf([IPAD_TIERS[2], IPAD_11[0], IPAD_TIERS[3], IPAD_OWNER[0]]),
-  "ipad-narrow": namesOf([IPAD_TIERS[0], IPAD_WINDOWS[1], IPAD_WINDOWS[0], IPAD_TIERS[1]]),
+  "ipad-medium": namesOf([IPAD_TIERS[2], IPAD_TIERS[3], IPAD_OWNER[0]]),
+  "ipad-narrow": namesOf([IPAD_TIERS[0], IPAD_WINDOWS[1], IPAD_WINDOWS[0], IPAD_TIERS[1], IPAD_11[0]]),
   "mac-834": namesOf(MAC_834),
-  "mac-compact": namesOf([...PORTRAIT, ...COMPACT_DESK, ...MAC_834]),
+  "panes-1024": ["1024x700"],
+  "panes-1100": ["1100x760"],
+  "panes-1180": ["1180x760"],
+  "panes-1280": ["1280x800"],
+  "panes-1440": ["1440x920"],
+  "ipad-700": namesOf([IPAD_WINDOWS[0]]),
+  "mac-compact": namesOf([...PORTRAIT, ...SHEET_DESK]),
 };
 
 const sizesOf = (s) => {
@@ -1062,6 +1314,7 @@ const SHIM = String.raw`
   localStorage.clear();
   if (P.place !== null) localStorage.setItem("webboard.place", JSON.stringify(P.place));
   if (P.theme !== null) localStorage.setItem("webboard.theme", JSON.stringify(P.theme));
+  if (P.panes !== null) localStorage.setItem("webboard.panes", JSON.stringify(P.panes));
   window.__PROBE_MISSING__ = [];
   window.__PROBE_TICKETS__ = {};
   window.__PROBE_MENUS__ = [];
@@ -1565,7 +1818,7 @@ const MEASURE = String.raw`
     return out.slice(0, 12);
   }
 
-  var POPUPS = ".overlay, .popover, .popover-scrim, .plan-menu-list, .plan-overlay-layer";
+  var POPUPS = ".overlay, .popover, .popover-scrim, .plan-menu-list, .plan-overlay-layer, .inspector-overlay-layer";
   var ON_TOP = [".tl-head", ".tl-corner", "table.list th", ".col-head"];
   function coveredUp() {
     var out = [];
@@ -1582,7 +1835,8 @@ const MEASURE = String.raw`
       var hits = document.elementsFromPoint(x, y);
       var front = hits.length > 0 ? hits[0] : null;
       if (front !== null && (front === el || el.contains(front))) continue;
-      if (front !== null && front.closest(".tl-corner") !== null && el.closest(".tl-scale") !== null) continue;
+      var solid = hits.filter(function (h) { return h.closest("[data-pane-divider]") === null; })[0];
+      if (solid !== undefined && solid !== el && solid.closest(".tl-corner, .outline-strip") !== null && el.closest(".tl-scale") !== null) continue;
       var popup = front === null ? null : front.closest(POPUPS);
       if (popup !== null && !popup.contains(el)) continue;
       out.push({ path: path(el), at: one(x) + "," + one(y), on: front === null ? "nothing at all" : path(front),
@@ -1829,6 +2083,18 @@ window.__probeAct = function (a) {
         " by " + (front === null ? "nothing" : front.tagName.toLowerCase() + "." + String(front.className)) };
     }
     return { at: [x, y] };
+  }
+  if (a.swipe !== undefined) {
+    var sw = matching(a.swipe[0]);
+    if (sw.hit === undefined) return { fail: missed(a.swipe[0], undefined, sw.nodes) };
+    var sr = sw.hit.getBoundingClientRect();
+    var sx = sr.left + Math.min(6, sr.width / 2);
+    var sy = (sr.top + sr.bottom) / 2;
+    var sfront = document.elementFromPoint(sx, sy);
+    if (sfront !== sw.hit) {
+      return { fail: a.swipe[0] + " is covered at " + Math.round(sx) + "," + Math.round(sy) + " by " + (sfront === null ? "nothing" : sfront.tagName.toLowerCase() + "." + String(sfront.className)) };
+    }
+    return { swipe: [sx, sy, a.swipe[1], a.swipe[2]] };
   }
   if (a.reveal !== undefined) {
     var v = matching(a.reveal[0], a.reveal[1]);
@@ -2091,6 +2357,38 @@ window.__probeAct = function (a) {
   if (a.shown !== undefined) {
     var seen = Array.prototype.slice.call(document.querySelectorAll(a.shown[0])).filter(onScreen).length;
     if (seen !== a.shown[1]) return { fail: a.shown[0] + " shows " + seen + " elements on screen, not " + a.shown[1] };
+    return { ok: true };
+  }
+  if (a.chart !== undefined) {
+    var chartScroll = document.querySelector(".tl-scroll");
+    var chartGrid = document.querySelector(".tl-grid");
+    if (chartScroll === null || chartGrid === null) return { fail: "no .tl-scroll and .tl-grid to measure the chart between" };
+    var chartW = chartScroll.getBoundingClientRect().width - chartGrid.getBoundingClientRect().width;
+    if (chartW < a.chart - 0.5) return { fail: "the chart beside the outline is " + Math.round(chartW * 10) / 10 + " px wide, under " + a.chart };
+    return { ok: true };
+  }
+  if (a.aligned !== undefined) {
+    var alRows = Array.prototype.slice.call(document.querySelectorAll(".tl-row[data-row]"));
+    var alLines = Array.prototype.slice.call(document.querySelectorAll(".tl-rowline"));
+    if (alRows.length === 0) return { fail: "no .tl-row to align with the chart" };
+    if (alRows.length !== alLines.length) return { fail: alRows.length + " .tl-row against " + alLines.length + " .tl-rowline" };
+    var alChecked = 0;
+    for (var ai = 0; ai < alRows.length; ai++) {
+      var alId = alRows[ai].getAttribute("data-row");
+      var alRow = alRows[ai].getBoundingClientRect();
+      var alLine = alLines[ai].getBoundingClientRect();
+      if (Math.abs(alRow.top - alLine.top) > 0.5) return { fail: "row " + alId + " has its top at " + Math.round(alRow.top * 10) / 10 + " px, its chart row at " + Math.round(alLine.top * 10) / 10 + " px" };
+      var alMarks = Array.prototype.slice.call(document.querySelectorAll('[data-bar="' + alId + '"], [data-gbar="' + alId + '"], [data-group-label="' + alId + '"]'));
+      for (var am = 0; am < alMarks.length; am++) {
+        var alBox = alMarks[am].getBoundingClientRect();
+        if (alBox.top < alLine.top - 0.5 || alBox.bottom > alLine.bottom + 0.5) {
+          var alWhat = alMarks[am].hasAttribute("data-bar") ? "bar" : alMarks[am].hasAttribute("data-gbar") ? "group bar" : "group label";
+          return { fail: "the " + alWhat + " of row " + alId + " spans " + Math.round(alBox.top * 10) / 10 + ".." + Math.round(alBox.bottom * 10) / 10 + " px, outside its chart row " + Math.round(alLine.top * 10) / 10 + ".." + Math.round(alLine.bottom * 10) / 10 };
+        }
+      }
+      if (alMarks.length > 0) alChecked++;
+    }
+    if (alChecked === 0) return { fail: "none of the " + alRows.length + " rows has a bar to align" };
     return { ok: true };
   }
   if (a.width !== undefined) {
@@ -2728,6 +3026,13 @@ async function pointer(cdp, sessionId, [x, y]) {
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 }, sessionId);
 }
 
+async function touchSwipe(cdp, sessionId, [x, y, dx, dy]) {
+  const at = (f) => [{ x: x + dx * f, y: y + dy * f, id: 1 }];
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(0) }, sessionId);
+  for (const f of [0.25, 0.5, 0.75, 1]) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: at(f) }, sessionId);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, sessionId);
+}
+
 const describeAction = (a) => JSON.stringify(a);
 
 async function runState(cdp, sessionId, origin, state, errors, traffic) {
@@ -2756,6 +3061,7 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
       const got = await evaluate(cdp, sessionId, `window.__probeAct(${JSON.stringify(action)})`, true);
       if (got.fail !== undefined) return unreached(`${describeAction(action)}: ${got.fail}`);
       if (got.at !== undefined) await pointer(cdp, sessionId, got.at);
+      if (got.swipe !== undefined) await touchSwipe(cdp, sessionId, got.swipe);
     }
     const after = unsettled(await settle(cdp, sessionId));
     checked();
@@ -3002,6 +3308,7 @@ async function main() {
     const payload = JSON.stringify({
       place: state.place,
       theme: state.theme,
+      panes: state.panes,
       fixture: fixtures.get(state.fixture),
       clip: state.clip,
       clipIn: state.clipIn,

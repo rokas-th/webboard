@@ -369,3 +369,34 @@ test("style reads a pseudo-element's used size and names it when it differs", as
   assert.deepEqual(await act(body, { style: [".x", "width", "28px", "::after"] }), { fail: '.x::after has width: "24px", not "28px"' });
   assert.deepEqual(await act(body, { style: [".x", "width", "28px"] }), { ok: true });
 });
+
+test("aligned passes outline rows level with their chart rows and fails a row or a bar off its chart row", async () => {
+  const body = (rowShift, barTop) =>
+    `<div class="tl-row" data-row="a" style="position: absolute; left: 0; top: ${rowShift}px; width: 100px; height: 34px">A</div>` +
+    `<div class="tl-row" data-row="b" style="position: absolute; left: 0; top: 34px; width: 100px; height: 34px">B</div>` +
+    `<div class="tl-rowline" style="position: absolute; left: 120px; top: 0; width: 200px; height: 34px"></div>` +
+    `<div class="tl-rowline" style="position: absolute; left: 120px; top: 34px; width: 200px; height: 34px"></div>` +
+    `<div data-bar="b" style="position: absolute; left: 140px; top: ${barTop}px; width: 40px; height: 18px"></div>`;
+  assert.deepEqual(await act(body(0, 42), { aligned: true }), { ok: true });
+  assert.equal((await act(body(4, 42), { aligned: true })).fail, "row a has its top at 4 px, its chart row at 0 px");
+  assert.equal((await act(body(0, 60), { aligned: true })).fail, "the bar of row b spans 60..78 px, outside its chart row 34..68");
+  assert.equal((await act('<div class="tl-row" data-row="a">A</div>', { aligned: true })).fail, "1 .tl-row against 0 .tl-rowline");
+  assert.equal((await act("<p>x</p>", { aligned: true })).fail, "no .tl-row to align with the chart");
+  const group = (gbarTop, labelTop) =>
+    `<div class="tl-row" data-row="g" style="position: absolute; left: 0; top: 0; width: 100px; height: 34px">G</div>` +
+    `<div class="tl-rowline" style="position: absolute; left: 120px; top: 0; width: 200px; height: 34px"></div>` +
+    `<div class="gbar" data-gbar="g" style="position: absolute; left: 140px; top: ${gbarTop}px; width: 40px; height: 6px"></div>` +
+    `<div class="bar-label group-label" data-group-label="g" style="position: absolute; left: 190px; top: ${labelTop}px; width: 40px; height: 18px"></div>`;
+  assert.deepEqual(await act(group(14, 8), { aligned: true }), { ok: true });
+  assert.equal((await act(group(40, 8), { aligned: true })).fail, "the group bar of row g spans 40..46 px, outside its chart row 0..34");
+  assert.equal((await act(group(14, 30), { aligned: true })).fail, "the group label of row g spans 30..48 px, outside its chart row 0..34");
+  assert.equal(
+    (
+      await act(
+        '<div class="tl-row" data-row="a" style="position: absolute; left: 0; top: 0; width: 100px; height: 34px">A</div><div class="tl-rowline" style="position: absolute; left: 120px; top: 0; width: 200px; height: 34px"></div>',
+        { aligned: true },
+      )
+    ).fail,
+    "none of the 1 rows has a bar to align",
+  );
+});

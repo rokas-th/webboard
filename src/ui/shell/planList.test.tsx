@@ -5,6 +5,7 @@ import { AppError } from "../../services/ipc";
 import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import type { UpdateState, Updates } from "../../store/updates";
+import { seedPanesClosed } from "../../test/panes";
 import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { LINUX, setPlatform } from "../../test/platform";
 import { setScreen } from "../../test/setup";
@@ -13,6 +14,7 @@ import { resetTauri } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { PLACE_KEY } from "../state";
+import type { PaneKey } from "./panes";
 import { UpdatesContext } from "./UpdateLine";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -56,8 +58,9 @@ const updatesAt = (state: UpdateState): Updates => ({
   install: () => Promise.reject(new Error("planList stub: install not used")),
 });
 
-const shown = async (t: TestSession, o: { over?: Partial<Registry>; updates?: Updates | null; place?: object } = {}): Promise<void> => {
+const shown = async (t: TestSession, o: { over?: Partial<Registry>; updates?: Updates | null; place?: object; closed?: readonly PaneKey[] } = {}): Promise<void> => {
   if (o.place !== undefined) window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, ...o.place }));
+  seedPanesClosed(["outline", ...(o.closed ?? [])]);
   render(<UpdatesContext.Provider value={o.updates ?? null}>{withSync(shellFor(t, o.over).ui)}</UpdatesContext.Provider>);
   await settle();
 };
@@ -116,7 +119,7 @@ describe("the plan list toggle (full form)", () => {
     b.focus();
     fireEvent.click(b);
     expect(list()).toBeNull();
-    expect(screen.queryByRole("separator")).toBeNull();
+    expect(screen.queryByRole("separator", { name: "Resize the plan list" })).toBeNull();
     expect([toggle().getAttribute("aria-expanded"), toggle().title]).toEqual(["false", "Show the plan list (⌘B)"]);
     expect(toggle().querySelector("svg .sidebar-toggle-fill")).toBeNull();
     expect(document.activeElement).toBe(toggle());
@@ -225,7 +228,7 @@ describe("the plan list shortcut and palette entry", () => {
     const nav = list();
     if (nav === null) throw new Error("no plan list");
     within(nav).getByRole("button", { name: "New plan" }).focus();
-    act(() => setScreen(1100, 800));
+    act(() => setScreen(1000, 800));
     await settle();
     expect(list()).toBeNull();
     const bar = document.querySelector("header.toolbar");
@@ -351,7 +354,7 @@ describe("the resize handle", () => {
 
   it("applies a stored width on .app-body, clamped to the window, and keeps the stored value", async () => {
     const t = await made();
-    await shown(t, { place: { sidebarWidth: 470 } });
+    await shown(t, { place: { sidebarWidth: 470 }, closed: ["inspector"] });
     expect([inlineWidth(), handle().getAttribute("aria-valuenow")]).toEqual(["470px", "470"]);
     act(() => setScreen(1180, 820));
     expect([inlineWidth(), handle().getAttribute("aria-valuenow"), handle().getAttribute("aria-valuemax")]).toEqual(["470px", "470", "472"]);
@@ -362,7 +365,7 @@ describe("the resize handle", () => {
   it("clamps a stored width above the window's max on screen only, and gives it back on a wider window", async () => {
     const t = await made();
     act(() => setScreen(1180, 820));
-    await shown(t, { place: { sidebarWidth: 478 } });
+    await shown(t, { place: { sidebarWidth: 478 }, closed: ["inspector"] });
     expect([inlineWidth(), handle().getAttribute("aria-valuenow")]).toEqual(["472px", "472"]);
     expect(savedField("sidebarWidth")).toBe(478);
     act(() => setScreen(1440, 900));
@@ -393,9 +396,9 @@ describe("the resize handle", () => {
     fireEvent.pointerDown(h, { button: 0, pointerId: 1, clientX: 300 });
     fireEvent.pointerMove(h, { pointerId: 1, clientX: 2000 });
     expect(inlineWidth()).toBe("480px");
-    fireEvent.pointerMove(h, { pointerId: 1, clientX: 0 });
+    fireEvent.pointerMove(h, { pointerId: 1, clientX: 200 });
     expect(inlineWidth()).toBe("200px");
-    fireEvent.pointerUp(h, { pointerId: 1, clientX: 0 });
+    fireEvent.pointerUp(h, { pointerId: 1, clientX: 200 });
     expect(savedField("sidebarWidth")).toBe(200);
   });
 
@@ -483,7 +486,7 @@ describe("the resize handle", () => {
 
   it.each([
     ["the list hides", () => press(toggle(), "b", { meta: true }), () => press(toggle(), "b", { meta: true })],
-    ["the window turns compact", () => setScreen(1100, 800), () => setScreen(1440, 900)],
+    ["the window turns compact", () => setScreen(1000, 800), () => setScreen(1440, 900)],
   ])("leaves no dragged width behind when %s mid-drag from the default", async (_, away, back) => {
     await shown(await made());
     fireEvent.pointerDown(handle(), { button: 0, pointerId: 1, clientX: 300 });

@@ -37,16 +37,15 @@
   --rail: 28px;
   --row-h: 34px;
   --sidebar-w: 284px;
-  --panel-w: 352px;
+  --panel-w: 360px;
   --grid-w: 300px;
+  --drawer-w: 320px;
   color-scheme: dark;
 }
 
 @media (max-width: 1240px) {
   :root {
     --sidebar-w: 236px;
-    --panel-w: 316px;
-    --grid-w: 252px;
   }
 }
 

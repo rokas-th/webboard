@@ -25,6 +25,11 @@ export interface Command {
   run(): void;
 }
 
+export interface PaneToggle {
+  open: boolean;
+  toggle(): void;
+}
+
 export interface CommandCtx {
   session: PlanSession | null;
   registry: Registry;
@@ -36,7 +41,9 @@ export interface CommandCtx {
   readOnly: boolean;
   command: boolean;
   listMode: PlanListMode;
-  overlay: { open: boolean; toggle(): void };
+  list: PaneToggle;
+  inspector: PaneToggle | null;
+  outline: PaneToggle | null;
   clock: Clock;
   select(id: PlanId): void;
   newPlan(): void;
@@ -313,15 +320,19 @@ export function commands(ctx: CommandCtx): Command[] {
     ctx.theme.preview(null);
     ctx.setUi({ settings: tab });
   };
-  const listToggle = (open: boolean, run: () => void): Command[] => [
-    { id: "sidebar", group: "View", label: open ? "Hide the plan list" : "Show the plan list", keys: ctx.command ? "⌘B" : "Ctrl B", run },
-  ];
+  const paneToggle = (id: string, pane: PaneToggle | null, name: string, letter: string): Command[] =>
+    pane === null
+      ? []
+      : [{ id, group: "View", label: `${pane.open ? "Hide" : "Show"} the ${name}`, keys: ctx.command ? `⌥⌘${letter}` : `Ctrl Alt ${letter}`, run: () => pane.toggle() }];
+  const list = ctx.list;
   const sidebarCommand: Command[] =
-    ctx.listMode === "column"
-      ? listToggle(ctx.ui.sidebarOpen, () => ctx.setUi({ sidebarOpen: !ctx.ui.sidebarOpen }))
-      : ctx.listMode === "overlay"
-        ? listToggle(ctx.overlay.open, () => ctx.overlay.toggle())
-        : [];
+    ctx.listMode === "column" || ctx.listMode === "overlay"
+      ? [{ id: "sidebar", group: "View", label: list.open ? "Hide the plan list" : "Show the plan list", keys: ctx.command ? "⌘B" : "Ctrl B", run: () => list.toggle() }]
+      : [];
+  const paneCommands: Command[] = [
+    ...(session !== null && (ctx.listMode === "column" || ctx.listMode === "overlay") ? paneToggle("inspector", ctx.inspector, "inspector", "I") : []),
+    ...(session !== null && ctx.ui.view === "timeline" ? paneToggle("outline", ctx.outline, "outline", "L") : []),
+  ];
   const always: Command[] = [
     { id: "new-plan", group: "File", label: "New plan", run: () => ctx.newPlan() },
     { id: "example-plan", group: "File", label: "Create the example plan", run: () => ctx.newExample() },
@@ -333,6 +344,7 @@ export function commands(ctx: CommandCtx): Command[] {
     { id: "sync-devices", group: "File", label: "Sync devices", run: () => ctx.setUi({ dialog: { t: "sync", pane: "devices" } }) },
     ...openPlans,
     ...sidebarCommand,
+    ...paneCommands,
     { id: "settings", group: "View", label: "Settings…", run: () => settingsAt("theme") },
     { id: "theme", group: "View", label: "Theme…", run: () => settingsAt("theme") },
     { id: "theme-cyberdeck", group: "View", label: "Use Cyberdeck theme", run: () => ctx.theme.useCyberdeck() },

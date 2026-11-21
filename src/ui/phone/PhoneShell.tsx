@@ -21,7 +21,7 @@ import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
 import { UiContext, useUi, useUiValue, type DialogState, type SyncPane } from "../state";
 import { useCanHover } from "../theme/ThemePanel";
 import { SettingsPanel } from "../settings/SettingsPanel";
-import { Timeline } from "../timeline/Timeline";
+import { Timeline, usePhoneOutline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { ChoiceSheet } from "./ChoiceSheet";
 import { RevertDialog } from "../panel/History";
@@ -90,6 +90,7 @@ function useSheetLetGo(session: PlanSession, device: string): void {
 function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock }) {
   const { ui, setUi } = useUiValue();
   const [view, setView] = useState<PhoneView>("list");
+  const outline = usePhoneOutline();
   const base = useId();
   const tabId = (v: PhoneView): string => `${base}-tab-${v}`;
   const panelId = `${base}-panel`;
@@ -102,7 +103,7 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
   return (
     <>
       <div id={panelId} className="phone-main" role="tabpanel" aria-labelledby={tabId(view)}>
-        {view === "list" ? <PhoneList session={p.session} onOpen={(id) => setUi({ selected: id })} /> : <Timeline session={p.session} readOnly />}
+        {view === "list" ? <PhoneList session={p.session} onOpen={(id) => setUi({ selected: id })} /> : <Timeline session={p.session} outline={outline} readOnly />}
       </div>
       <div className="seg phone-views" role="tablist" aria-label="Views">
         {VIEWS.map(([v, label]) => (

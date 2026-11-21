@@ -1,6 +1,6 @@
 import type { PlanListMode } from "../shell/planListMode";
 
-export type KeyInput = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">;
+export type KeyInput = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">;
 
 export interface KeyState {
   command: boolean;
@@ -27,15 +27,27 @@ export function isTyping(target: EventTarget | null, key: string): boolean {
   return target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable);
 }
 
+const PANE_CODES: Readonly<Record<string, string>> = { KeyI: "inspector", KeyL: "outline" };
+
+const panesShown = (s: KeyState): boolean => s.listMode === "column" || s.listMode === "overlay";
+
+function paneKey(e: KeyInput, s: KeyState): string | null {
+  if (e.shiftKey || s.typing || s.dialog) return null;
+  const pane = PANE_CODES[e.code];
+  if (pane === undefined || s.listMode === "phone" || (pane === "inspector" && !panesShown(s))) return null;
+  return pane;
+}
+
 function modified(e: KeyInput, s: KeyState): string | null {
   const mod = s.command ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-  if (!mod || e.altKey) return null;
+  if (!mod) return null;
+  if (e.altKey) return paneKey(e, s);
   const key = e.key.toLowerCase();
   if (s.dialog) return null;
   if (key === "k" && !e.shiftKey) return "palette";
   if (key === "p" && !e.shiftKey) return "print";
   if (s.typing) return null;
-  if (key === "b" && !e.shiftKey) return s.listMode === "column" || s.listMode === "overlay" ? "sidebar" : null;
+  if (key === "b" && !e.shiftKey) return panesShown(s) ? "sidebar" : null;
   if (key === "d" && !e.shiftKey) return s.selected ? "duplicate" : null;
   if (key === "z") return e.shiftKey ? "redo" : "undo";
   if (key === "y" && !s.command && !e.shiftKey) return "redo";

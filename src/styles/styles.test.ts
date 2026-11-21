@@ -242,7 +242,7 @@ describe("the Cyberdeck look", () => {
       ".theme-pv-today": ".theme-preview",
       ".theme-pv-danger": ".theme-preview",
       ".theme-switch::after": ".theme-switch",
-      ".sidebar-resizer::before": ".sidebar-resizer",
+      "[data-pane-divider]::before": "[data-pane-divider]",
       '.toolbar .sidebar-toggle[data-attention="true"]::after': ".toolbar .sidebar-toggle",
       'html[data-os="ios"] .toolbar button:not(.overlay *)::before': 'html[data-os="ios"] .toolbar button:not(.overlay *)',
       'html[data-os="ios"] .phone-head button:not(.overlay *)::before': 'html[data-os="ios"] .phone-head button:not(.overlay *)',
@@ -269,9 +269,16 @@ describe("the Cyberdeck look", () => {
       'html[data-os="ios"] .sync-buttons button::before': 'html[data-os="ios"] .sync-buttons button',
       'html[data-os="ios"] .banner button::before': 'html[data-os="ios"] .banner button',
       'html[data-os="ios"] .choice-banner button::before': 'html[data-os="ios"] .choice-banner button',
-      'html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer': 'html[data-os="ios"][data-idiom="pad"] .app-body',
-      'html[data-os="ios"][data-idiom="pad"] .plan-overlay-scrim': 'html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer',
-      'html[data-os="ios"][data-idiom="pad"] .plan-overlay': 'html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer',
+      ".list-edge": ".app-body",
+      ".plan-overlay-layer": ".app-body",
+      ".plan-overlay-scrim": ".plan-overlay-layer",
+      ".plan-overlay": ".plan-overlay-layer",
+      ".inspector-overlay-layer": ".app-body",
+      ".inspector-overlay-scrim": ".inspector-overlay-layer",
+      ".inspector-overlay": ".inspector-overlay-layer",
+      '.tl-frame > [data-pane-divider="outline"]': ".tl-frame",
+      ".outline-strip": ".tl-frame",
+      ".outline-strip::before": ".outline-strip",
     };
     const positioned = ["relative", "absolute", "sticky"];
     const absolute = sheet.rules.filter((r) => r.decls["position"] === "absolute" && r.conditions.length === 0).map((r) => r.selector);
@@ -349,15 +356,56 @@ describe("the Cyberdeck look", () => {
     ]);
   });
 
-  it("lights the resize handle on hover the way its pointer draws the focus accent", () => {
+  it("draws every pane divider from one rule set: a 1 px line, cyan on hover, focus and drag, 8 px hit and 44 px on touch", () => {
     const under = (sel: string, conditions: readonly string[]): Decls =>
       Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.join(" | ") === conditions.join(" | ")).map((r) => r.decls));
-    const coarseAccent = under(".sidebar-resizer:focus-visible::before", ["@media (pointer: coarse)"]);
-    expect(coarseAccent["background"]).toBe("linear-gradient(var(--cyan), var(--cyan)) 9px 0 / 2px 100% no-repeat");
-    expect(under("html.sidebar-dragging .sidebar-resizer::before", ["@media (pointer: coarse)"])).toEqual(coarseAccent);
-    expect(under(".sidebar-resizer::before", ["@media (pointer: coarse)"])["border-left"]).toBe("none");
-    expect(under(".sidebar-resizer:hover::before", ["@media (hover: hover)"])["border-left-color"]).toBe("var(--cyan)");
-    expect(under(".sidebar-resizer:hover::before", ["@media (hover: hover)", "@media (pointer: coarse)"])["background"]).toBe(coarseAccent["background"]);
+    const line = under("[data-pane-divider]::before", []);
+    expect([line["width"], line["left"], line["background"], line["cursor"]]).toEqual(["8px", "-4px", "linear-gradient(var(--line), var(--line)) 4px 0 / 1px 100% no-repeat", "col-resize"]);
+    expect(under("[data-pane-divider]", [])["flex"]).toBe("0 0 1px");
+    const trailing = under('[data-pane-divider="inspector"]::before', []);
+    expect([trailing["left"], trailing["background-position"]]).toEqual(["0", "0 0"]);
+    ["[data-pane-divider]::before", '[data-pane-divider="inspector"]::before'].forEach((sel) => {
+      const coarse = under(sel, ["@media (pointer: coarse)"]);
+      expect([sel, coarse["width"], coarse["left"], coarse["background-position"]]).toEqual([sel, "44px", "-22px", "22px 0"]);
+    });
+    const cyan = "linear-gradient(var(--cyan), var(--cyan))";
+    expect(under("[data-pane-divider]:hover::before", ["@media (hover: hover)"])["background-image"]).toBe(cyan);
+    [
+      "[data-pane-divider]:focus-visible::before",
+      'html.sidebar-dragging [data-pane-divider="list"]::before',
+      'html.inspector-dragging [data-pane-divider="inspector"]::before',
+      'html.outline-dragging [data-pane-divider="outline"]::before',
+    ].forEach((sel) => {
+      expect([sel, under(sel, [])["background-image"]]).toEqual([sel, cyan]);
+    });
+    expect(sheet.rules.filter((r) => r.selector.includes("resizer")).map((r) => r.selector)).toEqual([]);
+  });
+
+  it("gives the list drawer a 20 pt leading edge strip that leaves vertical panning to the page", () => {
+    const edge = Object.assign({}, ...sheet.rules.filter((r) => r.selector === ".list-edge" && r.conditions.length === 0).map((r) => r.decls));
+    expect([edge["left"], edge["top"], edge["bottom"], edge["width"], edge["touch-action"], edge["z-index"]]).toEqual(["0", "0", "0", "calc(20px + env(safe-area-inset-left))", "pan-y", "20"]);
+  });
+
+  it("tiers the outline by its own width off the phone, and collapses it to an 8 px strip with a wider hit", () => {
+    const under = (sel: string, conditions: readonly string[]): Decls =>
+      Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.join(" | ") === conditions.join(" | ")).map((r) => r.decls));
+    expect([under(".tl-grid", [])["container-type"], under(".tl-corner", [])["container-type"]]).toEqual(["inline-size", "inline-size"]);
+    const hidden = (sel: string, query: string): string | undefined => under(sel, [query])["display"];
+    expect([
+      hidden('html:not([data-form="phone"]) .tl-corner .days', "@container (width < 219px)"),
+      hidden('html:not([data-form="phone"]) .tl-row .days', "@container (width < 219px)"),
+      hidden('html:not([data-form="phone"]) .tl-row .dot', "@container (width < 179px)"),
+    ]).toEqual(["none", "none", "none"]);
+    expect(sheet.rules.filter((r) => r.conditions.some((c) => c.startsWith("@container")) && !r.selector.startsWith('html:not([data-form="phone"]) '))).toEqual([]);
+    const divider = under('.tl-frame > [data-pane-divider="outline"]', []);
+    expect([divider["position"], divider["left"]]).toEqual(["absolute", "calc(var(--grid-w) - 1px)"]);
+    expect(under('.tl-frame[data-pane-snap="outline"]', [])["--grid-w"]).toBe("8px !important");
+    expect(['.tl-frame[data-outline="collapsed"] .tl-grid', '.tl-frame[data-pane-snap="outline"] .tl-corner'].map((sel) => under(sel, [])["visibility"])).toEqual(["hidden", "hidden"]);
+    const strip = under(".outline-strip", []);
+    expect([strip["position"], strip["left"], strip["width"]]).toEqual(["absolute", "0", "8px"]);
+    expect(strip["z-index"]).toBe("21");
+    expect([under(".outline-strip::before", [])["width"], under(".outline-strip::before", ["@media (pointer: coarse)"])["width"]]).toEqual(["28px", "44px"]);
+    expect(under(".outline-collapse", [])["width"]).toBe("44px");
   });
 
   it("fills each link arrowhead from the token its path is stroked with", () => {

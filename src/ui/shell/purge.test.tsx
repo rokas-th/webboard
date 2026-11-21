@@ -5,6 +5,7 @@ import { AppError } from "../../services/ipc";
 import { Registry } from "../../store/registry";
 import { SyncManager } from "../../sync/manager";
 import { fakeFactory } from "../../test/fakeProvider";
+import { seedPanesClosed } from "../../test/panes";
 import { setScreen } from "../../test/setup";
 import type { Platform } from "../../platform";
 import { IPAD, IPHONE, MAC, setPlatform } from "../../test/platform";
@@ -361,6 +362,7 @@ async function nativeMounted(form: NativeForm, alert: Answer, trash: readonly nu
   if (form === "phone") setScreen(390, 844);
   else setScreen(1366, 1024);
   const s = await seededStore(["Alpha", "Beta"], { trash });
+  if (form === "pad") seedPanesClosed(["outline"]);
   setPlatform(form === "phone" ? IPHONE : IPAD);
   tauri.answers.alert_ask = alert;
   tauri.answers.device_info = () => ({ deviceId: form === "phone" ? "iphone" : "ipad", platform: "ios" });

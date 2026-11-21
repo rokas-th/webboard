@@ -109,38 +109,39 @@ const tab = (name: string): HTMLElement => within(bar()).getByRole("tab", { name
 describe("the iPad toolbar tiers", () => {
   it("shows everything inline in the roomy tier, with no More button", async () => {
     await at(ROOMY_MIN);
-    expect(inline()).toEqual(["Plan list", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "Local only", "Settings", "Plan"]);
+    expect(inline()).toEqual(["Plan list", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "Local only", "Settings", "Inspector"]);
     expect(within(bar()).queryByRole("button", { name: "More" })).toBeNull();
     expect(tab(BOARD).textContent).toBe(BOARD);
     expect(bar().querySelector(".sync-chip-text")?.textContent).toBe("Local only");
   });
 
-  it("moves Settings and Plan into More in the medium tier, with short view labels and the sync dot", async () => {
+  it("moves Settings into More in the medium tier, with short view labels, the sync dot and the Inspector button last", async () => {
     await at(ROOMY_MIN - 1);
-    expect(inline()).toEqual(["Plan list", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "Local only", "More"]);
-    expect(bar().lastElementChild?.lastElementChild?.firstElementChild).toBe(more());
+    expect(inline()).toEqual(["Plan list", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "Local only", "More", "Inspector"]);
+    expect(bar().lastElementChild?.lastElementChild).toBe(within(bar()).getByRole("button", { name: "Inspector" }));
+    expect(bar().lastElementChild?.lastElementChild?.previousElementSibling?.firstElementChild).toBe(more());
     expect(Array.from(bar().querySelectorAll(".seg-modes button")).map((b) => [b.textContent, b.getAttribute("aria-label"), b.getAttribute("title")])).toEqual([
       ["Timeline", "Timeline", "Timeline"],
       ["Board", BOARD, BOARD],
       ["List", "List", "List"],
     ]);
-    expect(rows(await opened())).toEqual(["Settings", "Plan"]);
+    expect(rows(await opened())).toEqual(["Settings"]);
   });
 
-  it("is the medium tier at 834 and at MEDIUM_MIN", async () => {
+  it("is the narrow tier at 834 and the medium tier at MEDIUM_MIN", async () => {
     await at(834);
-    expect(inline()).toEqual(["Plan list", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "Local only", "More"]);
+    expect(inline()).toEqual(["Plan list", "[Views]", "Undo", "Redo", "+ New", "Local only", "More", "Inspector"]);
     cleanup();
     await at(MEDIUM_MIN);
-    expect(inline()).toEqual(["Plan list", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "Local only", "More"]);
+    expect(inline()).toEqual(["Plan list", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "Local only", "More", "Inspector"]);
   });
 
   it("moves zoom and Today into More in the narrow tier", async () => {
     await at(MEDIUM_MIN - 1);
-    expect(inline()).toEqual(["Plan list", "[Views]", "Undo", "Redo", "+ New", "Local only", "More"]);
+    expect(inline()).toEqual(["Plan list", "[Views]", "Undo", "Redo", "+ New", "Local only", "More", "Inspector"]);
     expect([tab(BOARD).textContent, tab(BOARD).title]).toEqual(["Board", BOARD]);
     const m = await opened();
-    expect(rows(m)).toEqual(["group Zoom", "Week", "Month", "Quarter", "Fit", "Go to today", "Settings", "Plan"]);
+    expect(rows(m)).toEqual(["group Zoom", "Week", "Month", "Quarter", "Fit", "Go to today", "Settings"]);
     expect(checks(m)).toEqual([true, false, false, false]);
   });
 
@@ -152,7 +153,7 @@ describe("the iPad toolbar tiers", () => {
 
   it("leaves out the zoom rows off the timeline, as the toolbar leaves out the zoom", async () => {
     await at(760, { place: { view: "board" } });
-    expect(rows(await opened())).toEqual(["Go to today", "Settings", "Plan"]);
+    expect(rows(await opened())).toEqual(["Go to today", "Settings"]);
   });
 
   it("leaves out the plan rows with no plan open", async () => {
@@ -233,8 +234,8 @@ describe("the More menu", () => {
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
   });
 
-  it("opens the Plan sheet from its row", async () => {
-    await at(834);
+  it("opens the Plan sheet from its row below 700", async () => {
+    await at(600);
     choose(await opened(), "Plan");
     gone();
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Plan"]);

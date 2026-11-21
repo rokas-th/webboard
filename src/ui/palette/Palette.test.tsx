@@ -293,7 +293,16 @@ describe("opening the palette", () => {
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 
-  it.each([IPAD, IPHONE])("uses ⌘ on iOS (%o): ⌘K opens, Ctrl K does nothing, and the toolbar reads ⌘K", async (platform) => {
+  it("refuses an iPhone stamp in the wide shell, which a phone screen never reaches, and names why", async () => {
+    setPlatform(IPHONE);
+    const t = await made(MESA_SEED);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() => render(withSync(shellFor(t, { device: { deviceId: "iphone", name: "iPhone", platform: "ios" } }).ui))).toThrow(
+      "Shell: the wide shell has no pane record for a phone",
+    );
+  });
+
+  it.each([IPAD])("uses ⌘ on iOS (%o): ⌘K opens, Ctrl K does nothing, and the toolbar reads ⌘K", async (platform) => {
     setPlatform(platform);
     const t = await made(MESA_SEED);
     await shown(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } });
@@ -344,13 +353,13 @@ describe("the palette list", () => {
     await shown(t);
     press("k", { metaKey: true });
     type("view");
-    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewHide the plan list⌘B", "ViewSettings…", "ViewTheme…", "ViewUse Cyberdeck theme"]);
+    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewHide the plan list⌘B", "ViewHide the inspector⌥⌘I", "ViewHide the outline⌥⌘L", "ViewSettings…", "ViewTheme…", "ViewUse Cyberdeck theme"]);
     expect(highlighted()).toBe("ViewTimeline1");
     press("ArrowUp", {}, query());
     expect(highlighted()).toBe("ViewTimeline1");
     const scrolled = vi.mocked(Element.prototype.scrollIntoView);
     scrolled.mockClear();
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].forEach(() => press("ArrowDown", {}, query()));
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].forEach(() => press("ArrowDown", {}, query()));
     expect(highlighted()).toBe("ViewUse Cyberdeck theme");
     const lastScrolled = (): string | null => {
       const el: unknown = scrolled.mock.contexts[scrolled.mock.contexts.length - 1];
@@ -358,13 +367,13 @@ describe("the palette list", () => {
       expect(el.classList.contains("on")).toBe(true);
       return el.textContent;
     };
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([10, "ViewUse Cyberdeck theme"]);
-    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(() => [{ block: "nearest" }]));
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([12, "ViewUse Cyberdeck theme"]);
+    expect(scrolled.mock.calls).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(() => [{ block: "nearest" }]));
     press("ArrowDown", {}, query());
     expect(highlighted()).toBe("ViewUse Cyberdeck theme");
-    [1, 2, 3, 4, 5, 6, 7, 8, 9].forEach(() => press("ArrowUp", {}, query()));
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].forEach(() => press("ArrowUp", {}, query()));
     expect(highlighted()).toBe("ViewNow · Next · Later2");
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([19, "ViewNow · Next · Later2"]);
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([23, "ViewNow · Next · Later2"]);
     press("Enter", {}, query());
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(uiNow()[0].view).toBe("board");
