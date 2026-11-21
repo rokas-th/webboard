@@ -1,6 +1,6 @@
 import { workCalendar } from "./calendar";
 import { toDay, type Day, type IsoDate } from "./dates";
-import { linkKey, scheduleOf, type BaselineId, type Horizon, type Item, type ItemId, type PlanState, type Status } from "./model";
+import { linkKey, scheduleOf, type BaselineId, type Horizon, type Item, type ItemId, type Link, type PlanState, type Status } from "./model";
 import { need } from "./need";
 import { conflicts, endOf, loopLinks, startOf, type Conflict, type Lock, type Sched, type SchedView } from "./schedule";
 
@@ -52,7 +52,14 @@ export const goneSet = (plan: PlanState): ReadonlySet<ItemId> => {
 export const lockOf = (status: Status | undefined, held: boolean): Lock | null =>
   status === "done" ? "done" : status === "doing" ? "doing" : held ? "held" : null;
 
-const basis = (plan: PlanState, held: ReadonlySet<ItemId>): Basis => {
+interface Graph {
+  gone: ReadonlySet<ItemId>;
+  live: ReadonlyMap<ItemId, Item>;
+  links: Link[];
+  preds: ReadonlyMap<ItemId, readonly ItemId[]>;
+}
+
+const graphOf = (plan: PlanState): Graph => {
   const gone = goneSet(plan);
   const live = new Map([...plan.items].filter(([id, i]) => !gone.has(id) && i.kind !== "group"));
   const links = [...plan.links.values()].filter((l) => live.has(l.from) && live.has(l.to));
@@ -61,6 +68,13 @@ const basis = (plan: PlanState, held: ReadonlySet<ItemId>): Basis => {
   links
     .filter((l) => !loops.has(linkKey(l.from, l.to)))
     .forEach((l) => preds.set(l.to, [...(preds.get(l.to) ?? []), l.from]));
+  return { gone, live, links, preds };
+};
+
+export const statusPreds = (plan: PlanState, id: ItemId): readonly ItemId[] => graphOf(plan).preds.get(id) ?? [];
+
+const basis = (plan: PlanState, held: ReadonlySet<ItemId>): Basis => {
+  const { gone, live, links, preds } = graphOf(plan);
   const status = new Map<ItemId, Status>();
   const statusOf = (id: ItemId): Status => {
     const known = status.get(id);

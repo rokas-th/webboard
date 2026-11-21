@@ -111,6 +111,7 @@ export function LinksEditor(p: { view: PlanView; item: Item; readOnly: boolean; 
         <div className="suggest">
           <select
             aria-label="Add a dependency"
+            data-detail-field="deps"
             value=""
             onChange={(e) => {
               if (e.target.value === "") return;

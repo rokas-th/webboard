@@ -246,7 +246,7 @@ describe("ChoiceSheet: Step 2's fixture", () => {
     const banners = all(".choice-banner", item);
     expect(banners).toHaveLength(1);
     const banner = banners[0];
-    const controls = all("button, input, select, textarea", one(".sheet-body", item)).filter((e) => !banner.contains(e));
+    const controls = all("button, input, select, textarea", one(".detail-body", item)).filter((e) => !banner.contains(e));
     expect(controls.length).toBeGreaterThan(0);
     controls.forEach((ctl) => expect(banner.compareDocumentPosition(ctl) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0));
     expect(one(".banner-text", banner).textContent).toBe(`Changed on ${orderedSides(c, registry.device.name).map((s) => s.label).join(" and ")}. Choose which to keep.`);

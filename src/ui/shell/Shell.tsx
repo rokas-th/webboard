@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { Refused } from "../../actions/intents";
 import type { ItemId, PlanId } from "../../domain/model";
 import { usesNativeAlert } from "../../services/alert";
@@ -9,14 +10,14 @@ import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { readPlatform, shortcutsUseCommand } from "../../platform";
 import { openersFrom } from "../common/Dialog";
-import { closeTopOverlay } from "../common/dismiss";
+import { closeTopOverlay, commitFocus } from "../common/dismiss";
 import { Sheet } from "../common/Sheet";
 import { detailsOf } from "../common/errorText";
 import { takeHapticFault } from "../../services/haptics";
 import { toast, Toasts, toastWithoutHaptic } from "../common/Toast";
 import { revealPatch } from "../choices/HeadCounts";
 import { commands, type CommandCtx } from "../palette/commands";
-import { isTyping, keyToCommand } from "../palette/keymap";
+import { isControl, isTyping, keyToCommand } from "../palette/keymap";
 import { Palette } from "../palette/Palette";
 import { PhoneShell } from "../phone/PhoneShell";
 import { OpenChoice, runWith } from "../run";
@@ -27,8 +28,12 @@ import { ChoiceDialog } from "../choices/ChoiceDialog";
 import { ghostIds } from "../ghosts";
 import { List } from "../list/List";
 import { RevertDialog } from "../panel/History";
-import { ItemPanel } from "../panel/ItemPanel";
 import { PlanPanel } from "../panel/PlanPanel";
+import { DetailContext, type DetailApi } from "../detail/DetailContext";
+import { createClickPair, type ClickMark } from "../detail/clickPair";
+import { ItemDetail, promoteText, type DetailContainer } from "../detail/ItemDetail";
+import { ItemModal, rememberFocus, type FocusMemo } from "../detail/ItemModal";
+import { stepPatch, tabOrder } from "../detail/order";
 import { PrintSheet } from "../print/PrintSheet";
 import { startPrint } from "../print/start";
 import { useCanHover } from "../theme/ThemePanel";
@@ -73,6 +78,11 @@ type WideMode = Exclude<PlanListMode, "phone">;
 type Drawer = Exclude<PaneKey, "outline">;
 
 const DRAWER_PASS: ReadonlySet<string> = new Set(["sidebar", "inspector", "outline", "palette"]);
+
+const INSPECTOR_DRAWER_PASS: ReadonlySet<string> = new Set(["select-next", "select-prev", "detail-modal", "detail-open", "rename"]);
+
+const drawerPasses = (drawer: Drawer | null, dialog: boolean, id: string): boolean =>
+  drawer === null || dialog || DRAWER_PASS.has(id) || (drawer === "inspector" && INSPECTOR_DRAWER_PASS.has(id));
 
 interface WindowSize {
   w: number;
@@ -202,11 +212,14 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   const selectedItem = useRef<ItemId | null>(ui.selected);
 
   const session = main.k === "open" && main.id === ui.plan ? main.session : null;
+  const selectedItemShown = session !== null && ui.selected !== null && session.view().plan.items.has(ui.selected) ? ui.selected : null;
+  const itemModal = session !== null && selectedItemShown !== null && ui.dialog !== null && ui.dialog.t === "item";
+  const modalHidesInspector = itemModal && ui.settings === null;
 
   const timeline = session !== null && ui.view === "timeline";
   const inspectorHolds = session !== null || ui.settings !== null;
-  const layoutOf = (set: PaneSet) =>
-    paneLayout({ window: size.w, base: listMode, timeline, panes: inspectorHolds ? set : { ...set, inspector: { ...set.inspector, open: false } }, listDefault });
+  const layoutOf = (set: PaneSet, hidden: boolean = modalHidesInspector) =>
+    paneLayout({ window: size.w, base: listMode, timeline, panes: inspectorHolds && !hidden ? set : { ...set, inspector: { ...set.inspector, open: false } }, listDefault });
   const layout = layoutOf(panes);
   const listDrawer = drawerAsked === "list" && layout.list.mode === "overlay";
   const inspectorDrawer = drawerAsked === "inspector" && layout.inspector.mode === "overlay" && session !== null;
@@ -258,25 +271,49 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
 
   const seenSelection = useRef<ItemId | null>(ui.selected);
   const inspectorMode = layout.inspector.mode;
-  useEffect(() => {
-    const was = seenSelection.current;
-    seenSelection.current = ui.selected;
-    if (ui.selected === null || ui.selected === was || inspectorMode !== "overlay") return;
-    setDrawerAsked("inspector");
-  }, [ui.selected, inspectorMode]);
-
   const seenSettings = useRef(ui.settings);
   const revealInspector = useRef<() => void>(() => undefined);
+  const revealForSelection = useRef<() => void>(() => undefined);
+  const modalUp = useRef(itemModal);
+  const revealDetail = (): void => {
+    const mode = layoutOf(panes, false).inspector.mode;
+    if (mode === "overlay") {
+      setDrawerAsked("inspector");
+      return;
+    }
+    if (mode !== "closed") return;
+    const next: PaneState = { open: true, w: panes.inspector.w };
+    commitPane("inspector", next);
+    if (layoutOf({ ...panes, inspector: next }, false).inspector.mode === "overlay") setDrawerAsked("inspector");
+  };
   useLayoutEffect(() => {
+    modalUp.current = itemModal;
     revealInspector.current = () => {
       if (listMode === "column" && !panes.inspector.open) commitPane("inspector", { open: true, w: panes.inspector.w });
     };
+    revealForSelection.current = revealDetail;
   });
+  useEffect(() => {
+    const was = seenSelection.current;
+    seenSelection.current = ui.selected;
+    if (ui.selected === null || ui.selected === was || modalUp.current) return;
+    revealForSelection.current();
+  }, [ui.selected]);
   useLayoutEffect(() => {
     const was = seenSettings.current;
     seenSettings.current = ui.settings;
-    if (was === null && ui.settings !== null) revealInspector.current();
-  }, [ui.settings]);
+    if (was !== null || ui.settings === null) return;
+    if (modalUp.current) {
+      const modal = document.querySelector<HTMLElement>("[data-item-modal]");
+      if (modal === null) throw new Error("Shell: Settings opened over the item modal, but the modal is not in the page");
+      if (!commitFocus(modal, "The item modal")) {
+        setUi({ settings: null });
+        return;
+      }
+      setUi({ dialog: null });
+    }
+    revealInspector.current();
+  }, [ui.settings, setUi]);
 
   useEffect(() => {
     selectedItem.current = ui.selected;
@@ -357,6 +394,79 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
     setUi(revealPatch(session.view(), ui.collapsed, target));
   };
 
+  const pair = useRef(createClickPair());
+  const [focusMemo, setFocusMemo] = useState<FocusMemo | null>(null);
+  const liveDetail = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-detail]:not([data-detail="modal"])');
+  const scrollerOf = (detail: HTMLElement): HTMLElement => {
+    const scroller = detail.closest<HTMLElement>(`#${INSPECTOR_ID}, .sheet-body`);
+    if (scroller === null) throw new Error("Shell: the inspector's detail is outside #inspector and .sheet-body");
+    return scroller;
+  };
+  const promote = (id: ItemId): void => {
+    if (session === null || !session.view().plan.items.has(id)) throw new Error(`Shell: no item ${id} to open as a modal`);
+    const detail = liveDetail();
+    const memo = detail === null ? null : rememberFocus(detail, scrollerOf(detail));
+    if (detail !== null && !flushSync(() => commitFocus(detail, "The inspector"))) return;
+    setFocusMemo(memo);
+    pair.current.reset();
+    setDrawerAsked(null);
+    setUi({ selected: id, dialog: { t: "item" } });
+  };
+  const closeItemModal = (): void => {
+    setUi({ dialog: null });
+    revealDetail();
+  };
+  const toggleModal = (): void => {
+    if (itemModal) throw new Error("Shell: the item modal closes through its own keys and controls, not the command");
+    if (ui.selected === null) throw new Error("Shell: no selection to open as a modal");
+    promote(ui.selected);
+  };
+  const rename = (item?: ItemId): void => {
+    const target = item ?? ui.selected;
+    if (target === null) throw new Error("Shell: no selection to rename");
+    if (session === null) throw new Error(`Shell: no open plan to rename ${target} in`);
+    const it = session.view().plan.items.get(target);
+    if (it === undefined) throw new Error(`Shell: no item ${target} to rename`);
+    setUi(readOnly || it.trashed ? { selected: target } : { selected: target, naming: target });
+    if (!itemModal) revealDetail();
+  };
+  const press = (m: ClickMark): void => {
+    setUi(ui.view === "timeline" ? { selected: m.item, follow: m.item } : { selected: m.item });
+    if (pair.current.press(m) === "double") promote(m.item);
+  };
+  const scrimPress = (x: number, y: number, at: number): boolean => {
+    const item = ui.selected;
+    if (item === null || pair.current.press({ item, x, y, at }) === "single") {
+      pair.current.reset();
+      return false;
+    }
+    promote(item);
+    return true;
+  };
+  const deselected = ui.selected === null;
+  useEffect(() => {
+    pair.current.reset();
+  }, [ui.view]);
+  useEffect(() => {
+    if (deselected) pair.current.reset();
+  }, [deselected]);
+  useEffect(() => {
+    if (ui.dialog !== null && ui.dialog.t === "item" && selectedItemShown === null) setUi({ dialog: null });
+  }, [ui.dialog, selectedItemShown, setUi]);
+  const modalWas = useRef(itemModal);
+  useEffect(() => {
+    const was = modalWas.current;
+    modalWas.current = itemModal;
+    if (!was || itemModal) return;
+    const back = liveDetail();
+    if (back !== null) {
+      back.focus();
+      return;
+    }
+    if (ui.settings !== null || ui.dialog !== null || selectedItemShown === null) return;
+    throw new Error("Shell: the item modal closed but no column, drawer or sheet detail came back to take focus");
+  }, [itemModal, ui.settings, ui.dialog, selectedItemShown]);
+
   const ctx: CommandCtx = {
     session,
     registry,
@@ -379,12 +489,14 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
     print,
     updates,
     theme,
+    detail: session === null ? null : { promote, toggleModal, rename },
   };
   const ctxRef = useRef(ctx);
-  const drawerRef = useRef(drawerOpen);
+  const openDrawer: Drawer | null = listDrawer ? "list" : inspectorDrawer ? "inspector" : null;
+  const drawerRef = useRef(openDrawer);
   useLayoutEffect(() => {
     ctxRef.current = ctx;
-    drawerRef.current = drawerOpen;
+    drawerRef.current = openDrawer;
   });
 
   const runCommand = useCallback((id: string): void => {
@@ -406,8 +518,12 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
         closeSettings(c.theme, () => c.setUi({ settings: null }));
         return;
       }
-      const id = keyToCommand(e, { command: c.command, typing, dialog, selected: c.ui.selected !== null, listMode: c.listMode });
-      if (id === null || (drawerRef.current && !dialog && !DRAWER_PASS.has(id))) return;
+      const id = keyToCommand(e, { command: c.command, typing, dialog, selected: c.ui.selected !== null, control: isControl(e.target), listMode: c.listMode });
+      if (id === null || !drawerPasses(drawerRef.current, dialog, id)) return;
+      if (id === "detail-modal" && e.repeat) {
+        e.preventDefault();
+        return;
+      }
       if (id === "close-dialog") {
         if (!closeTopOverlay()) c.setUi({ dialog: null });
         return;
@@ -535,9 +651,31 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
     />
   );
 
-  const selectedItemShown = session !== null && ui.selected !== null && session.view().plan.items.has(ui.selected) ? ui.selected : null;
-  const itemPanel = (item: ItemId, s: PlanSession) => (
-    <ItemPanel key={item} session={s} item={item} local={registry.device.name} command={command} readOnly={readOnly} naming={ui.naming === item} onNamed={clearNaming} />
+  const closeColumn = (): void => {
+    const column = document.querySelector<HTMLElement>(`#${INSPECTOR_ID} [data-detail="column"]`);
+    if (column === null) throw new Error("Shell: the column X was pressed, but the column's detail is not in the page");
+    if (!flushSync(() => commitFocus(column, "The inspector"))) return;
+    const button = inspectorButton.current;
+    if (button === null) throw new Error("Shell: the inspector column closed, but the toolbar has no Inspector button to take focus");
+    commitPane("inspector", { open: false, w: panes.inspector.w });
+    button.focus();
+  };
+  const promoted = promoteText(command);
+  const itemDetail = (item: ItemId, s: PlanSession, container: Exclude<DetailContainer, "modal" | "sheet">) => (
+    <ItemDetail
+      session={s}
+      item={item}
+      container={container}
+      local={registry.device.name}
+      command={command}
+      readOnly={readOnly}
+      naming={ui.naming === item}
+      onNamed={clearNaming}
+      onExpand={() => promote(item)}
+      expandLabel={promoted.label}
+      expandTitle={promoted.title}
+      {...(container === "column" ? { onClose: closeColumn } : {})}
+    />
   );
   const closeSheet = (): void => setSheet(null);
   useEffect(() => {
@@ -569,12 +707,12 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
       </Sheet>
       {session !== null && (
         <Sheet open={sheet === "plan"} title="Plan" onClose={closeSheet}>
-          <PlanPanel session={session} readOnly={readOnly} />
+          <PlanPanel key={session.view().plan.id} session={session} readOnly={readOnly} />
         </Sheet>
       )}
       {session !== null && selectedItemShown !== null && (
-        <Sheet key={selectedItemShown} open={sheet === null && ui.settings === null} title={itemName(session, selectedItemShown)} onClose={() => setUi({ selected: null })}>
-          {itemPanel(selectedItemShown, session)}
+        <Sheet open={sheet === null && ui.settings === null} title={itemName(session, selectedItemShown)} onClose={() => setUi({ selected: null })}>
+          {itemDetail(selectedItemShown, session, "drawer")}
         </Sheet>
       )}
     </>
@@ -599,11 +737,12 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
     const dropped = drawerDroppedFocus.current;
     if (dropped === null) return;
     drawerDroppedFocus.current = null;
+    if (itemModal) return;
     const toInspector = dropped === "inspector" && inspectorButtonShown;
     const button = toInspector ? inspectorButton.current : sidebarButton.current;
     if (button === null) throw new Error(`Shell: the ${dropped} drawer left with focus, but the toolbar has no ${toInspector ? "Inspector" : "plan list"} button to take it`);
     button.focus();
-  }, [listMode, listSlotMode, inspectorMode, inspectorButtonShown]);
+  }, [listMode, listSlotMode, inspectorMode, inspectorButtonShown, itemModal]);
   const attention = listAttention({ open: listOpen, plans, failures: registry.failures(), selected: sel, update: updateState });
   const sidebarToggle = sheetBase ? null : { open: listOpen, attention, button: sidebarButton, onToggle: () => togglePane("list") };
   const inspectorToggle = sheetBase ? null : { open: inspectorOpen, button: inspectorButton, onToggle: () => togglePane("inspector") };
@@ -611,9 +750,22 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
     ...(listColumn !== null && panes.list.w !== null ? { "--sidebar-w": `${listColumn}px` } : {}),
     ...(inspectorColumn !== null && panes.inspector.w !== null ? { "--panel-w": `${inspectorColumn}px` } : {}),
   };
-  const inspectorBody = (s: PlanSession) => (selectedItemShown !== null ? itemPanel(selectedItemShown, s) : <PlanPanel session={s} readOnly={readOnly} />);
+  const inspectorBody = (s: PlanSession, container: "column" | "drawer") =>
+    selectedItemShown !== null ? itemDetail(selectedItemShown, s, container) : <PlanPanel key={s.view().plan.id} session={s} readOnly={readOnly} />;
+  const order = session === null ? [] : tabOrder(session.view(), ui);
+  const follows = ui.view === "timeline";
+  const detailApi: DetailApi = {
+    order,
+    press,
+    promote,
+    rename,
+    step: (by) => {
+      const patch = stepPatch(order, ui.selected, by, follows);
+      if (patch !== null) setUi(patch);
+    },
+  };
 
-  return (
+  const app = (
     <OpenChoice.Provider value={openChoice}>
       <div className="app">
         <Toolbar
@@ -692,7 +844,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
                 onCommit={(next) => commitPane("inspector", next)}
               />
               <div id={INSPECTOR_ID} className="slot slot-panel" data-slot="panel">
-                {ui.settings !== null ? settingsPanel("panel", ui.settings) : session === null ? null : inspectorBody(session)}
+                {ui.settings !== null ? settingsPanel("panel", ui.settings) : session === null ? null : inspectorBody(session, "column")}
               </div>
             </>
           )}
@@ -711,7 +863,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
               {sidebar}
             </PaneOverlay>
           )}
-          {inspectorDrawerW !== null && session !== null && (
+          {inspectorDrawerW !== null && session !== null && !modalHidesInspector && (
             <PaneOverlay
               kind="inspector"
               label="Inspector"
@@ -719,18 +871,33 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
               button={inspectorButton}
               width={inspectorDrawerW}
               onClose={closeInspectorDrawer}
+              onScrimPress={scrimPress}
               onFocusDropped={() => {
                 drawerDroppedFocus.current = "inspector";
               }}
             >
               <div id={INSPECTOR_ID} className="inspector-drawer-body">
-                {inspectorBody(session)}
+                {inspectorBody(session, "drawer")}
               </div>
             </PaneOverlay>
           )}
         </div>
         {sheets}
         {settingsSheet && ui.settings !== null && settingsPanel("sheet", ui.settings)}
+        {session !== null && itemModal && selectedItemShown !== null && (
+          <ItemModal
+            session={session}
+            item={selectedItemShown}
+            local={registry.device.name}
+            command={command}
+            readOnly={readOnly}
+            naming={ui.naming === selectedItemShown}
+            memo={focusMemo}
+            onNamed={clearNaming}
+            onRename={() => rename(selectedItemShown)}
+            onClose={closeItemModal}
+          />
+        )}
         {session !== null && ui.dialog !== null && ui.dialog.t === "calendar" && (
           <CalendarDialog key={session.view().plan.id} session={session} registry={registry} clock={p.clock} onClose={() => setUi({ dialog: null })} />
         )}
@@ -756,6 +923,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
       </div>
     </OpenChoice.Provider>
   );
+  return <DetailContext.Provider value={detailApi}>{app}</DetailContext.Provider>;
 }
 
 function WideShell(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null; size: WindowSize }) {

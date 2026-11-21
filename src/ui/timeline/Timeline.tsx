@@ -14,6 +14,7 @@ import type { PaneState } from "../shell/panes";
 import { Chart, itemOf, rowAt, type DropGhost, type Point, type TempLink, type TouchHost } from "./Chart";
 import { fitSpan, geometry, leadFor, ROW, type Geometry } from "./geometry";
 import { gestureIntent, isClick, startIntent } from "./gesture";
+import { useDetail } from "../detail/DetailContext";
 import { Grid, type Marks, type Placed } from "./Grid";
 import { timelineRows, visibleRange } from "./rows";
 import { Scale } from "./Scale";
@@ -137,6 +138,7 @@ export function Timeline(p: { session: PlanSession; outline: OutlineControl; rea
   const frame = useRef<HTMLDivElement>(null);
   const view = usePlanView(p.session);
   const { ui, setUi } = useUiValue();
+  const { press } = useDetail();
   const { run } = useRun(p.session);
   const [width, setWidth] = useState(0);
   const fitWidth = ui.zoom === "F" ? width : undefined;
@@ -366,11 +368,11 @@ export function Timeline(p: { session: PlanSession; outline: OutlineControl; rea
       const to = target instanceof HTMLElement ? (target.dataset.bar ?? target.dataset.row) : under === null ? undefined : under.row.id;
       const intent = gestureIntent(geo, { kind: "link", item: d.item, dxPx: up.x - d.down.x, target: to });
       if (intent !== null) run(intent);
-      else if (click) setUi({ selected: d.item });
+      else if (click) press({ item: d.item, x: up.x, y: up.y, at: performance.now() });
       return;
     }
     if (click) {
-      setUi({ selected: d.item });
+      press({ item: d.item, x: up.x, y: up.y, at: performance.now() });
       return;
     }
     const intent = intentOf(geo, d.mode, d.item, up.x - d.down.x);
@@ -378,6 +380,15 @@ export function Timeline(p: { session: PlanSession; outline: OutlineControl; rea
   };
 
   const { open: outlineOpen, phone, stored: outlineStored, onCommit: commitOutline } = outline;
+  const strip = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const button = strip.current;
+    if (outlineOpen || button === null) return;
+    const host = frame.current;
+    if (host === null) throw new Error("Timeline: no frame");
+    const grid = host.querySelector(`#${OUTLINE_ID}`);
+    if (grid !== null && grid.contains(document.activeElement)) button.focus({ preventScroll: true });
+  }, [outlineOpen, empty]);
   const hideOutline = useMemo(
     () => (phone && outlineOpen ? () => commitOutline({ open: false, w: outlineStored }) : null),
     [phone, outlineOpen, outlineStored, commitOutline],
@@ -450,6 +461,7 @@ export function Timeline(p: { session: PlanSession; outline: OutlineControl; rea
       )}
       {!empty && !outline.open && (
         <button
+          ref={strip}
           type="button"
           className="outline-strip"
           aria-label="Show the outline"

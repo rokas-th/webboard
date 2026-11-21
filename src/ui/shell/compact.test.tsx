@@ -74,6 +74,28 @@ const shown = async (t: TestSession): Promise<void> => {
   await settle();
 };
 
+const summaryRow = (sheet: HTMLElement, page: "history" | "trash"): void => {
+  const row = sheet.querySelector(`button.summary-row[data-summary-row="${page}"]`);
+  if (!(row instanceof HTMLButtonElement)) throw new Error(`no ${page} row in the plan sheet`);
+  fireEvent.click(row);
+};
+
+const summaryBack = (sheet: HTMLElement): boolean => fireEvent.click(within(sheet).getByRole("button", { name: "‹ Plan" }));
+
+const WRITES = ["Save baseline", "Remove", "Restore", "Change calendar…", "Revert this action", "Bring this action back"];
+
+const noWritesOnAnyPage = (): void => {
+  const pages = (["history", "summary", "trash"] as const).map((page) => {
+    if (page === "summary") summaryBack(planSheet());
+    if (page === "trash") summaryRow(planSheet(), "trash");
+    const sheet = planSheet();
+    expect(sheet.querySelector("input")).toBeNull();
+    WRITES.forEach((n) => expect([page, n, within(sheet).queryByRole("button", { name: n })]).toEqual([page, n, null]));
+    return sheet.querySelector("[data-summary-page]")?.getAttribute("data-summary-page");
+  });
+  expect(pages).toEqual(["history", "summary", "trash"]);
+};
+
 const planSheet = (): HTMLElement => {
   const all = screen.getAllByRole("dialog");
   expect(all.map((d) => d.getAttribute("aria-label"))).toEqual(["Plan"]);
@@ -248,8 +270,10 @@ describe('compact shell, data-form="compact"', () => {
     expect(within(toolbar()).getByRole("button", { name: "Plan" })).toBeTruthy();
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Plan" }));
     const sheet = planSheet();
-    expect(within(sheet).getAllByRole("heading").map((h) => h.textContent)).toEqual(expect.arrayContaining(["History", "Trash", "Baselines"]));
+    expect(within(sheet).getAllByRole("heading").map((h) => h.textContent)).toEqual(expect.arrayContaining(["Plan", "Baselines"]));
+    expect(Array.from(sheet.querySelectorAll(".summary-row-label")).map((l) => l.textContent)).toEqual(["History", "Trash"]);
     expect(within(sheet).getByRole("button", { name: "Change calendar…" })).toBeTruthy();
+    summaryRow(sheet, "history");
 
     const entry = sheet.querySelector(`.history li[data-action="${moved.action.id}"]`);
     if (!(entry instanceof HTMLElement)) throw new Error("no history entry for the move");
@@ -263,6 +287,8 @@ describe('compact shell, data-form="compact"', () => {
     expect(toastTexts()).toEqual([revertBuilt.toast]);
     clearToasts();
 
+    expect(planSheet().querySelector("[data-summary-page]")?.getAttribute("data-summary-page")).toBe("summary");
+    summaryRow(planSheet(), "trash");
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Restore" }));
     expect(apply.mock.calls).toEqual([[{ t: "restore", items: ["T"] }]]);
     const restoreBuilt = apply.mock.results[0];
@@ -270,6 +296,7 @@ describe('compact shell, data-form="compact"', () => {
     expect(toastTexts()).toEqual([restoreBuilt.value.toast]);
     clearToasts();
 
+    expect(planSheet().querySelector("[data-summary-page]")?.getAttribute("data-summary-page")).toBe("summary");
     const id = [...t.session.view().plan.baselines.keys()][0];
     const name = within(planSheet()).getByRole("textbox", { name: "Baseline name" });
     fireEvent.change(name, { target: { value: "Kickoff" } });
@@ -297,6 +324,7 @@ describe('compact shell, data-form="compact"', () => {
     const revert = vi.spyOn(t.session, "revert");
     await shown(t);
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Plan" }));
+    summaryRow(planSheet(), "history");
     expect(within(planSheet()).getAllByRole("button", { name: "Revert this action" }).length).toBeGreaterThan(0);
     act(() => t.session.setReadOnly(true));
     const sheet = planSheet();
@@ -305,10 +333,9 @@ describe('compact shell, data-form="compact"', () => {
     const heading = document.querySelector(".plan-head h1");
     if (!(heading instanceof HTMLElement)) throw new Error("no plan heading");
     expect([heading.querySelector("input"), within(heading).getByLabelText("Plan name").textContent]).toEqual([null, "Plan"]);
-    ["Save baseline", "Remove", "Restore", "Change calendar…", "Revert this action", "Bring this action back"].forEach((n) =>
-      expect([n, within(sheet).queryByRole("button", { name: n })]).toEqual([n, null]),
-    );
-    expect(within(sheet).getByRole("button", { name: "Show" })).toBeTruthy();
+    noWritesOnAnyPage();
+    summaryBack(planSheet());
+    expect(within(planSheet()).getByRole("button", { name: "Show" })).toBeTruthy();
     expect([apply.mock.calls.length, revert.mock.calls.length]).toEqual([0, 0]);
   });
 
@@ -321,6 +348,7 @@ describe('compact shell, data-form="compact"', () => {
     const revert = vi.spyOn(t.session, "revert");
     await shown(t);
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Plan" }));
+    summaryRow(planSheet(), "history");
     expect(within(planSheet()).getAllByRole("button", { name: "Revert this action" }).length).toBeGreaterThan(0);
     act(() => {
       t.doc.ydoc.getMap("actions").set("x1", ["iphone", "s1", 0, [], 42, []]);
@@ -329,9 +357,7 @@ describe('compact shell, data-form="compact"', () => {
     expect(document.querySelector(".plan-head .forward-lock")?.textContent).toBe(NEWER_PLAN);
     const sheet = planSheet();
     expect(sheet.querySelector("input")).toBeNull();
-    ["Save baseline", "Remove", "Restore", "Change calendar…", "Revert this action", "Bring this action back"].forEach((n) =>
-      expect([n, within(sheet).queryByRole("button", { name: n })]).toEqual([n, null]),
-    );
+    noWritesOnAnyPage();
     expect(within(toolbar()).getByRole("button", { name: "+ New" }).hasAttribute("disabled")).toBe(true);
     fireEvent.keyDown(sheet, { key: "Escape" });
     act(() => lastUi()[1]({ selected: "t3" }));

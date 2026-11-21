@@ -10,6 +10,7 @@ import { emptyYear, shellFor } from "../../test/shell";
 import { clearToasts } from "../common/Toast";
 import { EMPTY_PLAN } from "../copy";
 import { OpenChoice } from "../run";
+import { BareDetail } from "../../test/detail";
 import { UiContext, useUi, type UiState } from "../state";
 import { geometry, leadFor } from "./geometry";
 import { Timeline, usePhoneOutline, type OutlineControl } from "./Timeline";
@@ -145,7 +146,9 @@ function Bare(p: { session: PlanSession }) {
   return (
     <UiContext.Provider value={{ ui, setUi }}>
       <OpenChoice.Provider value={noChoice}>
-        <Timeline session={p.session} outline={BARE_OUTLINE} />
+        <BareDetail>
+          <Timeline session={p.session} outline={BARE_OUTLINE} />
+        </BareDetail>
       </OpenChoice.Provider>
     </UiContext.Provider>
   );
@@ -157,7 +160,9 @@ function PhoneBare(p: { session: PlanSession }) {
   return (
     <UiContext.Provider value={{ ui, setUi }}>
       <OpenChoice.Provider value={noChoice}>
-        <Timeline session={p.session} outline={outline} readOnly />
+        <BareDetail>
+          <Timeline session={p.session} outline={outline} readOnly />
+        </BareDetail>
       </OpenChoice.Provider>
     </UiContext.Provider>
   );
@@ -1428,6 +1433,36 @@ describe("the outline", () => {
     });
     expect([frame().dataset.outline, gridW(), document.documentElement.classList.contains("outline-dragging")]).toEqual(["collapsed", "8px", false]);
     expect(saved()).toEqual({ open: false, w: null });
+  });
+
+  it("steps with the outline collapsed from the strip, bar in view", async () => {
+    const t = await shown(
+      [
+        { id: "g", name: "G", kind: "group" },
+        ...Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, name: `T${i}`, parent: "g", start: i === 25 ? "2027-03-01" : "2026-11-10", dur: 1 })),
+      ],
+      { today: "2026-11-10" },
+    );
+    const scroll = one(".tl-scroll");
+    act(() => uiNow()[1]({ selected: "t24" }));
+    act(() => one('.tl-row[data-row="t24"]').focus());
+    act(() => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "¬", code: "KeyL", metaKey: true, altKey: true });
+    });
+    expect([frame().dataset.outline, document.activeElement === strip()]).toEqual(["collapsed", true]);
+    const left = scroll.scrollLeft;
+    act(() => {
+      fireEvent.keyDown(strip(), { key: "ArrowDown" });
+    });
+    expect([uiNow()[0].selected, uiNow()[0].follow, document.activeElement === strip()]).toEqual(["t25", null, true]);
+    const top = 26 * 34;
+    expect([scroll.scrollTop > 0, scroll.scrollTop <= top, top + 34 <= scroll.scrollTop + 700]).toEqual([true, true, true]);
+    const x0 = geometry(t.session.view(), "W").x(toDay("2027-03-01"));
+    expect([scroll.scrollLeft > left, x0 >= scroll.scrollLeft, x0 < scroll.scrollLeft + 1440 - 300]).toEqual([true, true, true]);
+    act(() => {
+      fireEvent.keyDown(strip(), { key: "k" });
+    });
+    expect([uiNow()[0].selected, document.activeElement === strip()]).toEqual(["t24", true]);
   });
 
   it.each<readonly [string, (h: HTMLElement) => void]>([

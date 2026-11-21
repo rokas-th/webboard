@@ -9,6 +9,7 @@ import { toast } from "../common/Toast";
 import { groupPath, statusLabel, type StatusLabel } from "../list/groups";
 import { useRun } from "../run";
 import { useUiValue } from "../state";
+import { useDetail } from "../detail/DetailContext";
 import { isClick } from "../timeline/gesture";
 
 export const DATED = "Dated items sit where their dates put them. Move them on the timeline.";
@@ -37,13 +38,13 @@ const horizonOf = (v: string): Horizon => {
   return found.h;
 };
 
-interface Columns {
+export interface Columns {
   cards: Readonly<Record<Horizon, readonly Item[]>>;
   column: ReadonlyMap<ItemId, Horizon>;
   done: number;
 }
 
-function columnsOf(view: PlanView): Columns {
+export function columnsOf(view: PlanView): Columns {
   const gone = goneSet(view.plan);
   const walk = (parent: ItemId | null): Item[] =>
     childrenOf(view.plan, parent).flatMap((i) => (gone.has(i.id) ? [] : i.kind === "group" ? walk(i.id) : [i]));
@@ -82,7 +83,8 @@ const groupName = (view: PlanView, item: Item): string | null => (item.place.par
 
 export function Board(p: { session: PlanSession; readOnly: boolean }) {
   const view = usePlanView(p.session);
-  const { ui, setUi } = useUiValue();
+  const { ui } = useUiValue();
+  const detail = useDetail();
   const { run } = useRun(p.session);
   const down = useRef<{ id: ItemId; x: number; y: number } | null>(null);
   const dragged = useRef<ItemId | null>(null);
@@ -114,13 +116,14 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
     const d = down.current;
     down.current = null;
     if (d === null || d.id !== id || !isClick(d, { x: e.clientX, y: e.clientY })) return;
-    setUi({ selected: id });
+    detail.press({ item: id, x: e.clientX, y: e.clientY, at: performance.now() });
   };
 
   const onKey = (e: ReactKeyboardEvent<HTMLDivElement>, id: ItemId): void => {
-    if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+    if (e.target !== e.currentTarget || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || (e.key !== "Enter" && e.key !== " ")) return;
     e.preventDefault();
-    setUi({ selected: id });
+    if (e.key === "Enter") detail.rename(id);
+    else detail.promote(id);
   };
 
   const onDragStart = (e: ReactDragEvent<HTMLDivElement>, id: ItemId): void => {

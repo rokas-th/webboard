@@ -16,7 +16,8 @@ export type DialogState =
   | { t: "calendar" }
   | { t: "choice"; id: string; side?: string }
   | { t: "palette" }
-  | { t: "revert"; id: string };
+  | { t: "revert"; id: string }
+  | { t: "item" };
 
 export interface UiState {
   plan: PlanId | null;

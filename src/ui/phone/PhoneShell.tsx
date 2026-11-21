@@ -3,11 +3,13 @@ import type { ItemId, PlanId } from "../../domain/model";
 import { usesNativeAlert } from "../../services/alert";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
-import type { PlanSession } from "../../store/session";
+import { usePlanView, type PlanSession } from "../../store/session";
 import type { SyncState } from "../../sync/manager";
 import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
 import { toast, Toasts } from "../common/Toast";
+import { DetailContext, type DetailApi } from "../detail/DetailContext";
+import { phoneOrder, stepPatch } from "../detail/order";
 import { ghostIds } from "../ghosts";
 import { OpenChoice } from "../run";
 import { ConvertedReport } from "../shell/ConvertedReport";
@@ -60,6 +62,7 @@ function PlanDialog(p: { session: PlanSession; registry: Registry; clock: Clock;
     case "sync":
       return null;
     case "palette":
+    case "item":
       throw new Error(`PhoneShell cannot show dialog ${d.t}`);
   }
 }
@@ -100,8 +103,25 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
   const dialog = ui.dialog;
   const closeDialog = useCallback(() => setUi({ dialog: null }), [setUi]);
   const named = useCallback(() => setUi({ naming: null }), [setUi]);
+  const planView = usePlanView(p.session);
+  const order = phoneOrder(planView, view, ui.collapsed);
+  const follows = view === "timeline";
+  const detailApi: DetailApi = {
+    order,
+    press: (m) => setUi(follows ? { selected: m.item, follow: m.item } : { selected: m.item }),
+    promote: (id) => {
+      throw new Error(`PhoneShell: the phone has no item modal to open ${id} in`);
+    },
+    rename: (item) => {
+      throw new Error(`PhoneShell: the phone renames in the item sheet, not from a row, so ${item ?? "the selection"} has no rename here`);
+    },
+    step: (by) => {
+      const patch = stepPatch(order, ui.selected, by, follows);
+      if (patch !== null) setUi(patch);
+    },
+  };
   return (
-    <>
+    <DetailContext.Provider value={detailApi}>
       <div id={panelId} className="phone-main" role="tabpanel" aria-labelledby={tabId(view)}>
         {view === "list" ? <PhoneList session={p.session} onOpen={(id) => setUi({ selected: id })} /> : <Timeline session={p.session} outline={outline} readOnly />}
       </div>
@@ -126,7 +146,6 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
       ) : (
         selected !== null && ui.settings === null && (
           <ItemSheet
-            key={selected}
             session={p.session}
             item={selected}
             local={local}
@@ -136,7 +155,7 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
           />
         )
       )}
-    </>
+    </DetailContext.Provider>
   );
 }
 

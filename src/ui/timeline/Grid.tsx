@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, type MouseEvent } from "react";
+import { useDetail } from "../detail/DetailContext";
 import type { ItemId, LinkType } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import type { SetUi, UiState } from "../state";
@@ -29,6 +30,7 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
   const item = p.view.plan.items.get(row.id);
   if (item === undefined) throw new Error(`Timeline row ${row.id} is not in the plan`);
   const selected = p.ui.selected === row.id;
+  const { press } = useDetail();
   const pad = 14 + row.depth * 16;
   const common = {
     "data-row": row.id,
@@ -37,7 +39,7 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
     "aria-selected": selected,
     tabIndex: p.tabStop ? 0 : -1,
     style: { top: index * ROW, paddingLeft: row.kind === "group" ? pad - 4 : pad },
-    onClick: () => p.setUi({ selected: row.id, follow: row.id }),
+    onClick: (e: MouseEvent<HTMLDivElement>) => press({ item: row.id, x: e.clientX, y: e.clientY, at: performance.now() }),
   };
   if (row.kind === "ghost") {
     return (
@@ -91,7 +93,7 @@ export function Grid(p: { id: string; mounted: readonly Placed[]; count: number;
   const selected = p.ui.selected;
   useLayoutEffect(() => {
     const el = list.current;
-    if (el === null || selected === null || !el.contains(document.activeElement)) return;
+    if (el === null || selected === null || !el.contains(document.activeElement) || el.closest('[data-outline="open"]') === null) return;
     const row = [...el.querySelectorAll("[data-row]")].find((r): r is HTMLElement => r instanceof HTMLElement && r.dataset.row === selected);
     if (row !== undefined && row !== document.activeElement) row.focus({ preventScroll: true });
   }, [selected, p.mounted]);

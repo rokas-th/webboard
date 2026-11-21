@@ -55,7 +55,7 @@ export function modalKeyDown(e: KeyboardEvent<HTMLElement>, onClose: () => void)
   }
 }
 
-export function Dialog(p: { label: string; wide?: boolean; onClose(): void; children?: ReactNode }) {
+export function Dialog(p: { label: string; wide?: boolean; size?: "item"; onClose(): void; onKeyDown?(e: KeyboardEvent<HTMLDivElement>): void; children?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useModalFocus(ref, "Dialog", readPlatform(window).os === "ios");
   const { close, scope } = useRequestClose(ref, p.onClose, "Dialog");
@@ -65,12 +65,16 @@ export function Dialog(p: { label: string; wide?: boolean; onClose(): void; chil
     <div className="overlay center" {...scrim}>
       <div
         ref={ref}
-        className={p.wide === true ? "modal modal-wide" : "modal"}
+        className={p.size === "item" ? "modal modal-item" : p.wide === true ? "modal modal-wide" : "modal"}
+        data-item-modal={p.size === "item" ? "" : undefined}
         role="dialog"
         aria-modal="true"
         aria-label={p.label}
         tabIndex={-1}
-        onKeyDown={(e) => modalKeyDown(e, () => close("escape"))}
+        onKeyDown={(e) => {
+          p.onKeyDown?.(e);
+          if (!e.defaultPrevented) modalKeyDown(e, () => close("escape"));
+        }}
       >
         <div className="modal-head">
           <CloseButton className="modal-close" onPress={() => close("x")} />

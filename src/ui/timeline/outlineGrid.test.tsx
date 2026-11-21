@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PlanSession } from "../../store/session";
 import { testSession } from "../../test/session";
 import { OpenChoice } from "../run";
+import { BareDetail } from "../../test/detail";
 import { UiContext, useUi } from "../state";
 import { Timeline, type OutlineControl } from "./Timeline";
 
@@ -37,7 +38,9 @@ function Bare(p: { session: PlanSession }) {
   return (
     <UiContext.Provider value={{ ui, setUi }}>
       <OpenChoice.Provider value={noChoice}>
-        <Timeline session={p.session} outline={OUTLINE} />
+        <BareDetail>
+          <Timeline session={p.session} outline={OUTLINE} />
+        </BareDetail>
       </OpenChoice.Provider>
     </UiContext.Provider>
   );

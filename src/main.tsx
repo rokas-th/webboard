@@ -11,6 +11,7 @@ import "./styles/timeline.css";
 import "./styles/board.css";
 import "./styles/list.css";
 import "./styles/panel.css";
+import "./styles/detail.css";
 import "./styles/calendar.css";
 import "./styles/choices.css";
 import "./styles/palette.css";

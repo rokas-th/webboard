@@ -7,6 +7,7 @@ export interface KeyState {
   typing: boolean;
   dialog: boolean;
   selected: boolean;
+  control: boolean;
   listMode: PlanListMode;
 }
 
@@ -25,6 +26,12 @@ const ARROW_KEYS: ReadonlySet<string> = new Set(["ArrowLeft", "ArrowRight", "Arr
 export function isTyping(target: EventTarget | null, key: string): boolean {
   if (target instanceof HTMLInputElement) return TEXT_TYPES.has(target.type) || (STEPPED_TYPES.has(target.type) && ARROW_KEYS.has(key));
   return target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable);
+}
+
+const CONTROLS = 'button, a[href], input, select, textarea, summary, [role="switch"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [role="slider"]';
+
+export function isControl(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(CONTROLS) !== null;
 }
 
 const PANE_CODES: Readonly<Record<string, string>> = { KeyI: "inspector", KeyL: "outline" };
@@ -47,6 +54,7 @@ function modified(e: KeyInput, s: KeyState): string | null {
   if (key === "k" && !e.shiftKey) return "palette";
   if (key === "p" && !e.shiftKey) return "print";
   if (s.typing) return null;
+  if (e.key === "ArrowDown" && !e.shiftKey) return s.selected ? "detail-open" : null;
   if (key === "b" && !e.shiftKey) return panesShown(s) ? "sidebar" : null;
   if (key === "d" && !e.shiftKey) return s.selected ? "duplicate" : null;
   if (key === "z") return e.shiftKey ? "redo" : "undo";
@@ -75,7 +83,10 @@ export function keyToCommand(e: KeyInput, s: KeyState): string | null {
   if (e.key.toLowerCase() === "n") return "new-task";
   if (e.key.toLowerCase() === "m") return "new-milestone";
   if (e.shiftKey) return null;
+  if (e.key === " " || e.key === "Enter") return s.selected && !s.control ? (e.key === " " ? "detail-modal" : "rename") : null;
   if (e.key === "ArrowDown" || e.key === "ArrowUp") return e.key === "ArrowDown" ? "select-next" : "select-prev";
+  const letter = e.key.toLowerCase();
+  if (letter === "j" || letter === "k") return letter === "j" ? "select-next" : "select-prev";
   if (e.key.toLowerCase() === "t") return "today";
   return VIEWS[e.key] ?? null;
 }

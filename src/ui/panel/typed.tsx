@@ -12,7 +12,7 @@ const WHOLE = /^[-+]?\d+$/;
 
 export const dateUnreadable = (): void => toast(DATE_UNREADABLE, "bad");
 
-export function WholeField(p: { label: string; value: number; min: number; max: number; notWhole: string; inputMode?: "numeric"; onCommit(n: number): boolean }) {
+export function WholeField(p: { label: string; value: number; min: number; max: number; notWhole: string; inputMode?: "numeric"; field?: string; onCommit(n: number): boolean }) {
   const notWhole = (): void => toast(p.notWhole, "bad");
   const commit = (next: string): boolean => {
     if (next === "") return false;
@@ -24,10 +24,10 @@ export function WholeField(p: { label: string; value: number; min: number; max: 
     if (n === p.value) return false;
     return p.onCommit(n);
   };
-  return <TextField type="number" inputMode={p.inputMode} className="num-input" label={p.label} min={String(p.min)} max={String(p.max)} value={String(p.value)} readOnly={false} onCommit={commit} onUnreadable={notWhole} />;
+  return <TextField type="number" inputMode={p.inputMode} className="num-input" label={p.label} min={String(p.min)} max={String(p.max)} value={String(p.value)} readOnly={false} field={p.field} onCommit={commit} onUnreadable={notWhole} />;
 }
 
-export function EndField(p: { view: PlanView; item: Item; label: string; run: Run }) {
+export function EndField(p: { view: PlanView; item: Item; label: string; run: Run; field?: string }) {
   const it = p.item;
   const cal = useMemo(() => workCalendar(p.view.plan.calendar), [p.view.plan.calendar]);
   const start = p.view.derived.start.get(it.id);
@@ -55,6 +55,7 @@ export function EndField(p: { view: PlanView; item: Item; label: string; run: Ru
       max={toIso(cal.addWork(start, MAX_TASK_DUR - 1))}
       value={toIso(end)}
       readOnly={false}
+      field={p.field}
       onCommit={commit}
       onUnreadable={dateUnreadable}
     />

@@ -158,6 +158,25 @@ describe("List", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
+  it("selects a row and renames it on Enter, and opens it as the item modal on Space", async () => {
+    const t = await made([
+      { id: "a", name: "A", start: "2026-11-20", dur: 2 },
+      { id: "b", name: "B", start: "2026-11-23", dur: 1 },
+    ]);
+    await list(t);
+    act(() => {
+      row("a").focus();
+      fireEvent.keyDown(row("a"), { key: "Enter" });
+    });
+    const name = document.querySelector('#inspector [data-detail-field="name"]');
+    expect([uiNow().selected, uiNow().dialog, document.activeElement === name && name !== null]).toEqual(["a", null, true]);
+    act(() => {
+      row("b").focus();
+      fireEvent.keyDown(row("b"), { key: " " });
+    });
+    expect([uiNow().selected, uiNow().dialog, document.querySelector("[data-item-modal] [data-detail]")?.getAttribute("data-detail-item")]).toEqual(["b", { t: "item" }, "b"]);
+  });
+
   it("selects nothing for a pointer that moved 4 px or more", async () => {
     const t = await made(STATUS_SEED);
     await list(t);

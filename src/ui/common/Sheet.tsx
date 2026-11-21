@@ -1,4 +1,4 @@
-import { useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { readPlatform } from "../../platform";
 import { modalKeyDown, useModalFocus } from "./Dialog";
 import { CloseButton, useOverlayEntry, useRequestClose, useScrimPress, type CloseReason } from "./dismiss";
@@ -16,6 +16,12 @@ export const SNAP_MS = 200;
 export const SWIPE_SLOP = 8;
 
 export const RELEASE_MS = 100;
+
+export const DETENT_UP = 48;
+
+export type SheetDetent = "medium" | "large";
+
+type DetentProps = { detent?: undefined; onDetent?: undefined } | { detent: SheetDetent; onDetent(d: SheetDetent): void };
 
 interface Sample {
   y: number;
@@ -42,7 +48,7 @@ function releaseSpeed(d: Drag, y: number, now: number): number {
   return (y - base.y) / Math.max(1, now - base.at);
 }
 
-function useSwipeDown(ref: { current: HTMLDivElement | null }, close: (reason: CloseReason) => void) {
+function useSwipeDown(ref: { current: HTMLDivElement | null }, close: (reason: CloseReason) => void, detents: DetentProps) {
   const drag = useRef<Drag | null>(null);
   const place = (dy: number): void => {
     const el = sheetOf(ref);
@@ -85,9 +91,13 @@ function useSwipeDown(ref: { current: HTMLDivElement | null }, close: (reason: C
       const dy = e.clientY - d.start.y;
       const height = sheetOf(ref).getBoundingClientRect().height;
       if (height <= 0) throw new Error("Sheet measured no height to swipe against");
-      const closing = dy > SWIPE_SHARE * height || (dy > FLICK_DISTANCE && releaseSpeed(d, e.clientY, performance.now()) > FLICK_SPEED);
+      const speed = releaseSpeed(d, e.clientY, performance.now());
+      const down = dy > SWIPE_SHARE * height || (dy > FLICK_DISTANCE && speed > FLICK_SPEED);
+      const up = dy < -DETENT_UP || (dy < -FLICK_DISTANCE && speed < -FLICK_SPEED);
       snapBack();
-      if (closing) close("swipe");
+      if (detents.detent === "large" && down) detents.onDetent("medium");
+      else if (detents.detent === "medium" && up) detents.onDetent("large");
+      else if (down) close("swipe");
     },
     onPointerCancel: (e: ReactPointerEvent<HTMLElement>): void => {
       const d = end(e);
@@ -96,22 +106,36 @@ function useSwipeDown(ref: { current: HTMLDivElement | null }, close: (reason: C
   };
 }
 
-function OpenSheet(p: { title: string; onClose: () => void; children: ReactNode }) {
+type SheetProps = { title: string; onClose: () => void; actions?: ReactNode; onKeyDown?(e: ReactKeyboardEvent<HTMLDivElement>): void; children: ReactNode } & DetentProps;
+
+function OpenSheet(p: SheetProps) {
   const ref = useRef<HTMLDivElement>(null);
   const ios = readPlatform(window).os === "ios";
   useModalFocus(ref, "Sheet", ios);
   const { close, scope } = useRequestClose(ref, p.onClose, "Sheet");
   useOverlayEntry(ref, close);
   const scrim = useScrimPress(() => close("scrim"));
-  const swipe = useSwipeDown(ref, close);
+  const swipe = useSwipeDown(ref, close, p.detent === undefined ? {} : { detent: p.detent, onDetent: p.onDetent });
   return (
     <div className="overlay sheet-overlay" {...scrim}>
-      <div ref={ref} className="sheet" role="dialog" aria-modal="true" aria-label={p.title} tabIndex={-1} onKeyDown={(e) => modalKeyDown(e, () => close("escape"))}>
+      <div
+        ref={ref}
+        className="sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label={p.title}
+        tabIndex={-1}
+        data-detent={p.detent}
+        onKeyDown={(e) => {
+          p.onKeyDown?.(e);
+          if (!e.defaultPrevented) modalKeyDown(e, () => close("escape"));
+        }}
+      >
         {ios && <span className="sheet-grabber" aria-hidden="true" />}
         <div className="sheet-head" {...swipe}>
           <CloseButton className="sheet-close" onPress={() => close("x")} />
           <h3 className="sheet-title">{p.title}</h3>
-          <span className="sheet-head-end" aria-hidden="true" />
+          {p.actions === undefined ? <span className="sheet-head-end" aria-hidden="true" /> : <span className="sheet-actions">{p.actions}</span>}
         </div>
         <div className="sheet-body">{scope(p.children)}</div>
       </div>
@@ -119,10 +143,11 @@ function OpenSheet(p: { title: string; onClose: () => void; children: ReactNode 
   );
 }
 
-export function Sheet(p: { open: boolean; title: string; onClose: () => void; children: ReactNode }) {
+export function Sheet(p: { open: boolean } & SheetProps) {
   if (!p.open) return null;
+  const detents: DetentProps = p.detent === undefined ? {} : { detent: p.detent, onDetent: p.onDetent };
   return (
-    <OpenSheet title={p.title} onClose={p.onClose}>
+    <OpenSheet title={p.title} onClose={p.onClose} actions={p.actions} onKeyDown={p.onKeyDown} {...detents}>
       {p.children}
     </OpenSheet>
   );

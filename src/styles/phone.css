@@ -119,47 +119,12 @@
   border-left: 2px solid var(--amber);
 }
 
-.isheet .isheet-status button {
-  padding: 6px 10px;
+html[data-form="phone"] .sheet[data-detent="medium"] {
+  height: 52%;
 }
 
-.ilink {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.ilink .dep-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.isheet-add {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 0 4px;
-}
-
-.isheet-add input[type="number"] {
-  width: 64px;
-}
-
-.isheet textarea {
-  width: 100%;
-  min-height: 96px;
-}
-
-.isheet-add > p.dim {
-  flex-basis: 100%;
-  margin: 0;
-  font-family: var(--prose);
-  font-size: 12.5px;
+html[data-form="phone"] .sheet[data-detent="large"] {
+  height: 100%;
 }
 
 .phone-head {

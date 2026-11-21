@@ -7,6 +7,7 @@ import { usePlanView, type PlanSession } from "../../store/session";
 import { EMPTY_PLAN } from "../copy";
 import { ghostIds } from "../ghosts";
 import { useUiValue } from "../state";
+import { useDetail } from "../detail/DetailContext";
 import { isClick } from "../timeline/gesture";
 import { listGroups, statusLabel, type StatusLabel } from "./groups";
 
@@ -43,7 +44,8 @@ export const depsOf = (view: PlanView, links: readonly Link[], id: ItemId): stri
 
 export function List(p: { session: PlanSession }) {
   const view = usePlanView(p.session);
-  const { ui, setUi } = useUiValue();
+  const { ui } = useUiValue();
+  const detail = useDetail();
   const down = useRef<{ id: ItemId; x: number; y: number } | null>(null);
   const sections = listGroups(view);
   const ghosts = ghostIds(view);
@@ -57,13 +59,14 @@ export function List(p: { session: PlanSession }) {
     const d = down.current;
     down.current = null;
     if (d === null || d.id !== id || !isClick(d, { x: e.clientX, y: e.clientY })) return;
-    setUi({ selected: id });
+    detail.press({ item: id, x: e.clientX, y: e.clientY, at: performance.now() });
   };
 
   const onKey = (e: ReactKeyboardEvent<HTMLTableRowElement>, id: ItemId): void => {
-    if (e.key !== "Enter" && e.key !== " ") return;
+    if (e.target !== e.currentTarget || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || (e.key !== "Enter" && e.key !== " ")) return;
     e.preventDefault();
-    setUi({ selected: id });
+    if (e.key === "Enter") detail.rename(id);
+    else detail.promote(id);
   };
 
   const row = (id: ItemId) => {

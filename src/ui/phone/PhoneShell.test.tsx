@@ -214,7 +214,7 @@ describe('PhoneShell, data-form="phone"', () => {
     await shown(t);
     fireEvent.click(rowOf("Review"));
     const sheet = screen.getByRole("dialog", { name: "Review" });
-    fireEvent.click(within(sheet).getByRole("button", { name: "Duration +1" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Longer by one working day" }));
     expect(t.session.view().plan.items.get("Review")?.schedule?.dur).toBe(3);
     fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "Probe choice" }));
@@ -1479,7 +1479,7 @@ describe("PhoneShell item sheet (Step 4)", () => {
     await settle();
     expect(t.session.view().choices.filter((c) => c.kind === "delete")).toHaveLength(1);
     const sheet = screen.getByRole("dialog");
-    expect(sheet.querySelector(".isheet")?.firstElementChild?.classList.contains("choice-banner")).toBe(true);
+    expect(sheet.querySelector(".detail-body")?.firstElementChild?.classList.contains("choice-banner")).toBe(true);
     expect(toastTexts()).toEqual([]);
   });
 
@@ -1522,7 +1522,7 @@ describe("PhoneShell read-only (Step 4b)", () => {
     { name: "Review", parent: "S4", start: "2026-11-10", dur: 2 },
     { name: "Notes", horizon: "now" },
   ];
-  const EDITS = ["Group", "Unschedule", "Move up", "Move down", "Move to Trash"];
+  const EDITS = ["Group", "Unschedule", "Move up", "Move down", "Delete"];
 
   it("read-only drops edit controls", async () => {
     const t = await testSession(EDIT_SEED);
@@ -1549,7 +1549,7 @@ describe("PhoneShell read-only (Step 4b)", () => {
     fireEvent.keyDown(nameText, { key: "Enter" });
     within(sheet)
       .getAllByRole("button")
-      .filter((b) => b.textContent !== "Close" && b.getAttribute("aria-label") !== "Close")
+      .filter((b) => b.textContent !== "Close" && b.getAttribute("aria-label") !== "Close" && b.closest(".detail-head") === null)
       .forEach((b) => fireEvent.click(b));
     expect(apply).not.toHaveBeenCalled();
     act(() => t.session.setReadOnly(false));

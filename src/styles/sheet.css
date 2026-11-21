@@ -33,6 +33,13 @@
   width: 28px;
 }
 
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+}
+
 .sheet-title {
   flex: 1;
   min-width: 0;

@@ -71,6 +71,7 @@ export const CHROME = Object.freeze({
   sheetHead: [`.sheet-head ${CONTROL}`],
   dialogHead: [`.modal-head ${CONTROL}`],
   drawerHead: [`.drawer-head ${CONTROL}`],
+  detailHead: [`.detail-head ${CONTROL}`],
   dialogActions: [`.modal-actions ${CONTROL}`],
   panelActions: [`.panel .actions ${CONTROL}`],
   settingsHead: [`.settings-head ${CONTROL}`],
@@ -98,6 +99,7 @@ const EXAMPLE_PLAN = "Example: Website relaunch";
 const CALENDAR_BANNER = "The calendar was changed on two devices. Nothing moves until you choose.";
 const NEWER_PLAN = "This plan has changes from a newer WebBoard. Update to edit.";
 const PICKED = "Tracking: review results";
+const HISTORY_ROW = '.slot-panel button.summary-row[data-summary-row="history"]';
 const PICKED_CHOICE = "Tracking: review results and fixes";
 const STATUS_FIRST = "Holidays for 2031 not loaded — load";
 const STATUS_REFUSED = "Holidays for 2031 not available — open calendar";
@@ -108,14 +110,17 @@ const loaded = (selector) => ({ loaded: selector });
 const click = (selector, text) => ({ click: text === undefined ? [selector] : [selector, text] });
 const tap = (selector, text) => ({ tap: [selector, text] });
 const swipe = (selector, dx, dy) => ({ swipe: [selector, dx, dy] });
+const doubleClick = (selector, text, dx) => ({ doubleClick: [selector, text ?? null, dx ?? 0] });
+const doubleTap = (selector, text) => ({ doubleTap: [selector, text ?? null] });
 const none = (selector, text) => ({ none: [selector, text] });
 const key = (k, code, modifiers) => ({ key: { key: k, code, modifiers } });
-const reveal = (selector, text) => ({ reveal: [selector, text] });
+const reveal = (selector, text) => ({ reveal: text === undefined ? [selector] : [selector, text] });
 const nubs = (reach) => ({ nubs: reach });
 const todayShown = () => ({ today: true });
 const edges = () => ({ edges: true });
 const shown = (selector, n) => ({ shown: [selector, n] });
 const width = (selector, min, max) => ({ width: [selector, min, max] });
+const heightShare = (selector, min, max) => ({ heightShare: [selector, min, max] });
 const chart = (min) => ({ chart: min });
 const aligned = () => ({ aligned: true });
 const style = (selector, prop, value, pseudo) => ({ style: pseudo === undefined ? [selector, prop, value] : [selector, prop, value, pseudo] });
@@ -704,8 +709,23 @@ function states() {
     ],
   });
   add("long-names/phone", "long-names", { sizes: "phone", clip: true, actions: [expect(".phone-list .prow .prow-name")] });
+  add("detail/summary", "mesa", {
+    actions: [
+      viewExpect("timeline"),
+      expect(".slot-panel .plan-summary h2", "Plan"),
+      count(".slot-panel .summary-row", 2),
+      expect(".slot-panel .summary-row .summary-row-label", "History"),
+      expect(".slot-panel .summary-row .summary-row-label", "Trash"),
+      expect(".slot-panel .summary-bar span"),
+      click(HISTORY_ROW),
+      expect(".slot-panel .summary-back", "‹ Plan"),
+      expect(".slot-panel .panel h2", "History"),
+      click(".slot-panel .summary-back"),
+      count(".slot-panel .summary-row", 2),
+    ],
+  });
   add("history", "mesa", {
-    actions: [reveal(".slot-panel .panel h2", "History"), width(".slot-panel .history li button", 1, 90), count(".slot-panel .history li", 40)],
+    actions: [click(HISTORY_ROW), reveal(".slot-panel .panel h2", "History"), width(".slot-panel .history li button", 1, 90), count(".slot-panel .history li", 40)],
   });
   add("converted-report", "converted", {
     place: null,
@@ -797,7 +817,7 @@ function states() {
   add("platform/ipad-11-landscape", "mesa-ios-pad", { sizes: "ipad-11-landscape", panes: OUTLINE_CLOSED, actions: [...fullShell, ...stamped("ios", "pad")] });
   add("platform/iphone-landscape", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), ...stamped("ios", "phone")] });
   const FIELDS = '.sheet input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), .sheet select, .sheet textarea';
-  const phoneItemSheet = [click(".phone-list .prow"), expect('.sheet[role="dialog"] .isheet')];
+  const phoneItemSheet = [click(".phone-list .prow"), expect('.sheet[role="dialog"] [data-detail="sheet"] .detail-body')];
   const phoneSettings = [click(".phone-head button", "Plans"), click(".plans-sheet button.settings-row", "Settings…"), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme")];
   add("ios-fields/phone-item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, fontMin(FIELDS, 16)] });
   add("ios-fields/phone-settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, fontMin(FIELDS, 16)] });
@@ -808,8 +828,18 @@ function states() {
   const padItem = [click(".tl-row .name", PICKED), still(), expect(`${INSPECTOR_DRAWER} .panel .kind`, "TASK"), count(".sheet", 0)];
   add("ios44/phone/plan", "mesa-ios-phone", { sizes: "phone", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
   add("ios44/phone/plans", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [click(".phone-head button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), hitChrome("sheetHead", "planList")] });
-  add("ios44/phone/item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal(".isheet .actions button", "Move up"), hitChrome("sheetHead", "panelActions")] });
-  add("ios44/phone/item-end", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal(".isheet > .actions button", "Move to Trash"), hitChrome("sheetHead", "panelActions")] });
+  add("ios44/phone/item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal('.sheet .detail-body [data-detail-field="group"]'), expect(".sheet .detail-body .actions button", "Move up"), hitChrome("sheetHead", "panelActions")] });
+  add("ios44/phone/item-end", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal(".sheet .detail-body > .actions button", "Delete"), hitChrome("sheetHead", "panelActions")] });
+  add("phone/detent-medium", "mesa-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [...phoneItemSheet, still(), count('.sheet[data-detent="medium"]', 1), heightShare(".sheet", 50, 54), expect(".sheet .detail-head .detail-expand"), inWindow(".sheet"), hitChrome("sheetHead", "detailHead")],
+  });
+  add("phone/detent-large", "mesa-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [...phoneItemSheet, still(), swipe(".sheet .sheet-title", 0, -120), still(), count('.sheet[data-detent="large"]', 1), heightShare(".sheet", 95, 100), inWindow(".sheet")],
+  });
   add("ios44/phone/settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, hitChrome("sheetHead", "settingsTabs")] });
   add("ios44/phone/sync", "mesa-ios-phone", {
     sizes: "phone",
@@ -846,7 +876,7 @@ function states() {
     sizes: "ipad-11-landscape",
     panes: OUTLINE_CLOSED,
     dialog: true,
-    actions: [...fullShell, click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), hitChrome("dialogActions", "dialogHead")],
+    actions: [...fullShell, click(HISTORY_ROW), click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), hitChrome("dialogActions", "dialogHead")],
   });
   add("ios44/pad-portrait/plan", "mesa-ios-pad", { sizes: "ipad-11-portrait", actions: [viewExpect("timeline"), hitChrome("toolbar")] });
   add("ios44/pad-portrait/plans", "mesa-ios-pad", {
@@ -854,7 +884,55 @@ function states() {
     dialog: true,
     actions: [viewExpect("timeline"), click(TOGGLE), still(), expect('.plan-overlay[role="dialog"] .sidebar'), hitChrome("toolbar", "planList")],
   });
-  add("ios44/pad-portrait/item", "mesa-ios-pad", { sizes: "ipad-11-portrait", dialog: true, actions: [viewExpect("timeline"), ...padItem, hitChrome("drawerHead", "panelActions")] });
+  add("ios44/pad-portrait/item", "mesa-ios-pad", { sizes: "ipad-11-portrait", dialog: true, actions: [viewExpect("timeline"), ...padItem, count(`${INSPECTOR_DRAWER} .detail-expand`, 1), hitChrome("drawerHead", "detailHead", "panelActions")] });
+  add("ios44/pad-portrait/detail-head", "mesa-ios-pad", {
+    sizes: "ipad-11-portrait",
+    dialog: true,
+    actions: [viewExpect("timeline"), ...padItem, count(`${INSPECTOR_DRAWER} .detail-head .inspector-close`, 0), count(`${INSPECTOR_DRAWER} .detail-head .detail-next`, 1), hitChrome("detailHead")],
+  });
+  add("ios44/pad-landscape/detail-head", "mesa-ios-pad", {
+    place: { view: "board", zoom: "W" },
+    sizes: "ipad-11-landscape",
+    panes: OUTLINE_CLOSED,
+    actions: [viewExpect("board"), tap(".card .card-name", PICKED), expect(".slot-panel .detail .kind", "TASK"), count(".slot-panel .detail-head .inspector-close", 1), hitChrome("detailHead")],
+  });
+  const PICKED_BAR = '.tl-chart .bar[data-bar="t3"]';
+  add("detail/pair-ipad-bar", "mesa-ios-pad", {
+    sizes: "ipad-11-landscape",
+    panes: OUTLINE_CLOSED,
+    dialog: true,
+    actions: [viewExpect("timeline"), doubleTap(PICKED_BAR), still(), count(".modal-item", 1), count(".slot-panel", 0), expect(".modal-item [data-detail] .kind", "TASK"), hitChrome("dialogHead", "detailHead")],
+  });
+  add("detail/pair-ipad-drawer", "mesa-ios-pad", {
+    sizes: "ipad-11-portrait",
+    dialog: true,
+    actions: [viewExpect("timeline"), doubleTap(".tl-row .name", PICKED), still(), count(".modal-item", 1), count(".inspector-overlay-layer", 0), expect(".modal-item [data-detail] .kind", "TASK"), hitChrome("dialogHead", "detailHead")],
+  });
+  add("detail/pair-desk-bar", "mesa", {
+    panes: OUTLINE_CLOSED,
+    dialog: true,
+    actions: [viewExpect("timeline"), doubleClick(PICKED_BAR), still(), count(".modal-item", 1), count(".slot-panel", 0), count('.modal-item [data-detail-item="t3"]', 1), centredIn(".modal-item")],
+  });
+  add("detail/pair-desk-card", "mesa", {
+    place: { view: "board", zoom: "W" },
+    dialog: true,
+    actions: [viewExpect("board"), doubleClick(".card .card-name", PICKED), still(), count(".modal-item", 1), count(".slot-panel", 0), expect('.modal-item [data-detail="modal"] .kind', "TASK")],
+  });
+  add("detail/micro-drag", "mesa", {
+    panes: OUTLINE_CLOSED,
+    actions: [viewExpect("timeline"), doubleClick(PICKED_BAR, null, 5), still(), count(".modal-item", 0), count('.slot-panel [data-detail-item="t3"]', 1), count(".tl-row.selected", 1)],
+  });
+  add("detail/modal-size", "mesa", {
+    sizes: "standard",
+    panes: OUTLINE_CLOSED,
+    dialog: true,
+    actions: [viewExpect("timeline"), doubleClick(PICKED_BAR), still(), width(".modal-item", 720, 720), heightShare(".modal-item", 79, 81), inWindow(".modal-item"), centredIn(".modal-item")],
+  });
+  add("detail/ipad-form-sheet", "mesa-ios-pad", {
+    sizes: "ipad-11-portrait",
+    dialog: true,
+    actions: [viewExpect("timeline"), ...padItem, click(`${INSPECTOR_DRAWER} .detail-expand`), still(), count(".modal-item", 1), count(".inspector-overlay-layer", 0), width(".modal-item", 600, 786), inWindow(".modal-item"), centredIn(".modal-item")],
+  });
   add("ios44/pad-portrait/settings", "mesa-ios-pad", {
     sizes: "ipad-11-portrait",
     dialog: true,
@@ -928,7 +1006,22 @@ function states() {
   add("ipad-form-sheet/item", "mesa-ios-pad", {
     sizes: "ipad-portraits",
     dialog: true,
-    actions: [viewExpect("timeline"), ...padItem, count(`${INSPECTOR_DRAWER} > .drawer-head:first-child > .drawer-close`, 1), edgeAt(INSPECTOR_DRAWER, "right", "window"), width(INSPECTOR_DRAWER, 360, 360), hitChrome("drawerHead")],
+    actions: [
+      viewExpect("timeline"),
+      ...padItem,
+      count(`${INSPECTOR_DRAWER} > .drawer-head:first-child > .drawer-close`, 1),
+      edgeAt(INSPECTOR_DRAWER, "right", "window"),
+      width(INSPECTOR_DRAWER, 360, 360),
+      hitChrome("drawerHead"),
+      click(`${INSPECTOR_DRAWER} .detail-expand`),
+      still(),
+      count(".inspector-overlay-layer", 0),
+      count(".modal-item .modal-head .modal-close", 1),
+      expect('.modal-item [data-detail="modal"] .kind', "TASK"),
+      inWindow(".modal-item"),
+      centredIn(".modal-item"),
+      hitChrome("dialogHead", "detailHead"),
+    ],
   });
   add("ipad-form-sheet/plans-below-700", "mesa-ios-pad", {
     sizes: "ipad-699",
@@ -1025,6 +1118,22 @@ function states() {
     sizes: "panes-1440",
     panes: { closed: ["outline", "inspector"] },
     actions: [viewExpect("timeline"), count(".slot-panel", 0), count(".inspector-resizer", 0), count(`${PANE_TOGGLE}[aria-expanded="false"]`, 1), edgeAt(".main", "right", "window"), oneLine(".toolbar")],
+  });
+  add("panes/inspector-reveal", "mesa", {
+    sizes: "panes-1440",
+    panes: { closed: ["inspector"] },
+    actions: [
+      viewExpect("timeline"),
+      count(".slot-panel", 0),
+      click(".tl-row .name", PICKED),
+      count(".slot-panel", 1),
+      expect(".slot-panel .detail .kind", "TASK"),
+      edgeAt(".slot-panel", "right", "window"),
+      click(".slot-panel .inspector-close"),
+      count(".slot-panel", 0),
+      count(".tl-row.selected", 1),
+      edgeAt(".main", "right", "window"),
+    ],
   });
   [
     ["Home", 300],
@@ -1190,7 +1299,7 @@ function states() {
   });
   add("close/dialog", "mesa", {
     dialog: true,
-    actions: [click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), width(".modal-close", 28, 28), style(".modal-close", "width", "24px", "::after"), style(".modal-close", "height", "24px", "::after"), corner(".modal-close", ".modal", "top-leading", 20)],
+    actions: [click(HISTORY_ROW), click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), width(".modal-close", 28, 28), style(".modal-close", "width", "24px", "::after"), style(".modal-close", "height", "24px", "::after"), corner(".modal-close", ".modal", "top-leading", 20)],
   });
   add("close/sheet-mac", "mesa", {
     sizes: "mac-compact",
@@ -1235,7 +1344,7 @@ function states() {
   });
   add("revert-preview", "mesa", {
     dialog: true,
-    actions: [click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), expect(".revert-text p")],
+    actions: [click(HISTORY_ROW), click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), expect(".revert-text p")],
   });
 
   const names = new Set();
@@ -2084,6 +2193,21 @@ window.__probeAct = function (a) {
     }
     return { at: [x, y] };
   }
+  if (a.doubleClick !== undefined || a.doubleTap !== undefined) {
+    var dd = a.doubleClick !== undefined ? a.doubleClick : a.doubleTap;
+    var dm = matching(dd[0], dd[1] === null ? undefined : dd[1]);
+    if (dm.hit === undefined) return { fail: missed(dd[0], dd[1] === null ? undefined : dd[1], dm.nodes) };
+    dm.hit.scrollIntoView({ block: "nearest", inline: "nearest" });
+    var dr = dm.hit.getBoundingClientRect();
+    var ddx = Math.min(dr.left + 6, dr.right - 1);
+    var ddy = (dr.top + dr.bottom) / 2;
+    var dfront = document.elementFromPoint(ddx, ddy);
+    if (dfront === null || !(dfront === dm.hit || dm.hit.contains(dfront))) {
+      return { fail: dd[0] + " " + JSON.stringify(dd[1]) + " is covered at " + Math.round(ddx) + "," + Math.round(ddy) +
+        " by " + (dfront === null ? "nothing" : dfront.tagName.toLowerCase() + "." + String(dfront.className)) };
+    }
+    return a.doubleClick !== undefined ? { doubleClick: [ddx, ddy, dd[2]] } : { doubleTap: [ddx, ddy] };
+  }
   if (a.swipe !== undefined) {
     var sw = matching(a.swipe[0]);
     if (sw.hit === undefined) return { fail: missed(a.swipe[0], undefined, sw.nodes) };
@@ -2396,6 +2520,13 @@ window.__probeAct = function (a) {
     if (wide === undefined) return { fail: "no " + a.width[0] + " on screen to measure" };
     var ww = wide.getBoundingClientRect().width;
     if (ww < a.width[1] - 0.5 || ww > a.width[2] + 0.5) return { fail: a.width[0] + " is " + Math.round(ww * 10) / 10 + " px wide, not " + a.width[1] + ".." + a.width[2] };
+    return { ok: true };
+  }
+  if (a.heightShare !== undefined) {
+    var tall = Array.prototype.slice.call(document.querySelectorAll(a.heightShare[0])).filter(onScreen)[0];
+    if (tall === undefined) return { fail: "no " + a.heightShare[0] + " on screen to measure" };
+    var share = (tall.getBoundingClientRect().height / window.innerHeight) * 100;
+    if (share < a.heightShare[1] || share > a.heightShare[2]) return { fail: a.heightShare[0] + " is " + Math.round(share * 10) / 10 + " % of the window's height, not " + a.heightShare[1] + ".." + a.heightShare[2] + " %" };
     return { ok: true };
   }
   if (a.focus !== undefined) {
@@ -3026,6 +3157,27 @@ async function pointer(cdp, sessionId, [x, y]) {
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 }, sessionId);
 }
 
+const PAIR_GAP_MS = 120;
+
+async function mouseDouble(cdp, sessionId, [x, y, dx]) {
+  await pointer(cdp, sessionId, [x, y]);
+  await sleep(PAIR_GAP_MS);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, sessionId);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 }, sessionId);
+  if (dx !== 0) await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x + dx, y, button: "left", buttons: 1 }, sessionId);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x + dx, y, button: "left", buttons: 0, clickCount: 1 }, sessionId);
+}
+
+async function touchDouble(cdp, sessionId, [x, y]) {
+  const once = async () => {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y, id: 1 }] }, sessionId);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, sessionId);
+  };
+  await once();
+  await sleep(PAIR_GAP_MS);
+  await once();
+}
+
 async function touchSwipe(cdp, sessionId, [x, y, dx, dy]) {
   const at = (f) => [{ x: x + dx * f, y: y + dy * f, id: 1 }];
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(0) }, sessionId);
@@ -3062,6 +3214,8 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
       if (got.fail !== undefined) return unreached(`${describeAction(action)}: ${got.fail}`);
       if (got.at !== undefined) await pointer(cdp, sessionId, got.at);
       if (got.swipe !== undefined) await touchSwipe(cdp, sessionId, got.swipe);
+      if (got.doubleClick !== undefined) await mouseDouble(cdp, sessionId, got.doubleClick);
+      if (got.doubleTap !== undefined) await touchDouble(cdp, sessionId, got.doubleTap);
     }
     const after = unsettled(await settle(cdp, sessionId));
     checked();

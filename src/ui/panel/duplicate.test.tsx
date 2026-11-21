@@ -4,6 +4,7 @@ import { childrenOf } from "../../plan/project";
 import type { PlanSession } from "../../store/session";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
 import { clearToasts } from "../common/Toast";
+import { DetailContext, type DetailApi } from "../detail/DetailContext";
 import { ItemSheet } from "../phone/ItemSheet";
 import { OpenChoice } from "../run";
 import { UiContext, type UiState } from "../state";
@@ -99,18 +100,28 @@ describe("Duplicate in the item panel (product-7)", () => {
     t.session.apply({ t: "trash", items: ["g"] });
     expect(t.session.view().plan.items.get("a")?.trashed).toBe(true);
     panel(t);
-    expect(document.querySelector(".panel .kind")?.textContent).toBe("TASK");
+    expect(document.querySelector(".detail-body .title-input")?.textContent).toBe("A");
     expect(screen.queryByRole("button", { name: "Duplicate" })).toBeNull();
   });
 
-  it("is not on the phone's item sheet", async () => {
+  it("is on the phone's item sheet too, which holds the same detail", async () => {
     const t = await made();
+    const setUi = vi.fn<(p: Partial<UiState>) => void>();
+    const api: DetailApi = { press: vi.fn(), step: vi.fn(), promote: vi.fn(), rename: vi.fn(), order: ["a", "b"] };
     render(
       <OpenChoice.Provider value={vi.fn()}>
-        <ItemSheet session={t.session} item="a" local="Mac" onClose={() => undefined} />
+        <UiContext.Provider value={{ ui: UI, setUi }}>
+          <DetailContext.Provider value={api}>
+            <ItemSheet session={t.session} item="a" local="Mac" naming={false} onNamed={() => undefined} onClose={() => undefined} />
+          </DetailContext.Provider>
+        </UiContext.Provider>
       </OpenChoice.Provider>,
     );
     expect(screen.getByRole("button", { name: "Move up" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Duplicate" })).toBeNull();
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Duplicate" }));
+    });
+    const copy = copyId(t);
+    expect(setUi.mock.calls).toEqual([[{ selected: copy, follow: copy }]]);
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject, type TransitionEvent as ReactTransitionEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, type TransitionEvent as ReactTransitionEvent } from "react";
 import { focusables } from "../common/Dialog";
 import { CLOSE_CONTROLS, CloseButton, useScrimPress } from "../common/dismiss";
 import { OPEN_MENU } from "../common/menu";
@@ -37,6 +37,7 @@ export interface PaneOverlayProps {
   button: RefObject<HTMLButtonElement | null>;
   width: number;
   onClose(): void;
+  onScrimPress?(x: number, y: number, at: number): boolean;
   onFocusDropped(): void;
   children: ReactNode;
 }
@@ -132,12 +133,28 @@ export function PaneOverlay(p: PaneOverlayProps) {
     return () => document.removeEventListener("keydown", onKey);
   }, [p.open, p.button]);
 
+  const paired = useRef(false);
   const scrim = useScrimPress(
     () => {
+      if (paired.current) return;
       if (p.open) onClose.current();
     },
     () => document.querySelector(OPEN_MENU) !== null,
   );
+  const onScrimPress = p.onScrimPress;
+  if (onScrimPress !== undefined && p.kind !== "inspector") throw new Error(`PaneOverlay: only the inspector drawer pairs scrim presses, not the ${p.kind} one`);
+  const scrimHandlers = {
+    ...scrim,
+    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>): void => {
+      paired.current = false;
+      scrim.onPointerDown(e);
+    },
+    onPointerUp: (e: ReactPointerEvent<HTMLDivElement>): void => {
+      scrim.onPointerUp(e);
+      if (onScrimPress === undefined || !p.open || e.target !== e.currentTarget) return;
+      paired.current = onScrimPress(e.clientX, e.clientY, performance.now());
+    },
+  };
 
   if (phase === "gone" && next === "gone") return null;
 
@@ -147,7 +164,7 @@ export function PaneOverlay(p: PaneOverlayProps) {
   };
   return (
     <div className={classes.layer} data-shown={phase === "shown" ? "true" : undefined} inert={!p.open}>
-      <div className={classes.scrim} {...scrim} />
+      <div className={classes.scrim} {...scrimHandlers} />
       <div
         ref={panel}
         className={panelClass}

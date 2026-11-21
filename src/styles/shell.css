@@ -880,6 +880,7 @@ html[data-os="ios"] .popover > .popover-close {
 .sheet-close,
 .modal-close,
 .drawer-close,
+.inspector-close,
 .popover-close,
 .palette-close {
   position: relative;
@@ -932,9 +933,19 @@ html[data-os="ios"] .popover > .popover-close {
   background: rgba(var(--line-rgb), 0.9);
 }
 
+.inspector-close::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: 50%;
+  background: rgba(var(--line-rgb), 0.9);
+}
+
 .sheet-close svg,
 .modal-close svg,
 .drawer-close svg,
+.inspector-close svg,
 .popover-close svg,
 .palette-close svg {
   width: 12px;
@@ -944,6 +955,7 @@ html[data-os="ios"] .popover > .popover-close {
 .sheet-close:focus-visible,
 .modal-close:focus-visible,
 .drawer-close:focus-visible,
+.inspector-close:focus-visible,
 .popover-close:focus-visible,
 .palette-close:focus-visible {
   outline-offset: -2px;
@@ -968,6 +980,7 @@ html[data-os="ios"] .popover > .popover-close {
   .sheet-close:hover:not(:disabled),
   .modal-close:hover:not(:disabled),
   .drawer-close:hover:not(:disabled),
+  .inspector-close:hover:not(:disabled),
   .popover-close:hover:not(:disabled),
   .palette-close:hover:not(:disabled) {
     color: var(--cyan);
@@ -994,6 +1007,12 @@ html[data-os="ios"] .popover > .popover-close {
   border-color: transparent;
 }
 
+:where(html[data-os="ios"]) .inspector-close:active:not(:disabled) {
+  color: var(--cyan);
+  background: transparent;
+  border-color: transparent;
+}
+
 :where(html[data-os="ios"]) .popover-close:active:not(:disabled) {
   color: var(--cyan);
   background: transparent;
@@ -1009,6 +1028,7 @@ html[data-os="ios"] .popover > .popover-close {
 html[data-os="ios"] .sheet-close,
 html[data-os="ios"] .modal-close,
 html[data-os="ios"] .drawer-close,
+html[data-os="ios"] .inspector-close,
 html[data-os="ios"] .popover-close,
 html[data-os="ios"] .palette-close {
   width: 44px;
@@ -1018,6 +1038,7 @@ html[data-os="ios"] .palette-close {
 html[data-os="ios"] .sheet-close::after,
 html[data-os="ios"] .modal-close::after,
 html[data-os="ios"] .drawer-close::after,
+html[data-os="ios"] .inspector-close::after,
 html[data-os="ios"] .palette-close::after {
   inset: 7px;
 }
@@ -1034,6 +1055,7 @@ html[data-os="ios"] .popover-close::after {
 html[data-os="ios"] .sheet-close svg,
 html[data-os="ios"] .modal-close svg,
 html[data-os="ios"] .drawer-close svg,
+html[data-os="ios"] .inspector-close svg,
 html[data-os="ios"] .popover-close svg,
 html[data-os="ios"] .palette-close svg {
   width: 14px;
@@ -1043,6 +1065,7 @@ html[data-os="ios"] .palette-close svg {
 html[data-os="ios"] .sheet-close:focus-visible,
 html[data-os="ios"] .modal-close:focus-visible,
 html[data-os="ios"] .drawer-close:focus-visible,
+html[data-os="ios"] .inspector-close:focus-visible,
 html[data-os="ios"] .popover-close:focus-visible,
 html[data-os="ios"] .palette-close:focus-visible {
   outline-offset: -8px;

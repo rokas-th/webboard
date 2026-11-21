@@ -786,8 +786,13 @@ describe("read-only", () => {
         [...root.querySelectorAll("button, input, select, textarea")]
           .filter((e) => !(e instanceof HTMLButtonElement || e instanceof HTMLInputElement || e instanceof HTMLSelectElement || e instanceof HTMLTextAreaElement) || !e.disabled)
           .filter((e) => !((e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement) && e.readOnly))
+          .filter((e) => !e.matches(".summary-row"))
           .map((e) => e.closest("label")?.textContent ?? e.getAttribute("aria-label") ?? e.textContent ?? "");
       expect(enabled(panel())).toEqual([]);
+      expect([...panel().querySelectorAll<HTMLButtonElement>(".summary-row")].map((b) => [b.dataset.summaryRow, b.disabled])).toEqual([
+        ["history", false],
+        ["trash", true],
+      ]);
       fireEvent.click(within(bar()).getByRole("tab", { name: "Now · Next · Later" }));
       const board = document.querySelector('[data-slot="board"]');
       if (!(board instanceof HTMLElement)) throw new Error("no board");

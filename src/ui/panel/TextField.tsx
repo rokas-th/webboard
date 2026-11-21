@@ -16,6 +16,7 @@ export function TextField(p: {
   min?: string;
   max?: string;
   inputMode?: "numeric";
+  field?: string;
   onCommit(next: string): boolean;
   onUnreadable?(): void;
 }) {
@@ -73,6 +74,7 @@ export function TextField(p: {
       max={p.max ?? (date ? LAST_PLAN_DATE : undefined)}
       className={p.className}
       aria-label={p.label}
+      data-detail-field={p.field}
       value={draft}
       onChange={(e) => {
         sent.current = null;

@@ -14,8 +14,8 @@ import { baselineDefault } from "../panel/Baselines";
 import { placeStep } from "../panel/placeStep";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { PlanListMode } from "../shell/planListMode";
+import { stepPatch, tabOrder } from "../detail/order";
 import type { SettingsTab, UiState, ViewKind, Zoom } from "../state";
-import { timelineRows } from "../timeline/rows";
 
 export interface Command {
   id: string;
@@ -28,6 +28,12 @@ export interface Command {
 export interface PaneToggle {
   open: boolean;
   toggle(): void;
+}
+
+export interface DetailCommands {
+  promote(id: ItemId): void;
+  toggleModal(): void;
+  rename(id: ItemId): void;
 }
 
 export interface CommandCtx {
@@ -52,6 +58,7 @@ export interface CommandCtx {
   print(): void;
   updates: Updates | null;
   theme: ThemeApi;
+  detail: DetailCommands | null;
 }
 
 export const NEW_NAME: Readonly<Record<ItemKind, string>> = { task: "New task", milestone: "New milestone", group: "New group" };
@@ -133,7 +140,17 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
   const sel = ctx.ui.selected;
   if (sel === null) return [];
   const it = session.view().plan.items.get(sel);
-  if (it === undefined || it.trashed) return [];
+  if (it === undefined) return [];
+  const detail = ctx.detail;
+  const opening: Command[] =
+    detail === null
+      ? []
+      : [
+          { id: "detail-modal", group: "Edit", label: "Toggle the item modal", keys: "Space", run: () => detail.toggleModal() },
+          { id: "detail-open", group: "Edit", label: "Open the item", keys: ctx.command ? "⌘↓" : "Ctrl ↓", run: () => detail.promote(sel) },
+          { id: "rename", group: "Edit", label: ctx.readOnly || it.trashed ? "Show the item in the inspector" : "Rename the item", keys: "Return", run: () => detail.rename(sel) },
+        ];
+  if (it.trashed) return opening;
   const trash: Command = {
     id: "trash",
     group: "Edit",
@@ -176,9 +193,9 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
     return [{ id: `move-${id}`, group: "Edit", label, keys: `${ctx.command ? "⌥" : "Alt "}${arrow}`, run: () => void run(step) }];
   });
   const copy = ctx.readOnly ? [] : [duplicate];
-  if (it.kind === "group") return [...nudges, ...order, ...copy, trash];
-  if (!dated(it)) return [...order, ...copy, trash];
-  return [...nudges, ...resizes, ...order, ...copy, trash];
+  if (it.kind === "group") return [...opening, ...nudges, ...order, ...copy, trash];
+  if (!dated(it)) return [...opening, ...order, ...copy, trash];
+  return [...opening, ...nudges, ...resizes, ...order, ...copy, trash];
 }
 
 function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
@@ -229,12 +246,8 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
     label,
     keys,
     run: () => {
-      const rows = timelineRows(session.view(), ctx.ui.collapsed);
-      if (rows.length === 0) return;
-      const at = rows.findIndex((r) => r.id === ctx.ui.selected);
-      const next = at < 0 ? (by > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + by));
-      const target = rows[next].id;
-      ctx.setUi({ selected: target, follow: target });
+      const patch = stepPatch(tabOrder(session.view(), ctx.ui), ctx.ui.selected, by, ctx.ui.view === "timeline");
+      if (patch !== null) ctx.setUi(patch);
     },
   });
   const groups = [...view.plan.items.values()].filter((it) => it.kind === "group" && !it.trashed).map((it) => it.id);
@@ -245,7 +258,7 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
           { id: "collapse-all", group: "View", label: "Collapse all groups", run: () => ctx.setUi({ collapsed: new Set(groups) }) },
           { id: "expand-all", group: "View", label: "Expand all groups", run: () => ctx.setUi({ collapsed: new Set() }) },
         ];
-  const steps = ctx.ui.view === "timeline" ? [step("select-next", "Select the next row", "↓", 1), step("select-prev", "Select the previous row", "↑", -1)] : [];
+  const steps = [step("select-next", "Select the next item", "↓ or J", 1), step("select-prev", "Select the previous item", "↑ or K", -1)];
   return [
     create("task", "N"),
     create("milestone", "M"),

@@ -825,7 +825,7 @@ describe("ItemPanel read-only", () => {
     act(() => {
       fireEvent.keyDown(inPanel().getByLabelText("Name"), { key: "Enter" });
     });
-    all("button", panel()).forEach(click);
+    all(".detail-body button", panel()).forEach(click);
     expect(apply).not.toHaveBeenCalled();
     act(() => t.session.setReadOnly(false));
     expect(input("Name").value).toBe("X");
@@ -842,7 +842,7 @@ describe("ItemPanel on a trashed item", () => {
     select("A");
     expect(uiNow()[0].selected).toBe("A");
     expect(panel().querySelectorAll("input, select")).toHaveLength(0);
-    expect(all("button", panel()).map((b) => b.textContent)).toEqual(["Choose"]);
+    expect(all(".detail-body button", panel()).map((b) => b.textContent)).toEqual(["Choose"]);
     expect(inPanel().getByLabelText("Name").textContent).toBe("Renamed");
     const note = inPanel().getByLabelText("Notes");
     expect(note instanceof HTMLTextAreaElement && note.readOnly).toBe(true);
@@ -882,6 +882,86 @@ describe("opens from every view (refinement 48)", () => {
 
 describe("PlanPanel", () => {
   const stat = (k: string): HTMLElement => one(`[data-stat="${k}"]`, panel());
+
+  it("summary counts, span, progress; rows open History and Trash and return", async () => {
+    const t = await made([
+      { id: "G", name: "G", kind: "group" },
+      { id: "a", name: "a", parent: "G", start: "2026-11-10", dur: 2, status: "done", progress: 100 },
+      { id: "b", name: "b", parent: "G", start: "2026-11-12", dur: 2, status: "doing", progress: 40 },
+      { id: "T", name: "T", start: "2026-11-20", dur: 3, status: "doing", progress: 10 },
+      { id: "M", name: "M", kind: "milestone", start: "2026-12-01" },
+      { id: "U", name: "U", kind: "milestone" },
+      { id: "K", name: "K", start: "2026-11-10", dur: 1 },
+    ]);
+    act(() => {
+      t.session.apply({ t: "trash", items: ["K"] });
+    });
+    await shown(t);
+    const summary = one(".panel.plan-summary", panel());
+    expect([one("h2", summary).textContent, one(".summary-name", summary).textContent, one(".summary-span", summary).textContent, one(".summary-span", summary).classList.contains("mono")]).toEqual([
+      "Plan",
+      t.session.view().plan.name,
+      "10 Nov – 1 Dec",
+      true,
+    ]);
+    expect([one(".summary-progress", summary).textContent, one(".summary-bar > span", summary).style.width]).toEqual(["Progress 40 %", "40%"]);
+    expect(["Items", "Done", "Unscheduled", "Late", "Held", "Conflicts", "Not started", "In progress"].map((k) => [k, stat(k).textContent])).toEqual([
+      ["Items", "5"],
+      ["Done", "1"],
+      ["Unscheduled", "1"],
+      ["Late", "0"],
+      ["Held", "0"],
+      ["Conflicts", "0"],
+      ["Not started", "2"],
+      ["In progress", "2"],
+    ]);
+    const rows = all("button.summary-row", summary);
+    expect(rows.map((r) => [r.dataset.summaryRow, one(".summary-row-label", r).textContent, one(".summary-row-count", r).textContent, r instanceof HTMLButtonElement && r.disabled])).toEqual([
+      ["history", "History", String(t.session.history().length), false],
+      ["trash", "Trash", "1", false],
+    ]);
+    click(rows[0]);
+    expect([panel().querySelector(".plan-summary .summary-row"), one(".summary-back", panel()).textContent, one(".panel h2", panel()).textContent, all(".history li", panel()).length]).toEqual([
+      null,
+      "‹ Plan",
+      "History",
+      t.session.history().length,
+    ]);
+    click(one(".summary-back", panel()));
+    expect(all("button.summary-row", panel())).toHaveLength(2);
+    click(one('button.summary-row[data-summary-row="trash"]', panel()));
+    expect([one(".panel h2", panel()).textContent, all("[data-trashed]", panel()).map((r) => r.dataset.trashed)]).toEqual(["Trash", ["K"]]);
+    click(within(one('[data-trashed="K"]', panel())).getByRole("button", { name: "Restore" }));
+    const trashRow = one('button.summary-row[data-summary-row="trash"]', panel());
+    expect([panel().querySelector(".summary-back"), one(".summary-row-count", trashRow).textContent, trashRow instanceof HTMLButtonElement && trashRow.disabled]).toEqual([null, "0", true]);
+  });
+
+  it("hands focus to the History row when restoring the last Trash item empties the page", async () => {
+    const t = await made([
+      { id: "K", name: "K", start: "2026-11-10", dur: 1 },
+      { id: "L", name: "L", start: "2026-11-12", dur: 1 },
+    ]);
+    act(() => {
+      t.session.apply({ t: "trash", items: ["K"] });
+    });
+    await shown(t);
+    const historyRow = (): HTMLElement => one('button.summary-row[data-summary-row="history"]', panel());
+    click(historyRow());
+    expect(document.activeElement).toBe(one(".summary-back", panel()));
+    click(one(".summary-back", panel()));
+    expect(document.activeElement).toBe(historyRow());
+    click(one('button.summary-row[data-summary-row="trash"]', panel()));
+    const restore = within(one('[data-trashed="K"]', panel())).getByRole("button", { name: "Restore" });
+    act(() => restore.focus());
+    click(restore);
+    expect([panel().querySelector(".summary-back"), document.activeElement]).toEqual([null, historyRow()]);
+  });
+
+  it("omits the span of a plan with nothing dated, and the progress of a plan without a task", async () => {
+    const t = await made([{ name: "Gate", kind: "milestone" }, { name: "G", kind: "group" }]);
+    await shown(t);
+    expect([panel().querySelector(".summary-span"), panel().querySelector(".summary-progress"), stat("Items").textContent]).toEqual([null, null, "1"]);
+  });
 
   it("counts items, done, unscheduled, late, held and conflicts", async () => {
     const t = await made(
@@ -973,6 +1053,7 @@ describe("PlanPanel", () => {
       t.session.apply({ t: "trash", items: ["T"] });
     });
     await shown(t);
+    click(one('button.summary-row[data-summary-row="trash"]', panel()));
     expect(all("[data-trashed]", panel()).map((r) => r.dataset.trashed)).toEqual(["G", "T"]);
     const apply = vi.spyOn(t.session, "apply");
     click(within(one('[data-trashed="T"]', panel())).getByRole("button", { name: "Restore" }));
@@ -986,6 +1067,10 @@ describe("History", () => {
   const rows = (): HTMLElement[] => all(".history li", panel());
   const rowText = (li: HTMLElement): string | null => one(".hist-text", li).textContent;
   const dialogLines = (): (string | null)[] => all(".revert-text p", screen.getByRole("dialog")).map((p) => p.textContent);
+  const shownHistory = async (t: TestSession): Promise<void> => {
+    await shown(t);
+    click(one('button.summary-row[data-summary-row="history"]', panel()));
+  };
 
   it("lists newest first with time, device and label, dims inactive entries and has no button on the first", async () => {
     const t = await made(SEED);
@@ -994,7 +1079,7 @@ describe("History", () => {
       t.session.apply({ t: "rename", item: "A", name: "B" });
       t.session.undo();
     });
-    await shown(t);
+    await shownHistory(t);
     const h = t.session.history();
     expect(rows().map((li) => li.dataset.action)).toEqual(h.map((e) => e.id));
     expect(rows().map(rowText)).toEqual(h.map((e) => `${historyTime(e.at, "2026-11-09")} · Mac · ${e.label}`));
@@ -1013,7 +1098,7 @@ describe("History", () => {
     act(() => {
       t.session.apply({ t: "move", items: ["A"], days: 1 });
     });
-    await shown(t);
+    await shownHistory(t);
     const id = t.session.history()[0].id;
     const revert = vi.spyOn(t.session, "revert");
     click(within(rows()[0]).getByRole("button", { name: "Revert this action" }));
@@ -1040,7 +1125,7 @@ describe("History", () => {
     act(() => {
       t.session.apply({ t: "planName", name: "Q1" });
     });
-    await shown(t);
+    await shownHistory(t);
     click(within(rows()[0]).getByRole("button", { name: "Revert this action" }));
     expect(dialogLines()).toEqual(["Renamed the plan to “Q1”", "No item dates change."]);
     expect(screen.getByRole("dialog").textContent).not.toMatch(/Changes/);
@@ -1051,7 +1136,7 @@ describe("History", () => {
     act(() => {
       t.session.apply({ t: "move", items: ["A"], days: 1 });
     });
-    await shown(t);
+    await shownHistory(t);
     click(within(rows()[0]).getByRole("button", { name: "Revert this action" }));
     act(() => {
       fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
@@ -1067,7 +1152,7 @@ describe("History", () => {
     const t = await made(SEED, { today: "2026-11-08" });
     const entry: HistoryEntry = { id: "x1", label: "Moved “A”", device: "Mac", at: new Date(2026, 10, 7, 14, 2).getTime(), active: true, root: false };
     vi.spyOn(t.session, "history").mockReturnValue([entry]);
-    await shown(t);
+    await shownHistory(t);
     expect(rows().map(rowText)).toEqual(["7 Nov 14:02 · Mac · Moved “A”"]);
   });
 
@@ -1082,7 +1167,7 @@ describe("History", () => {
       root: i === 119,
     }));
     vi.spyOn(t.session, "history").mockReturnValue(entries);
-    await shown(t);
+    await shownHistory(t);
     const ids = (): (string | undefined)[] => rows().map((li) => li.dataset.action);
     expect(ids()).toEqual(entries.slice(0, 50).map((e) => e.id));
     click(button("Show older changes"));
@@ -1096,7 +1181,7 @@ describe("History", () => {
     const t = await made(SEED);
     const entry: HistoryEntry = { id: "x0", label: "Created the plan", device: "Mac", at: 0, active: true, root: true };
     vi.spyOn(t.session, "history").mockReturnValue([entry]);
-    await shown(t);
+    await shownHistory(t);
     expect(rows().map(rowText)).toEqual([`${historyTime(0, "2026-11-09")} · Mac · Created the plan`]);
     expect(all("button", rows()[0])).toEqual([]);
   });
@@ -1114,7 +1199,7 @@ describe("History", () => {
     const apply = vi.spyOn(t.session, "apply");
     const revert = vi.spyOn(t.session, "revert");
     const resolve = vi.spyOn(t.session, "resolve");
-    await shown(t);
+    await shownHistory(t);
     const local = rows().find((li) => rowText(li)?.endsWith("· Mac · Moved “A” later by 1 working day"));
     if (local === undefined) throw new Error("no row for the local move");
     click(within(local).getByRole("button", { name: "Revert this action" }));
@@ -1133,7 +1218,7 @@ describe("History", () => {
     act(() => {
       t.session.apply({ t: "move", items: ["A"], days: 1 });
     });
-    await shown(t);
+    await shownHistory(t);
     click(within(rows()[0]).getByRole("button", { name: "Revert this action" }));
     expect(screen.getByRole("dialog")).not.toBeNull();
     act(() => {
@@ -1159,21 +1244,35 @@ describe("PlanPanel read-only", () => {
       t.session.apply({ t: "move", items: ["A"], days: 1 });
     });
     await shown(t);
+    const page = (row: "history" | "trash"): void => click(one(`button.summary-row[data-summary-row="${row}"]`, panel()));
+    const back = (): void => click(one(".summary-back", panel()));
     expect(button("Save baseline")).not.toBeNull();
     expect(button("Remove")).not.toBeNull();
-    expect(button("Restore")).not.toBeNull();
     expect(button("Change calendar…")).not.toBeNull();
+    page("trash");
+    expect(button("Restore")).not.toBeNull();
+    back();
+    page("history");
     expect(inPanel().getAllByRole("button", { name: /Revert this action|Bring this action back/ }).length).toBeGreaterThan(0);
+    back();
     const apply = vi.spyOn(t.session, "apply");
     const revert = vi.spyOn(t.session, "revert");
     act(() => t.session.setReadOnly(true));
     expect(panel().querySelectorAll("input, select")).toHaveLength(0);
     expect(panel().textContent).toContain("Plan");
     expect(panel().textContent).toContain("Before");
-    ["Save baseline", "Remove", "Restore", "Change calendar…", "Revert this action", "Bring this action back"].forEach(noButton);
+    ["Save baseline", "Remove", "Change calendar…"].forEach(noButton);
     expect(button("Show")).not.toBeNull();
     click(button("Show"));
     expect(button("Hide")).not.toBeNull();
+    page("trash");
+    noButton("Restore");
+    expect(all("[data-trashed]", panel())).toHaveLength(1);
+    back();
+    page("history");
+    ["Revert this action", "Bring this action back"].forEach(noButton);
+    expect(all(".history li", panel()).length).toBeGreaterThan(0);
+    all("button", panel()).forEach(click);
     all("button", panel()).forEach(click);
     expect([apply.mock.calls.length, revert.mock.calls.length]).toEqual([0, 0]);
   });

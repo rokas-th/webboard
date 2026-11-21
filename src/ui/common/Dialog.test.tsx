@@ -57,6 +57,22 @@ describe("the dialog's close control", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("sizes an item dialog with its own class and marker, and keeps the ✕", () => {
+    render(
+      <Dialog label="Tracking" size="item" onClose={vi.fn()}>
+        <p>body</p>
+      </Dialog>,
+    );
+    expect([dialog().className, dialog().hasAttribute("data-item-modal"), head().querySelectorAll(".modal-close").length]).toEqual(["modal modal-item", true, 1]);
+    cleanup();
+    render(
+      <Dialog label="Plain" wide onClose={vi.fn()}>
+        <p>body</p>
+      </Dialog>,
+    );
+    expect([dialog().className, dialog().hasAttribute("data-item-modal")]).toEqual(["modal modal-wide", false]);
+  });
+
   it("the ✕ commits a focused field first", () => {
     setPlatform(MAC);
     const onCommit = vi.fn(() => true);

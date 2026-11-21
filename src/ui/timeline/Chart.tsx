@@ -6,6 +6,7 @@ import { linkKey, type Item, type ItemId } from "../../domain/model";
 import { liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import type { SetUi, UiState, Zoom } from "../state";
+import { useDetail } from "../detail/DetailContext";
 import { pinched, ROW, WEEK_TICKS_PPD, type Geometry } from "./geometry";
 import type { Marks, Placed } from "./Grid";
 import { linkPath, type End } from "./linkPath";
@@ -158,6 +159,8 @@ function useTouch(p: ChartProps): {
   });
   const allowPickup = !p.readOnly;
   const { setUi, touch } = p;
+  const { press } = useDetail();
+  const lifted = useRef<{ x: number; y: number } | null>(null);
   const ppd = p.geo.ppd;
 
   const live = (): TouchGesture => {
@@ -183,9 +186,11 @@ function useTouch(p: ChartProps): {
           picked.current = null;
           touch.clear();
         } else if (ev.k === "tap") {
+          const up = lifted.current;
           if (ev.item === null) setUi({ selected: null });
-          else if (touch.has(ev.item)) setUi({ selected: ev.item });
-          else reset.current(live());
+          else if (!touch.has(ev.item)) reset.current(live());
+          else if (up === null) throw new Error(`Timeline: a tap on ${ev.item} with no pointer-up point`);
+          else press({ item: ev.item, x: up.x, y: up.y, at: performance.now() });
         } else if (!touch.has(ev.item)) {
           reset.current(live());
         } else if (ev.k === "pickup") {
@@ -264,6 +269,7 @@ function useTouch(p: ChartProps): {
       onPointerUp: (e) => {
         if (e.pointerType !== "touch") return;
         const at = pointOf(e);
+        lifted.current = { x: e.clientX, y: e.clientY };
         const events = live().up(sample(e, at), rowAt(p.mounted, at.y)?.row.id ?? null);
         ended(e.pointerId);
         handle.current(events);

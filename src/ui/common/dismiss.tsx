@@ -32,9 +32,9 @@ export const DISCARD = "Discard";
 
 export const ASK_WAIT_MS = 1000;
 
-export type CloseClass = "sheet-close" | "modal-close" | "drawer-close" | "popover-close" | "palette-close";
+export type CloseClass = "sheet-close" | "modal-close" | "drawer-close" | "popover-close" | "palette-close" | "inspector-close";
 
-export const CLOSE_CONTROLS = ".sheet-close, .modal-close, .drawer-close, .popover-close, .palette-close";
+export const CLOSE_CONTROLS = ".sheet-close, .modal-close, .drawer-close, .popover-close, .palette-close, .inspector-close";
 
 export function CloseGlyph() {
   return (

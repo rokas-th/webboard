@@ -1,6 +1,7 @@
 import { useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { fmtNear, isCalendarDate, toIso, type Day, type IsoDate } from "../../domain/dates";
-import { MAX_TASK_DUR, type Item, type ItemId, type PlanState, type Schedule, type Status } from "../../domain/model";
+import { MAX_TASK_DUR, type Horizon, type Item, type ItemId, type PlanState, type Schedule, type Status } from "../../domain/model";
+import { statusPreds } from "../../domain/derive";
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
@@ -28,7 +29,23 @@ const STATUSES: readonly { v: Status; label: string }[] = [
   { v: "done", label: "Done" },
 ];
 
-const KIND: Readonly<Record<Item["kind"], string>> = { task: "TASK", milestone: "MILESTONE", group: "GROUP" };
+const HORIZONS: readonly { v: Horizon; label: string }[] = [
+  { v: "now", label: "Now" },
+  { v: "next", label: "Next" },
+  { v: "later", label: "Later" },
+];
+
+const horizonOf = (v: string): Horizon => {
+  const found = HORIZONS.find((h) => h.v === v);
+  if (found === undefined) throw new Error(`ItemPanel: no horizon ${v}`);
+  return found.v;
+};
+
+const horizonLabel = (h: Horizon): string => {
+  const found = HORIZONS.find((x) => x.v === h);
+  if (found === undefined) throw new Error(`ItemPanel: no horizon ${h}`);
+  return found.label;
+};
 
 const statusOf = (v: string): Status => {
   const found = STATUSES.find((s) => s.v === v);
@@ -79,6 +96,7 @@ function ProgressField(p: { value: number; readOnly: boolean; onCommit(v: number
         max={100}
         step={5}
         aria-label="Progress"
+        data-detail-field="progress"
         value={draft}
         onChange={(e) => setDraft(Number(e.target.value))}
         onPointerUp={commit}
@@ -112,12 +130,41 @@ function GroupFields(p: { view: PlanView; item: Item }) {
   );
 }
 
+function HorizonField(p: { item: Item; horizon: Horizon; readOnly: boolean; run: Run }) {
+  const id = useId();
+  return (
+    <>
+      <label htmlFor={id}>Horizon</label>
+      {p.readOnly ? (
+        <span className="val">{horizonLabel(p.horizon)}</span>
+      ) : (
+        <select
+          id={id}
+          data-detail-field="horizon"
+          value={p.horizon}
+          onChange={(e) => {
+            const next = horizonOf(e.target.value);
+            if (next !== p.horizon) p.run.run({ t: "schedule", item: p.item.id, set: { horizon: next } });
+          }}
+        >
+          {HORIZONS.map((h) => (
+            <option key={h.v} value={h.v}>
+              {h.label}
+            </option>
+          ))}
+        </select>
+      )}
+    </>
+  );
+}
+
 function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run: Run }) {
   const it = p.item;
   const sc = scheduleOf(it);
   const statusId = useId();
   const dated = sc.start !== null && !it.trashed;
   const milestone = it.kind === "milestone";
+  const derivedFromPreds = milestone && statusPreds(p.view.plan, it.id).length > 0;
   const shownStatus = (): Status => {
     if (it.trashed) return sc.status;
     return derivedStatus(p.view, it.id, "ItemPanel");
@@ -132,9 +179,11 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
         label={milestone ? "Date" : "Start"}
         value={sc.start ?? ""}
         readOnly={p.readOnly}
+        field="start"
         onCommit={(next) => isCalendarDate(next) && schedule({ start: next })}
         onUnreadable={dateUnreadable}
       />
+      {sc.start === null && <HorizonField item={it} horizon={sc.horizon} readOnly={p.readOnly} run={p.run} />}
       {!milestone && (
         <>
           <label>Duration</label>
@@ -161,6 +210,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
                   max={MAX_TASK_DUR}
                   inputMode="numeric"
                   notWhole={DUR_NOT_WHOLE}
+                  field="dur"
                   onCommit={(dur) => p.run.run({ t: "resize", item: it.id, dur }) !== null}
                 />
                 <span className="val">{sc.dur === 1 ? "working day" : "working days"}</span>
@@ -180,14 +230,14 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
           </span>
           <label>End</label>
           {dated && !p.readOnly ? (
-            <EndField view={p.view} item={it} label="End" run={p.run} />
+            <EndField view={p.view} item={it} label="End" run={p.run} field="end" />
           ) : (
             <span className="val">{dated ? dayText(p.view.derived.end, it, "end", p.view.today) : "—"}</span>
           )}
         </>
       )}
       <label htmlFor={statusId}>Status</label>
-      {milestone ? (
+      {derivedFromPreds ? (
         <span className="val">
           {shownStatus() === "done" ? "reached" : "open"} <span className="dimc">· from its predecessors</span>
         </span>
@@ -196,6 +246,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
       ) : (
         <select
           id={statusId}
+          data-detail-field="status"
           value={sc.status}
           onChange={(e) => {
             const next = statusOf(e.target.value);
@@ -243,7 +294,7 @@ export function PlaceFields(p: { plan: PlanState; item: Item; readOnly: boolean;
         {p.readOnly || current === undefined ? (
           <span className="val">{currentLabel}</span>
         ) : (
-          <select id={groupId} value={it.place.parent ?? ""} onChange={(e) => regroup(e.target.value)}>
+          <select id={groupId} data-detail-field="group" value={it.place.parent ?? ""} onChange={(e) => regroup(e.target.value)}>
             {options.map((o) => (
               <option key={o.id ?? ""} value={o.id ?? ""}>
                 {o.label}
@@ -314,7 +365,7 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean; comman
     if (k === "redo") b.redo();
     else b.undo();
   };
-  return <textarea ref={ref} aria-label="Notes" placeholder="Anything worth knowing about this item" readOnly={p.readOnly} onKeyDown={onKeyDown} />;
+  return <textarea ref={ref} aria-label="Notes" data-detail-field="note" placeholder="Anything worth knowing about this item" readOnly={p.readOnly} onKeyDown={onKeyDown} />;
 }
 
 function FirstChoice(p: { view: PlanView; item: ItemId; local: string }) {
@@ -343,14 +394,14 @@ export function ItemPanel(p: { session: PlanSession; item: ItemId; local: string
   if (it === undefined) throw new Error(`ItemPanel: no item ${p.item}`);
   const readOnly = p.readOnly === true || it.trashed;
   return (
-    <div className="panel" ref={root}>
-      <span className="kind">{KIND[it.kind]}</span>
+    <div className="detail-body" ref={root}>
       <FirstChoice view={view} item={it.id} local={p.local} />
       <TextField
         className="title-input"
         label="Name"
         value={it.name}
         readOnly={readOnly}
+        field="name"
         onCommit={(next) => run.run({ t: "rename", item: it.id, name: next }) !== null}
       />
       {it.kind === "group" ? <GroupFields view={view} item={it} /> : <ScheduleFields view={view} item={it} readOnly={readOnly} run={run} />}

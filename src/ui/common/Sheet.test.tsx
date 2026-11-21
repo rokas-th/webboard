@@ -8,7 +8,7 @@ import { resetTauri, tauri } from "../../test/tauriMock";
 import { TextField } from "../panel/TextField";
 import { Dialog } from "./Dialog";
 import { useCloseGuard } from "./dismiss";
-import { Sheet } from "./Sheet";
+import { Sheet, type SheetDetent } from "./Sheet";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
@@ -556,6 +556,74 @@ describe("a swipe down from the sheet head on iOS", () => {
     fireEvent.pointerMove(body, { pointerId: 3, pointerType: "touch", clientY: 600 });
     fireEvent.pointerUp(body, { pointerId: 3, pointerType: "touch", clientY: 600 });
     expect([onClose.mock.calls.length, dialog().style.transform]).toEqual([0, ""]);
+  });
+
+  it("detents: up to large, down to medium, down again closes", () => {
+    setPlatform(IPHONE);
+    const onClose = vi.fn();
+    const onDetent = vi.fn();
+    function Detented() {
+      const [detent, setDetent] = useState<SheetDetent>("medium");
+      return (
+        <Sheet
+          open
+          title="Review"
+          detent={detent}
+          onDetent={(d) => {
+            onDetent(d);
+            setDetent(d);
+          }}
+          onClose={onClose}
+        >
+          <p>Body</p>
+        </Sheet>
+      );
+    }
+    render(<Detented />);
+    measured();
+    expect(dialog().dataset.detent).toBe("medium");
+    swipe(-40, 1000);
+    expect([dialog().dataset.detent, onDetent.mock.calls, onClose.mock.calls.length]).toEqual(["medium", [], 0]);
+    swipe(-49, 1000);
+    expect([dialog().dataset.detent, onDetent.mock.calls, onClose.mock.calls.length, dialog().style.transform]).toEqual(["large", [["large"]], 0, ""]);
+    swipe(-200, 100);
+    expect([dialog().dataset.detent, onDetent.mock.calls.length]).toEqual(["large", 1]);
+    swipe(120, 1000);
+    expect([dialog().dataset.detent, onDetent.mock.calls.length, onClose.mock.calls.length]).toEqual(["large", 1, 0]);
+    swipe(SHEET_HEIGHT * 0.25 + 10, 2000);
+    expect([dialog().dataset.detent, onDetent.mock.calls, onClose.mock.calls.length]).toEqual(["medium", [["large"], ["medium"]], 0]);
+    swipe(SHEET_HEIGHT * 0.25 + 10, 2000);
+    expect([onDetent.mock.calls.length, onClose.mock.calls.length]).toEqual([2, 1]);
+  });
+
+  it("a fast upward flick from medium reaches large", () => {
+    setPlatform(IPHONE);
+    const onDetent = vi.fn();
+    render(
+      <Sheet open title="Review" detent="medium" onDetent={onDetent} onClose={() => undefined}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    measured();
+    swipe(-41, 50);
+    expect(onDetent.mock.calls).toEqual([["large"]]);
+  });
+
+  it("puts its actions in place of the empty end slot, and marks no detent without one", () => {
+    setPlatform(IPHONE);
+    render(
+      <Sheet open title="Review" onClose={() => undefined} actions={<button type="button">Done</button>}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    expect([[...head().children].map((k) => k.className), within(head()).getByRole("button", { name: "Done" }).parentElement?.className, dialog().dataset.detent]).toEqual([
+      ["sheet-close", "sheet-title", "sheet-actions"],
+      "sheet-actions",
+      undefined,
+    ]);
+    measured();
+    swipe(-200, 100);
+    expect(dialog().style.transform).toBe("");
   });
 
   it("a kept guarded swipe snaps back", async () => {

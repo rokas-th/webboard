@@ -71,6 +71,9 @@ interface Harness {
   useCyberdeck: ReturnType<typeof vi.fn<() => void>>;
   preview: ReturnType<typeof vi.fn<(id: string | null) => void>>;
   toggleList: ReturnType<typeof vi.fn<() => void>>;
+  promote: ReturnType<typeof vi.fn<(id: string) => void>>;
+  toggleModal: ReturnType<typeof vi.fn<() => void>>;
+  rename: ReturnType<typeof vi.fn<(id: string) => void>>;
 }
 
 function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly string[] = [], more: Partial<Registry> = {}): Harness {
@@ -84,6 +87,9 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
   const open = vi.fn<(choice: string, side?: string) => void>();
   const useCyberdeck = vi.fn<() => void>();
   const preview = vi.fn<(id: string | null) => void>();
+  const promote = vi.fn<(id: string) => void>();
+  const toggleModal = vi.fn<() => void>();
+  const rename = vi.fn<(id: string) => void>();
   const theme = { useCyberdeck, preview } as unknown as ThemeApi;
   const id = t.session.view().plan.id;
   const registry = testRegistry(t, {
@@ -117,8 +123,9 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     print,
     updates: null,
     theme,
+    detail: { promote, toggleModal, rename },
   };
-  return { ctx, setUi, select, newPlan, newExample, reveal, print, open, useCyberdeck, preview, toggleList };
+  return { ctx, setUi, select, newPlan, newExample, reveal, print, open, useCyberdeck, preview, toggleList, promote, toggleModal, rename };
 }
 
 const find = (ctx: CommandCtx, id: string) => {
@@ -138,7 +145,7 @@ describe("commands()", () => {
     const baseline = [...t.session.view().plan.baselines.keys()][0];
     const h = harness(t, { selected: "a" }, ["p2"]);
     const all = ids(h.ctx);
-    const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash", "today", "select-next", "select-prev", "duplicate", "print"];
+    const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash", "today", "select-next", "select-prev", "duplicate", "print", "detail-modal", "detail-open", "rename"];
     const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", "zoom-F", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "settings", "about"];
     const goTo = ["g1", "a", "b", "one", "m", "u"].map((x) => `goto:${x}`);
     expect([...keyed, ...more, ...goTo].filter((x) => !all.includes(x))).toEqual([]);
@@ -322,13 +329,66 @@ describe("commands()", () => {
       [[{ selected: "one", follow: "one" }]],
       [[{ selected: "g1", follow: "g1" }]],
     ]);
-    expect([find(harness(t).ctx, "select-next").keys, find(harness(t).ctx, "select-prev").keys]).toEqual(["↓", "↑"]);
+    const next = find(harness(t).ctx, "select-next");
+    const prev = find(harness(t).ctx, "select-prev");
+    expect([next.label, next.keys, prev.label, prev.keys]).toEqual(["Select the next item", "↓ or J", "Select the previous item", "↑ or K"]);
   });
 
-  it("offers the row steps only on the timeline", async () => {
+  it("toggles the item modal, opens and renames the selected item, labelled with their keys", async () => {
+    const t = await made(SMALL);
+    const h = harness(t, { selected: "a" });
+    const [modal, open, rename] = ["detail-modal", "detail-open", "rename"].map((id) => find(h.ctx, id));
+    expect([modal, open, rename].map((c) => [c.group, c.label, c.keys])).toEqual([
+      ["Edit", "Toggle the item modal", "Space"],
+      ["Edit", "Open the item", "⌘↓"],
+      ["Edit", "Rename the item", "Return"],
+    ]);
+    modal.run();
+    open.run();
+    rename.run();
+    expect([h.toggleModal.mock.calls, h.promote.mock.calls, h.rename.mock.calls]).toEqual([[[]], [["a"]], [["a"]]]);
+    expect(find({ ...h.ctx, command: false }, "detail-open").keys).toBe("Ctrl ↓");
+    expect(ids(harness(t).ctx).filter((x) => x.startsWith("detail-") || x === "rename")).toEqual([]);
+    expect(ids({ ...h.ctx, detail: null }).filter((x) => x.startsWith("detail-") || x === "rename")).toEqual([]);
+  });
+
+  it("keeps Space and Return working on a read-only plan and a trashed selection, where Return only shows the item", async () => {
+    const t = await made(SMALL);
+    const ro = harness(t, { selected: "a" });
+    const shownOnly = find({ ...ro.ctx, readOnly: true }, "rename");
+    expect([shownOnly.label, shownOnly.keys]).toEqual(["Show the item in the inspector", "Return"]);
+    shownOnly.run();
+    expect(ro.rename.mock.calls).toEqual([["a"]]);
+    t.session.apply({ t: "trash", items: ["one"] });
+    const gone = harness(t, { selected: "one" });
+    expect(ids(gone.ctx).filter((x) => x.startsWith("detail-") || x === "rename" || x === "trash" || x.startsWith("nudge"))).toEqual(["detail-modal", "detail-open", "rename"]);
+    expect(find(gone.ctx, "rename").label).toBe("Show the item in the inspector");
+  });
+
+  it("offers the steps on every tab", async () => {
     const t = await made(SMALL);
     const steps = (view: UiState["view"]): string[] => ids(harness(t, { view }).ctx).filter((x) => x.startsWith("select-"));
-    expect([steps("board"), steps("list"), steps("timeline")]).toEqual([[], [], ["select-next", "select-prev"]]);
+    expect([steps("board"), steps("list"), steps("timeline")]).toEqual([
+      ["select-next", "select-prev"],
+      ["select-next", "select-prev"],
+      ["select-next", "select-prev"],
+    ]);
+  });
+
+  it("steps through the Board's cards and the List's rows in their own order, selecting without following a bar", async () => {
+    const t = await made(SMALL);
+    const step = (ui: Partial<UiState>, id: string): unknown[] => {
+      const h = harness(t, ui);
+      find(h.ctx, id).run();
+      return h.setUi.mock.calls;
+    };
+    expect([
+      step({ view: "board" }, "select-next"),
+      step({ view: "board", selected: "b" }, "select-next"),
+      step({ view: "board", selected: "g1" }, "select-prev"),
+      step({ view: "list" }, "select-prev"),
+      step({ view: "list", selected: "one" }, "select-prev"),
+    ]).toEqual([[[{ selected: "a" }]], [[{ selected: "one" }]], [[{ selected: "u" }]], [[{ selected: "u" }]], [[{ selected: "b" }]]]);
   });
 
   it("selects and reveals on Go to, for an item and for a group", async () => {
@@ -778,6 +838,6 @@ describe("inspector and outline commands", () => {
     const toggle = vi.fn<() => void>();
     const c = find({ ...h.ctx, listMode: "sheet", outline: { open: true, toggle } }, "outline");
     expect([c.label, c.keys]).toEqual(["Hide the outline", "⌥⌘L"]);
-    expect(keyToCommand({ key: "¬", code: "KeyL", metaKey: true, ctrlKey: false, shiftKey: false, altKey: true }, { command: true, typing: false, dialog: false, selected: false, listMode: "sheet" })).toBe(c.id);
+    expect(keyToCommand({ key: "¬", code: "KeyL", metaKey: true, ctrlKey: false, shiftKey: false, altKey: true }, { command: true, typing: false, dialog: false, selected: false, control: false, listMode: "sheet" })).toBe(c.id);
   });
 });

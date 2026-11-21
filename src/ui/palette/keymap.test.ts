@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { isTyping, keyToCommand, type KeyInput, type KeyState } from "./keymap";
+import { isControl, isTyping, keyToCommand, type KeyInput, type KeyState } from "./keymap";
 
 const codeOf = (key: string): string => (/^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : /^[0-9]$/.test(key) ? `Digit${key}` : key);
 
 const k = (key: string, o: Partial<KeyInput> = {}): KeyInput => ({ key, code: codeOf(key), metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...o });
 
-const MAC: KeyState = { command: true, typing: false, dialog: false, selected: false, listMode: "column" };
+const MAC: KeyState = { command: true, typing: false, dialog: false, selected: false, control: false, listMode: "column" };
 const PC: KeyState = { ...MAC, command: false };
 
 describe("keyToCommand on macOS", () => {
@@ -73,6 +73,39 @@ describe("keyToCommand on macOS", () => {
     expect([keyToCommand(k("ArrowDown", { shiftKey: true }), MAC), keyToCommand(k("ArrowUp", { altKey: true }), MAC)]).toEqual([null, null]);
   });
 
+  it("opens the item modal on Space and renames on Return, only with a selection, never on a control, while typing or in a dialog", () => {
+    const sel = { ...MAC, selected: true };
+    expect([keyToCommand(k(" "), sel), keyToCommand(k("Enter"), sel), keyToCommand(k(" "), { ...PC, selected: true }), keyToCommand(k("Enter"), { ...PC, selected: true })]).toEqual(["detail-modal", "rename", "detail-modal", "rename"]);
+    expect([keyToCommand(k(" "), { ...sel, control: true }), keyToCommand(k("Enter"), { ...sel, control: true })]).toEqual([null, null]);
+    expect([keyToCommand(k(" "), { ...sel, typing: true }), keyToCommand(k("Enter"), { ...sel, dialog: true })]).toEqual([null, null]);
+    expect([keyToCommand(k(" ", { shiftKey: true }), sel), keyToCommand(k("Enter", { altKey: true }), sel), keyToCommand(k(" ", { metaKey: true }), sel)]).toEqual([null, null, null]);
+  });
+
+  it("opens the item on ⌘↓ and Ctrl ↓ off macOS, only with a selection, not while typing or in a dialog", () => {
+    expect([keyToCommand(k("ArrowDown", { metaKey: true }), { ...MAC, selected: true }), keyToCommand(k("ArrowDown", { ctrlKey: true }), { ...PC, selected: true })]).toEqual(["detail-open", "detail-open"]);
+    expect([keyToCommand(k("ArrowDown", { metaKey: true }), MAC), keyToCommand(k("ArrowDown", { ctrlKey: true }), { ...MAC, selected: true }), keyToCommand(k("ArrowDown", { metaKey: true }), { ...MAC, selected: true, typing: true })]).toEqual([null, null, null]);
+    expect([keyToCommand(k("ArrowDown", { metaKey: true }), { ...MAC, selected: true, dialog: true }), keyToCommand(k("ArrowDown", { metaKey: true, shiftKey: true }), { ...MAC, selected: true }), keyToCommand(k("ArrowUp", { metaKey: true }), { ...MAC, selected: true })]).toEqual([null, null, null]);
+  });
+
+  it("knows the controls Space and Return belong to", () => {
+    const made = (html: string): Element => {
+      const host = document.createElement("div");
+      host.innerHTML = html;
+      const el = host.querySelector("[data-t]");
+      if (el === null) throw new Error("no target");
+      return el;
+    };
+    const controls = ['<input type="checkbox" data-t>', '<input type="range" data-t>', '<textarea data-t></textarea>', '<button data-t>x</button>', '<a href="#" data-t>x</a>', '<select data-t></select>', '<details><summary data-t>x</summary></details>', '<div role="switch" data-t></div>', '<div role="checkbox" data-t></div>', '<div role="radio" data-t></div>', '<div role="tab" data-t></div>', '<div role="menuitem" data-t></div>', '<div role="slider" data-t></div>', '<button><svg data-t></svg></button>'];
+    const others = ['<div tabindex="0" data-t></div>', '<a data-t>x</a>', '<div role="option" data-t></div>', '<div class="detail" tabindex="-1" data-t></div>'];
+    expect([controls.map((h) => isControl(made(h))), others.map((h) => isControl(made(h))), isControl(null), isControl(window)]).toEqual([controls.map(() => true), others.map(() => false), false, false]);
+  });
+
+  it("steps on J and K like ArrowDown and ArrowUp, never with a modifier, while typing or in a dialog", () => {
+    expect([keyToCommand(k("j"), MAC), keyToCommand(k("k"), { ...PC, selected: true }), keyToCommand(k("J"), MAC), keyToCommand(k("K"), MAC)]).toEqual(["select-next", "select-prev", "select-next", "select-prev"]);
+    expect([keyToCommand(k("j"), { ...MAC, typing: true }), keyToCommand(k("k"), { ...MAC, dialog: true })]).toEqual([null, null]);
+    expect([keyToCommand(k("J", { shiftKey: true }), MAC), keyToCommand(k("j", { altKey: true }), MAC), keyToCommand(k("j", { metaKey: true }), MAC), keyToCommand(k("k", { ctrlKey: true }), MAC)]).toEqual([null, null, null, null]);
+  });
+
   it("moves the selected item up and down among its siblings on Alt+ArrowUp and Alt+ArrowDown, only with a selection", () => {
     const sel = { ...MAC, selected: true };
     expect([keyToCommand(k("ArrowUp", { altKey: true }), sel), keyToCommand(k("ArrowDown", { altKey: true }), { ...PC, selected: true })]).toEqual(["move-up", "move-down"]);
@@ -93,7 +126,8 @@ describe("keyToCommand on macOS", () => {
   });
 
   it("leaves other keys alone", () => {
-    expect(["4", "a", "Enter", "Tab", " "].map((key) => keyToCommand(k(key), { ...MAC, selected: true }))).toEqual([null, null, null, null, null]);
+    expect(["4", "a", "Tab"].map((key) => keyToCommand(k(key), { ...MAC, selected: true }))).toEqual([null, null, null]);
+    expect(["Enter", " "].map((key) => keyToCommand(k(key), MAC))).toEqual([null, null]);
     expect(keyToCommand(k("1", { metaKey: true }), MAC)).toBeNull();
     expect(keyToCommand(k("n", { altKey: true }), MAC)).toBeNull();
   });

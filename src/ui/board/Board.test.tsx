@@ -341,14 +341,20 @@ describe("Board clicks (refinement 48)", () => {
     expect(uiNow().selected).toBeNull();
   });
 
-  it.each(["Enter", " "])("selects a card by the %j key", async (key) => {
+  it("selects a card and renames it on Enter, and opens it as the item modal on Space", async () => {
     const t = await made([{ name: "a", start: "2026-11-20" }]);
     await board(t);
     act(() => {
       card("a").focus();
-      fireEvent.keyDown(card("a"), { key });
+      fireEvent.keyDown(card("a"), { key: "Enter" });
     });
-    expect(uiNow().selected).toBe("a");
+    const name = document.querySelector('#inspector [data-detail-field="name"]');
+    expect([uiNow().selected, uiNow().dialog, document.activeElement === name && name !== null]).toEqual(["a", null, true]);
+    act(() => {
+      card("a").focus();
+      fireEvent.keyDown(card("a"), { key: " " });
+    });
+    expect([uiNow().selected, uiNow().dialog, document.querySelector("[data-item-modal] [data-detail]")?.getAttribute("data-detail-item")]).toEqual(["a", { t: "item" }, "a"]);
   });
 });
 

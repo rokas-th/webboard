@@ -14,6 +14,7 @@ import { hold, resetTauri, tauri } from "../../test/tauriMock";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { PLACE_KEY } from "../state";
+import { PaneOverlay } from "./PlanOverlay";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
@@ -749,5 +750,18 @@ describe("other platforms at the same width", () => {
       expect(screen.getByRole("dialog", { name: "Plans" }).classList.contains("sheet")).toBe(true);
       cleanup();
     }
+  });
+});
+
+describe("PaneOverlay's scrim pairing", () => {
+  it("throws when a drawer other than the inspector is given a scrim press", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() =>
+      render(
+        <PaneOverlay kind="plan" label="Plans" open button={{ current: null }} width={320} onClose={vi.fn()} onScrimPress={() => false} onFocusDropped={vi.fn()}>
+          <p>list</p>
+        </PaneOverlay>,
+      ),
+    ).toThrow("PaneOverlay: only the inspector drawer pairs scrim presses, not the plan one");
   });
 });

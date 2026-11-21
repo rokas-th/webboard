@@ -151,7 +151,7 @@ const styled = new Set(sheet.rules.flatMap((r) => (r.selector.match(/\.[A-Za-z][
 
 describe("every class the stylesheets style", () => {
   it("reads the sources and sheets it is asserting against", () => {
-    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./list.css", "./palette.css", "./panel.css", "./phone.css", "./print.css", "./sheet.css", "./shell.css", "./sync.css", "./theme.css", "./timeline.css", "./tokens.css"]);
+    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./detail.css", "./list.css", "./palette.css", "./panel.css", "./phone.css", "./print.css", "./sheet.css", "./shell.css", "./sync.css", "./theme.css", "./timeline.css", "./tokens.css"]);
     expect(Object.keys(SOURCES).length).toBeGreaterThan(40);
     expect(CODE.length).toBeGreaterThan(100000);
     expect(styled.size).toBeGreaterThan(60);
@@ -257,6 +257,7 @@ describe("the Cyberdeck look", () => {
       ".sheet-close::after": ".sheet-close",
       ".modal-close::after": ".modal-close",
       ".drawer-close::after": ".drawer-close",
+      ".inspector-close::after": ".inspector-close",
       ".palette-close::after": ".palette-close",
       ".popover-close::before": ".popover-close",
       'html[data-os="ios"] .popover-close::after': 'html[data-os="ios"] .popover-close',
@@ -289,8 +290,43 @@ describe("the Cyberdeck look", () => {
     expect(sheet.rules.some((r) => r.selector === ".tl-scroll" && r.decls["position"] === "relative" && r.decls["overflow"] === "auto")).toBe(true);
   });
 
+  it("sizes the detail head's steps at 28 px and 44 pt on iOS, the position in mono and dim", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    [".detail-prev", ".detail-next", ".detail-expand"].forEach((sel) => {
+      expect([sel, decls(sel)["width"], decls(sel)["height"]]).toEqual([sel, "28px", "28px"]);
+      expect([sel, decls(`${IOS} ${sel}`)["width"], decls(`${IOS} ${sel}`)["height"]]).toEqual([sel, "44px", "44px"]);
+    });
+    expect([decls(".detail-head")["display"], decls(".detail-head")["align-items"]]).toEqual(["flex", "center"]);
+    expect([decls(".mono")["font-family"], decls(".detail-pos")["color"]]).toEqual(["var(--mono)", "var(--dim)"]);
+  });
+
+  it("sizes the item modal 720 px by 80 vh, inside the window, a column whose body scrolls, narrower on an iPad", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    const m = decls(".modal.modal-item");
+    expect([m["width"], m["height"], m["max-height"], m["display"], m["flex-direction"], m["overflow"]]).toEqual(["720px", "80vh", "calc(100% - 40px)", "flex", "column", "hidden"]);
+    expect(decls(`${IOS} .modal.modal-item`)["width"]).toBe("min(720px, 100% - 48px)");
+    const body = decls(".modal-item-body");
+    expect([body["flex"], body["min-height"], body["overflow-y"]]).toEqual(["1 1 auto", "0", "auto"]);
+  });
+
+  it("holds a phone sheet at 52 % on the medium detent and full height on the large one", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect([decls('html[data-form="phone"] .sheet[data-detent="medium"]')["height"], decls('html[data-form="phone"] .sheet[data-detent="large"]')["height"]]).toEqual(["52%", "100%"]);
+    expect([decls(".sheet-actions")["display"], decls(".sheet-actions")["flex"]]).toEqual(["flex", "none"]);
+  });
+
+  it("lines the summary rows with 1 px --line, 44 pt on iOS", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect([decls(".summary-row")["border-bottom"], decls(".summary-rows")["border-top"], decls(`${IOS} .summary-row`)["min-height"]]).toEqual([
+      "1px solid var(--line)",
+      "1px solid var(--line)",
+      "44px",
+    ]);
+    expect(decls(`${IOS} .inspector-close`)).toEqual({ width: "44px", height: "44px" });
+  });
+
   it("clips every name to one line", () => {
-    [".entry-name", ".plan-head h1", ".plan-head .plan-name-input", ".choice-row", ".tl-row .name", ".list-name", ".palette-label"].forEach((sel) => {
+    [".entry-name", ".plan-head h1", ".plan-head .plan-name-input", ".choice-row", ".tl-row .name", ".list-name", ".palette-label", ".plan-summary .summary-name"].forEach((sel) => {
       const decls = Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
       expect([sel, decls["overflow"], decls["text-overflow"], decls["white-space"]]).toEqual([sel, "hidden", "ellipsis", "nowrap"]);
     });
@@ -487,6 +523,7 @@ const BUTTON_HOVERS = [
   ".sheet-close:hover:not(:disabled)",
   ".modal-close:hover:not(:disabled)",
   ".drawer-close:hover:not(:disabled)",
+  ".inspector-close:hover:not(:disabled)",
   ".popover-close:hover:not(:disabled)",
   ".palette-close:hover:not(:disabled)",
 ];
