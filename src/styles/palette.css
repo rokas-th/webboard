@@ -18,10 +18,26 @@
   overflow: hidden;
 }
 
-.palette input {
-  width: 100%;
-  border: none;
+.palette-field {
+  display: flex;
+  align-items: flex-start;
   border-bottom: 1px solid var(--line);
+}
+
+.palette-field .palette-close {
+  margin-block-start: 7px;
+  margin-inline-end: 7px;
+}
+
+html[data-os="ios"] .palette-field .palette-close {
+  margin-block-start: 1px;
+  margin-inline-end: 2px;
+}
+
+.palette input {
+  flex: 1 1 0;
+  min-width: 0;
+  border: none;
   border-radius: 0;
   background: transparent;
   padding: 14px 16px;

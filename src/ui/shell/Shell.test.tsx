@@ -13,7 +13,7 @@ import { importPlan, type Imported } from "../../store/file";
 import { IndexDoc } from "../../store/index-doc";
 import type { PersistedDoc } from "../../store/persist";
 import { Registry } from "../../store/registry";
-import type { PlanSession } from "../../store/session";
+import { NEWER_PLAN, type PlanSession } from "../../store/session";
 import { deleteClash } from "../../test/fixtures/deleteClash";
 import { memoryStore } from "../../test/fixtures/store";
 import { MESA_SEED, memoryDoc, testSession, type SeedItem, type TestSession } from "../../test/session";
@@ -731,8 +731,11 @@ describe("PlanHead", () => {
     const view = render(<Head session={t.session} onChoose={vi.fn()} />);
     const bad = (): (string | null)[] => [...view.container.querySelectorAll(".bad")].map((e) => e.textContent);
     expect(bad()).toEqual(messages);
+    const lines = (): (string | null)[] => [...view.container.querySelectorAll(".head-line")].map((e) => e.textContent);
+    expect(lines()).toEqual([NEWER_PLAN, ...messages]);
     view.rerender(<Head session={t.session} onChoose={vi.fn()} />);
     expect(bad()).toEqual(messages);
+    expect(lines()).toEqual([NEWER_PLAN, ...messages]);
     expect(screen.getByText("Receiving… · 1 change waiting")).toBeTruthy();
   });
 
@@ -775,6 +778,37 @@ describe("PlanHead", () => {
     fireEvent.click(rows[1]);
     expect(onChoose.mock.calls).toEqual([[view.choices[1].id]]);
     expect(screen.queryByRole("list", { name: "Open choices" })).toBeNull();
+  });
+
+  it("holds the list in a popover whose ✕, Escape and scrim close it, focus staying on Choose…", async () => {
+    const t = await made(A, { clashes: [NAME_CLASH] });
+    const onChoose = vi.fn();
+    render(<Head session={t.session} onChoose={onChoose} />);
+    const choose = screen.getByRole("button", { name: "Choose…" });
+    const open = (): HTMLElement => {
+      act(() => choose.focus());
+      fireEvent.click(choose);
+      expect(document.activeElement).toBe(choose);
+      return screen.getByRole("dialog", { name: "Open choices" });
+    };
+    const box = open();
+    expect([box.classList.contains("popover"), box.hasAttribute("aria-modal"), [...box.children].map((k) => k.className)]).toEqual([true, false, ["choice-list", "popover-close"]]);
+    expect(within(box).getByRole("list", { name: "Open choices" })).toBeTruthy();
+    fireEvent.click(within(box).getByRole("button", { name: "Close" }));
+    expect([screen.queryByRole("dialog", { name: "Open choices" }), choose.getAttribute("aria-expanded")]).toEqual([null, "false"]);
+    open();
+    fireEvent.keyDown(choose, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Open choices" })).toBeNull();
+    open();
+    const scrim = document.querySelector(".popover-scrim");
+    if (!(scrim instanceof HTMLElement)) throw new Error("no popover scrim");
+    const under = vi.spyOn(document, "elementFromPoint").mockReturnValue(scrim);
+    fireEvent.pointerDown(scrim, { button: 0, pointerType: "mouse", clientX: 5, clientY: 5 });
+    fireEvent.pointerUp(scrim, { button: 0, pointerType: "mouse", clientX: 5, clientY: 5 });
+    fireEvent.click(scrim, { button: 0, clientX: 5, clientY: 5 });
+    under.mockRestore();
+    expect(screen.queryByRole("dialog", { name: "Open choices" })).toBeNull();
+    expect([document.activeElement, onChoose.mock.calls]).toEqual([choose, []]);
   });
 
   it("lists this device's side first even when the iPhone's replays first", async () => {
@@ -1778,6 +1812,38 @@ describe("the panel slot", () => {
     });
   };
 
+  it("a newer plan closes every editing path", async () => {
+    const t = await made(MESA_SEED, { raw: { x1: ["iphone", "s1", 0, [], 42, []] } });
+    expect(t.session.readOnlyReason).toBe(NEWER_PLAN);
+    await shown(t);
+    const count = t.session.view().plan.items.size;
+    expect(document.querySelector(".plan-head .forward-lock")?.textContent).toBe(NEWER_PLAN);
+    const bar = document.querySelector(".toolbar");
+    if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
+    expect(["+ New", "Undo", "Redo"].map((name) => within(bar).getByRole("button", { name }).hasAttribute("disabled"))).toEqual([true, true, true]);
+    expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
+    expect(screen.getByLabelText("Plan name").tagName).toBe("SPAN");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "n" });
+    });
+    expect(toastTexts()).toEqual([NEWER_PLAN]);
+    expect(t.session.view().plan.items.size).toBe(count);
+    select("t3");
+    expect(panel().querySelectorAll("input, select")).toHaveLength(0);
+    expect(inPanel().queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(inPanel().queryByRole("button", { name: "Move to Trash" })).toBeNull();
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Delete" });
+    });
+    expect(toastTexts()).toEqual([NEWER_PLAN, NEWER_PLAN]);
+    expect(t.session.view().plan.items.get("t3")?.trashed).toBe(false);
+    expect(document.querySelectorAll(".nub")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("tab", { name: "Now · Next · Later" }));
+    const cards = [...document.querySelectorAll<HTMLElement>("[data-card]")];
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.filter((c) => c.draggable)).toEqual([]);
+  });
+
   it("drops nubs, handles and panel fields when the session turns read-only, and brings the nubs back", async () => {
     const t = await made(MESA_SEED);
     await shown(t);
@@ -2039,6 +2105,37 @@ describe("calendar dialog in the shell", () => {
     await settle();
     expect(lastUi().dialog).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("Escape outside the open dialog goes through its guard", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const panel = slot("panel");
+    if (!(panel instanceof HTMLElement)) throw new Error("no panel");
+    fireEvent.click(within(panel).getByRole("button", { name: "Change calendar…" }));
+    await settle();
+    const before = t.session.view().plan.calendar;
+    fireEvent.click(within(within(calendarDialogs()[0]).getByRole("group", { name: "Working days" })).getByRole("button", { name: "Sat" }));
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+    await settle();
+    const ask = screen.getByRole("alertdialog", { name: "Discard calendar changes?" });
+    expect([lastUi().dialog, calendarDialogs().length, document.activeElement]).toEqual([{ t: "calendar" }, 1, within(ask).getByRole("button", { name: "Keep editing" })]);
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+    await settle();
+    expect([screen.queryByRole("alertdialog"), calendarDialogs().length, lastUi().dialog]).toEqual([null, 1, { t: "calendar" }]);
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+    await settle();
+    fireEvent.click(within(screen.getByRole("alertdialog", { name: "Discard calendar changes?" })).getByRole("button", { name: "Discard" }));
+    await settle();
+    expect([screen.queryByRole("dialog"), screen.queryByRole("alertdialog"), lastUi().dialog]).toEqual([null, null, null]);
+    expect(t.session.view().plan.calendar).toBe(before);
   });
 
   it("opens the same dialog from Choose region on a plan with no region", async () => {

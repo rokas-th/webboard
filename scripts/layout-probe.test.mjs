@@ -312,6 +312,18 @@ test("centredIn passes a centred box and fails one 2 px off", async () => {
   assert.equal((await act(box(102), { centredIn: ".s" })).fail, ".s sits 2 px across and 0 px down from the window's centre");
 });
 
+test("corner passes a control near its box's corner and fails one past the gap, out of the box or in no box", async () => {
+  const body = (left, top) =>
+    `<div class="m" style="position: absolute; left: 100px; top: 50px; width: 200px; height: 120px"><button class="x" style="position: absolute; left: ${left}px; top: ${top}px; width: 24px; height: 24px; margin: 0">X</button></div>`;
+  assert.deepEqual(await act(body(16, 18), { corner: [".x", ".m", "top-leading", 20] }), { ok: true });
+  assert.equal((await act(body(24, 18), { corner: [".x", ".m", "top-leading", 20] })).fail, ".x sits 24 px from the leading side and 18 px from the top of its .m, more than 20");
+  assert.deepEqual(await act(body(164, 4), { corner: [".x", ".m", "top-trailing", 12] }), { ok: true });
+  assert.equal((await act(body(16, 4), { corner: [".x", ".m", "top-trailing", 12] })).fail, ".x sits 160 px from the trailing side and 4 px from the top of its .m, more than 12");
+  assert.equal((await act(body(-4, 4), { corner: [".x", ".m", "top-leading", 20] })).fail, ".x runs out of its .m");
+  assert.equal((await act('<button class="x">X</button>', { corner: [".x", ".m", "top-leading", 20] })).fail, ".x is not inside a .m");
+  assert.equal((await act("<p>x</p>", { corner: [".x", ".m", "top-leading", 20] })).fail, "no .x on screen to measure");
+});
+
 test("kept passes a box that stayed and names the edges of one that moved", async () => {
   const body = '<div class="k" style="position: absolute; left: 10px; top: 10px; width: 100px; height: 40px">K</div>';
   assert.deepEqual(await actAll(body, [{ keep: ".k" }, { kept: ".k" }]), [{ ok: true }, { ok: true }]);
@@ -349,4 +361,11 @@ test("still waits for a transition beside an infinite animation, and does not wa
   assert.ok(Date.now() - started < 5000);
   const left = await evaluate(page.cdp, page.sessionId, 'document.querySelector(".t").getBoundingClientRect().left');
   assert.equal(left, 100);
+});
+
+test("style reads a pseudo-element's used size and names it when it differs", async () => {
+  const body = '<style>.x { position: relative; width: 28px; height: 28px; } .x::after { content: ""; position: absolute; inset: 2px; }</style><button class="x">X</button>';
+  assert.deepEqual(await act(body, { style: [".x", "width", "24px", "::after"] }), { ok: true });
+  assert.deepEqual(await act(body, { style: [".x", "width", "28px", "::after"] }), { fail: '.x::after has width: "24px", not "28px"' });
+  assert.deepEqual(await act(body, { style: [".x", "width", "28px"] }), { ok: true });
 });

@@ -2,13 +2,13 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { Built } from "../../actions/intents";
 import { childrenOf } from "../../plan/project";
-import type { HistoryEntry, PlanSession } from "../../store/session";
+import { READ_ONLY, type HistoryEntry, type PlanSession } from "../../store/session";
 import { deleteClash } from "../../test/fixtures/deleteClash";
 import { fs, MESA_SEED, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { shellFor } from "../../test/shell";
 import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
-import { OpenChoice, READ_ONLY } from "../run";
+import { OpenChoice } from "../run";
 import { UiContext, useUi, type UiState } from "../state";
 import { historyTime, revertText } from "./historyText";
 import { groupOptions, ItemPanel } from "./ItemPanel";
@@ -453,7 +453,7 @@ describe("ItemPanel fields", () => {
     await shown(t);
     select("X");
     const apply = vi.spyOn(t.session, "apply");
-    vi.spyOn(t.session, "readOnly", "get").mockReturnValue(true);
+    vi.spyOn(t.session, "readOnlyReason", "get").mockReturnValue(READ_ONLY);
     act(() => {
       input("Progress").focus();
       fireEvent.change(input("Progress"), { target: { value: "70" } });

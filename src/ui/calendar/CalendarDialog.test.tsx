@@ -1284,6 +1284,27 @@ describe("failed years in the day list", () => {
     expect(within(head()).getByText("Holidays for 2027 ready — review")).toBeTruthy();
   });
 
+  it("closes at once on ✕ when the only change is a year it took from a ready notice", async () => {
+    const y = year2027();
+    const t = await made([], { calendar: zhPlan({ holidays: new Map([[2026, CH_ZH_2026]]) }), answers: { holidays_year: y.holidaysYear } });
+    await shown(t);
+    const plan = t.session.view().plan.id;
+    act(() => {
+      void t.holidays.load(plan, t.session, 2027);
+    });
+    await settle();
+    await y.resolve();
+    expect(readyYear(t, 2027).days).toEqual(NINE_2027.days);
+    await openDialog();
+    expect(dayRow("Holiday 1")).toBeTruthy();
+    const x = dialog().querySelector(".modal-head .modal-close");
+    if (!(x instanceof HTMLElement)) throw new Error("no ✕ in the calendar dialog's head");
+    fireEvent.click(x);
+    await settle();
+    expect([screen.queryByRole("dialog"), screen.queryByRole("alertdialog")]).toEqual([null, null]);
+    expect(readyYear(t, 2027).days).toEqual(NINE_2027.days);
+  });
+
   it("shows why a picked region's year did not load and loads it again in the dialog (refinement 43)", async () => {
     const t = await made(LATE_2027, { calendar: { region: { src: "govuk", division: "scotland" } } });
     await settle();
@@ -1367,5 +1388,106 @@ describe("read-only", () => {
     expect(apply).not.toHaveBeenCalled();
     expect(dismiss).not.toHaveBeenCalled();
     expect(dialog()).toBeTruthy();
+  });
+});
+
+describe("closing with a draft", () => {
+  const ASK = "Discard calendar changes?";
+  const discardAsk = (): HTMLElement | null => screen.queryByRole("alertdialog", { name: ASK });
+  const closeX = (): HTMLElement => {
+    const bar = dialog().querySelector(".modal-head");
+    if (!(bar instanceof HTMLElement)) throw new Error("no dialog head");
+    return within(bar).getByRole("button", { name: "Close" });
+  };
+  const scrimPress = (): void => {
+    const scrim = dialog().parentElement;
+    if (scrim === null || !scrim.classList.contains("overlay")) throw new Error("the calendar dialog has no scrim");
+    const under = vi.spyOn(document, "elementFromPoint").mockReturnValue(scrim);
+    fireEvent.pointerDown(scrim, { button: 0, pointerType: "mouse", clientX: 5, clientY: 5 });
+    fireEvent.pointerUp(scrim, { button: 0, pointerType: "mouse", clientX: 5, clientY: 5 });
+    fireEvent.click(scrim, { button: 0, clientX: 5, clientY: 5 });
+    under.mockRestore();
+  };
+  const keepEditing = async (): Promise<void> => {
+    const box = discardAsk();
+    if (box === null) throw new Error("no discard ask");
+    expect(within(box).getByText("Your calendar changes are not applied yet.")).toBeTruthy();
+    expect(document.activeElement).toBe(within(box).getByRole("button", { name: "Keep editing" }));
+    fireEvent.click(within(box).getByRole("button", { name: "Keep editing" }));
+    await settle();
+    expect([discardAsk(), screen.queryAllByRole("dialog", { name: "Calendar · Plan" }).length, lastUi().dialog]).toEqual([null, 1, { t: "calendar" }]);
+  };
+
+  it("asks before dropping a changed draft on ✕, Esc and scrim", async () => {
+    const t = await made([]);
+    await shown(t);
+    await openDialog();
+    const before = t.session.view().plan.calendar;
+    fireEvent.click(weekday("Sat"));
+    fireEvent.click(closeX());
+    await settle();
+    await keepEditing();
+    fireEvent.keyDown(dialog(), { key: "Escape" });
+    await settle();
+    await keepEditing();
+    scrimPress();
+    await settle();
+    await keepEditing();
+    expect(weekday("Sat").getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(closeX());
+    await settle();
+    const box = discardAsk();
+    if (box === null) throw new Error("no discard ask");
+    fireEvent.click(within(box).getByRole("button", { name: "Discard" }));
+    await settle();
+    expect([screen.queryByRole("dialog"), discardAsk(), lastUi().dialog]).toEqual([null, null, null]);
+    expect(t.session.view().plan.calendar).toBe(before);
+  });
+
+  it("asks for a half-typed day off too", async () => {
+    const t = await made([]);
+    await shown(t);
+    await openDialog();
+    type("Day off name", "Team offsite");
+    fireEvent.click(closeX());
+    await settle();
+    await keepEditing();
+    type("Day off name", "");
+    type("First day", "2026-12-24");
+    fireEvent.click(closeX());
+    await settle();
+    expect(discardAsk()).not.toBeNull();
+  });
+
+  it("Cancel drops without asking", async () => {
+    const t = await made([]);
+    await shown(t);
+    await openDialog();
+    const before = t.session.view().plan.calendar;
+    fireEvent.click(weekday("Sat"));
+    fireEvent.click(inDialog().getByRole("button", { name: "Cancel" }));
+    await settle();
+    expect([screen.queryByRole("dialog"), discardAsk(), lastUi().dialog]).toEqual([null, null, null]);
+    expect(t.session.view().plan.calendar).toBe(before);
+  });
+
+  it("an unchanged calendar closes at once", async () => {
+    const t = await made([]);
+    await shown(t);
+    await openDialog();
+    fireEvent.click(weekday("Sat"));
+    fireEvent.click(weekday("Sat"));
+    fireEvent.click(closeX());
+    await settle();
+    expect([screen.queryByRole("dialog"), discardAsk(), lastUi().dialog]).toEqual([null, null, null]);
+  });
+
+  it("an applied calendar closes without asking", async () => {
+    const t = await made([]);
+    await shown(t);
+    await openDialog();
+    fireEvent.click(weekday("Sat"));
+    await clickApply();
+    expect([screen.queryByRole("dialog"), discardAsk(), t.session.view().plan.calendar.workdays]).toEqual([null, null, [1, 2, 3, 4, 5, 6]]);
   });
 });

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Refused, type Built, type Intent } from "../../actions/intents";
 import type { ItemId } from "../../domain/model";
 import type { Registry } from "../../store/registry";
-import type { PlanSession } from "../../store/session";
+import { NEWER_PLAN, type PlanSession } from "../../store/session";
 import { phoneRegistry } from "../../test/phone";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { setScreen } from "../../test/setup";
@@ -407,6 +407,21 @@ describe("ItemSheet", () => {
     expect(apply).toHaveBeenCalledTimes(0);
     act(() => t.session.setReadOnly(false));
     expect(button("Start +1 working day")).toBeTruthy();
+  });
+
+  it("read-only on a newer plan", async () => {
+    const t = await made([REVIEW, { name: "Ship", start: "2026-11-18", dur: 1, deps: [fs("Review")] }], { raw: { x1: ["iphone", "s1", 0, [], 42, []] } });
+    expect(t.session.readOnlyReason).toBe(NEWER_PLAN);
+    const { apply } = shown(t, "Review");
+    ["Start +1 working day", "Start −1 working day", "Duration +1", "Duration −1", "Lag +1", "Lag −1", "Remove", "Add a dependency", "Schedule", "Move to Trash"].forEach((n) =>
+      expect([n, noButton(n)]).toEqual([n, null]),
+    );
+    expect(within(sheet()).queryByRole("group", { name: "Status" })).toBeNull();
+    expect(within(sheet()).queryByRole("combobox", { name: "Link type" })).toBeNull();
+    expect(sheet().querySelectorAll("input")).toHaveLength(0);
+    const area = within(sheet()).getByRole("textbox", { name: "Notes" });
+    expect(area instanceof HTMLTextAreaElement && area.readOnly).toBe(true);
+    expect(apply).toHaveBeenCalledTimes(0);
   });
 
   it("edits report through useRun", async () => {

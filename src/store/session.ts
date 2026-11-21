@@ -41,7 +41,8 @@ export interface HistoryEntry {
   root: boolean;
 }
 
-const READ_ONLY = "This device was removed from the space; its plans are read-only.";
+export const READ_ONLY = "This device was removed from the space; its plans are read-only.";
+export const NEWER_PLAN = "This plan has changes from a newer WebBoard. Update to edit.";
 const SETTLED = "This choice was settled meanwhile.";
 const REPAIRED = "The last change before WebBoard stopped was cut off while saving and was not kept.";
 
@@ -59,6 +60,7 @@ export class PlanSession implements HolidayHost {
   private readonly ses: SessionId = newId();
   private readonly log = new LogState(planRules);
   private readonly bad = new Map<ActionId, Bad>();
+  private readonly undecoded = new Set<ActionId>();
   private readonly devOf = new Map<ActionId, DeviceId>();
   private readonly subscribers = new Set<() => void>();
   private readonly undoStack: ActionId[] = [];
@@ -165,6 +167,7 @@ export class PlanSession implements HolidayHost {
       validateWrite,
     );
     ok.forEach((a) => this.devOf.set(a.id, a.dev));
+    unreadable.forEach((u) => this.undecoded.add(u.id));
     const delta = this.log.add(ok);
     const refused = delta.refused.map((r): [ActionId, Bad] => {
       const dev = this.devOf.get(r.id);
@@ -192,6 +195,7 @@ export class PlanSession implements HolidayHost {
         id,
         message: `A change from ${b.dev === null ? "another device" : deviceName(this.devices, b.dev)} could not be read: ${b.error}. Update WebBoard on this device.`,
       })),
+      newer: this.undecoded.size > 0,
     };
   }
 
@@ -233,7 +237,8 @@ export class PlanSession implements HolidayHost {
 
   private writable(): void {
     this.usable();
-    if (this.ro) throw new Refused(READ_ONLY);
+    const reason = this.readOnlyReason;
+    if (reason !== null) throw new Refused(reason);
   }
 
   private commit(built: Built, stacks: () => void): Built {
@@ -434,8 +439,14 @@ export class PlanSession implements HolidayHost {
     return Y.encodeStateAsUpdate(this.doc.ydoc);
   }
 
+  get readOnlyReason(): string | null {
+    if (this.ro) return READ_ONLY;
+    if (this.current.newer) return NEWER_PLAN;
+    return null;
+  }
+
   get readOnly(): boolean {
-    return this.ro;
+    return this.readOnlyReason !== null;
   }
 
   setReadOnly(on: boolean): void {

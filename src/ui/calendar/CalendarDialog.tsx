@@ -12,6 +12,7 @@ import type { Registry } from "../../store/registry";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { HOLIDAY_ATTRIBUTION } from "../common/About";
 import { Dialog } from "../common/Dialog";
+import { useCloseGuard, type DraftGuard } from "../common/dismiss";
 import { toast } from "../common/Toast";
 import { DATE_UNREADABLE } from "../copy";
 import { historyTime } from "../panel/historyText";
@@ -37,6 +38,8 @@ export interface CalendarProps {
 }
 
 const NOTHING = "Nothing to change.";
+
+export const CALENDAR_DRAFT: DraftGuard = { title: "Discard calendar changes?", message: "Your calendar changes are not applied yet." };
 
 const WEEK: readonly { d: Weekday; label: string }[] = [
   { d: 1, label: "Mon" },
@@ -135,6 +138,7 @@ export function CalendarBody(p: CalendarProps) {
   );
   const [base, setBase] = useState<Calendar>(() => p.review?.intent.base ?? session.view().plan.calendar);
   const [draft, setDraft] = useState<Calendar>(() => p.review?.intent.next ?? base);
+  const [taken, setTaken] = useState<Calendar>(base);
   const [seen, setSeen] = useState<Calendar["holidays"]>(() => view.plan.calendar.holidays);
   const [seenNotices, setSeenNotices] = useState<readonly HolidayNotice[] | null>(null);
   const [drafted, setDrafted] = useState<ReadonlyMap<string, ReadonlyMap<number, DraftYear>>>(new Map());
@@ -154,12 +158,16 @@ export function CalendarBody(p: CalendarProps) {
       const ownKey = planCal.region === null ? null : regionKey(planCal.region);
       setBase((c) => withArrived(c, arrived));
       setDraft((d) => (d.region !== null && regionKey(d.region) === ownKey ? withArrived(d, arrived) : d));
+      setTaken((c) => (c.region !== null && regionKey(c.region) === ownKey ? withArrived(c, arrived) : c));
     }
   }
   if (p.review === undefined && seenNotices !== notices) {
     const ready = readyYears(notices);
     setSeenNotices(notices);
-    if (ready.length > 0) setDraft((d) => withReady(d, ready));
+    if (ready.length > 0) {
+      setDraft((d) => withReady(d, ready));
+      setTaken((c) => withReady(c, ready));
+    }
   }
   const span = spanOf(view);
   const spanYears = useMemo(() => yearsOf(span.from, span.to), [span.from, span.to]);
@@ -247,6 +255,7 @@ export function CalendarBody(p: CalendarProps) {
   };
 
   const unchanged = sameCalendar(draft, base);
+  useCloseGuard(!applied && (!sameCalendar(draft, taken) || dayName !== "" || dayFrom !== "" || dayTo !== "") ? CALENDAR_DRAFT : null);
   const impact = useMemo(
     () => (unchanged ? impactText({ endsChanged: 0, movedLater: 0 }) : previewText(session, view, { t: "calendar", next: draft, base })),
     [unchanged, session, draft, base, view],

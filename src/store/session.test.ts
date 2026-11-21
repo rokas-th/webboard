@@ -24,7 +24,7 @@ import { commandsSince, commandsWith, hold, resetTauri, tauri, type Answer } fro
 import { testSession, type TestSession } from "../test/session";
 import { encodeAction, LOCAL, PlanDoc, decodeAction } from "./doc";
 import { openPersisted, type PersistedDoc } from "./persist";
-import { PlanSession, usePlanView, type SessionDeps } from "./session";
+import { NEWER_PLAN, PlanSession, usePlanView, type SessionDeps } from "./session";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 
@@ -748,6 +748,88 @@ describe("PlanSession", () => {
     expect(s.view().unreadable.map((u) => u.id)).toEqual([id]);
     expect(s.view().unreadable[0]?.message).toContain(`s:${aId}: start is not a date from 1900-01-01 to 2199-12-31`);
     expect(nameOf(s, aId)).toBe("A");
+    expect(s.readOnly).toBe(true);
+    expect(s.readOnlyReason).toBe(NEWER_PLAN);
+  });
+
+  it("an unreadable action makes every write throw Refused(NEWER_PLAN)", async () => {
+    const e = env();
+    const { s, r, a, choice, macKey, north } = await clash(e);
+    remoteRaw(r, newId(), ["dev-B", "s-dev-B", 0, [...logOf(r).heads], 5, []]);
+    deliver(r, e);
+    expect(s.view().newer).toBe(true);
+    expect(s.readOnly).toBe(true);
+    expect(s.readOnlyReason).toBe(NEWER_PLAN);
+    await settle(e);
+    const before = appends();
+    const writes: (() => unknown)[] = [
+      () => s.apply({ t: "rename", item: a, name: "X" }),
+      () => s.undo(),
+      () => s.redo(),
+      () => s.revert(north.action.id),
+      () => s.resolve(choice.id, { side: macKey }, OPTS),
+    ];
+    writes.forEach((f) => {
+      const err = thrown(f);
+      expect(err).toBeInstanceOf(Refused);
+      expect(err instanceof Error && err.message).toBe(NEWER_PLAN);
+    });
+    await settle(e);
+    expect(appends()).toBe(before);
+  });
+
+  it("the lock arrives with a delivered action and notifies", async () => {
+    const e = env();
+    const s = await open(e);
+    expect(s.view().newer).toBe(false);
+    expect(s.readOnly).toBe(false);
+    expect(s.readOnlyReason).toBeNull();
+    const cb = vi.fn();
+    s.subscribe(cb);
+    const r = remoteOf(s);
+    remoteRaw(r, newId(), ["dev-B", "s-dev-B", 0, [...logOf(r).heads], 5, []]);
+    deliver(r, e);
+    expect(cb).toHaveBeenCalled();
+    expect(s.view().newer).toBe(true);
+    expect(s.readOnly).toBe(true);
+    expect(s.readOnlyReason).toBe(NEWER_PLAN);
+  });
+
+  it("a refused action does not lock", async () => {
+    const e = env();
+    const s = await open(e);
+    const a = itemId(s, "A");
+    const r = remoteOf(s);
+    const x = s.apply({ t: "rename", item: itemId(s, "B"), name: "Local" }).action.id;
+    const parent = remoteBuild(r, { t: "rename", item: a, name: "Remote" }).action.id;
+    const q = act(newId(), [parent], [{ u: key.a(x), v: false, c: "revert" }], { dev: "dev-B" });
+    remoteRaw(r, q.id, encodeAction(q));
+    deliver(r, e);
+    expect(s.view().unreadable.map((u) => u.id)).toEqual([q.id]);
+    expect(s.view().newer).toBe(false);
+    expect(s.readOnly).toBe(false);
+    expect(s.readOnlyReason).toBeNull();
+    s.apply({ t: "rename", item: a, name: "Edited" });
+    expect(nameOf(s, a)).toBe("Edited");
+  });
+
+  it("removal names its own reason first", async () => {
+    const e = env();
+    const s = await open(e);
+    const a = itemId(s, "A");
+    const r = remoteOf(s);
+    remoteRaw(r, newId(), ["dev-B", "s-dev-B", 0, [...logOf(r).heads], 5, []]);
+    deliver(r, e);
+    s.setReadOnly(true);
+    expect(s.readOnlyReason).toBe(READ_ONLY);
+    const err = thrown(() => s.apply({ t: "rename", item: a, name: "X" }));
+    expect(err).toBeInstanceOf(Refused);
+    expect(err instanceof Error && err.message).toBe(READ_ONLY);
+    s.setReadOnly(false);
+    expect(s.readOnly).toBe(true);
+    expect(s.readOnlyReason).toBe(NEWER_PLAN);
+    const again = thrown(() => s.apply({ t: "rename", item: a, name: "X" }));
+    expect(again instanceof Error && again.message).toBe(NEWER_PLAN);
   });
 
   it("undecodable remote action", async () => {

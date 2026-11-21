@@ -9,6 +9,7 @@ import type { PlanListing, Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { readPlatform, shortcutsUseCommand } from "../../platform";
 import { openersFrom } from "../common/Dialog";
+import { closeTopOverlay } from "../common/dismiss";
 import { Sheet } from "../common/Sheet";
 import { detailsOf } from "../common/errorText";
 import { takeHapticFault } from "../../services/haptics";
@@ -300,8 +301,12 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
       }
       const id = keyToCommand(e, { command: c.command, typing, dialog, selected: c.ui.selected !== null, listMode: c.listMode });
       if (id === null || (c.overlay.open && !dialog && id !== "sidebar" && id !== "palette")) return;
-      if (id === "close-dialog" || id === "deselect") {
-        c.setUi(id === "close-dialog" ? { dialog: null } : { selected: null });
+      if (id === "close-dialog") {
+        if (!closeTopOverlay()) c.setUi({ dialog: null });
+        return;
+      }
+      if (id === "deselect") {
+        c.setUi({ selected: null });
         return;
       }
       const cmd = commands(c).find((x) => x.id === id);

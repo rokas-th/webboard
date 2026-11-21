@@ -4,7 +4,7 @@ import type { Built } from "../../actions/intents";
 import { fixedClock } from "../../services/clock";
 import { Registry } from "../../store/registry";
 import type { UpdateState, Updates } from "../../store/updates";
-import type { PlanSession } from "../../store/session";
+import { NEWER_PLAN, type PlanSession } from "../../store/session";
 import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { seededStore, shellFor } from "../../test/shell";
@@ -94,6 +94,31 @@ describe('compact shell, data-form="compact"', () => {
     expect(within(sheet).getByRole("navigation", { name: "Plans" })).toBeTruthy();
     fireEvent.keyDown(sheet, { key: "Escape" });
     expect(plans()).toBeNull();
+  });
+
+  it("closes the Plans sheet on Escape at the window, through the sheet's own close", async () => {
+    const t = await made();
+    await shown(t);
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Plans" }));
+    expect(screen.getByRole("dialog", { name: "Plans" })).toBeTruthy();
+    act(() => {
+      document.body.focus();
+    });
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+    expect([screen.queryByRole("dialog"), plans()]).toEqual([null, null]);
+  });
+
+  it("closes the Plans sheet from its ✕", async () => {
+    const t = await made();
+    await shown(t);
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Plans" }));
+    const sheet = screen.getByRole("dialog", { name: "Plans" });
+    const head = sheet.querySelector(".sheet-head");
+    if (!(head instanceof HTMLElement)) throw new Error("no sheet head");
+    fireEvent.click(within(head).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("opens the selected item in a modal sheet, and Esc returns focus to the opener", async () => {
@@ -284,6 +309,35 @@ describe('compact shell, data-form="compact"', () => {
       expect([n, within(sheet).queryByRole("button", { name: n })]).toEqual([n, null]),
     );
     expect(within(sheet).getByRole("button", { name: "Show" })).toBeTruthy();
+    expect([apply.mock.calls.length, revert.mock.calls.length]).toEqual([0, 0]);
+  });
+
+  it("read-only on a newer plan", async () => {
+    const t = await made();
+    t.session.apply({ t: "trash", items: ["T"] });
+    t.session.apply({ t: "baseline", op: "save", name: "Before" });
+    t.session.apply({ t: "move", items: ["t3"], days: 1 });
+    const apply = vi.spyOn(t.session, "apply");
+    const revert = vi.spyOn(t.session, "revert");
+    await shown(t);
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Plan" }));
+    expect(within(planSheet()).getAllByRole("button", { name: "Revert this action" }).length).toBeGreaterThan(0);
+    act(() => {
+      t.doc.ydoc.getMap("actions").set("x1", ["iphone", "s1", 0, [], 42, []]);
+    });
+    expect(t.session.readOnlyReason).toBe(NEWER_PLAN);
+    expect(document.querySelector(".plan-head .forward-lock")?.textContent).toBe(NEWER_PLAN);
+    const sheet = planSheet();
+    expect(sheet.querySelector("input")).toBeNull();
+    ["Save baseline", "Remove", "Restore", "Change calendar…", "Revert this action", "Bring this action back"].forEach((n) =>
+      expect([n, within(sheet).queryByRole("button", { name: n })]).toEqual([n, null]),
+    );
+    expect(within(toolbar()).getByRole("button", { name: "+ New" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.keyDown(sheet, { key: "Escape" });
+    act(() => lastUi()[1]({ selected: "t3" }));
+    const item = screen.getByRole("dialog", { name: "Tracking: review results" });
+    expect(item.querySelectorAll("input, select")).toHaveLength(0);
+    expect(within(item).queryByRole("button", { name: "Delete" })).toBeNull();
     expect([apply.mock.calls.length, revert.mock.calls.length]).toEqual([0, 0]);
   });
 

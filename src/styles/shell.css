@@ -651,21 +651,51 @@ button.chip {
   background: transparent;
 }
 
-.choice-list {
+.popover-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  background: transparent;
+}
+
+.popover {
+  display: flex;
+  align-items: flex-start;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 16px 40px rgba(var(--shadow-rgb), 0.5);
+}
+
+.popover > :not(.popover-close) {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.popover > .popover-close {
+  margin-block-start: 4px;
+  margin-inline-end: 4px;
+}
+
+html[data-os="ios"] .popover > .popover-close {
+  margin-block-start: 0;
+  margin-inline-end: 0;
+}
+
+.choice-popover {
   position: absolute;
   left: 24px;
   top: calc(100% - 4px);
   z-index: 20;
   width: min(560px, calc(100% - 48px));
+}
+
+.choice-list {
   max-height: 260px;
   overflow-y: auto;
   list-style: none;
   margin: 0;
   padding: 4px 0;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 16px 40px rgba(var(--shadow-rgb), 0.5);
 }
 
 .choice-row {
@@ -833,6 +863,196 @@ button.chip {
   margin: 0 0 14px;
 }
 
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-block: -6px 10px;
+  margin-inline: -10px 0;
+}
+
+.modal-head h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.sheet-close,
+.modal-close,
+.drawer-close,
+.popover-close,
+.palette-close {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--dim);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  isolation: isolate;
+}
+
+.sheet-close::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: 50%;
+  background: rgba(var(--line-rgb), 0.9);
+}
+
+.modal-close::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: 50%;
+  background: rgba(var(--line-rgb), 0.9);
+}
+
+.drawer-close::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: 50%;
+  background: rgba(var(--line-rgb), 0.9);
+}
+
+.palette-close::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: 50%;
+  background: rgba(var(--line-rgb), 0.9);
+}
+
+.sheet-close svg,
+.modal-close svg,
+.drawer-close svg,
+.popover-close svg,
+.palette-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+.sheet-close:focus-visible,
+.modal-close:focus-visible,
+.drawer-close:focus-visible,
+.popover-close:focus-visible,
+.palette-close:focus-visible {
+  outline-offset: -2px;
+}
+
+.popover-close {
+  width: 20px;
+  height: 20px;
+}
+
+.popover-close::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+
+.popover-close:focus-visible {
+  outline-offset: 0;
+}
+
+@media (hover: hover) {
+  .sheet-close:hover:not(:disabled),
+  .modal-close:hover:not(:disabled),
+  .drawer-close:hover:not(:disabled),
+  .popover-close:hover:not(:disabled),
+  .palette-close:hover:not(:disabled) {
+    color: var(--cyan);
+    background: transparent;
+    border-color: transparent;
+  }
+}
+
+:where(html[data-os="ios"]) .sheet-close:active:not(:disabled) {
+  color: var(--cyan);
+  background: transparent;
+  border-color: transparent;
+}
+
+:where(html[data-os="ios"]) .modal-close:active:not(:disabled) {
+  color: var(--cyan);
+  background: transparent;
+  border-color: transparent;
+}
+
+:where(html[data-os="ios"]) .drawer-close:active:not(:disabled) {
+  color: var(--cyan);
+  background: transparent;
+  border-color: transparent;
+}
+
+:where(html[data-os="ios"]) .popover-close:active:not(:disabled) {
+  color: var(--cyan);
+  background: transparent;
+  border-color: transparent;
+}
+
+:where(html[data-os="ios"]) .palette-close:active:not(:disabled) {
+  color: var(--cyan);
+  background: transparent;
+  border-color: transparent;
+}
+
+html[data-os="ios"] .sheet-close,
+html[data-os="ios"] .modal-close,
+html[data-os="ios"] .drawer-close,
+html[data-os="ios"] .popover-close,
+html[data-os="ios"] .palette-close {
+  width: 44px;
+  height: 44px;
+}
+
+html[data-os="ios"] .sheet-close::after,
+html[data-os="ios"] .modal-close::after,
+html[data-os="ios"] .drawer-close::after,
+html[data-os="ios"] .palette-close::after {
+  inset: 7px;
+}
+
+html[data-os="ios"] .popover-close::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  z-index: -1;
+  border-radius: 50%;
+  background: rgba(var(--line-rgb), 0.9);
+}
+
+html[data-os="ios"] .sheet-close svg,
+html[data-os="ios"] .modal-close svg,
+html[data-os="ios"] .drawer-close svg,
+html[data-os="ios"] .popover-close svg,
+html[data-os="ios"] .palette-close svg {
+  width: 14px;
+  height: 14px;
+}
+
+html[data-os="ios"] .sheet-close:focus-visible,
+html[data-os="ios"] .modal-close:focus-visible,
+html[data-os="ios"] .drawer-close:focus-visible,
+html[data-os="ios"] .popover-close:focus-visible,
+html[data-os="ios"] .palette-close:focus-visible {
+  outline-offset: -8px;
+}
+
+html[data-os="ios"] .modal-head {
+  margin-block: -12px 0;
+  margin-inline: -16px 0;
+}
+
 .modal p {
   font-family: var(--prose);
   font-size: 12.5px;
@@ -846,6 +1066,45 @@ button.chip {
   width: 48px;
   height: 48px;
   margin: 0 0 12px;
+}
+
+.discard-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(20px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
+  background: var(--scrim);
+}
+
+.discard-ask {
+  width: 380px;
+  max-width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 20px 20px;
+  box-shadow: 0 24px 64px rgba(var(--shadow-rgb), 0.55);
+}
+
+.discard-ask h4 {
+  margin: 0 0 10px;
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--heading);
+}
+
+.discard-ask p {
+  margin: 0;
+  font-family: var(--prose);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text);
 }
 
 .modal-actions {
@@ -1145,6 +1404,17 @@ html[data-os="ios"][data-idiom="pad"] .plan-overlay-layer[data-shown="true"] .pl
   html[data-os="ios"][data-idiom="pad"] .plan-overlay {
     transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  flex: none;
+  padding: 8px 12px 0;
+}
+
+html[data-os="ios"] .drawer-head {
+  padding: 4px 8px 0;
 }
 
 html[data-os="ios"][data-idiom="pad"] .plan-overlay .sidebar {

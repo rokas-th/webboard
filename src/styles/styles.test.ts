@@ -212,7 +212,7 @@ describe("the Cyberdeck look", () => {
 
   it("anchors every absolute box to a positioned box in its pane", () => {
     const anchors: Record<string, string> = {
-      ".choice-list": ".plan-head",
+      ".choice-popover": ".plan-head",
       ".plan-menu-list": ".plan-menu",
       ".tl-month": ".tl-scale",
       ".tl-tick": ".tl-scale",
@@ -251,6 +251,17 @@ describe("the Cyberdeck look", () => {
       'html[data-os="ios"] .sidebar button::before': 'html[data-os="ios"] .sidebar button',
       'html[data-os="ios"] .sheet-head button::before': 'html[data-os="ios"] .sheet-head button',
       'html[data-os="ios"] .modal-actions button::before': 'html[data-os="ios"] .modal-actions button',
+      'html[data-os="ios"] .modal-head button::before': 'html[data-os="ios"] .modal-head button',
+      'html[data-os="ios"] .drawer-head button::before': 'html[data-os="ios"] .drawer-head button',
+      ".sheet-grabber": ".sheet",
+      ".sheet-close::after": ".sheet-close",
+      ".modal-close::after": ".modal-close",
+      ".drawer-close::after": ".drawer-close",
+      ".palette-close::after": ".palette-close",
+      ".popover-close::before": ".popover-close",
+      'html[data-os="ios"] .popover-close::after': 'html[data-os="ios"] .popover-close',
+      'html[data-os="ios"] .popover-close::before': 'html[data-os="ios"] .popover-close',
+      'html[data-os="ios"] .palette-close::before': 'html[data-os="ios"] .palette-close',
       'html[data-os="ios"] .panel .actions button::before': 'html[data-os="ios"] .panel .actions button',
       'html[data-os="ios"] .settings-head button::before': 'html[data-os="ios"] .settings-head button',
       'html[data-os="ios"] .settings-tabs button::before': 'html[data-os="ios"] .settings-tabs button',
@@ -287,6 +298,14 @@ describe("the Cyberdeck look", () => {
     const widths = (sel: string): string[] => sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0 && r.decls["width"] !== undefined).map((r) => r.decls["width"] ?? "");
     expect(widths(".modal")).toEqual(["520px"]);
     expect(widths(".modal.modal-wide")).toEqual(["600px"]);
+  });
+
+  it("pulls the dialog head's ✕ to the leading corner with logical margins, so it follows right-to-left", () => {
+    const heads = sheet.rules.filter((r) => r.selector === ".modal-head" || r.selector === 'html[data-os="ios"] .modal-head');
+    expect(heads.map((r) => [r.selector, r.decls["margin-block"], r.decls["margin-inline"], ["margin", "margin-left", "margin-right"].filter((m) => r.decls[m] !== undefined)])).toEqual([
+      [".modal-head", "-6px 10px", "-10px 0", []],
+      ['html[data-os="ios"] .modal-head', "-12px 0", "-16px 0", []],
+    ]);
   });
 
   it("clips the panel's name inputs with an ellipsis", () => {
@@ -417,6 +436,11 @@ const BUTTON_HOVERS = [
   ".theme-card:hover:not(:disabled)",
   '.theme-card[aria-pressed="true"]:hover:not(:disabled)',
   ".tl-row .caret:hover",
+  ".sheet-close:hover:not(:disabled)",
+  ".modal-close:hover:not(:disabled)",
+  ".drawer-close:hover:not(:disabled)",
+  ".popover-close:hover:not(:disabled)",
+  ".palette-close:hover:not(:disabled)",
 ];
 
 describe("iOS presses", () => {

@@ -9,7 +9,7 @@ import { itemChoices } from "../choices/describe";
 import { FixActions } from "../choices/FixActions";
 import { toast } from "../common/Toast";
 import { planGroupPath } from "../list/groups";
-import { OpenChoice, READ_ONLY, useRun, type Run } from "../run";
+import { OpenChoice, useRun, type Run } from "../run";
 import { duplicateRow } from "../duplicate";
 import { useUiValue } from "../state";
 import { derivedStatus } from "../status";
@@ -291,7 +291,8 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean; comman
   useEffect(() => {
     const el = ref.current;
     if (el === null) throw new Error("Note rendered without its textarea");
-    const b = bindTextarea(el, p.session.note(p.item));
+    const session = p.session;
+    const b = bindTextarea(el, session.note(p.item), () => session.readOnlyReason);
     binding.current = b;
     return () => {
       binding.current = null;
@@ -304,7 +305,8 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean; comman
     e.preventDefault();
     e.stopPropagation();
     if (readOnly.current) {
-      if (p.session.readOnly) toast(READ_ONLY, "bad");
+      const reason = p.session.readOnlyReason;
+      if (reason !== null) toast(reason, "bad");
       return;
     }
     const b = binding.current;

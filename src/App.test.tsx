@@ -549,10 +549,11 @@ describe("Dialog", () => {
     const dialog = screen.getByRole("dialog", { name: "Test dialog" });
     const first = screen.getByRole("button", { name: "First" });
     const last = screen.getByRole("button", { name: "Last" });
+    const close = within(dialog).getByRole("button", { name: "Close" });
     expect(document.activeElement).toBe(first);
     last.focus();
     fireEvent.keyDown(dialog, { key: "Tab" });
-    expect(document.activeElement).toBe(first);
+    expect(document.activeElement).toBe(close);
     fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(last);
     expect(onClose).not.toHaveBeenCalled();

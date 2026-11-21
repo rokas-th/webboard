@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { sideText } from "../../plan/choices";
-import { usePlanView, type PlanSession } from "../../store/session";
+import { NEWER_PLAN, usePlanView, type PlanSession } from "../../store/session";
 import { CalendarBanner } from "../choices/CalendarBanner";
+import { Popover } from "../common/Popover";
 import { HeadCounts } from "../choices/HeadCounts";
 import { orderedSides } from "../choices/order";
 import { TextField } from "../panel/TextField";
@@ -9,7 +10,7 @@ import { useRun } from "../run";
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-type Popover = "choices" | "menu" | null;
+type HeadPopup = "choices" | "menu" | null;
 
 export function PlanHead(p: {
   session: PlanSession;
@@ -34,7 +35,7 @@ export function PlanHead(p: {
     input.focus();
     input.select();
   }, [naming, onNamed, readOnly]);
-  const [popover, setPopover] = useState<Popover>(null);
+  const [popover, setPopover] = useState<HeadPopup>(null);
   const plan = view.plan;
   const none = view.choices.length === 0;
   const listOpen = popover === "choices";
@@ -42,6 +43,7 @@ export function PlanHead(p: {
     if (none) setPopover((o) => (o === "choices" ? null : o));
   }, [none]);
   const setMenuOpen = useCallback((open: boolean) => setPopover((o) => (open ? "menu" : o === "menu" ? null : o)), []);
+  const closeList = useCallback(() => setPopover((o) => (o === "choices" ? null : o)), []);
   const choose = (id: string): void => {
     setPopover(null);
     p.onChoose(id);
@@ -52,6 +54,11 @@ export function PlanHead(p: {
         <h1>
           <TextField className="plan-name-input" label="Plan name" value={plan.name} readOnly={p.readOnly} onCommit={(next) => run.run({ t: "planName", name: next }) !== null} />
         </h1>
+        {view.newer && (
+          <p className="head-line warn forward-lock" role="status">
+            {NEWER_PLAN}
+          </p>
+        )}
         {view.unreadable.map((u) => (
           <p key={u.id} className="head-line bad">
             {u.message}
@@ -76,15 +83,17 @@ export function PlanHead(p: {
       </div>
       {p.menu === undefined ? null : p.menu(popover === "menu", setMenuOpen)}
       {listOpen && view.choices.length > 0 && (
-        <ul className="choice-list" aria-label="Open choices">
-          {view.choices.map((c) => (
-            <li key={c.id}>
-              <button type="button" className="choice-row" onClick={() => choose(c.id)}>
-                {orderedSides(c, p.local).map((s) => sideText(c, s.key, plan)).join(" or ")}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <Popover label="Open choices" className="choice-popover" onClose={closeList}>
+          <ul className="choice-list" aria-label="Open choices">
+            {view.choices.map((c) => (
+              <li key={c.id}>
+                <button type="button" className="choice-row" onClick={() => choose(c.id)}>
+                  {orderedSides(c, p.local).map((s) => sideText(c, s.key, plan)).join(" or ")}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Popover>
       )}
     </div>
   );

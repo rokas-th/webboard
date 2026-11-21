@@ -354,7 +354,8 @@ function Note(p: { session: PlanSession; item: ItemId; readOnly: boolean }) {
   useEffect(() => {
     const el = ref.current;
     if (el === null) throw new Error("ItemSheet: the note rendered without its textarea");
-    const b = bindTextarea(el, p.session.note(p.item));
+    const session = p.session;
+    const b = bindTextarea(el, session.note(p.item), () => session.readOnlyReason);
     return () => b.dispose();
   }, [p.session, p.item]);
   return <textarea ref={ref} aria-label="Notes" placeholder="Anything worth knowing about this item" readOnly={p.readOnly} />;

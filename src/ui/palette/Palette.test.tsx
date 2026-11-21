@@ -2,11 +2,10 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { version } from "../../../package.json";
 import { toDay } from "../../domain/dates";
-import type { PlanSession } from "../../store/session";
+import { READ_ONLY, type PlanSession } from "../../store/session";
 import { MESA_SEED, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { shellFor } from "../../test/shell";
 import { clearToasts } from "../common/Toast";
-import { READ_ONLY } from "../run";
 import { useUi, type UiState } from "../state";
 import { geometry, leadFor, ROW } from "../timeline/geometry";
 import { timelineRows } from "../timeline/rows";
@@ -143,6 +142,58 @@ describe("opening the palette", () => {
     fireEvent.click(button(bar(), "⌘K"));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(document.activeElement).toBe(query());
+  });
+
+  it("a ✕ ends the field and closes", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    const opener = button(bar(), "⌘K");
+    act(() => opener.focus());
+    fireEvent.click(opener);
+    const field = palette().querySelector(".palette-field");
+    if (!(field instanceof HTMLElement)) throw new Error("no palette field");
+    expect([...field.children].map((k) => [k.tagName.toLowerCase(), k.className])).toEqual([
+      ["input", ""],
+      ["button", "palette-close"],
+    ]);
+    expect(field.firstElementChild).toBe(query());
+    expect(document.activeElement).toBe(query());
+    const close = within(field).getByRole("button", { name: "Close" });
+    expect(close.querySelector("svg")).not.toBeNull();
+    fireEvent.click(close);
+    expect([screen.queryByRole("dialog"), uiNow()[0].dialog, document.activeElement]).toEqual([null, null, opener]);
+  });
+
+  it("closes on a scrim press, not one ending in the box", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    press("k", { metaKey: true });
+    const scrim = palette().parentElement;
+    if (scrim === null || !scrim.classList.contains("overlay")) throw new Error("the palette has no scrim");
+    const tap = (down: Element, up: Element): void => {
+      const under = vi.spyOn(document, "elementFromPoint").mockReturnValue(up);
+      fireEvent.pointerDown(down, { button: 0, pointerType: "mouse", clientX: 10, clientY: 10 });
+      fireEvent.mouseDown(down, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(up, { button: 0, pointerType: "mouse", clientX: 10, clientY: 10 });
+      fireEvent.click(down === up ? up : scrim, { button: 0, clientX: 10, clientY: 10 });
+      under.mockRestore();
+    };
+    tap(scrim, palette());
+    expect(screen.getAllByRole("dialog")).toEqual([palette()]);
+    tap(palette(), scrim);
+    expect(screen.getAllByRole("dialog")).toEqual([palette()]);
+    tap(scrim, scrim);
+    expect([screen.queryByRole("dialog"), uiNow()[0].dialog]).toEqual([null, null]);
+  });
+
+  it("closes on Escape from its ✕, through the overlay stack", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    press("k", { metaKey: true });
+    const close = within(palette()).getByRole("button", { name: "Close" });
+    act(() => close.focus());
+    press("Escape", {}, close);
+    expect([screen.queryByRole("dialog"), uiNow()[0].dialog]).toEqual([null, null]);
   });
 
   it("opens on Ctrl K off macOS, and ⌘K does nothing there", async () => {
@@ -726,7 +777,7 @@ describe("read-only", () => {
         [...root.querySelectorAll("button, input, select, textarea")]
           .filter((e) => !(e instanceof HTMLButtonElement || e instanceof HTMLInputElement || e instanceof HTMLSelectElement || e instanceof HTMLTextAreaElement) || !e.disabled)
           .filter((e) => !((e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement) && e.readOnly))
-          .map((e) => e.closest("label")?.textContent ?? e.textContent ?? "");
+          .map((e) => e.closest("label")?.textContent ?? e.getAttribute("aria-label") ?? e.textContent ?? "");
       expect(enabled(panel())).toEqual([]);
       fireEvent.click(within(bar()).getByRole("tab", { name: "Now · Next · Later" }));
       const board = document.querySelector('[data-slot="board"]');
@@ -741,7 +792,7 @@ describe("read-only", () => {
       fireEvent.click(row);
       const choice = screen.getByRole("dialog");
       expect(within(choice).getAllByRole("button", { name: /^Keep / }).map((b) => b.hasAttribute("disabled"))).toEqual([true, true]);
-      expect(enabled(choice)).toEqual(["Push from predecessors", "Return the items the other side's push moved", "Pick per item"]);
+      expect(enabled(choice)).toEqual(["Close", "Push from predecessors", "Return the items the other side's push moved", "Pick per item"]);
       spies.forEach((s) => expect(s).not.toHaveBeenCalled());
       await settle();
       expect(rejected).not.toHaveBeenCalled();

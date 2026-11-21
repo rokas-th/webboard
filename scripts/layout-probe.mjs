@@ -68,6 +68,8 @@ export const CHROME = Object.freeze({
   phoneStatus: [`.phone-status ${CONTROL}`],
   planList: [`.sidebar ${CONTROL}`],
   sheetHead: [`.sheet-head ${CONTROL}`],
+  dialogHead: [`.modal-head ${CONTROL}`],
+  drawerHead: [`.drawer-head ${CONTROL}`],
   dialogActions: [`.modal-actions ${CONTROL}`],
   panelActions: [`.panel .actions ${CONTROL}`],
   settingsHead: [`.settings-head ${CONTROL}`],
@@ -93,6 +95,7 @@ const LISTED = ["WebBoard would show different dates than the .gantt file:", ...
 const EMPTY_PLAN = "No items yet. Add one with + New.";
 const EXAMPLE_PLAN = "Example: Website relaunch";
 const CALENDAR_BANNER = "The calendar was changed on two devices. Nothing moves until you choose.";
+const NEWER_PLAN = "This plan has changes from a newer WebBoard. Update to edit.";
 const PICKED = "Tracking: review results";
 const PICKED_CHOICE = "Tracking: review results and fixes";
 const STATUS_FIRST = "Holidays for 2031 not loaded — load";
@@ -111,7 +114,7 @@ const todayShown = () => ({ today: true });
 const edges = () => ({ edges: true });
 const shown = (selector, n) => ({ shown: [selector, n] });
 const width = (selector, min, max) => ({ width: [selector, min, max] });
-const style = (selector, prop, value) => ({ style: [selector, prop, value] });
+const style = (selector, prop, value, pseudo) => ({ style: pseudo === undefined ? [selector, prop, value] : [selector, prop, value, pseudo] });
 const valued = (selector, text) => ({ valued: [selector, text] });
 const ellipsed = (selector) => ({ ellipsed: selector });
 const within_ = (selector, box, n) => ({ within: [selector, box, n] });
@@ -131,6 +134,7 @@ const keep = (selector) => ({ keep: selector });
 const kept = (selector) => ({ kept: selector });
 const meets = (selector, side, other, otherSide) => ({ meets: [selector, side, other, otherSide] });
 const centredIn = (selector) => ({ centredIn: selector });
+const corner = (selector, box, at, gap) => ({ corner: [selector, box, at, gap] });
 const inWindow = (selector) => ({ inWindow: selector });
 const uncovered = (selector) => ({ uncovered: selector });
 const still = () => ({ still: true });
@@ -247,7 +251,18 @@ function states() {
       count(".plan-head .head-line.bad", 1),
       expect(".plan-head .head-line.bad", UNREADABLE_LINE),
       expect(".plan-head .chip-cyan", "Receiving… · 1 change waiting"),
+      count(".plan-head .forward-lock", 1),
+      expect(".plan-head .forward-lock", NEWER_PLAN),
+      expect(".toolbar button:disabled", "+ New"),
     ],
+  });
+  add("unreadable/ios-pad", "unreadable-ios-pad", {
+    sizes: "ipad-11-landscape",
+    actions: [expect(".plan-head .forward-lock", NEWER_PLAN), expect(".toolbar button:disabled", "+ New"), hitChrome("toolbar")],
+  });
+  add("unreadable/ios-phone", "unreadable-ios-phone", {
+    sizes: "phone",
+    actions: [expect(".phone-status .status-strip .status-text", NEWER_PLAN), hitChrome("phoneBars", "phoneStatus")],
   });
   add("two-choices", "two-choices", {
     actions: [
@@ -793,7 +808,7 @@ function states() {
   add("ios44/pad-landscape/dialog", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
     dialog: true,
-    actions: [...fullShell, click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), hitChrome("dialogActions")],
+    actions: [...fullShell, click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), hitChrome("dialogActions", "dialogHead")],
   });
   add("ios44/pad-portrait/plan", "mesa-ios-pad", { sizes: "ipad-11-portrait", actions: [viewExpect("timeline"), hitChrome("toolbar")] });
   add("ios44/pad-portrait/plans", "mesa-ios-pad", {
@@ -853,7 +868,7 @@ function states() {
       width(OVERLAY, 320, 320),
     ],
   });
-  add("ipad-overlay/hit44", "mesa-ios-pad", { sizes: "ipad-overlay-open", dialog: true, actions: [...overlayOpened, hitChrome("toolbar", "planList")] });
+  add("ipad-overlay/hit44", "mesa-ios-pad", { sizes: "ipad-overlay-open", dialog: true, actions: [...overlayOpened, hitChrome("toolbar", "planList", "drawerHead")] });
   add("ipad-overlay/closed", "mesa-ios-pad", {
     sizes: "ipad-overlay-open",
     actions: [...overlayOpened, click(TOGGLE), still(), count(".plan-overlay-layer", 0), count("main.main[inert]", 0), count(`${TOGGLE}[aria-expanded="false"]`, 1), kept(".main")],
@@ -927,6 +942,51 @@ function states() {
     dialog: true,
     actions: [viewExpect("timeline"), click(".toolbar button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), count(".plan-overlay-layer", 0), style(".sheet", "border-bottom-width", "0px"), edgeAt(".sheet", "bottom", 1194)],
   });
+  add("close/dialog", "mesa", {
+    dialog: true,
+    actions: [click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), width(".modal-close", 28, 28), style(".modal-close", "width", "24px", "::after"), style(".modal-close", "height", "24px", "::after"), corner(".modal-close", ".modal", "top-leading", 20)],
+  });
+  add("close/sheet-mac", "mesa", {
+    sizes: "mac-compact",
+    dialog: true,
+    actions: [viewExpect("timeline"), click(".toolbar button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), width(".sheet-close", 28, 28), style(".sheet-close", "width", "24px", "::after"), style(".sheet-close", "height", "24px", "::after"), corner(".sheet-close", ".sheet", "top-leading", 24)],
+  });
+  add("close/sheet-ios", "mesa-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-head button", "Plans"),
+      expect('.sheet[role="dialog"] .sheet-title', "Plans"),
+      count(".sheet > .sheet-grabber:first-child", 1),
+      width(".sheet-grabber", 36, 36),
+      style(".sheet-grabber", "height", "5px"),
+      within_(".sheet-grabber", ".sheet", 1),
+      style(".sheet-head", "touch-action", "none"),
+      corner(".sheet-close", ".sheet", "top-leading", 16),
+      hitChrome("sheetHead"),
+    ],
+  });
+  add("close/palette", "mesa", {
+    dialog: true,
+    actions: [key("k", "KeyK", 4), expect('.palette[role="dialog"] .palette-field input'), count(".palette-field > *", 2), count(".palette-field > .palette-close:last-child", 1), width(".palette-close", 28, 28), corner(".palette-close", ".palette-field", "top-trailing", 8)],
+  });
+  add("close/popover", "two-choices", {
+    actions: [
+      expect(".plan-head .chip-amber", "2 open choices · Choose…"),
+      click(".plan-head .chip-button", "Choose…"),
+      count('.plan-head .popover[role="dialog"]:not([aria-modal]) .choice-list li', 2),
+      count(".plan-head .popover > .popover-close:last-child", 1),
+      width(".popover-close", 20, 20),
+      style(".popover-close", "width", "28px", "::before"),
+      style(".popover-close", "height", "28px", "::before"),
+      corner(".popover-close", ".popover", "top-trailing", 12),
+    ],
+  });
+  add("close/drawer", "mesa-ios-pad", {
+    sizes: "ipad-overlay-open",
+    dialog: true,
+    actions: [...overlayOpened, count(`${OVERLAY} > .drawer-head:first-child > .drawer-close`, 1), width(".drawer-close", 44, 44), corner(".drawer-close", OVERLAY, "top-leading", 16)],
+  });
   add("revert-preview", "mesa", {
     dialog: true,
     actions: [click(".slot-panel .history button", "Revert"), expect('[role="dialog"] h3', "Revert this action"), expect(".revert-text p")],
@@ -937,7 +997,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -1505,7 +1565,7 @@ const MEASURE = String.raw`
     return out.slice(0, 12);
   }
 
-  var POPUPS = ".overlay, .choice-list, .plan-menu-list, .plan-overlay-layer";
+  var POPUPS = ".overlay, .popover, .popover-scrim, .plan-menu-list, .plan-overlay-layer";
   var ON_TOP = [".tl-head", ".tl-corner", "table.list th", ".col-head"];
   function coveredUp() {
     var out = [];
@@ -2098,6 +2158,21 @@ window.__probeAct = function (a) {
     if (Math.abs(meetGot - meetWant) > 0.5) return { fail: a.meets[0] + " has its " + a.meets[1] + " edge at " + tenth(meetGot) + " px, not at " + a.meets[2] + "'s " + a.meets[3] + " edge, " + tenth(meetWant) + " px" };
     return { ok: true };
   }
+  if (a.corner !== undefined) {
+    var kEl = firstShown(a.corner[0]);
+    if (kEl === undefined) return { fail: "no " + a.corner[0] + " on screen to measure" };
+    var kHolder = kEl.closest(a.corner[1]);
+    if (kHolder === null) return { fail: a.corner[0] + " is not inside a " + a.corner[1] };
+    if (a.corner[2] !== "top-leading" && a.corner[2] !== "top-trailing") throw new Error("corner: no corner " + a.corner[2]);
+    var kr = boxOf(kEl);
+    var kb = boxOf(kHolder);
+    if (kr.left < kb.left - 0.5 || kr.top < kb.top - 0.5 || kr.right > kb.right + 0.5 || kr.bottom > kb.bottom + 0.5) return { fail: a.corner[0] + " runs out of its " + a.corner[1] };
+    var kLeading = a.corner[2] === "top-leading";
+    var kSide = kLeading ? kr.left - kb.left : kb.right - kr.right;
+    var kTop = kr.top - kb.top;
+    if (kSide > a.corner[3] + 0.5 || kTop > a.corner[3] + 0.5) return { fail: a.corner[0] + " sits " + tenth(kSide) + " px from the " + (kLeading ? "leading" : "trailing") + " side and " + tenth(kTop) + " px from the top of its " + a.corner[1] + ", more than " + a.corner[3] };
+    return { ok: true };
+  }
   if (a.centredIn !== undefined) {
     var cEl = firstShown(a.centredIn);
     if (cEl === undefined) return { fail: "no " + a.centredIn + " on screen to measure" };
@@ -2327,8 +2402,11 @@ window.__probeAct = function (a) {
   if (a.style !== undefined) {
     var styled = document.querySelector(a.style[0]);
     if (styled === null) return { fail: "no " + a.style[0] + " to read " + a.style[1] + " from" };
-    var got = getComputedStyle(styled).getPropertyValue(a.style[1]);
-    if (got !== a.style[2]) return { fail: a.style[0] + " has " + a.style[1] + ": " + JSON.stringify(got) + ", not " + JSON.stringify(a.style[2]) };
+    var pseudo = a.style[3] === undefined ? null : a.style[3];
+    if (pseudo !== null && pseudo !== "::before" && pseudo !== "::after") throw new Error("style: no pseudo-element " + pseudo);
+    var got = getComputedStyle(styled, pseudo).getPropertyValue(a.style[1]);
+    var named = a.style[0] + (pseudo === null ? "" : pseudo);
+    if (got !== a.style[2]) return { fail: named + " has " + a.style[1] + ": " + JSON.stringify(got) + ", not " + JSON.stringify(a.style[2]) };
     return { ok: true };
   }
   if (a.loaded !== undefined) {

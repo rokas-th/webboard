@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { Refused } from "../../actions/intents";
 
 export const LOCAL_NOTE: unique symbol = Symbol("LOCAL_NOTE");
 
@@ -17,7 +18,7 @@ function diff(before: string, after: string): { at: number; remove: number; inse
   return { at: head, remove: before.length - head - tail, insert: after.slice(head, after.length - tail) };
 }
 
-export function bindTextarea(el: HTMLTextAreaElement, text: Y.Text): NoteBinding {
+export function bindTextarea(el: HTMLTextAreaElement, text: Y.Text, lockedBy: () => string | null): NoteBinding {
   const doc = text.doc;
   if (doc === null) throw new Error("bindTextarea needs a Y.Text inside a Y.Doc");
   const undoManager = new Y.UndoManager(text, { trackedOrigins: new Set([LOCAL_NOTE]) });
@@ -25,6 +26,11 @@ export function bindTextarea(el: HTMLTextAreaElement, text: Y.Text): NoteBinding
   el.value = text.toString();
 
   const onInput = (): void => {
+    const reason = lockedBy();
+    if (reason !== null) {
+      el.value = text.toString();
+      throw new Refused(reason);
+    }
     const d = diff(text.toString(), el.value);
     if (d.remove === 0 && d.insert === "") return;
     doc.transact(() => {

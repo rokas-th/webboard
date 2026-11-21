@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanSession } from "../../store/session";
+import { NEWER_PLAN, type PlanSession } from "../../store/session";
 import { testSession, type TestSession } from "../../test/session";
 import { shellFor } from "../../test/shell";
 import { withSync } from "../../test/withSync";
@@ -113,6 +113,27 @@ describe("the plan name in the heading", () => {
     const onNamed = vi.fn();
     render(head(t.session, { readOnly: false, naming: true, onNamed }));
     expect([document.activeElement === field(), field().selectionStart, field().selectionEnd, onNamed.mock.calls.length]).toEqual([true, 0, "Plan".length, 1]);
+  });
+
+  it("shows the update line once, before the per-action lines", async () => {
+    const t = await testSession([{ name: "A", start: "2026-11-10", dur: 3 }], {
+      raw: { x1: ["iphone", "s1", 0, [], 42, []], x2: ["iphone", "s1", 0, [], 43, []] },
+    });
+    sessions.push(t.session);
+    render(head(t.session, { readOnly: t.session.readOnly, naming: false, onNamed: vi.fn() }));
+    const messages = t.session.view().unreadable.map((u) => u.message);
+    expect(messages).toHaveLength(2);
+    const lines = [...document.querySelectorAll(".plan-head .head-line")].map((e) => e.textContent);
+    expect(lines).toEqual([NEWER_PLAN, ...messages]);
+    const lock = document.querySelectorAll(".plan-head .forward-lock");
+    expect(lock).toHaveLength(1);
+    expect([lock[0].getAttribute("role"), lock[0].classList.contains("warn")]).toEqual(["status", true]);
+  });
+
+  it("shows no update line on a plan this build reads whole", async () => {
+    const t = await made();
+    render(head(t.session, { readOnly: false, naming: false, onNamed: vi.fn() }));
+    expect(document.querySelector(".plan-head .forward-lock")).toBeNull();
   });
 
   it("only clears the naming signal on a read-only plan", async () => {

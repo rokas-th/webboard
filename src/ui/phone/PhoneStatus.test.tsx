@@ -9,7 +9,7 @@ import { noticeText, type HolidayNotice, type HolidayService } from "../../servi
 import { AppError } from "../../services/ipc";
 import { encodeAction } from "../../store/doc";
 import { Registry } from "../../store/registry";
-import type { PlanSession } from "../../store/session";
+import { NEWER_PLAN, type PlanSession } from "../../store/session";
 import { CH_ZH, holidayDay, holidayYear } from "../../test/fixtures/calendars";
 import { phoneRegistry } from "../../test/phone";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
@@ -556,7 +556,7 @@ describe("PhoneStatus lines (Step 1)", () => {
     const message = view.unreadable[0].message;
     expect(message.startsWith("A change from iPhone could not be read: ")).toBe(true);
     expect(message.endsWith(". Update WebBoard on this device.")).toBe(true);
-    expect(lineTexts().slice(0, 2)).toEqual([message, "Receiving… · 1 change waiting"]);
+    expect(lineTexts().slice(0, 3)).toEqual([NEWER_PLAN, message, "Receiving… · 1 change waiting"]);
     expect(lineOf(message).classList.contains("bad")).toBe(true);
     expect(within(lineOf(message)).queryAllByRole("button")).toEqual([]);
     expect(lineOf("Receiving… · 1 change waiting").classList.contains("cyan")).toBe(true);
@@ -568,7 +568,20 @@ describe("PhoneStatus lines (Step 1)", () => {
     act(() => {
       t.doc.ydoc.getMap("actions").set("x3", encodeAction(x3));
     });
-    expect(lineTexts().slice(0, 2)).toEqual([message, "Receiving… · 2 changes waiting"]);
+    expect(lineTexts().slice(0, 3)).toEqual([NEWER_PLAN, message, "Receiving… · 2 changes waiting"]);
+  });
+
+  it("a newer plan leads with the update line", async () => {
+    const t = await made(SEED, { calendar: { ...CH_ZH }, answers: { holidays_year: pending }, raw: unreadableRaw() });
+    await shown(t);
+    expect(t.session.readOnlyReason).toBe(NEWER_PLAN);
+    expect(strip().textContent).toBe(`${NEWER_PLAN} · +2 more`);
+    expect(strip().classList.contains("warn")).toBe(true);
+    openStatus();
+    const message = t.session.view().unreadable[0].message;
+    expect(lineTexts()).toEqual([NEWER_PLAN, message, "Receiving… · 1 change waiting"]);
+    expect(lineOf(NEWER_PLAN).classList.contains("warn")).toBe(true);
+    expect(within(lineOf(NEWER_PLAN)).queryAllByRole("button")).toEqual([]);
   });
 
   it("no holiday region offers Choose region, which opens the calendar", async () => {
@@ -701,17 +714,21 @@ describe("PhoneStatus lines (Step 1)", () => {
   });
 
   it("orders one line of each kind, the strip naming the first", async () => {
-    const t = await made(CONFLICT_SEED, { raw: unreadableRaw(), clashes: [AWAY] });
+    const t = await made(CONFLICT_SEED, { clashes: [AWAY] });
     await shown(t);
     failOnce("store_append", { code: "store.io", message: "Disk full." });
     act(() => {
       t.session.apply({ t: "rename", item: "A", name: "A2" });
     });
     await settle();
+    act(() => {
+      const actions = t.doc.ydoc.getMap("actions");
+      Object.entries(unreadableRaw()).forEach(([id, raw]) => actions.set(id, raw));
+    });
     const message = t.session.view().unreadable[0].message;
-    expect(strip().textContent).toBe("Disk full. · +6 more");
+    expect(strip().textContent).toBe("Disk full. · +7 more");
     openStatus();
-    expect(lineTexts()).toEqual(["Disk full.", message, "Receiving… · 1 change waiting", NO_REGION, "1 conflict", "1 open choice · Choose…", CALENDAR_BANNER]);
+    expect(lineTexts()).toEqual(["Disk full.", NEWER_PLAN, message, "Receiving… · 1 change waiting", NO_REGION, "1 conflict", "1 open choice · Choose…", CALENDAR_BANNER]);
   });
 
   it("shows nothing when there is nothing to say", async () => {

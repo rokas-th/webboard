@@ -157,6 +157,23 @@ describe("the plan list overlay on an iPad at 700-1179", () => {
     closed();
   });
 
+  it("a ✕ leads the drawer and returns focus to the toolbar button", async () => {
+    await shown(await made());
+    fireEvent.click(toggle());
+    const d = opened();
+    const head = d.firstElementChild;
+    if (!(head instanceof HTMLElement)) throw new Error("the drawer is empty");
+    expect([head.className, [...head.children].map((k) => [k.tagName.toLowerCase(), k.className])]).toEqual(["drawer-head", [["button", "drawer-close"]]]);
+    expect(head.nextElementSibling).toBe(within(d).getByRole("navigation", { name: "Plans" }));
+    const close = within(head).getByRole("button", { name: "Close" });
+    expect(close.querySelector("svg")).not.toBeNull();
+    expect(document.activeElement).toBe(d);
+    act(() => close.focus());
+    fireEvent.click(close);
+    expect(document.activeElement).toBe(toggle());
+    closed();
+  });
+
   it("closes on Escape and gives the button focus", async () => {
     await shown(await made());
     fireEvent.click(toggle());
@@ -387,22 +404,31 @@ describe("the plan list overlay on an iPad at 700-1179", () => {
     expect(within(opened()).getByRole("button", { name: "Delete forever" })).toHaveProperty("disabled", false);
   });
 
-  it("cycles Tab through the panel and the toolbar button", async () => {
+  it("cycles Tab through the toolbar button, the ✕ and the panel, entering past the ✕", async () => {
     await shown(await made());
     fireEvent.click(toggle());
     const d = opened();
     const newPlan = within(d).getByRole("button", { name: "New plan" });
+    const close = within(d).getByRole("button", { name: "Close" });
     press(d, "Tab");
     expect(document.activeElement).toBe(newPlan);
     press(newPlan, "Tab", { shift: true });
+    expect(document.activeElement).toBe(close);
+    press(close, "Tab", { shift: true });
     expect(document.activeElement).toBe(toggle());
     press(toggle(), "Tab", { shift: true });
     const stops = Array.from(d.querySelectorAll<HTMLElement>("button:not(:disabled)"));
+    expect(stops[0]).toBe(close);
     expect(document.activeElement).toBe(stops[stops.length - 1]);
     press(stops[stops.length - 1], "Tab");
     expect(document.activeElement).toBe(toggle());
     press(toggle(), "Tab");
+    expect(document.activeElement).toBe(close);
+    press(close, "Tab");
     expect(document.activeElement).toBe(newPlan);
+    press(newPlan, "Tab", { shift: true });
+    expect(document.activeElement).toBe(close);
+    act(() => d.focus());
     press(d, "Tab", { shift: true });
     expect(document.activeElement).toBe(toggle());
   });

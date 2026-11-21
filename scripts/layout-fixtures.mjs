@@ -680,6 +680,8 @@ export function buildFixtures() {
       { id: PLAN_IDS.longRtl, name: LONG.rtlPlan, log: rtlLog() },
     ]),
     unreadable,
+    "unreadable-ios-pad": onIosPad(unreadable),
+    "unreadable-ios-phone": onIosPhone(unreadable),
     "two-choices": fixtureOf([mesa(twoChoicesLog())]),
     "phone-choice": fixtureOf([{ id: PLAN_IDS.phone, name: "Sprint plan", log: phoneChoiceLog() }]),
     "phone-status": status,

@@ -2,13 +2,19 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Platform } from "../../platform";
+import { setReducedMotion } from "../../test/matchMedia";
 import { IPAD, IPHONE, LINUX, MAC, setPlatform } from "../../test/platform";
+import { resetTauri, tauri } from "../../test/tauriMock";
 import { TextField } from "../panel/TextField";
 import { Dialog } from "./Dialog";
+import { useCloseGuard } from "./dismiss";
 import { Sheet } from "./Sheet";
+
+vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 const dialog = (): HTMLElement => screen.getByRole("dialog");
@@ -96,17 +102,23 @@ describe("the sheet head", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it.each<Platform>([MAC, LINUX])("on %o keeps the title first and a Close text button last", (platform) => {
+  it.each<Platform>([MAC, LINUX])("on %o leads with a ✕ like iOS", (platform) => {
     setPlatform(platform);
+    const onClose = vi.fn();
     render(
-      <Sheet open title="Plans" onClose={() => undefined}>
+      <Sheet open title="Plans" onClose={onClose}>
         <p>Body</p>
       </Sheet>,
     );
     expect([...head().children].map((k) => [k.tagName.toLowerCase(), k.className, k.textContent])).toEqual([
+      ["button", "sheet-close", ""],
       ["h3", "sheet-title", "Plans"],
-      ["button", "button-small", "Close"],
+      ["span", "sheet-head-end", ""],
     ]);
+    const close = within(head()).getByRole("button", { name: "Close" });
+    expect(close.querySelector("svg")).not.toBeNull();
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -175,7 +187,7 @@ describe("a tap outside the sheet", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it.each<Platform>([MAC, LINUX])("does nothing on %o", (platform) => {
+  it.each<Platform>([MAC, LINUX])("closes on %o on a scrim press", (platform) => {
     setPlatform(platform);
     const onClose = vi.fn();
     render(
@@ -183,11 +195,13 @@ describe("a tap outside the sheet", () => {
         <p>Body</p>
       </Sheet>,
     );
-    tap(overlay(), overlay());
+    tap(overlay(), dialog());
     expect(onClose).not.toHaveBeenCalled();
+    tap(overlay(), overlay());
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("never closes a centred dialog, which is an alert", () => {
+  it("closes a centred dialog on a scrim press", () => {
     setPlatform(IPAD);
     const onClose = vi.fn();
     render(
@@ -196,7 +210,7 @@ describe("a tap outside the sheet", () => {
       </Dialog>,
     );
     tap(overlay(), overlay());
-    expect(onClose).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -340,6 +354,229 @@ describe("focus when a sheet or dialog opens", () => {
   it.each(opened)("on macOS lands on the %s's first control", (_, open) => {
     setPlatform(MAC);
     open();
-    expect(document.activeElement).toBe(dialog().querySelector("button"));
+    expect(document.activeElement).toBe(within(dialog()).getByRole("button", { name: "First" }));
+  });
+});
+
+describe("a swipe down from the sheet head on iOS", () => {
+  const SHEET_HEIGHT = 600;
+  let now = 0;
+
+  const measured = (): void => {
+    vi.spyOn(dialog(), "getBoundingClientRect").mockReturnValue(new DOMRect(0, 200, 390, SHEET_HEIGHT));
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+  };
+
+  const swipe = (to: number, ms: number, pointerType = "touch", end: "up" | "cancel" = "up"): string => {
+    now = 1000;
+    fireEvent.pointerDown(head(), { button: 0, pointerId: 7, pointerType, clientX: 100, clientY: 220 });
+    now = 1000 + ms / 2;
+    fireEvent.pointerMove(head(), { pointerId: 7, pointerType, clientX: 100, clientY: 220 + to / 2 });
+    now = 1000 + ms;
+    fireEvent.pointerMove(head(), { pointerId: 7, pointerType, clientX: 100, clientY: 220 + to });
+    const during = dialog().style.transform;
+    if (end === "up") fireEvent.pointerUp(head(), { pointerId: 7, pointerType, clientX: 100, clientY: 220 + to });
+    else fireEvent.pointerCancel(head(), { pointerId: 7, pointerType });
+    return during;
+  };
+
+  it("shows a grabber at the top of the sheet on iOS only, outside the head", () => {
+    setPlatform(IPHONE);
+    const { unmount } = render(
+      <Sheet open title="Plans" onClose={() => undefined}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    const grabber = dialog().querySelector(".sheet-grabber");
+    expect([grabber?.parentElement === dialog(), grabber?.getAttribute("aria-hidden"), dialog().firstElementChild === grabber]).toEqual([true, "true", true]);
+    unmount();
+    setPlatform(MAC);
+    render(
+      <Sheet open title="Plans" onClose={() => undefined}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    expect(dialog().querySelector(".sheet-grabber")).toBeNull();
+  });
+
+  it("swipe past a quarter closes, committing the field", () => {
+    setPlatform(IPHONE);
+    const onRename = vi.fn();
+    const onClosed = vi.fn();
+    render(<Named onRename={onRename} onClosed={onClosed} />);
+    typed("Final review");
+    measured();
+    const during = swipe(SHEET_HEIGHT * 0.25 + 10, 2000);
+    expect([during, onRename.mock.calls, onClosed.mock.calls.length, stored(), screen.queryByRole("dialog")]).toEqual([
+      `translateY(${SHEET_HEIGHT * 0.25 + 10}px)`,
+      [["Final review"]],
+      1,
+      "Final review",
+      null,
+    ]);
+  });
+
+  it("a short swipe snaps back, and so does a cancelled one", () => {
+    setPlatform(IPHONE);
+    const onClose = vi.fn();
+    render(
+      <Sheet open title="Plans" onClose={onClose}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    measured();
+    expect(swipe(120, 1000)).toBe("translateY(120px)");
+    expect([onClose.mock.calls.length, dialog().style.transform, dialog().style.transition]).toEqual([0, "", "transform 200ms ease-out"]);
+    expect(swipe(400, 100, "touch", "cancel")).toBe("translateY(400px)");
+    expect([onClose.mock.calls.length, dialog().style.transform]).toEqual([0, ""]);
+    expect(swipe(-80, 100)).toBe("translateY(0px)");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("snaps back at once under reduced motion", () => {
+    setPlatform(IPHONE);
+    setReducedMotion(true);
+    render(
+      <Sheet open title="Plans" onClose={() => undefined}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    measured();
+    swipe(100, 1000);
+    expect([dialog().style.transform, dialog().style.transition]).toEqual(["", "none"]);
+  });
+
+  it("a fast flick closes", () => {
+    setPlatform(IPHONE);
+    const onClose = vi.fn();
+    render(
+      <Sheet open title="Plans" onClose={onClose}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    measured();
+    swipe(41, 50);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("a slow drag that ends in a quick flick closes, by the speed at release", () => {
+    setPlatform(IPHONE);
+    const onClose = vi.fn();
+    render(
+      <Sheet open title="Plans" onClose={onClose}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    measured();
+    now = 1000;
+    fireEvent.pointerDown(head(), { button: 0, pointerId: 7, pointerType: "touch", clientX: 100, clientY: 220 });
+    now = 3000;
+    fireEvent.pointerMove(head(), { pointerId: 7, pointerType: "touch", clientX: 100, clientY: 240 });
+    now = 3050;
+    fireEvent.pointerMove(head(), { pointerId: 7, pointerType: "touch", clientX: 100, clientY: 280 });
+    fireEvent.pointerUp(head(), { pointerId: 7, pointerType: "touch", clientX: 100, clientY: 280 });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("a touch tap on the ✕ closes once and never takes the pointer for a swipe", () => {
+    setPlatform(IPHONE);
+    const onClose = vi.fn();
+    render(
+      <Sheet open title="Plans" onClose={onClose}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    measured();
+    const capture = vi.spyOn(head(), "setPointerCapture");
+    const x = within(head()).getByRole("button", { name: "Close" });
+    fireEvent.pointerDown(x, { button: 0, pointerId: 4, pointerType: "touch", clientX: 30, clientY: 220 });
+    fireEvent.pointerUp(x, { button: 0, pointerId: 4, pointerType: "touch", clientX: 30, clientY: 220 });
+    fireEvent.click(x, { button: 0, clientX: 30, clientY: 220 });
+    expect([onClose.mock.calls.length, capture.mock.calls.length]).toEqual([1, 0]);
+  });
+
+  it("a tap on the title leaves the sheet's style alone", () => {
+    setPlatform(IPHONE);
+    const onClose = vi.fn();
+    render(
+      <Sheet open title="Plans" onClose={onClose}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    measured();
+    const capture = vi.spyOn(head(), "setPointerCapture");
+    const title = within(head()).getByRole("heading", { name: "Plans" });
+    fireEvent.pointerDown(title, { button: 0, pointerId: 5, pointerType: "touch", clientX: 190, clientY: 220 });
+    fireEvent.pointerMove(title, { pointerId: 5, pointerType: "touch", clientX: 191, clientY: 223 });
+    fireEvent.pointerUp(title, { button: 0, pointerId: 5, pointerType: "touch", clientX: 191, clientY: 223 });
+    expect([onClose.mock.calls.length, capture.mock.calls.length, dialog().style.transform, dialog().style.transition]).toEqual([0, 0, "", ""]);
+  });
+
+  it("a slow or short flick does not close", () => {
+    setPlatform(IPHONE);
+    const onClose = vi.fn();
+    render(
+      <Sheet open title="Plans" onClose={onClose}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    measured();
+    swipe(40, 10);
+    swipe(100, 200);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, Platform, string]>([
+    ["a mouse drag on iOS", IPAD, "mouse"],
+    ["a pen drag on iOS", IPHONE, "pen"],
+    ["a touch drag on macOS", MAC, "touch"],
+  ])("%s does not swipe", (_, platform, pointerType) => {
+    setPlatform(platform);
+    const onClose = vi.fn();
+    render(
+      <Sheet open title="Plans" onClose={onClose}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    measured();
+    expect([swipe(400, 100, pointerType), onClose.mock.calls.length, dialog().style.transform]).toEqual(["", 0, ""]);
+  });
+
+  it("a drag that starts in the body does not swipe", () => {
+    setPlatform(IPHONE);
+    const onClose = vi.fn();
+    render(
+      <Sheet open title="Plans" onClose={onClose}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    measured();
+    const body = screen.getByText("Body");
+    fireEvent.pointerDown(body, { pointerId: 3, pointerType: "touch", clientY: 300 });
+    fireEvent.pointerMove(body, { pointerId: 3, pointerType: "touch", clientY: 600 });
+    fireEvent.pointerUp(body, { pointerId: 3, pointerType: "touch", clientY: 600 });
+    expect([onClose.mock.calls.length, dialog().style.transform]).toEqual([0, ""]);
+  });
+
+  it("a kept guarded swipe snaps back", async () => {
+    setPlatform(IPHONE);
+    resetTauri({ alert_ask: () => "cancel" });
+    const onClose = vi.fn();
+    function Guarded() {
+      useCloseGuard({ title: "Discard calendar changes?", message: "Your calendar changes are not applied yet." });
+      return <p>Body</p>;
+    }
+    render(
+      <Sheet open title="Calendar" onClose={onClose}>
+        <Guarded />
+      </Sheet>,
+    );
+    measured();
+    swipe(400, 1000);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect([tauri.calls.map((c) => c.cmd), onClose.mock.calls.length, screen.queryByRole("dialog") !== null, dialog().style.transform]).toEqual([["alert_ask"], 0, true, ""]);
   });
 });

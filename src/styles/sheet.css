@@ -4,6 +4,7 @@
 }
 
 .sheet {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 560px;
@@ -25,6 +26,11 @@
   flex-shrink: 0;
   padding: 14px 20px 12px;
   border-bottom: 1px solid var(--line);
+}
+
+.sheet-head-end {
+  flex: none;
+  width: 28px;
 }
 
 .sheet-title {
@@ -71,31 +77,28 @@ html[data-os="ios"][data-idiom="pad"][data-width="regular"] .sheet {
 html[data-os="ios"] .sheet-head {
   gap: 4px;
   padding: 4px 8px;
+  touch-action: none;
+}
+
+.sheet-grabber {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: 36px;
+  height: 5px;
+  margin-left: -18px;
+  border-radius: 3px;
+  background: var(--line);
+  pointer-events: none;
 }
 
 html[data-os="ios"] .sheet-title {
   text-align: center;
 }
 
-html[data-os="ios"] .sheet-close,
 html[data-os="ios"] .sheet-head-end {
-  flex: none;
   width: 44px;
   height: 44px;
-}
-
-html[data-os="ios"] .sheet-close {
-  display: grid;
-  place-items: center;
-  padding: 0;
-  color: var(--dim);
-  border: none;
-  border-radius: 0;
-}
-
-html[data-os="ios"] .sheet-close svg {
-  width: 16px;
-  height: 16px;
 }
 
 html[data-os="ios"] .sheet:focus-visible,

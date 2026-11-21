@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent, type ReactNode, type RefObject, type TransitionEvent as ReactTransitionEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject, type TransitionEvent as ReactTransitionEvent } from "react";
 import { focusables } from "../common/Dialog";
+import { CLOSE_CONTROLS, CloseButton, useScrimPress } from "../common/dismiss";
 import { OPEN_MENU } from "../common/menu";
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
@@ -23,7 +24,6 @@ function mounted<T>(el: T | null, what: string): T {
 export function PlanOverlay(p: { open: boolean; button: RefObject<HTMLButtonElement | null>; onClose(): void; onFocusDropped(): void; children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>(() => (p.open ? "mounted" : "gone"));
   const panel = useRef<HTMLDivElement>(null);
-  const press = useRef<"none" | "down" | "tapped">("none");
   const onClose = useRef(p.onClose);
   const onFocusDropped = useRef(p.onFocusDropped);
   useLayoutEffect(() => {
@@ -98,9 +98,11 @@ export function PlanOverlay(p: { open: boolean; button: RefObject<HTMLButtonElem
       }
       if (e.key !== "Tab") return;
       const cycle: Element[] = [button, ...focusables(root)];
-      const at = active === root ? (e.shiftKey ? 1 : 0) : active === null ? -1 : cycle.indexOf(active);
+      const entry = cycle.findIndex((el, i) => i > 0 && !el.matches(CLOSE_CONTROLS));
+      const first = entry === -1 ? Math.min(1, cycle.length - 1) : entry;
+      const at = active === root ? (e.shiftKey ? 1 : first - 1) : active === null ? -1 : cycle.indexOf(active);
       e.preventDefault();
-      const to = at === -1 ? cycle[e.shiftKey ? cycle.length - 1 : Math.min(1, cycle.length - 1)] : cycle[(at + (e.shiftKey ? -1 : 1) + cycle.length) % cycle.length];
+      const to = at === -1 ? cycle[e.shiftKey ? cycle.length - 1 : first] : cycle[(at + (e.shiftKey ? -1 : 1) + cycle.length) % cycle.length];
       if (!(to instanceof HTMLElement)) throw new Error("PlanOverlay: a focus stop is not an HTML element");
       to.focus();
     };
@@ -108,32 +110,26 @@ export function PlanOverlay(p: { open: boolean; button: RefObject<HTMLButtonElem
     return () => document.removeEventListener("keydown", onKey);
   }, [p.open, p.button]);
 
+  const scrim = useScrimPress(
+    () => {
+      if (p.open) onClose.current();
+    },
+    () => document.querySelector(OPEN_MENU) !== null,
+  );
+
   if (phase === "gone" && next === "gone") return null;
 
   const onEnd = (e: ReactTransitionEvent<HTMLDivElement>): void => {
     if (e.target !== e.currentTarget || e.propertyName !== "transform") return;
     if (phase === "leaving") setPhase("gone");
   };
-  const scrim = {
-    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => {
-      press.current = e.target === e.currentTarget && document.querySelector(OPEN_MENU) === null ? "down" : "none";
-    },
-    onPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => {
-      press.current = press.current === "down" && document.elementFromPoint(e.clientX, e.clientY) === e.currentTarget ? "tapped" : "none";
-    },
-    onPointerCancel: () => {
-      press.current = "none";
-    },
-    onClick: (e: MouseEvent<HTMLDivElement>) => {
-      const tapped = press.current === "tapped";
-      press.current = "none";
-      if (tapped && e.target === e.currentTarget && p.open) onClose.current();
-    },
-  };
   return (
     <div className="plan-overlay-layer" data-shown={phase === "shown" ? "true" : undefined} inert={!p.open}>
       <div className="plan-overlay-scrim" {...scrim} />
       <div ref={panel} className={PLAN_OVERLAY_CLASS} role="dialog" aria-modal="true" aria-label="Plans" tabIndex={-1} onTransitionEnd={onEnd}>
+        <div className="drawer-head">
+          <CloseButton className="drawer-close" onPress={() => onClose.current()} />
+        </div>
         {p.children}
       </div>
     </div>

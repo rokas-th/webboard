@@ -2,10 +2,10 @@ import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OfferRefused } from "../actions/undo";
 import type { Conflict } from "../domain/schedule";
-import type { PlanSession } from "../store/session";
+import { NEWER_PLAN, READ_ONLY, type PlanSession } from "../store/session";
 import { fs, testSession, type TestSession } from "../test/session";
 import { toast } from "./common/Toast";
-import { OpenChoice, READ_ONLY, useExec, useRun, type Run } from "./run";
+import { OpenChoice, useExec, useRun, type Run } from "./run";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 vi.mock("./common/Toast", async (importOriginal) => {
@@ -138,6 +138,26 @@ describe("useRun", () => {
       [READ_ONLY, "bad"],
       [READ_ONLY, "bad"],
       [READ_ONLY, "bad"],
+    ]);
+    expect(apply).not.toHaveBeenCalled();
+    expect(undo).not.toHaveBeenCalled();
+    expect(redo).not.toHaveBeenCalled();
+  });
+
+  it("a newer plan toasts the update line and writes nothing", async () => {
+    const t = await made([{ name: "A", start: "2026-11-10", dur: 3 }], { raw: { x1: ["iphone", "s1", 0, [], 42, []] } });
+    expect(t.session.view().newer).toBe(true);
+    const p = probe(t.session);
+    const apply = vi.spyOn(t.session, "apply");
+    const undo = vi.spyOn(t.session, "undo");
+    const redo = vi.spyOn(t.session, "redo");
+    expect(now(() => p.run().run({ t: "move", items: ["A"], days: 1 }))).toBeNull();
+    expect(now(() => p.run().undo())).toBeNull();
+    expect(now(() => p.run().redo())).toBeNull();
+    expect(toasts()).toEqual([
+      [NEWER_PLAN, "bad"],
+      [NEWER_PLAN, "bad"],
+      [NEWER_PLAN, "bad"],
     ]);
     expect(apply).not.toHaveBeenCalled();
     expect(undo).not.toHaveBeenCalled();

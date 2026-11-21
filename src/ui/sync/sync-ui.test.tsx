@@ -279,6 +279,19 @@ describe("the sync chip", () => {
 });
 
 describe("the sync dialog's status", () => {
+  it("closes from its ✕ and gives the chip focus back", async () => {
+    const w = await spaceWorld();
+    await mounted(w);
+    const opener = chip();
+    act(() => opener.focus());
+    await openChip();
+    const head = dialog().querySelector(".modal-head");
+    if (!(head instanceof HTMLElement)) throw new Error("the Sync dialog has no head");
+    expect(within(head).getAllByRole("button", { name: "Close" })).toHaveLength(1);
+    await click(within(head).getByRole("button", { name: "Close" }));
+    expect([screen.queryByRole("dialog", { name: "Sync" }), uiNow()[0].dialog, document.activeElement]).toEqual([null, null, opener]);
+  });
+
   it("a failed sync_status shows in the dialog", async () => {
     const w = syncWorld({ names: NAMES });
     const message = "Could not read the sync state: invalid JSON";

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Refused, type Intent } from "../../actions/intents";
 import { toDay, type IsoDate } from "../../domain/dates";
 import { liveLinks } from "../../plan/project";
-import type { PlanSession } from "../../store/session";
+import { READ_ONLY, type PlanSession } from "../../store/session";
 import { IPAD, MAC, setPlatform } from "../../test/platform";
 import { setScreen } from "../../test/setup";
 import { tauri } from "../../test/tauriMock";
@@ -11,7 +11,6 @@ import { fs, testSession, type SeedItem, type TestSession } from "../../test/ses
 import { shellFor } from "../../test/shell";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
-import { READ_ONLY } from "../run";
 import { useUi, type UiState, type Zoom } from "../state";
 import { geometry } from "./geometry";
 
@@ -563,7 +562,7 @@ describe("haptics on the timeline", () => {
   it("on iOS a drop on a read-only session plays no light", async () => {
     setPlatform(IPAD);
     const t = await shown();
-    vi.spyOn(t.session, "readOnly", "get").mockReturnValue(true);
+    vi.spyOn(t.session, "readOnlyReason", "get").mockReturnValue(READ_ONLY);
     const from = tauri.calls.length;
     holdAndDrag(barOf("Review"), x0(t) + 60, x0(t) + 140, rowY("Review"));
     expect(toastTexts()).toEqual([READ_ONLY]);

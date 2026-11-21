@@ -7,7 +7,7 @@ import type { Choice } from "../plan/choices";
 
 export const LOCAL: unique symbol = Symbol("LOCAL");
 
-export interface PlanView { plan: PlanState; derived: Derived; choices: readonly Choice[]; held: ReadonlySet<ItemId>; pending: number; today: IsoDate; unreadable: readonly { id: ActionId; message: string }[] }
+export interface PlanView { plan: PlanState; derived: Derived; choices: readonly Choice[]; held: ReadonlySet<ItemId>; pending: number; today: IsoDate; unreadable: readonly { id: ActionId; message: string }[]; newer: boolean }
 
 const LETTER: Readonly<Record<Cause, string>> = {
   own: "o",

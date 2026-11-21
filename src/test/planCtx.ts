@@ -25,7 +25,7 @@ export function ctxOf(
   const cs = choices(log, plan, devices);
   const held = heldItems(cs, plan);
   return {
-    view: { plan, derived: derive(plan, held, today), choices: cs, held, pending: log.pending.length, today, unreadable: [] },
+    view: { plan, derived: derive(plan, held, today), choices: cs, held, pending: log.pending.length, today, unreadable: [], newer: false },
     log,
     dev,
     ses: o.ses ?? "s-" + dev,

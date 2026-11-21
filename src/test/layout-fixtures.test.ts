@@ -122,7 +122,7 @@ function planDocs(f: Fixture): string[] {
   return Object.keys(f.docs).filter((d) => d !== "local" && !d.startsWith("ix-"));
 }
 
-const UNREADABLE_FIXTURES: ReadonlySet<string> = new Set(["unreadable", "sync-receiving"]);
+const UNREADABLE_FIXTURES: ReadonlySet<string> = new Set(["unreadable", "unreadable-ios-pad", "unreadable-ios-phone", "sync-receiving"]);
 
 function only<T>(xs: readonly T[]): T {
   expect(xs).toHaveLength(1);
@@ -140,7 +140,7 @@ function decoded(f: Fixture, doc: string) {
   return { ydoc, actions, log, plan, cs, held: heldItems(cs, plan) };
 }
 
-const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad" };
+const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
 
 const openRegistries: Registry[] = [];
 
@@ -229,6 +229,8 @@ describe("layout fixtures", () => {
       "sync-space",
       "two-choices",
       "unreadable",
+      "unreadable-ios-pad",
+      "unreadable-ios-phone",
       "update-available",
       "update-check-failed",
       "update-downloading",
@@ -361,6 +363,8 @@ describe("layout fixtures", () => {
     ["phone-removed-banner-ios", "phone-removed-banner", "iphone", { os: "ios", idiom: "phone" }],
     ["sync-removed-ios-pad", "sync-removed", "ipad", { os: "ios", idiom: "pad" }],
     ["choices-ios-pad", "choices", "ipad", { os: "ios", idiom: "pad" }],
+    ["unreadable-ios-pad", "unreadable", "ipad", { os: "ios", idiom: "pad" }],
+    ["unreadable-ios-phone", "unreadable", "iphone", { os: "ios", idiom: "phone" }],
   ] as const)("%s is the %s fixture on iOS", (name, of, deviceId, platform) => {
     expect(fixture(name).docs).toEqual(fixture(of).docs);
     expect(fixture(name).ipc).toEqual({ ...fixture(of).ipc, device_info: { deviceId, platform: "ios" }, ...UIKIT });
@@ -378,7 +382,7 @@ describe("layout fixtures", () => {
       const answered = Object.keys(f.ipc).filter((cmd) => cmd in UIKIT);
       expect([name, answered]).toEqual([name, f.platform.os === "ios" ? Object.keys(UIKIT) : []]);
     });
-    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(6);
+    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(8);
   });
 
   it("every fixture carries a platform global its device_info agrees with", () => {

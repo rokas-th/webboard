@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useModalFocus } from "../common/Dialog";
+import { CloseButton, useOverlayEntry, useScrimPress } from "../common/dismiss";
 import type { Command } from "./commands";
 
 const LIMIT = 40;
@@ -19,6 +20,8 @@ export function Palette(p: { commands: readonly Command[]; onClose(): void }) {
   const at = Math.min(on, Math.max(0, shown.length - 1));
 
   useModalFocus(box, "Palette");
+  useOverlayEntry(box, () => p.onClose());
+  const scrim = useScrimPress(() => p.onClose());
 
   useEffect(() => {
     const box = list.current;
@@ -51,25 +54,23 @@ export function Palette(p: { commands: readonly Command[]; onClose(): void }) {
   };
 
   return (
-    <div
-      className="overlay"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) p.onClose();
-      }}
-    >
+    <div className="overlay" {...scrim}>
       <div ref={box} className="palette" role="dialog" aria-modal="true" aria-label="Command palette">
-        <input
-          type="text"
-          placeholder="Type a command or an item name"
-          autoComplete="off"
-          aria-label="Command"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOn(0);
-          }}
-          onKeyDown={onKeyDown}
-        />
+        <div className="palette-field">
+          <input
+            type="text"
+            placeholder="Type a command or an item name"
+            autoComplete="off"
+            aria-label="Command"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setOn(0);
+            }}
+            onKeyDown={onKeyDown}
+          />
+          <CloseButton className="palette-close" onPress={() => p.onClose()} />
+        </div>
         <div className="palette-list" role="listbox" aria-label="Commands" ref={list}>
           {shown.length === 0 ? (
             <div className="palette-empty">No command or item matches.</div>

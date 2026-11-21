@@ -698,6 +698,17 @@ describe("choice dialog", () => {
     expect(dialog().querySelector(".undo-offer")).toBeNull();
     expect(columns().filter((col) => col.classList.contains("picked"))).toEqual([]);
   });
+
+  it("closes from its ✕, leaving the choice open", async () => {
+    const t = await made(AB, { clashes: [{ unit: "n:A", mac: "Alpha", iphone: "Beta" }] });
+    const c = only(t);
+    await shown(t);
+    openChoiceFromHead(t, c);
+    expect(screen.getAllByRole("dialog")).toEqual([dialog()]);
+    const bar = one(".modal-head", dialog());
+    click(within(bar).getByRole("button", { name: "Close" }));
+    expect([uiNow()[0].dialog, screen.queryByRole("dialog"), t.session.view().choices.map((x) => x.id)]).toEqual([null, null, [c.id]]);
+  });
 });
 
 describe("a choice settled meanwhile", () => {

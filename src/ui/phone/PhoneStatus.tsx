@@ -7,7 +7,7 @@ import { noticeText, type HolidayNotice } from "../../services/holidays";
 import type { PlanView } from "../../store/doc";
 import { SPACE_PREFIX } from "../../store/plan-id";
 import type { Registry } from "../../store/registry";
-import type { PlanSession } from "../../store/session";
+import { NEWER_PLAN, type PlanSession } from "../../store/session";
 import { chipText, holdsPlan, type SyncState } from "../../sync/manager";
 import { canReload } from "../../sync/reload";
 import { docName } from "../../sync/SyncProvider";
@@ -172,6 +172,7 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
     const conflicts = countedConflicts(view);
     const first = conflicts[0];
     return [
+      ...(view.newer ? [line("newer", NEWER_PLAN, "warn")] : []),
       ...view.unreadable.map((u) => line(`unreadable ${u.id}`, u.message, "bad")),
       ...(view.pending > 0 ? [line("pending", `Receiving… · ${plural(view.pending, "change waiting", "changes waiting")}`, "cyan")] : []),
       ...(plan.calendar.region === null ? [line("region", NO_REGION, "warn", <Act label="Choose region" onPress={openCalendar} />)] : []),

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
+import { Refused } from "../../actions/intents";
 import { bindTextarea, LOCAL_NOTE } from "./noteBinding";
 
 const disposers: (() => void)[] = [];
@@ -9,7 +10,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function pair(initial: string) {
+function pair(initial: string, lockedBy: () => string | null = () => null) {
   const a = new Y.Doc();
   const b = new Y.Doc();
   a.getText("note").insert(0, initial);
@@ -24,7 +25,7 @@ function pair(initial: string) {
   a.on("update", toB);
   const el = document.createElement("textarea");
   document.body.append(el);
-  const binding = bindTextarea(el, a.getText("note"));
+  const binding = bindTextarea(el, a.getText("note"), lockedBy);
   disposers.push(() => binding.dispose());
   return { a, b, el, binding, local: a.getText("note"), remote: b.getText("note") };
 }
@@ -40,6 +41,25 @@ describe("bindTextarea", () => {
   it("shows the text it binds", () => {
     const { el } = pair("abc");
     expect(el.value).toBe("abc");
+  });
+
+  it("refuses typing on a locked plan, writes nothing and puts the text back", () => {
+    const reason = "This plan has changes from a newer WebBoard. Update to edit.";
+    const { el, local } = pair("abc", () => reason);
+    const writes = vi.fn();
+    local.observe(writes);
+    const reported: unknown[] = [];
+    const onError = (e: ErrorEvent): void => {
+      reported.push(e.error);
+      e.preventDefault();
+    };
+    window.addEventListener("error", onError);
+    try {
+      type(el, "abXc", 3);
+    } finally {
+      window.removeEventListener("error", onError);
+    }
+    expect([reported.map((e) => (e instanceof Refused ? e.message : String(e))), writes.mock.calls.length, local.toString(), el.value]).toEqual([[reason], 0, "abc", "abc"]);
   });
 
   it("writes one insert for a typed character", () => {

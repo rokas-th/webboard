@@ -5,8 +5,6 @@ import type { PlanSession } from "../store/session";
 import { requestUndo } from "./choices/undo";
 import { toast } from "./common/Toast";
 
-export const READ_ONLY = "This device was removed from the space; its plans are read-only.";
-
 export type OpenChoiceFn = (choice: string, side?: string) => void;
 
 export const OpenChoice = createContext<OpenChoiceFn | null>(null);
@@ -22,8 +20,9 @@ type Exec = (write: () => Built | null) => Built | null;
 const execWith =
   (session: PlanSession, open: OpenChoiceFn): Exec =>
   (write) => {
-    if (session.readOnly) {
-      toast(READ_ONLY, "bad");
+    const reason = session.readOnlyReason;
+    if (reason !== null) {
+      toast(reason, "bad");
       return null;
     }
     let built: Built | null;
