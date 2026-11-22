@@ -45,10 +45,18 @@ function paneKey(e: KeyInput, s: KeyState): string | null {
   return pane;
 }
 
+const STEP_CODE = /^Digit([1-9])$/;
+
+function stepKey(e: KeyInput, s: KeyState): string | null {
+  if (e.shiftKey || s.typing || s.dialog || !s.selected) return null;
+  const m = STEP_CODE.exec(e.code);
+  return m === null ? null : `to-step-${m[1]}`;
+}
+
 function modified(e: KeyInput, s: KeyState): string | null {
   const mod = s.command ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
   if (!mod) return null;
-  if (e.altKey) return paneKey(e, s);
+  if (e.altKey) return paneKey(e, s) ?? stepKey(e, s);
   if (e.code === "Comma") return e.shiftKey ? null : "settings";
   const key = e.key.toLowerCase();
   if (s.dialog) return null;

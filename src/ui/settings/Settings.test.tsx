@@ -551,7 +551,7 @@ describe("the plan group: Overview, Baselines, Danger zone", () => {
       ["app", "App"],
       ["plan", name],
     ]);
-    expect(navItems(m.root())).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "Working time", "Baselines", "Danger zone"]);
+    expect(navItems(m.root())).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "Workflow", "Working time", "Baselines", "Danger zone"]);
     fireEvent.click(within(nav(m.root())).getByRole("button", { name: "Danger zone" }));
     expect([m.onSection.mock.calls, m.root().getAttribute("aria-label"), shownSection(m.root())]).toEqual([[["danger"]], "Danger zone", ["danger"]]);
     await t.session.close();
@@ -574,6 +574,43 @@ describe("the plan group: Overview, Baselines, Danger zone", () => {
     fireEvent.change(field, { target: { value: "   " } });
     fireEvent.blur(field);
     expect([vi.mocked(toast).mock.calls, apply.mock.calls.length, t.session.view().plan.name, field.value]).toEqual([[[refusal.emptyName, "bad"]], 1, "Dome works", "Dome works"]);
+    await t.session.close();
+  });
+
+  it("Workflow lists the steps under its three rows, and search finds it by a row", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ session: t.session, section: "workflow" });
+    expect([m.root().getAttribute("aria-label"), shownSection(m.root())]).toEqual(["Workflow", ["workflow"]]);
+    const workflow = sectionEl(m.root(), "workflow");
+    expect([...workflow.querySelectorAll<HTMLElement>("[data-settings-row]")].map((r) => r.dataset["settingsRow"])).toEqual(["workflow.steps", "workflow.add", "workflow.new-items"]);
+    expect([...workflow.querySelectorAll<HTMLElement>("li.workflow-row")].map((r) => r.dataset["step"])).toEqual(["now", "next", "later", "done"]);
+    typeSearch(m.root(), "add step");
+    expect([navItems(m.root()), [...nav(m.root()).querySelectorAll<HTMLElement>("button.settings-nav-row")].map((b) => b.dataset["row"])]).toEqual([["Workflow"], ["workflow.add"]]);
+    await t.session.close();
+  });
+
+  it("Esc in the Workflow colour popover closes the popover and leaves Settings open", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ session: t.session, section: "workflow" });
+    const root = m.root();
+    fireEvent.click(within(root).getByRole("button", { name: "Colour · Now" }));
+    const pop = within(root).getByRole("dialog", { name: "Colour · Now" });
+    expect(pop.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement ?? pop, { key: "Escape" });
+    expect([within(root).queryByRole("dialog", { name: "Colour · Now" }), root.isConnected, m.root().getAttribute("aria-label")]).toEqual([null, true, "Workflow"]);
+    await t.session.close();
+  });
+
+  it("Workflow renders the same rows in the phone sheet", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ frame: "sheet", t });
+    const group = m.view.getByRole("dialog", { name: "Settings" }).querySelector<HTMLElement>('section.settings-group[data-section="workflow"]');
+    if (group === null) throw new Error("no Workflow group");
+    expect([group.querySelector("h2")?.textContent, [...group.querySelectorAll<HTMLElement>("li.workflow-row")].map((r) => r.dataset["step"]), group.querySelector(".workflow-add")?.textContent]).toEqual([
+      "Workflow",
+      ["now", "next", "later", "done"],
+      "+ Add step",
+    ]);
     await t.session.close();
   });
 
@@ -981,7 +1018,7 @@ describe("Settings in the sheet frame", () => {
     const list = sheet.querySelector(".settings-list");
     if (list === null) throw new Error("no list");
     const order = [...list.querySelectorAll<HTMLElement>("p.settings-list-plan, section.settings-group > h2")].map((el) => el.textContent);
-    expect(order).toEqual(["General", "Theme", "Sync", "Import & export", t.session.view().plan.name, "Overview", "Working time", "Baselines", "Danger zone"]);
+    expect(order).toEqual(["General", "Theme", "Sync", "Import & export", t.session.view().plan.name, "Overview", "Workflow", "Working time", "Baselines", "Danger zone"]);
     await t.session.close();
   });
 

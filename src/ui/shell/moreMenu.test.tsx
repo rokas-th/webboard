@@ -18,7 +18,7 @@ vi.mock("@tauri-apps/api/event", () => import("../../test/tauriMock"));
 const sessions: PlanSession[] = [];
 let unstub = (): void => undefined;
 const ON_IPAD: Partial<Registry> = { device: { deviceId: "ipad", name: "iPad", platform: "ios" } };
-const BOARD = "Now · Next · Later";
+const BOARD = "Board";
 
 beforeEach(() => {
   window.localStorage.clear();

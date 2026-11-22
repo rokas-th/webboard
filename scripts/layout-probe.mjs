@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
-import { buildFixtures, CONVERTED_FILE, LONG_NAMES, PLAN_IDS, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "./layout-fixtures.mjs";
+import { buildFixtures, CONVERTED_FILE, LONG_NAMES, PLAN_IDS, STEP_QA, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "./layout-fixtures.mjs";
 
 const DIST = fileURLToPath(new URL("../dist", import.meta.url));
 
@@ -80,6 +80,8 @@ export const CHROME = Object.freeze({
   sync: [`.sync-tabs ${CONTROL}`, `.sync-buttons ${CONTROL}`],
   banners: [`.banner ${CONTROL}`],
   choiceBanners: [`.choice-banner ${CONTROL}`],
+  boardHead: [".col-head .col-btn", ".col-strip"],
+  workflowRows: [".workflow-row button", ".workflow-add"],
 });
 const hitChrome = (...groups) => ({ hit44: groups.flatMap((g) => CHROME[g]) });
 const READY_MS = 5000;
@@ -174,7 +176,7 @@ const panesFor = (place, o) => {
 const OUTLINE_CLOSED = { closed: ["outline"] };
 
 const viewExpect = (view) =>
-  view === "timeline" ? expect(".tl-canvas") : view === "board" ? count(".nnl .col", 3) : expect("table.list tbody tr");
+  view === "timeline" ? expect(".tl-canvas") : view === "board" ? count('.nnl:has(> .col-strip[data-strip="done"]):not(:has(> .col-strip[data-strip="done"] ~ .col-strip[data-strip="done"])) > section.col', 3) : expect("table.list tbody tr");
 
 function states() {
   const out = [];
@@ -193,6 +195,7 @@ function states() {
       shotMedia: o.shotMedia ?? null,
       theme: o.theme ?? null,
       panes: o.panes === undefined ? null : panesFor(o.place === undefined ? { view: "timeline", zoom: "W" } : o.place, o.panes),
+      board: o.board ?? null,
     });
 
   add("empty", "empty", {
@@ -329,9 +332,9 @@ function states() {
   const SETTINGS_SHEET = '.sheet[role="dialog"][aria-label="Settings"]';
   const SETTINGS_GEAR = '.toolbar button[aria-label="Settings"]';
   const APP_LABELS = ["General", "Theme", "Sync", "Import & export"];
-  const PLAN_LABELS = ["Overview", "Working time", "Baselines", "Danger zone"];
+  const PLAN_LABELS = ["Overview", "Workflow", "Working time", "Baselines", "Danger zone"];
   const SECTION_LABELS = [...APP_LABELS, ...PLAN_LABELS];
-  const SECTION_SLUGS = ["general", "theme", "sync", "files", "overview", "working-time", "baselines", "danger"];
+  const SECTION_SLUGS = ["general", "theme", "sync", "files", "overview", "workflow", "working-time", "baselines", "danger"];
   const PLAN_NAME = "MESA 1.0";
   const sectionOn = (label) => [expect(`${SETTINGS_MODAL} .modal-head h3`, label), expect(`${SETTINGS_MODAL} .settings-nav-item[aria-current="page"]`, label), count(`${SETTINGS_MODAL} section.settings-section:not([hidden])`, 1)];
   const sectionChecks = (scope) => [
@@ -340,6 +343,26 @@ function states() {
     ["sync", "Sync", [expect(`${scope} .settings-status.cyan`, "Local only"), count(`${scope} .settings-sync .sync-tabs [role="tab"]`, 4), expect(`${scope} .settings-sync [role="tab"][aria-selected="true"]`, "Set up sync"), expect(`${scope} .settings-sync .sync-pane[data-settings-row="sync.setup"] button`, "Create or join space"), count(`${scope} .settings-row[data-settings-row^="sync."] button`, 0)]],
     ["files", "Import & export", [expect(`${scope} [data-settings-row="files.import"] button`, "Import plan…"), expect(`${scope} [data-settings-row="files.export"] button`, "Export plan…")]],
     ["overview", "Overview", [expect(`${scope} [data-settings-row="overview.name"] .settings-label`, "Name"), count(`${scope} [data-settings-row="overview.name"] input.settings-plan-name[aria-label="Plan name"]`, 1), inWindow(`${scope} input.settings-plan-name`)]],
+    [
+      "workflow",
+      "Workflow",
+      [
+        expect(`${scope} [data-settings-row="workflow.steps"] .settings-label`, "Steps"),
+        expect(`${scope} .workflow-line[role="status"] [data-by-dates]`, "Columns follow dates. Edit a step or drag a card to use your own steps."),
+        count(`${scope} .workflow-line .board-problem`, 0),
+        count(`${scope} li.workflow-row`, 4),
+        count(`${scope} li.workflow-row button.workflow-grip`, 4),
+        count(`${scope} li.workflow-row input.workflow-name`, 4),
+        count(`${scope} li.workflow-row input.workflow-limit[placeholder="None"]`, 4),
+        expect(`${scope} li.workflow-row[data-step="now"] input.workflow-name[aria-label="Name of Now"]`),
+        count(`${scope} li.workflow-row[data-step="done"] button.workflow-completes[aria-checked="true"]`, 1),
+        count(`${scope} button.workflow-completes[aria-checked="true"]`, 1),
+        expect(`${scope} li.workflow-row button.workflow-delete`, "Delete…"),
+        expect(`${scope} button.workflow-none[aria-checked="false"]`, "No step completes items"),
+        expect(`${scope} [data-settings-row="workflow.add"] button.workflow-add`, "+ Add step"),
+        expect(`${scope} [data-settings-row="workflow.new-items"] .workflow-new`, "New undated items go to “Later” until this plan uses steps."),
+      ],
+    ],
     [
       "working-time",
       "Working time",
@@ -431,6 +454,30 @@ function states() {
       expect(`${SETTINGS_SHOWN} [data-settings-row="files.import"] button`, "Import plan…"),
       expect(`${SETTINGS_SHOWN} [data-settings-row="files.export"] button`, "Export plan…"),
       hitChrome("dialogHead", "settingsNav", "settingsRows"),
+    ],
+  });
+  add("settings-workflow/pad-landscape", "mesa-steps-ios-pad", {
+    sizes: "ipad-11-landscape",
+    dialog: true,
+    actions: [
+      click(SETTINGS_GEAR),
+      click(`${SETTINGS_MODAL} .settings-nav-item`, "Workflow"),
+      ...sectionOn("Workflow"),
+      ...modalFrame(780, 580),
+      count(`${SETTINGS_SHOWN} [data-by-dates]`, 0),
+      count(`${SETTINGS_SHOWN} li.workflow-row`, 5),
+      expect(`${SETTINGS_SHOWN} li.workflow-row[data-step="${STEP_QA}"] input.workflow-name[aria-label="Name of QA"]`),
+      expect(`${SETTINGS_SHOWN} li.workflow-row[data-step="next"] .workflow-count.over[title="Over the limit of 2"]`, "3 items"),
+      expect(`${SETTINGS_SHOWN} [data-settings-row="workflow.new-items"] .workflow-new`, "New undated items go to “Now”, the first step that does not complete items."),
+      height(`${SETTINGS_SHOWN} li.workflow-row[data-step="next"]`, 52, 54),
+      width(`${SETTINGS_SHOWN} li.workflow-row[data-step="next"] button.workflow-grip`, 44, 44),
+      hitChrome("dialogHead", "workflowRows"),
+      click(`${SETTINGS_SHOWN} li.workflow-row[data-step="next"] button.workflow-swatch`),
+      expect('.colour-pop[role="dialog"] .step-pop-title', "Colour · Review"),
+      uncovered('.colour-pop [role="radio"]'),
+      click('.colour-pop [data-colour="amber"]'),
+      count(".colour-pop", 0),
+      count(`${SETTINGS_SHOWN} li.workflow-row[data-step="next"][style*="--s-amber"]`, 1),
     ],
   });
   add("settings-sheet/phone", "mesa", {
@@ -566,6 +613,130 @@ function states() {
     sizes: "standard",
     place: { view: "board", zoom: "W" },
     actions: [viewExpect("board"), exampleHead, expect(".card .card-name", "Visual design")],
+  });
+  const boardPlace = { view: "board", zoom: "W" };
+  add("board/by-dates", "mesa", {
+    place: boardPlace,
+    actions: [
+      viewExpect("board"),
+      expect('.board-line[role="status"] [data-by-dates]', "Columns follow dates. Edit a step or drag a card to use your own steps."),
+      count(".board-line .board-problem", 0),
+      width(".nnl > section.col", 280, 280),
+      width('.nnl > .col-strip[data-strip="done"]', 40, 40),
+      expect('.col-strip[data-strip="done"] .strip-count', "2"),
+      style(".nnl", "overflow-x", "auto"),
+    ],
+  });
+  add("board/steps", "mesa-steps", {
+    place: boardPlace,
+    actions: [
+      count(".nnl > section.col", 5),
+      count('.nnl > .col-strip[data-strip="done"]', 1),
+      count("[data-by-dates]", 0),
+      expect(".nnl > section.col:first-child .col-head h2", "NO STEP"),
+      expect('.nnl > section.col:first-child .col-note button.move-all', "Move all to…"),
+      expect('[data-col="next"] .col-count.over', "3/2"),
+      expect('[data-col="stepQa00001"] .col-head h2', "QA"),
+      count('[data-col="no-step"] [data-card="u2"]', 1),
+      width(".nnl > section.col", 280, 280),
+    ],
+  });
+  add("board/hidden-strip", "mesa-steps", {
+    place: boardPlace,
+    board: { v: 1, hidden: [STEP_QA], doneOpen: false },
+    actions: [count('[data-col="stepQa00001"].col', 0), width('.nnl > .col-strip[data-strip="hidden"]', 36, 36), expect('.col-strip[data-strip="hidden"] .strip-count', "1")],
+  });
+  add("board/done-open", "mesa", {
+    place: boardPlace,
+    board: { v: 1, hidden: [], doneOpen: true },
+    actions: [count(".nnl .col-strip", 0), width('.nnl > section.col[data-col="done"]', 280, 280), count('[data-col="done"] [data-card]', 2), count('[data-col="done"] .col-collapse', 1)],
+  });
+  const HEAD_ROWS = ["Rename", "Colour…", "Limit…", "Completes items", "Insert left", "Insert right", "Hide on this device", "Delete…"];
+  const stepMenu = (col) => [click(`[data-col="${col}"] .col-head .col-more`), count('.context-menu[role="menu"]', 1)];
+  const menuRow = (text) => click('.context-menu [role^="menuitem"]', text);
+  add("board/header-menu", "mesa-steps", {
+    place: boardPlace,
+    actions: [
+      count('[data-col="next"] .col-head .col-btn', 2),
+      ...stepMenu("next"),
+      count('.context-menu [role^="menuitem"]', 8),
+      ...HEAD_ROWS.map((t) => expect('.context-menu [role^="menuitem"]', t)),
+      count('.context-menu [role="separator"]', 2),
+      count(".context-menu .popover-close", 0),
+      inWindow(".context-menu"),
+      style(".context-menu", "position", "fixed"),
+    ],
+  });
+  add("board/colour-popover", "mesa-steps", {
+    place: boardPlace,
+    actions: [
+      count('[role="dialog"]', 0),
+      ...stepMenu("next"),
+      menuRow("Colour…"),
+      count(".context-menu", 0),
+      expect('.colour-pop[role="dialog"] .step-pop-title', "Colour · Review"),
+      count('.colour-pop [role="radio"]', 8),
+      count('.colour-pop [role="radio"][aria-checked="true"][data-colour="violet"]', 1),
+      count('.colour-pop[role="dialog"]', 1),
+      count(".colour-pop > .popover-close:last-child", 1),
+      width(".colour-pop .popover-close", 20, 20),
+      corner(".colour-pop .popover-close", ".colour-pop", "top-trailing", 12),
+      inWindow(".colour-pop"),
+      uncovered('.colour-pop [role="radio"]'),
+      uncovered(".colour-pop .popover-close"),
+      click('.colour-pop [data-colour="amber"]'),
+      count(".colour-pop", 0),
+      count('[data-col="next"][style*="--s-amber"]', 1),
+    ],
+  });
+  add("board/limit-popover", "mesa-steps", {
+    place: boardPlace,
+    actions: [
+      count('[role="dialog"]', 0),
+      ...stepMenu("next"),
+      menuRow("Limit…"),
+      expect('.limit-pop[role="dialog"] .step-pop-title', "Limit · Review"),
+      expect(".limit-pop .pop-note", "Shown as count/limit in amber when passed. A limit never blocks a drop."),
+      valued(".limit-pop .limit-input", "2"),
+      expect(".limit-pop .limit-row button", "Clear"),
+      expect(".limit-pop .limit-row button", "Apply"),
+      count('.limit-pop[role="dialog"]', 1),
+      count(".limit-pop > .popover-close:last-child", 1),
+      width(".limit-pop .popover-close", 20, 20),
+      corner(".limit-pop .popover-close", ".limit-pop", "top-trailing", 12),
+      inWindow(".limit-pop"),
+      uncovered(".limit-pop .limit-input"),
+      uncovered(".limit-pop .limit-row button"),
+      uncovered(".limit-pop .popover-close"),
+      click(".limit-pop .limit-row button", "Clear"),
+      count(".limit-pop", 0),
+      expect('[data-col="next"] .col-count', "3"),
+    ],
+  });
+  add("board/new-card", "mesa-steps", {
+    place: boardPlace,
+    actions: [
+      click('[data-col="now"] .col-head .col-add'),
+      count('[data-col="now"] .col-body > .card.card-draft:first-child > input.card-draft-name[placeholder="New task"]', 1),
+      width('[data-col="now"] .card-draft', 250, 262),
+      width('[data-col="now"] .card-draft-name', 230, 250),
+    ],
+  });
+  add("board/delete-step", "mesa-steps", {
+    place: boardPlace,
+    dialog: true,
+    actions: [
+      ...stepMenu(STEP_QA),
+      menuRow("Delete…"),
+      expect('.modal[role="dialog"] .modal-head h3', "Move 1 item from QA to…"),
+      count('.modal [role="radiogroup"] .step-pick-row', 4),
+      count('.modal .step-pick-row input[type="radio"]:checked', 1),
+      expect(".modal .step-pick-row.on .step-pick-name", "Now"),
+      expect(".modal .pick-note", "marks them done"),
+      expect(".modal .modal-actions .button-danger", "Delete and move"),
+      count(".modal .modal-head .modal-close", 1),
+      inWindow(".modal"),
+    ],
   });
   add("example/list", "example", {
     sizes: "standard",
@@ -846,7 +1017,7 @@ function states() {
   add("detail/summary-baselines", "mesa", {
     sizes: "smallest",
     dialog: true,
-    actions: [viewExpect("timeline"), click('.slot-panel .summary-row[data-summary-row="baselines"]'), ...sectionOn("Baselines"), ...sectionChecks(SETTINGS_SHOWN)[6][2]],
+    actions: [viewExpect("timeline"), click('.slot-panel .summary-row[data-summary-row="baselines"]'), ...sectionOn("Baselines"), ...sectionChecks(SETTINGS_SHOWN)[SECTION_SLUGS.indexOf("baselines")][2]],
   });
   add("history", "mesa", {
     actions: [click(HISTORY_ROW), reveal(".slot-panel .panel h2", "History"), width(".slot-panel .history li button", 1, 90), count(".slot-panel .history li", 40)],
@@ -996,6 +1167,27 @@ function states() {
     sizes: "ipad-11-portrait",
     actions: [viewExpect("timeline"), click(".toolbar button", "+ New"), asked(NEW_ROWS), hitChrome("toolbar")],
   });
+  add("ios44/pad-landscape/board-head", "mesa-steps-ios-pad", {
+    sizes: "ipad-11-landscape",
+    place: { view: "board", zoom: "W" },
+    panes: { closed: ["list", "inspector"] },
+    board: { v: 1, hidden: ["now", "next", STEP_QA], doneOpen: true },
+    actions: [
+      count(".col-head .col-btn", 5),
+      count('[data-col="later"] .col-head .col-add', 1),
+      count('[data-col="later"] .col-head .col-more', 1),
+      count('[data-col="done"] .col-head .col-collapse', 1),
+      count('.col-strip[data-strip="hidden"]', 3),
+      width('[data-col="later"] .col-head h2', 40, 280),
+      hitChrome("boardHead"),
+    ],
+  });
+  add("board/ipad-header-menu", "mesa-steps-ios-pad", {
+    sizes: "ipad-11-landscape",
+    place: { view: "board", zoom: "W" },
+    panes: { closed: ["list", "inspector"] },
+    actions: [click('[data-col="next"] .col-head .col-more'), askedExactly([[0, ["Rename", "Colour…", "Limit…", "Completes items", "Insert left", "Insert right", "Hide on this device", "Delete…"]]]), count(".context-menu", 0)],
+  });
   add("ios44/pad-landscape/plan-menu", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
     panes: OUTLINE_CLOSED,
@@ -1130,9 +1322,14 @@ function states() {
     actions: [viewExpect("timeline"), key("b", "KeyB", 4), still(), expect(`${OVERLAY} nav.sidebar`), key("b", "KeyB", 4), still(), count(".plan-overlay-layer", 0)],
   });
   add("ipad-form-sheet/settings", "mesa-ios-pad", {
-    sizes: "ipad-overlay-open",
+    sizes: "ipad-more-open",
     dialog: true,
     actions: [viewExpect("timeline"), ...settingsFromMore, ...sectionOn("General"), count(".sheet", 0), width(SETTINGS_MODAL, 600, 780), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL)],
+  });
+  add("ipad-form-sheet/settings-owner-portrait", "mesa-ios-pad", {
+    sizes: "ipad-owner-portrait",
+    dialog: true,
+    actions: [viewExpect("timeline"), click(SETTINGS_GEAR), ...sectionOn("General"), count(".sheet", 0), width(SETTINGS_MODAL, 600, 780), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL)],
   });
   add("ipad-form-sheet/settings-below-700", "mesa-ios-pad", {
     sizes: "ipad-699",
@@ -1189,20 +1386,29 @@ function states() {
   add("ipad-toolbar/narrow-min", "mesa-ios-pad", { sizes: "ipad-narrow-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 0), oneLine(".toolbar"), spare(".toolbar", 0)] });
   add("ipad-toolbar/owner-landscape", "mesa-ios-pad", { sizes: "ipad-owner-landscape", panes: OUTLINE_CLOSED, actions: [...fullShell, ...oneRowBar] });
   add("ipad-toolbar/overlay-open", "mesa-ios-pad", {
-    sizes: "ipad-overlay-open",
+    sizes: "ipad-more-open",
     dialog: true,
     actions: [...overlayOpened, still(), uncovered(MORE), ...oneRowBar],
+  });
+  add("ipad-toolbar/owner-portrait-overlay-open", "mesa-ios-pad", {
+    sizes: "ipad-owner-portrait",
+    dialog: true,
+    actions: [...overlayOpened, still(), count(MORE, 0), uncovered(SETTINGS_GEAR), ...oneRowBar],
+  });
+  add("ipad-toolbar/owner-portrait-settings-over-overlay", "mesa-ios-pad", {
+    sizes: "ipad-owner-portrait",
+    actions: [...overlayOpened, click(SETTINGS_GEAR), ...sectionOn("General"), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), uncovered(`${SETTINGS_MODAL} .modal-head ${CONTROL}`)],
   });
   const MORE_ROWS = [
     [0, ["group Zoom", "Week ✓", "Month", "Quarter", "Fit", "Go to today", "Settings"]],
     [MEDIUM_MIN, ["Settings"]],
   ];
   add("ipad-toolbar/more-open", "mesa-ios-pad", {
-    sizes: "ipad-overlay-open",
+    sizes: "ipad-more-open",
     actions: [viewExpect("timeline"), click(MORE), askedExactly(MORE_ROWS)],
   });
   add("ipad-toolbar/settings-over-overlay", "mesa-ios-pad", {
-    sizes: "ipad-overlay-open",
+    sizes: "ipad-more-open",
     actions: [...overlayOpened, click(MORE), chooseNative("Settings"), ...sectionOn("General"), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), uncovered(`${SETTINGS_MODAL} .modal-head ${CONTROL}`)],
   });
   add("ipad-toolbar/inspector-over-overlay", "mesa-ios-pad", {
@@ -1211,7 +1417,7 @@ function states() {
     actions: [...overlayOpened, click(INSPECTOR_TOGGLE), still(), count(".plan-overlay-layer", 0), count(`${INSPECTOR_TOGGLE}[aria-expanded="true"]`, 1), expect(`${INSPECTOR_DRAWER} .panel h2`, "Plan"), count("main.main[inert]", 1), uncovered(INSPECTOR_TOGGLE)],
   });
   add("ipad-toolbar/more-over-overlay", "mesa-ios-pad", {
-    sizes: "ipad-overlay-open",
+    sizes: "ipad-more-open",
     dialog: true,
     actions: [...overlayOpened, click(MORE), count(`${TOGGLE}[aria-expanded="true"]`, 1), askedExactly(MORE_ROWS)],
   });
@@ -1527,6 +1733,8 @@ const SIZES = {
   "ipad-1179": namesOf([IPAD_WINDOWS[2]]),
   "ipad-overlay": namesOf([IPAD_WINDOWS[0], IPAD_11[0], IPAD_WINDOWS[2], IPAD_OWNER[0]]),
   "ipad-overlay-open": namesOf([IPAD_WINDOWS[0], IPAD_11[0], IPAD_OWNER[0]]),
+  "ipad-more-open": namesOf([IPAD_WINDOWS[0], IPAD_11[0]]),
+  "ipad-owner-portrait": namesOf([IPAD_OWNER[0]]),
   "ipad-column": namesOf([LANDSCAPE[0], IPAD_WINDOWS[3], IPAD_11[1], IPAD_OWNER[1]]),
   "ipad-portraits": namesOf([IPAD_11[0], IPAD_OWNER[0]]),
   "ipad-landscapes": namesOf([IPAD_11[1], IPAD_OWNER[1]]),
@@ -1535,8 +1743,8 @@ const SIZES = {
   "ipad-roomy-min": namesOf([IPAD_TIERS[4]]),
   "ipad-medium-min": namesOf([IPAD_TIERS[2]]),
   "ipad-narrow-min": namesOf([IPAD_TIERS[0]]),
-  "ipad-roomy": namesOf([IPAD_TIERS[4], IPAD_WINDOWS[2]]),
-  "ipad-medium": namesOf([IPAD_TIERS[2], IPAD_TIERS[3], IPAD_OWNER[0]]),
+  "ipad-roomy": namesOf([IPAD_TIERS[4], IPAD_OWNER[0], IPAD_WINDOWS[2]]),
+  "ipad-medium": namesOf([IPAD_TIERS[2], IPAD_TIERS[3]]),
   "ipad-narrow": namesOf([IPAD_TIERS[0], IPAD_WINDOWS[1], IPAD_WINDOWS[0], IPAD_TIERS[1], IPAD_11[0]]),
   "mac-834": namesOf(MAC_834),
   "panes-1024": ["1024x700"],
@@ -1562,6 +1770,7 @@ const SHIM = String.raw`
   if (P.place !== null) localStorage.setItem("webboard.place", JSON.stringify(P.place));
   if (P.theme !== null) localStorage.setItem("webboard.theme", JSON.stringify(P.theme));
   if (P.panes !== null) localStorage.setItem("webboard.panes", JSON.stringify(P.panes));
+  if (P.board !== null) localStorage.setItem("webboard.board.planMesa001", JSON.stringify(P.board));
   window.__PROBE_MISSING__ = [];
   window.__PROBE_TICKETS__ = {};
   window.__PROBE_MENUS__ = [];
@@ -3621,6 +3830,7 @@ async function main() {
       place: state.place,
       theme: state.theme,
       panes: state.panes,
+      board: state.board,
       fixture: fixtures.get(state.fixture),
       clip: state.clip,
       clipIn: state.clipIn,

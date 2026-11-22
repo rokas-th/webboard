@@ -26,12 +26,13 @@ const TITLES: Readonly<Record<SettingsSection, string>> = {
   sync: "Sync",
   files: "Import & export",
   overview: "Overview",
+  workflow: "Workflow",
   "working-time": "Working time",
   baselines: "Baselines",
   danger: "Danger zone",
 };
 
-const PLAN_SECTIONS: readonly SettingsSection[] = ["overview", "working-time", "baselines", "danger"];
+const PLAN_SECTIONS: readonly SettingsSection[] = ["overview", "workflow", "working-time", "baselines", "danger"];
 
 const UPDATES_ROW = "updates";
 
@@ -52,6 +53,7 @@ export const SETTINGS_SECTIONS: readonly SectionSpec[] = [
   section("sync", [row("status", "Status"), ...PANE_ORDER.map((pane) => row(pane, PANE_LABELS[pane]))]),
   section("files", [row("import", "Import"), row("export", "Export")]),
   section("overview", [row("name", "Name")]),
+  section("workflow", [row("steps", "Steps"), row("add", "Add step"), row("new-items", "New items")]),
   section("working-time", [row("region", "Region"), row("days", "Working days"), row("closures", "Closures"), row("days-off", "Days off and holidays")]),
   section("baselines", [row("baselines", "Baselines")]),
   section("danger", [row("trash", "Move to Trash"), row("delete", "Delete forever")]),

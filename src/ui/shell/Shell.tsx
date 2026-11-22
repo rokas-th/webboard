@@ -32,6 +32,9 @@ import { DetailContext, type DetailApi } from "../detail/DetailContext";
 import { createClickPair, type ClickMark } from "../detail/clickPair";
 import { ItemDetail, promoteText, type DetailContainer } from "../detail/ItemDetail";
 import { ItemModal, rememberFocus, type FocusMemo } from "../detail/ItemModal";
+import { useBoardPrefs } from "../board/prefs";
+import { GROUP_NO_STEP, noStepNumber, SELECTION_GONE } from "../board/text";
+import { stepsOf } from "../../domain/steps";
 import { stepPatch, tabOrder } from "../detail/order";
 import { PrintSheet } from "../print/PrintSheet";
 import { startPrint } from "../print/start";
@@ -83,6 +86,31 @@ const DRAWER_PASS: ReadonlySet<string> = new Set(["sidebar", "inspector", "outli
 const SETTINGS_PASSES = "[data-item-modal], [data-settings-modal]";
 
 const INSPECTOR_DRAWER_PASS: ReadonlySet<string> = new Set(["select-next", "select-prev", "detail-modal", "detail-open", "rename"]);
+
+const TO_STEP = /^to-step-([1-9])$/;
+
+function toStepByKey(c: CommandCtx, n: number): void {
+  if (c.session === null) throw new Error(`Shell: ⌥⌘${n} reached the shell without an open plan`);
+  if (c.run === null) throw new Error("Shell: an open plan has no run");
+  const sel = c.ui.selected;
+  if (sel === null) throw new Error(`Shell: ⌥⌘${n} reached the shell without a selection`);
+  const plan = c.session.view().plan;
+  const item = plan.items.get(sel);
+  if (item === undefined) {
+    toast(SELECTION_GONE, "bad");
+    return;
+  }
+  if (item.kind === "group") {
+    toast(GROUP_NO_STEP, "bad");
+    return;
+  }
+  const step = stepsOf(plan)[n - 1];
+  if (step === undefined) {
+    toast(noStepNumber(n), "bad");
+    return;
+  }
+  c.run({ t: "toStep", items: [sel], step: step.id });
+}
 
 const drawerPasses = (drawer: Drawer | null, dialog: boolean, id: string): boolean =>
   drawer === null || dialog || DRAWER_PASS.has(id) || (drawer === "inspector" && INSPECTOR_DRAWER_PASS.has(id));
@@ -215,6 +243,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   const selectedItem = useRef<ItemId | null>(ui.selected);
 
   const session = main.k === "open" && main.id === ui.plan ? main.session : null;
+  const boardPrefs = useBoardPrefs(session === null ? null : session.view().plan.id);
   const selectedItemShown = session !== null && ui.selected !== null && session.view().plan.items.has(ui.selected) ? ui.selected : null;
   const itemModal = session !== null && selectedItemShown !== null && ui.dialog !== null && ui.dialog.t === "item";
   const modalHidesInspector = itemModal;
@@ -551,6 +580,12 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
         c.setUi({ selected: null });
         return;
       }
+      const stepKey = TO_STEP.exec(id);
+      if (stepKey !== null) {
+        e.preventDefault();
+        toStepByKey(c, Number(stepKey[1]));
+        return;
+      }
       const cmd = commands(c).find((x) => x.id === id);
       if (cmd === undefined) return;
       e.preventDefault();
@@ -756,7 +791,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   };
   const inspectorBody = (s: PlanSession, container: "column" | "drawer") =>
     selectedItemShown !== null ? itemDetail(selectedItemShown, s, container) : <PlanPanel key={s.view().plan.id} session={s} readOnly={readOnly} />;
-  const order = session === null ? [] : tabOrder(session.view(), ui);
+  const order = session === null ? [] : tabOrder(session.view(), ui, boardPrefs);
   const follows = ui.view === "timeline";
   const detailApi: DetailApi = {
     order,

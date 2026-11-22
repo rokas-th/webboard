@@ -1,6 +1,8 @@
 import type { ItemId } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
-import { columnsOf } from "../board/Board";
+import { boardLayout, cardOrder } from "../board/layout";
+import type { BoardPrefs } from "../board/prefs";
+import { projectBoard } from "../../domain/steps";
 import { listGroups } from "../list/groups";
 import type { UiState } from "../state";
 import { timelineRows } from "../timeline/rows";
@@ -11,10 +13,10 @@ const listOrder = (view: PlanView): ItemId[] => listGroups(view).flatMap((s) => 
 
 const rowOrder = (view: PlanView, collapsed: ReadonlySet<ItemId>): ItemId[] => timelineRows(view, collapsed).map((r) => r.id);
 
-export function tabOrder(view: PlanView, ui: Pick<UiState, "view" | "collapsed">): readonly ItemId[] {
+export function tabOrder(view: PlanView, ui: Pick<UiState, "view" | "collapsed">, prefs: BoardPrefs): readonly ItemId[] {
   if (ui.view === "timeline") return rowOrder(view, ui.collapsed);
   if (ui.view === "list") return listOrder(view);
-  return columnsOf(view).shown.flatMap((c) => c.items.map((i) => i.id));
+  return cardOrder(boardLayout(view, projectBoard(view.plan, view.derived), prefs));
 }
 
 export function phoneOrder(view: PlanView, tab: PhoneTab, collapsed: ReadonlySet<ItemId>): readonly ItemId[] {

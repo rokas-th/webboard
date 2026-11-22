@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CloseButton, useScrimPress } from "./dismiss";
 
-export function Popover(p: { label: string; className: string; onClose(): void; children: ReactNode }) {
+export function Popover(p: { label: string; className: string; returnFocus?: HTMLElement; onClose(): void; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const onClose = useRef(p.onClose);
   useLayoutEffect(() => {
     onClose.current = p.onClose;
   });
-  const [opener] = useState(() => document.activeElement);
+  const [opener] = useState(() => p.returnFocus ?? document.activeElement);
   const scrim = useScrimPress(() => onClose.current());
 
   useEffect(() => {

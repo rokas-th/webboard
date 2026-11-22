@@ -11,7 +11,7 @@ afterEach(() => {
   vi.mocked(toast).mockClear();
 });
 
-const ALL: readonly SettingsSection[] = ["general", "theme", "sync", "files", "overview", "working-time", "baselines", "danger"];
+const ALL: readonly SettingsSection[] = ["general", "theme", "sync", "files", "overview", "workflow", "working-time", "baselines", "danger"];
 
 describe("the last Settings section", () => {
   it("round-trips every section", () => {

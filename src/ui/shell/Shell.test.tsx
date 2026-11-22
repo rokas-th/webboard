@@ -214,7 +214,7 @@ describe("Shell on testSession(MESA_SEED)", () => {
     const tabs = within(bar).getAllByRole("tab");
     expect(tabs.map((b) => [b.textContent, b.getAttribute("aria-selected")])).toEqual([
       ["Timeline", "true"],
-      ["Now · Next · Later", "false"],
+      ["Board", "false"],
       ["List", "false"],
     ]);
     expect(["W", "M", "Q"].map((z) => within(bar).getByRole("button", { name: z }).getAttribute("aria-pressed"))).toEqual(["true", "false", "false"]);
@@ -436,9 +436,10 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect(slot("list")?.querySelector(".list-wrap table.list")).not.toBeNull();
     expectNoTimeline();
     expect(screen.getByRole("tab", { name: "List" }).getAttribute("aria-selected")).toBe("true");
-    fireEvent.click(screen.getByRole("tab", { name: "Now · Next · Later" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Board" }));
     expect(slot("board")).not.toBeNull();
-    expect(slot("board")?.querySelectorAll(".nnl [data-col]")).toHaveLength(3);
+    expect(slot("board")?.querySelectorAll(".nnl section.col[data-col]")).toHaveLength(3);
+    expect(slot("board")?.querySelectorAll('.nnl [data-strip="done"]')).toHaveLength(1);
     expect(slot("list")).toBeNull();
     expect(document.querySelector(".list-wrap")).toBeNull();
   });
@@ -1879,7 +1880,7 @@ describe("the panel slot", () => {
     expect(toastTexts()).toEqual([NEWER_PLAN, NEWER_PLAN]);
     expect(t.session.view().plan.items.get("t3")?.trashed).toBe(false);
     expect(document.querySelectorAll(".nub")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("tab", { name: "Now · Next · Later" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Board" }));
     const cards = [...document.querySelectorAll<HTMLElement>("[data-card]")];
     expect(cards.length).toBeGreaterThan(0);
     expect(cards.filter((c) => c.draggable)).toEqual([]);
@@ -2517,5 +2518,72 @@ describe("the Settings modal in the wide shell", () => {
     render(withSync(shellFor(t).ui));
     await settle();
     expect(vi.mocked(paintNative).mock.calls).toEqual([[tokensOf(cyberdeck()).void]]);
+  });
+});
+
+describe("Shell: ⌥⌘1-9 moves the selection to a step", () => {
+  const press = (n: number): void => {
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "x", code: `Digit${n}`, metaKey: true, altKey: true });
+    });
+  };
+
+  it("moves the selected task to step 2 from the Timeline, in one toStep", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    setUiNow({ selected: "t3" });
+    const apply = vi.spyOn(t.session, "apply");
+    press(2);
+    expect(apply.mock.calls).toEqual([[{ t: "toStep", items: ["t3"], step: "next" }]]);
+    expect(t.session.view().plan.workflow.items.get("t3")).toBe("next");
+    expect(lastUi().selected).toBe("t3");
+  });
+
+  it("toasts for a group and for a step the plan does not have, writing nothing", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const apply = vi.spyOn(t.session, "apply");
+    setUiNow({ selected: "g2" });
+    press(1);
+    setUiNow({ selected: "t3" });
+    press(9);
+    expect(apply).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual(["Groups have no step. Select a task or milestone.", "This plan has no step 9."]);
+  });
+
+  it("says why while read-only, writing nothing", async () => {
+    const t = await made(MESA_SEED);
+    t.session.setReadOnly(true);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    setUiNow({ selected: "t3" });
+    const apply = vi.spyOn(t.session, "apply");
+    press(2);
+    expect(apply).not.toHaveBeenCalled();
+    const reason = t.session.readOnlyReason;
+    expect(reason).not.toBeNull();
+    expect(toastTexts()).toEqual([reason]);
+  });
+
+  it("says the selection is gone when the selected item leaves the plan before the shell has caught up", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    act(() => {
+      t.session.apply({ t: "create", kind: "task", name: "Fresh", parent: null, after: null, start: null });
+    });
+    const fresh = [...t.session.view().plan.items.values()].find((i) => i.name === "Fresh");
+    if (fresh === undefined) throw new Error("no new task");
+    setUiNow({ selected: fresh.id });
+    clearToasts();
+    const apply = vi.spyOn(t.session, "apply");
+    act(() => {
+      t.session.undo();
+      fireEvent.keyDown(document.body, { key: "x", code: "Digit2", metaKey: true, altKey: true });
+    });
+    expect(apply).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual(["The selected item is no longer in this plan."]);
   });
 });

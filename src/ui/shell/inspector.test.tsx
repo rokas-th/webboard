@@ -304,7 +304,7 @@ describe("the pane budget in the shell", () => {
     expect(plans.classList.contains("plan-overlay")).toBe(true);
     expect(document.querySelector("main.main")?.hasAttribute("inert")).toBe(true);
     fireEvent.click(within(plans).getByRole("button", { name: "Close" }));
-    fireEvent.click(within(bar()).getByRole("tab", { name: "Now · Next · Later" }));
+    fireEvent.click(within(bar()).getByRole("tab", { name: "Board" }));
     expect(screen.getByRole("navigation", { name: "Plans" }).closest('[role="dialog"]')).toBeNull();
     expect(stored().desk.list).toEqual({ open: true, w: null });
   });

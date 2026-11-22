@@ -1,8 +1,10 @@
 import * as Y from "yjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InvokeArgs } from "@tauri-apps/api/core";
-import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, OUT_OF_RANGE, UNREADABLE_ID, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "../../scripts/layout-fixtures.mjs";
+import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, OUT_OF_RANGE, STEP_GONE, STEP_QA, UNREADABLE_ID, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "../../scripts/layout-fixtures.mjs";
 import { normalizeName } from "../actions/build";
+import { derive } from "../domain/derive";
+import { projectBoard } from "../domain/steps";
 import { LogState } from "../log/state";
 import type { Action, Cause, DeviceId } from "../log/types";
 import { choices, heldItems } from "../plan/choices";
@@ -140,7 +142,7 @@ function decoded(f: Fixture, doc: string) {
   return { ydoc, actions, log, plan, cs, held: heldItems(cs, plan) };
 }
 
-const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
+const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
 
 const openRegistries: Registry[] = [];
 
@@ -212,6 +214,8 @@ describe("layout fixtures", () => {
       "mesa-ios-pad",
       "mesa-ios-phone",
       "mesa-linux",
+      "mesa-steps",
+      "mesa-steps-ios-pad",
       "phone-choice",
       "phone-plans",
       "phone-removed-banner",
@@ -382,7 +386,7 @@ describe("layout fixtures", () => {
       const answered = Object.keys(f.ipc).filter((cmd) => cmd in UIKIT);
       expect([name, answered]).toEqual([name, f.platform.os === "ios" ? Object.keys(UIKIT) : []]);
     });
-    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(8);
+    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(9);
   });
 
   it("every fixture carries a platform global its device_info agrees with", () => {
@@ -485,6 +489,35 @@ describe("layout fixtures", () => {
     expect(session.history()).toHaveLength(40);
     expect(session.view().unreadable).toEqual([]);
     expect(session.view().plan.calendar.holidays.size).toBe(2);
+  });
+
+  it("mesa-steps is mesa plus one action that renames Next to Review with a limit of 2, adds QA and places six items, one in a deleted step", () => {
+    const f = fixture("mesa-steps");
+    const doc = only(planDocs(f));
+    const d = decoded(f, doc);
+    const base = decoded(fixture("mesa"), only(planDocs(fixture("mesa"))));
+    expect(d.actions).toHaveLength(41);
+    expect(shapeOf(d.plan)).toEqual(shapeOf(base.plan));
+    expect(d.cs).toEqual([]);
+    expect([...d.plan.workflow.steps]).toEqual([
+      ["next", { n: "Review", c: "violet", o: "a1", l: 2 }],
+      [STEP_QA, { n: "QA", c: "sky", o: "a15" }],
+    ]);
+    expect(Object.fromEntries(d.plan.workflow.items)).toEqual({ t2: "now", t3: "next", t4: "now", t5: STEP_QA, t10: "next", u2: STEP_GONE });
+    const derived = derive(d.plan, d.held, "2026-11-09");
+    const board = projectBoard(d.plan, derived);
+    expect(board.mode).toBe("steps");
+    expect(board.columns.map((c) => [c.step === null ? null : c.step.name, c.items.length])).toEqual([
+      [null, 1],
+      ["Now", 2],
+      ["Review", 3],
+      ["QA", 1],
+      ["Later", 13],
+      ["Done", 2],
+    ]);
+    expect(fixture("mesa-steps-ios-pad").docs).toEqual(f.docs);
+    expect(fixture("mesa-steps-ios-pad").ipc).toEqual({ ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" }, ...UIKIT });
+    expect(fixture("mesa-steps-ios-pad").platform).toEqual({ os: "ios", idiom: "pad" });
   });
 
   it("scale holds 1,000 items and 2,000 links with nothing pending", () => {
@@ -657,7 +690,7 @@ describe("layout fixtures", () => {
       resetTauri(answersOf(f));
       setPlatform(f.platform);
       if (name === "mesa-ios-phone") setScreen(390, 844);
-      if (name === "mesa-ios-pad") setScreen(834, 1194);
+      if (name === "mesa-ios-pad" || name === "mesa-steps-ios-pad") setScreen(834, 1194);
       const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
       try {
         expect(registry.device.name).toBe(DEVICE_NAMES[name] ?? "Mac");

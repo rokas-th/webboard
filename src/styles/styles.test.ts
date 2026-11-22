@@ -200,9 +200,27 @@ describe("the Cyberdeck look", () => {
 
   it("keeps magenta for danger", () => {
     const allowed = (sel: string): boolean => /bad|conflict|danger|magenta|\.x:/.test(sel) || sel.includes(".legend .lc");
-    const users = sheet.rules.filter((r) => Object.values(r.decls).some((v) => /var\(--magenta(-rgb)?\)/.test(v)));
+    const users = sheet.rules.filter((r) => Object.entries(r.decls).some(([k, v]) => k !== "--s-magenta" && /var\(--magenta(-rgb)?\)/.test(v)));
     expect(users.length).toBeGreaterThan(3);
     expect(users.filter((r) => !allowed(r.selector)).map((r) => r.selector)).toEqual([]);
+  });
+
+  it("keeps the iPad's Board hold targets free of text selection, the callout and browser pans, as the Timeline's are", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    const hold = { "touch-action": "pan-x pan-y", "-webkit-touch-callout": "none", "-webkit-user-select": "none", "user-select": "none" };
+    const timeline = decls(".bar");
+    expect(Object.keys(hold).map((k) => timeline[k])).toEqual(Object.values(hold));
+    ['html[data-os="ios"] .card:not(.card-draft)', 'html[data-os="ios"] .col-head', 'html[data-os="ios"] .col-strip'].forEach((sel) => {
+      expect([sel, decls(sel)]).toEqual([sel, expect.objectContaining(hold)]);
+    });
+    expect(decls('html[data-os="ios"] .col-head .col-rename')).toEqual(expect.objectContaining({ "-webkit-user-select": "text", "user-select": "text" }));
+  });
+
+  it("stacks a Board popover above its scrim: a positioned popover with the float's z-index", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    const scrim = decls(".popover-scrim");
+    const pop = decls(".board-float .popover");
+    expect([pop["position"], Number(pop["z-index"]) > Number(scrim["z-index"])]).toEqual(["relative", true]);
   });
 
   it("keeps the amber day-off edge on a bar that is also a conflict", () => {

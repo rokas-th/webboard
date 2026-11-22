@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PlanSession } from "../../store/session";
 import { testSession, type SeedItem } from "../../test/session";
+import { EMPTY_BOARD_PREFS } from "../board/prefs";
 import { phoneOrder, stepFrom, tabOrder } from "./order";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -36,18 +37,18 @@ const view = async () => {
 describe("tabOrder", () => {
   it("is the Timeline's rows, groups included, minus what a collapsed group hides", async () => {
     const v = await view();
-    expect(tabOrder(v, { view: "timeline", collapsed: new Set() })).toEqual(["g", "a", "b", "n", "d"]);
-    expect(tabOrder(v, { view: "timeline", collapsed: new Set(["g"]) })).toEqual(["g", "n", "d"]);
+    expect(tabOrder(v, { view: "timeline", collapsed: new Set() }, EMPTY_BOARD_PREFS)).toEqual(["g", "a", "b", "n", "d"]);
+    expect(tabOrder(v, { view: "timeline", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS)).toEqual(["g", "n", "d"]);
   });
 
   it("is the Board's cards, Now then Next then Later, top to bottom, without the hidden done ones", async () => {
     const v = await view();
-    expect(tabOrder(v, { view: "board", collapsed: new Set(["g"]) })).toEqual(["a", "n", "u", "b"]);
+    expect(tabOrder(v, { view: "board", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS)).toEqual(["a", "n", "u", "b"]);
   });
 
   it("is the List's rows, section by section", async () => {
     const v = await view();
-    expect(tabOrder(v, { view: "list", collapsed: new Set(["g"]) })).toEqual(["a", "b", "n", "u", "d"]);
+    expect(tabOrder(v, { view: "list", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS)).toEqual(["a", "b", "n", "u", "d"]);
   });
 });
 

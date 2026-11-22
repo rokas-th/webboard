@@ -4,6 +4,7 @@ import { MAX_STEP_LIMIT, MAX_STEP_NAME, stepModeOf, stepNameKey, stepsOf, stored
 import { newId } from "../log/ids";
 import type { Write } from "../log/types";
 import { applyWrites } from "../plan/project";
+import type { PlanView } from "../store/doc";
 import { planRules } from "../plan/rules";
 import * as codec from "../plan/units";
 import { key } from "../plan/units";
@@ -71,24 +72,28 @@ const scheduleOf = (it: Item): Schedule => {
   return it.schedule;
 };
 
-const statusOf = (ctx: Ctx, id: ItemId) => {
-  const s = ctx.view.derived.status.get(id);
+const statusIn = (view: PlanView, id: ItemId) => {
+  const s = view.derived.status.get(id);
   if (s === undefined) throw new Error(`Item ${id} has no status`);
   return s;
 };
 
-export function switchWrites(ctx: Ctx): readonly Write[] {
-  const plan = ctx.view.plan;
+const statusOf = (ctx: Ctx, id: ItemId) => statusIn(ctx.view, id);
+
+export function switchWritesOf(view: PlanView): readonly Write[] {
+  const plan = view.plan;
   if (stepModeOf(plan) === "steps") return [];
   const gone = goneSet(plan);
   return [...plan.items.values()]
-    .filter((i) => i.kind !== "group" && !gone.has(i.id) && i.schedule !== null && i.schedule.start !== null && statusOf(ctx, i.id) !== "done")
+    .filter((i) => i.kind !== "group" && !gone.has(i.id) && i.schedule !== null && i.schedule.start !== null && statusIn(view, i.id) !== "done")
     .map((i) => {
-      const h = ctx.view.derived.horizon.get(i.id);
+      const h = view.derived.horizon.get(i.id);
       if (h === undefined) throw new Error(`Item ${i.id} has no horizon`);
       return refWrite(i.id, h);
     });
 }
+
+export const switchWrites = (ctx: Ctx): readonly Write[] => switchWritesOf(ctx.view);
 
 export function switched(ctx: Ctx, d: StepDraft): StepDraft {
   if (stepModeOf(ctx.view.plan) === "steps") return d;
@@ -96,19 +101,35 @@ export function switched(ctx: Ctx, d: StepDraft): StepDraft {
   return { own: [...switchWrites(ctx).filter((x) => !edited.has(x.u)), ...d.own], label: d.label, sentences: [...d.sentences, sentence.switched] };
 }
 
-const switchedPlan = (ctx: Ctx): PlanState => {
-  const sw = switchWrites(ctx);
-  return sw.length === 0 ? ctx.view.plan : applyWrites(ctx.view.plan, sw);
+const switchedPlanOf = (view: PlanView): PlanState => {
+  const sw = switchWritesOf(view);
+  return sw.length === 0 ? view.plan : applyWrites(view.plan, sw);
 };
+
+const switchedPlan = (ctx: Ctx): PlanState => switchedPlanOf(ctx.view);
 
 const plain = (own: readonly Write[], text: string): StepDraft => ({ own, label: text, sentences: [] });
 
 const heldBy = (base: PlanState, id: StepId): Item[] => [...base.items.values()].filter((i) => i.kind !== "group" && storedStepOf(base, i) === id);
 
-const openIn = (ctx: Ctx, base: PlanState, held: readonly Item[]): Item[] => {
+const openOf = (view: PlanView, base: PlanState, held: readonly Item[]): Item[] => {
   const gone = goneSet(base);
-  return held.filter((i) => !gone.has(i.id) && statusOf(ctx, i.id) !== "done");
+  return held.filter((i) => !gone.has(i.id) && statusIn(view, i.id) !== "done");
 };
+
+const openIn = (ctx: Ctx, base: PlanState, held: readonly Item[]): Item[] => openOf(ctx.view, base, held);
+
+export interface StepHolding {
+  held: number;
+  hidden: number;
+}
+
+export function stepHolding(view: PlanView, step: StepId): StepHolding {
+  const s = liveStep(view.plan, step);
+  const base = switchedPlanOf(view);
+  const held = heldBy(base, s.id);
+  return { held: held.length, hidden: held.length - openOf(view, base, held).length };
+}
 
 const statusMayChange = (plan: PlanState, it: Item): void => {
   if (it.kind === "milestone" && hasPredecessor(plan, it.id)) throw new Refused(refusal.milestoneStatus(it.name));
@@ -172,6 +193,14 @@ const editDraft = (ctx: Ctx, intent: StepIntent): StepDraft => {
         if (open.length > 0) throw new Refused(refusal.stepHoldsOpen(s.name, open.length));
       }
       return plain(writes, label.stepCompletes(s.name, intent.completes));
+    }
+    case "noneCompletes": {
+      const completing = stepsOf(plan).filter((x) => x.completes);
+      if (completing.length === 0) throw new Refused(refusal.nothing);
+      return plain(
+        completing.map((x) => stepWrite({ ...x, completes: false })),
+        label.noneCompletes(completing.map((x) => x.name)),
+      );
     }
     case "delete": {
       const s = liveStep(plan, intent.step);

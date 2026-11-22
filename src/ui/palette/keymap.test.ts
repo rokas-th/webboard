@@ -340,3 +340,39 @@ describe("keyToCommand: the inspector and the outline", () => {
     expect(keyToCommand(k("l", { ctrlKey: true, altKey: true }), { ...PC, listMode: "sheet", typing: true })).toBeNull();
   });
 });
+
+describe("keyToCommand: ⌥⌘1-9 moves the selection to a step", () => {
+  const SEL: KeyState = { ...MAC, selected: true };
+  const digit = (n: string, o: Partial<KeyInput>): KeyInput => k(n === "1" ? "¡" : "™", { code: `Digit${n}`, ...o });
+
+  it("names the step by the physical digit on the Mac, in every list form", () => {
+    expect(keyToCommand(digit("1", { metaKey: true, altKey: true }), SEL)).toBe("to-step-1");
+    expect(keyToCommand(digit("2", { metaKey: true, altKey: true }), SEL)).toBe("to-step-2");
+    expect(keyToCommand(k("9", { metaKey: true, altKey: true }), { ...SEL, listMode: "phone" })).toBe("to-step-9");
+    expect(keyToCommand(k("5", { metaKey: true, altKey: true }), { ...SEL, listMode: "sheet", control: true })).toBe("to-step-5");
+  });
+
+  it("guards on Shift, typing, a dialog, no selection, Digit0 and a missing ⌘", () => {
+    expect(keyToCommand(digit("1", { metaKey: true, altKey: true, shiftKey: true }), SEL)).toBeNull();
+    expect(keyToCommand(digit("1", { metaKey: true, altKey: true }), { ...SEL, typing: true })).toBeNull();
+    expect(keyToCommand(digit("1", { metaKey: true, altKey: true }), { ...SEL, dialog: true })).toBeNull();
+    expect(keyToCommand(digit("1", { metaKey: true, altKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("0", { metaKey: true, altKey: true }), SEL)).toBeNull();
+    expect(keyToCommand(digit("1", { altKey: true }), SEL)).toBeNull();
+    expect(keyToCommand(k("1", { metaKey: true }), SEL)).toBeNull();
+    expect(keyToCommand(digit("1", { ctrlKey: true, altKey: true }), SEL)).toBeNull();
+  });
+
+  it("takes Ctrl+Alt on Linux, and not ⌘", () => {
+    const pc: KeyState = { ...PC, selected: true };
+    expect(keyToCommand(k("1", { ctrlKey: true, altKey: true }), pc)).toBe("to-step-1");
+    expect(keyToCommand(k("3", { ctrlKey: true, altKey: true }), pc)).toBe("to-step-3");
+    expect(keyToCommand(k("1", { metaKey: true, altKey: true }), pc)).toBeNull();
+    expect(keyToCommand(k("1", { ctrlKey: true, altKey: true, shiftKey: true }), pc)).toBeNull();
+    expect(keyToCommand(k("1", { ctrlKey: true, altKey: true }), PC)).toBeNull();
+  });
+
+  it("leaves ⌥⌘I and ⌥⌘L to the panes", () => {
+    expect(keyToCommand(k("ˆ", { code: "KeyI", metaKey: true, altKey: true }), SEL)).toBe("inspector");
+  });
+});

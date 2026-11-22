@@ -271,6 +271,27 @@ function mesaLog(prefix) {
 
 const sched = (start, dur, status = "todo", progress = 0, horizon = "later") => [start, dur, status, progress, horizon];
 
+export const STEP_QA = "stepQa00001";
+export const STEP_GONE = "stepGone001";
+
+function mesaStepsLog() {
+  const log = mesaLog("mesaW");
+  log.act({
+    lbl: `Renamed step ${q("Next")} to ${q("Review")}`,
+    w: [
+      own("ws:next", { n: "Review", c: "violet", o: "a1", l: 2 }),
+      own(`ws:${STEP_QA}`, { n: "QA", c: "sky", o: "a15" }),
+      own("wi:t2", "now"),
+      own("wi:t4", "now"),
+      own("wi:t3", "next"),
+      own("wi:t10", "next"),
+      own("wi:t5", STEP_QA),
+      own("wi:u2", STEP_GONE),
+    ],
+  });
+  return log;
+}
+
 function choicesLog() {
   const log = mesaLog("mesaC");
   const head = log.head();
@@ -659,6 +680,7 @@ export function buildFixtures() {
   const unreadable = fixtureOf([mesa(unreadableLog())]);
   const scale = fixtureOf([{ id: PLAN_IDS.scale, name: "Scale: 1,000 items", log: scaleLog() }]);
   const choices = fixtureOf([mesa(choicesLog())]);
+  const mesaSteps = fixtureOf([mesa(mesaStepsLog())]);
   const removed = inSpace(mesaOnMac, true);
   const phoneRemoved = inSpace(mesaOnMac, true, [PLAN_IDS.mesa]);
   const status = withStatusYears(fixtureOf([{ id: PLAN_IDS.status, name: LONG.plan, log: statusLog() }]));
@@ -671,6 +693,8 @@ export function buildFixtures() {
     "mesa-linux": onLinux(mesaOnMac),
     "mesa-ios-phone": onIosPhone(mesaOnMac),
     "mesa-ios-pad": onIosPad(mesaOnMac),
+    "mesa-steps": mesaSteps,
+    "mesa-steps-ios-pad": onIosPad(mesaSteps),
     scale,
     "scale-print": { ...scale, ipc: { ...scale.ipc, print_window: null } },
     choices,

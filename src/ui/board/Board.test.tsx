@@ -44,7 +44,7 @@ const made = async (seed: readonly SeedItem[], opts?: TestSessionOpts): Promise<
 const board = async (t: TestSession): Promise<void> => {
   render(withSync(shellFor(t).ui));
   await settle();
-  fireEvent.click(screen.getByRole("tab", { name: "Now · Next · Later" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Board" }));
 };
 
 const uiNow = (): UiState => {
@@ -89,7 +89,27 @@ const dragTo = (id: string, h: string): void => {
   });
 };
 
-const DATED = "Dated items sit where their dates put them. Move them on the timeline.";
+const menuRows = (): [string | null, string | null][] => all('.context-menu [role^="menuitem"]').map((e) => [e.textContent, e.getAttribute("aria-checked")]);
+
+const moveToRows = (): [string | null, string | null][] =>
+  all('[role^="menuitem"]', screen.getByRole("group", { name: "Move to" })).map((e) => [e.textContent, e.getAttribute("aria-checked")]);
+
+const openCardMenu = (id: string): void => {
+  act(() => {
+    fireEvent.contextMenu(card(id), { clientX: 40, clientY: 40 });
+  });
+  expect(screen.getByRole("menu", { name: "Card options" })).toBeTruthy();
+};
+
+const chooseRow = (title: string): void => {
+  const el = all('.context-menu [role^="menuitem"]').find((e) => e.textContent === title);
+  if (el === undefined) throw new Error("no menu row " + title);
+  act(() => {
+    fireEvent.click(el);
+  });
+};
+
+const MOVED_U ="Moved “u” to “Next”. Cards now keep their steps. Undo goes back to dates.";
 
 describe("Board columns", () => {
   const SEED: SeedItem[] = [
@@ -102,19 +122,19 @@ describe("Board columns", () => {
     { name: "w" },
   ];
 
-  it("sorts items into NOW, NEXT and LATER by their dates, and hides done ones", async () => {
+  it("sorts items into NOW, NEXT and LATER by their dates under one quiet line, and folds done ones into the Done strip", async () => {
     const t = await made(SEED);
     await board(t);
     expect(all(".col-head h2").map((e) => e.textContent)).toEqual(["NOW", "NEXT", "LATER"]);
     expect(cardsIn("now")).toEqual(["soon", "far"]);
     expect(cardsIn("next")).toEqual(["mid", "u"]);
     expect(cardsIn("later")).toEqual(["w"]);
-    expect(all(".col-head span").map((e) => e.textContent)).toEqual(["2", "2", "1"]);
-    expect(all(".col-sub").map((e) => e.textContent)).toEqual([
-      "In progress, or starting within two weeks. 2 done items are hidden.",
-      "Starting within eight weeks.",
-      "Further out, or no dates yet.",
-    ]);
+    expect(all(".col-head .col-count").map((e) => e.textContent)).toEqual(["2", "2", "1"]);
+    expect(all(".col-sub")).toEqual([]);
+    expect(one(".board-line [data-by-dates]").textContent).toBe("Columns follow dates. Edit a step or drag a card to use your own steps.");
+    expect(document.querySelector("[data-done-hidden]")).toBeNull();
+    expect(one('[data-strip="done"]').getAttribute("aria-label")).toBe("Done, 2 items. Expand");
+    expect(one('[data-strip="done"] .strip-count').textContent).toBe("2");
     expect(document.querySelector('[data-card="d1"]')).toBeNull();
     expect(one(".card-name", card("soon")).textContent).toBe("soon");
     expect(one(".card-meta .when", card("soon")).textContent).toBe("20 Nov – 23 Nov");
@@ -132,13 +152,14 @@ describe("Board columns", () => {
     expect(one('[data-slot="board"]').firstElementChild).toBe(slot);
   });
 
-  it("says one done item is hidden", async () => {
+  it("counts one done item on the Done strip", async () => {
     const t = await made([
       { name: "a", start: "2026-11-20" },
       { name: "d", start: "2026-11-02", status: "done", progress: 100 },
     ]);
     await board(t);
-    expect(one(".col-sub", col("now")).textContent).toBe("In progress, or starting within two weeks. 1 done item is hidden.");
+    expect(one('[data-strip="done"]').getAttribute("aria-label")).toBe("Done, 1 item. Expand");
+    expect(one('[data-strip="done"] .strip-count').textContent).toBe("1");
   });
 
   it("leaves out trashed items and the subtree of a trashed group, and names a card's group", async () => {
@@ -199,26 +220,26 @@ describe("Board moves", () => {
     { name: "dated", start: "2026-11-20", dur: 2 },
   ];
 
-  it("gives an unscheduled card dropped on NEXT one schedule intent", async () => {
+  it("gives an unscheduled card dropped on NEXT one step move", async () => {
     const t = await made(SEED);
     await board(t);
     const apply = vi.spyOn(t.session, "apply");
     pointer(card("u"), "down", 10, 10);
     dragTo("u", "next");
-    expect(apply.mock.calls).toEqual([[{ t: "schedule", item: "u", set: { horizon: "next" } }]]);
+    expect(apply.mock.calls).toEqual([[{ t: "toStep", items: ["u"], step: "next" }]]);
     expect(cardsIn("next")).toEqual(["u"]);
     expect(uiNow().selected).toBeNull();
-    expect(toastTexts()).toEqual(["Moved “u” to Next."]);
+    expect(toastTexts()).toEqual([MOVED_U]);
   });
 
-  it("explains instead of moving a dated card", async () => {
+  it("moves a dated card too, by its step", async () => {
     const t = await made(SEED);
     await board(t);
     const apply = vi.spyOn(t.session, "apply");
     dragTo("dated", "next");
-    expect(apply).not.toHaveBeenCalled();
-    expect(toastTexts()).toEqual([DATED]);
-    expect(cardsIn("now")).toEqual(["dated"]);
+    expect(apply.mock.calls).toEqual([[{ t: "toStep", items: ["dated"], step: "next" }]]);
+    expect(cardsIn("now")).toEqual([]);
+    expect(cardsIn("next")).toEqual(["dated"]);
   });
 
   it("does nothing for a drop on the card's own column", async () => {
@@ -231,30 +252,27 @@ describe("Board moves", () => {
     expect(toastTexts()).toEqual([]);
   });
 
-  it("does the same through each card's Move to select", async () => {
+  it("does the same through Move to in each card's menu", async () => {
     const t = await made(SEED);
     await board(t);
     const apply = vi.spyOn(t.session, "apply");
-    const moveTo = (id: string): HTMLSelectElement => {
-      const el = card(id).querySelector('select[aria-label="Move to"]');
-      if (!(el instanceof HTMLSelectElement)) throw new Error("no Move to on " + id);
-      return el;
-    };
-    expect(moveTo("u").value).toBe("later");
-    expect([...moveTo("u").options].map((o) => o.textContent)).toEqual(["NOW", "NEXT", "LATER"]);
-    act(() => {
-      fireEvent.change(moveTo("u"), { target: { value: "later" } });
-    });
+    openCardMenu("u");
+    expect(moveToRows()).toEqual([
+      ["Now", "false"],
+      ["Next", "false"],
+      ["Later", "true"],
+      ["Done", "false"],
+    ]);
+    chooseRow("Later");
     expect(apply).not.toHaveBeenCalled();
-    act(() => {
-      fireEvent.change(moveTo("u"), { target: { value: "next" } });
-    });
-    expect(apply.mock.calls).toEqual([[{ t: "schedule", item: "u", set: { horizon: "next" } }]]);
-    act(() => {
-      fireEvent.change(moveTo("dated"), { target: { value: "later" } });
-    });
-    expect(apply).toHaveBeenCalledTimes(1);
-    expect(toastTexts()).toEqual(["Moved “u” to Next.", DATED]);
+    openCardMenu("u");
+    chooseRow("Next");
+    expect(apply.mock.calls).toEqual([[{ t: "toStep", items: ["u"], step: "next" }]]);
+    openCardMenu("dated");
+    chooseRow("Later");
+    expect(apply.mock.calls).toEqual([[{ t: "toStep", items: ["u"], step: "next" }], [{ t: "toStep", items: ["dated"], step: "later" }]]);
+    expect(cardsIn("later")).toEqual(["dated"]);
+    expect(toastTexts()).toEqual([MOVED_U, "Moved “dated” to “Later”."]);
     expect(uiNow().selected).toBeNull();
   });
 
@@ -359,18 +377,26 @@ describe("Board clicks (refinement 48)", () => {
 });
 
 describe("Board read-only", () => {
-  it("drops every drag and Move to, and ignores drops", async () => {
+  it("drops every drag, offers only Open in the card menu, and ignores drops", async () => {
     const t = await made([
       { name: "u", horizon: "later" },
       { name: "a", start: "2026-11-20" },
     ]);
     await board(t);
     expect(all("[data-card]").map((c) => c.draggable)).toEqual([true, true]);
-    expect(all('select[aria-label="Move to"]')).toHaveLength(2);
+    expect(all("select")).toHaveLength(0);
+    openCardMenu("u");
+    expect(menuRows().map(([title]) => title)).toEqual(["Open", "Now", "Next", "Later", "Done", "Duplicate", "Delete"]);
+    act(() => {
+      fireEvent.keyDown(one(".context-menu"), { key: "Escape" });
+    });
     act(() => t.session.setReadOnly(true));
     const apply = vi.spyOn(t.session, "apply");
     expect(all("[data-card]").map((c) => c.draggable)).toEqual([false, false]);
-    expect(all('select[aria-label="Move to"]')).toHaveLength(0);
+    openCardMenu("u");
+    expect(menuRows()).toEqual([["Open", null]]);
+    chooseRow("Open");
+    expect(document.querySelector("[data-item-modal] [data-detail]")?.getAttribute("data-detail-item")).toBe("u");
     dragTo("u", "next");
     expect(apply).not.toHaveBeenCalled();
     expect(toastTexts()).toEqual([]);

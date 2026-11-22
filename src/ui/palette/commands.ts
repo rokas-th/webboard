@@ -14,6 +14,7 @@ import { baselineDefault } from "../panel/Baselines";
 import { placeStep } from "../panel/placeStep";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { PlanListMode } from "../shell/planListMode";
+import { readBoardPrefs } from "../board/prefs";
 import { stepPatch, tabOrder } from "../detail/order";
 import { lastSection } from "../settings/lastSection";
 import type { SettingsSection, SyncPane, UiState, ViewKind, Zoom } from "../state";
@@ -66,7 +67,7 @@ export const NEW_NAME: Readonly<Record<ItemKind, string>> = { task: "New task", 
 
 const VIEWS: readonly (readonly [ViewKind, string, string])[] = [
   ["timeline", "Timeline", "1"],
-  ["board", "Now · Next · Later", "2"],
+  ["board", "Board", "2"],
   ["list", "List", "3"],
 ];
 
@@ -252,7 +253,7 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
     label,
     keys,
     run: () => {
-      const patch = stepPatch(tabOrder(session.view(), ctx.ui), ctx.ui.selected, by, ctx.ui.view === "timeline");
+      const patch = stepPatch(tabOrder(session.view(), ctx.ui, readBoardPrefs(window.localStorage, session.view().plan.id)), ctx.ui.selected, by, ctx.ui.view === "timeline");
       if (patch !== null) ctx.setUi(patch);
     },
   });

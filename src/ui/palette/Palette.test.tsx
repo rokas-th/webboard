@@ -362,7 +362,7 @@ describe("the palette list", () => {
     await shown(t);
     press("k", { metaKey: true });
     type("view");
-    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewHide the plan list⌘B", "ViewHide the inspector⌥⌘I", "ViewHide the outline⌥⌘L", "ViewSettings…⌘,", "ViewTheme…", "ViewUse Cyberdeck theme"]);
+    expect(rows()).toEqual(["ViewTimeline1", "ViewBoard2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewHide the plan list⌘B", "ViewHide the inspector⌥⌘I", "ViewHide the outline⌥⌘L", "ViewSettings…⌘,", "ViewTheme…", "ViewUse Cyberdeck theme"]);
     expect(highlighted()).toBe("ViewTimeline1");
     press("ArrowUp", {}, query());
     expect(highlighted()).toBe("ViewTimeline1");
@@ -381,8 +381,8 @@ describe("the palette list", () => {
     press("ArrowDown", {}, query());
     expect(highlighted()).toBe("ViewUse Cyberdeck theme");
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].forEach(() => press("ArrowUp", {}, query()));
-    expect(highlighted()).toBe("ViewNow · Next · Later2");
-    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([23, "ViewNow · Next · Later2"]);
+    expect(highlighted()).toBe("ViewBoard2");
+    expect([scrolled.mock.calls.length, lastScrolled()]).toEqual([23, "ViewBoard2"]);
     press("Enter", {}, query());
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(uiNow()[0].view).toBe("board");
@@ -825,11 +825,11 @@ describe("read-only", () => {
         ["history", false],
         ["trash", true],
       ]);
-      fireEvent.click(within(bar()).getByRole("tab", { name: "Now · Next · Later" }));
+      fireEvent.click(within(bar()).getByRole("tab", { name: "Board" }));
       const board = document.querySelector('[data-slot="board"]');
       if (!(board instanceof HTMLElement)) throw new Error("no board");
       expect(board.querySelectorAll(".card").length).toBeGreaterThan(0);
-      expect(enabled(board)).toEqual([]);
+      expect(enabled(board)).toEqual(["Now options", "Next options", "Later options", "Done, 2 items. Expand"]);
       const head = document.querySelector(".plan-head");
       if (!(head instanceof HTMLElement)) throw new Error("no head");
       fireEvent.click(within(head).getByRole("button", { name: /Choose…/ }));

@@ -10,7 +10,7 @@ export const DESK_MIN_WIDTH = 1024;
 
 export type ToolbarTier = "roomy" | "medium" | "narrow";
 
-export const ROOMY_MIN = 1000;
+export const ROOMY_MIN = 910;
 export const MEDIUM_MIN = 870;
 
 export function planListMode(m: { form: FormFactor; width: number; platform: Platform }): PlanListMode {

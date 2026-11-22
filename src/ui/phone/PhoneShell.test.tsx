@@ -2500,8 +2500,8 @@ describe("the settings sheet on the phone", () => {
     expect(lastUi().settings).toBe("general");
     const sheet = screen.getByRole("dialog", { name: "Settings" });
     expect([...sheet.querySelectorAll('[role="tab"]')].filter((tab) => tab.closest(".sync-tabs") === null)).toEqual([]);
-    expect(groups(sheet)).toEqual(["general", "theme", "sync", "files", "overview", "working-time", "baselines", "danger"]);
-    expect([...sheet.querySelectorAll("h2.settings-group-title")].map((h) => h.textContent)).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "Working time", "Baselines", "Danger zone"]);
+    expect(groups(sheet)).toEqual(["general", "theme", "sync", "files", "overview", "workflow", "working-time", "baselines", "danger"]);
+    expect([...sheet.querySelectorAll("h2.settings-group-title")].map((h) => h.textContent)).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "Workflow", "Working time", "Baselines", "Danger zone"]);
     fireEvent.click(within(sheet).getAllByRole("button", { name: "Close" })[0]);
     expect(dialogs()).toEqual([]);
     expect(lastUi().settings).toBeNull();
@@ -2533,7 +2533,7 @@ describe("the settings sheet on the phone", () => {
     fireEvent.click(themeRow(openPlanSheet()));
     expect(dialogs()).toEqual(["Settings"]);
     expect(lastUi().settings).toBe("general");
-    expect(groups(screen.getByRole("dialog", { name: "Settings" }))).toEqual(["general", "theme", "sync", "files", "overview", "working-time", "baselines", "danger"]);
+    expect(groups(screen.getByRole("dialog", { name: "Settings" }))).toEqual(["general", "theme", "sync", "files", "overview", "workflow", "working-time", "baselines", "danger"]);
   });
 
   it("hides a selected item's sheet while Settings is open, and the item sheet returns after Close", async () => {

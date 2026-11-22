@@ -6,6 +6,7 @@ import { testSession, type SeedItem, type TestSession } from "../../test/session
 import { shellFor } from "../../test/shell";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
+import { EMPTY_BOARD_PREFS } from "./prefs";
 import { tabOrder } from "../detail/order";
 import type { UiState } from "../state";
 
@@ -41,7 +42,7 @@ const made = async (seed: readonly SeedItem[]): Promise<TestSession> => {
 const board = async (t: TestSession): Promise<void> => {
   render(withSync(shellFor(t).ui));
   await settle();
-  fireEvent.click(screen.getByRole("tab", { name: "Now · Next · Later" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Board" }));
 };
 
 const one = (sel: string, root: ParentNode = document): HTMLElement => {
@@ -60,13 +61,32 @@ const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll
 const heads = (): (string | null)[] => all(".col-head h2").map((e) => e.textContent);
 const cols = (): (string | undefined)[] => all(".nnl > .col").map((e) => e.dataset.col);
 
-const moveSelect = (id: string): HTMLSelectElement => {
-  const el = card(id).querySelector('select[aria-label="Move to"]');
-  if (!(el instanceof HTMLSelectElement)) throw new Error("no Move to on " + id);
-  return el;
+const moveToRows = (id: string): HTMLElement[] => {
+  act(() => {
+    fireEvent.contextMenu(card(id), { clientX: 40, clientY: 40 });
+  });
+  return all('[role^="menuitem"]', screen.getByRole("group", { name: "Move to" }));
 };
 
-const offered = (id: string): (string | null)[] => [...moveSelect(id).options].filter((o) => !o.disabled).map((o) => o.textContent);
+const closeMenu = (): void => {
+  act(() => {
+    fireEvent.keyDown(one(".context-menu"), { key: "Escape" });
+  });
+};
+
+const offered = (id: string): [string | null, boolean][] => {
+  const rows = moveToRows(id).map((e): [string | null, boolean] => [e.textContent, e.getAttribute("aria-checked") === "true"]);
+  closeMenu();
+  return rows;
+};
+
+const moveVia = (id: string, name: string): void => {
+  const row = moveToRows(id).find((e) => e.textContent === name);
+  if (row === undefined) throw new Error("no Move to row " + name);
+  act(() => {
+    fireEvent.click(row);
+  });
+};
 
 const dragTo = (id: string, h: string): void => {
   const dataTransfer = { setData: vi.fn(), effectAllowed: "none" };
@@ -98,7 +118,7 @@ const SEED: SeedItem[] = [
 const BOARD: Pick<UiState, "view" | "collapsed"> = { view: "board", collapsed: new Set() };
 
 describe("Board by steps", () => {
-  it("heads columns with the renamed step, keeps three columns and the hidden-done line, and offers the steps in Move to", async () => {
+  it("heads columns with the renamed step, keeps three columns and the Done strip, and offers every step in Move to", async () => {
     const t = await made(SEED);
     t.session.apply({ t: "step", op: "rename", step: "next", name: "Review" });
     await board(t);
@@ -107,11 +127,18 @@ describe("Board by steps", () => {
     expect(cardsIn("now")).toEqual(["soon"]);
     expect(cardsIn("next")).toEqual(["mid", "u"]);
     expect(cardsIn("later")).toEqual(["w"]);
-    expect(all(".col-sub").map((e) => e.textContent)).toEqual(["1 done item is hidden.", "", ""]);
-    expect(offered("u")).toEqual(["NOW", "REVIEW", "LATER"]);
-    expect(moveSelect("mid").value).toBe("next");
-    expect(one(".nnl").style.gridTemplateColumns).toBe("repeat(3, minmax(0, 1fr))");
-    expect(tabOrder(t.session.view(), BOARD)).toEqual(["soon", "mid", "u", "w"]);
+    expect(all(".col-sub")).toEqual([]);
+    expect(document.querySelector("[data-by-dates]")).toBeNull();
+    expect(one('[data-strip="done"]').getAttribute("aria-label")).toBe("Done, 1 item. Expand");
+    expect(offered("u")).toEqual([
+      ["Now", false],
+      ["Review", true],
+      ["Later", false],
+      ["Done", false],
+    ]);
+    expect(offered("mid").filter(([, checked]) => checked)).toEqual([["Review", true]]);
+    expect(all(".nnl > .col").map((c) => c.style.getPropertyValue("--step"))).toEqual(["var(--s-cyan)", "var(--s-violet)", "var(--s-slate)"]);
+    expect(tabOrder(t.session.view(), BOARD, EMPTY_BOARD_PREFS)).toEqual(["soon", "mid", "u", "w"]);
   });
 
   it("moves no card when a date changes", async () => {
@@ -125,13 +152,13 @@ describe("Board by steps", () => {
     expect(cardsIn("now")).toEqual(["soon"]);
   });
 
-  it("sizes the grid to the shown steps and leaves the completing step out", async () => {
+  it("gives every shown step a column and folds the completing step into a strip", async () => {
     const t = await made(SEED);
     t.session.apply({ t: "step", op: "add", name: "QA", colour: "amber", after: "later" });
     await board(t);
     expect(heads()).toEqual(["NOW", "NEXT", "LATER", "QA"]);
-    expect(one(".nnl").style.gridTemplateColumns).toBe("repeat(4, minmax(0, 1fr))");
-    expect(document.querySelector('[data-col="done"]')).toBeNull();
+    expect(all(".nnl > *").map((c) => c.dataset.col)).toEqual(["now", "next", "later", stepId(t, "QA"), "done"]);
+    expect(one('[data-col="done"]').dataset.strip).toBe("done");
   });
 
   it("lists No step first when an item points at a deleted step, and never offers it in Move to", async () => {
@@ -147,17 +174,26 @@ describe("Board by steps", () => {
     expect(heads()).toEqual(["NO STEP", "NOW", "NEXT", "LATER"]);
     expect(cols()).toEqual(["no-step", "now", "next", "later"]);
     expect(cardsIn("no-step")).toEqual(["w"]);
-    expect(all(".col-sub").map((e) => e.textContent)).toEqual(["1 done item is hidden.", "", "", ""]);
-    expect(offered("w")).toEqual(["NOW", "NEXT", "LATER"]);
-    expect(offered("soon")).toEqual(["NOW", "NEXT", "LATER"]);
-    expect(one(".nnl").style.gridTemplateColumns).toBe("repeat(4, minmax(0, 1fr))");
-    expect(tabOrder(t.session.view(), BOARD)).toEqual(["w", "soon", "mid", "u"]);
+    expect(one(".col-note", col("no-step")).textContent).toBe("These items point at a step another device deleted.Move all to…");
+    expect(one(".col-badge", col("no-step")).textContent).toBe("1");
+    expect(col("no-step").hasAttribute("data-drop")).toBe(false);
+    expect(offered("w")).toEqual([
+      ["Now", false],
+      ["Next", false],
+      ["Later", false],
+      ["Done", false],
+    ]);
+    expect(offered("soon")).toEqual([
+      ["Now", true],
+      ["Next", false],
+      ["Later", false],
+      ["Done", false],
+    ]);
+    expect(tabOrder(t.session.view(), BOARD, EMPTY_BOARD_PREFS)).toEqual(["w", "soon", "mid", "u"]);
     const apply = vi.spyOn(t.session, "apply");
     dragTo("soon", "no-step");
     expect(apply).not.toHaveBeenCalled();
-    act(() => {
-      fireEvent.change(moveSelect("w"), { target: { value: "later" } });
-    });
+    moveVia("w", "Later");
     expect(apply.mock.calls).toEqual([[{ t: "toStep", items: ["w"], step: "later" }]]);
     expect(cols()).toEqual(["now", "next", "later"]);
     expect(cardsIn("later")).toEqual(["w"]);
@@ -168,13 +204,9 @@ describe("Board by steps", () => {
     t.session.apply({ t: "step", op: "rename", step: "next", name: "Review" });
     await board(t);
     const apply = vi.spyOn(t.session, "apply");
-    act(() => {
-      fireEvent.change(moveSelect("mid"), { target: { value: "next" } });
-    });
+    moveVia("mid", "Review");
     expect(apply).not.toHaveBeenCalled();
-    act(() => {
-      fireEvent.change(moveSelect("mid"), { target: { value: "later" } });
-    });
+    moveVia("mid", "Later");
     dragTo("soon", "next");
     dragTo("u", "next");
     expect(apply.mock.calls).toEqual([
@@ -187,7 +219,7 @@ describe("Board by steps", () => {
     expect(toastTexts()).toEqual(["Moved “mid” to “Later”.", "Moved “soon” to “Review”."]);
   });
 
-  it("shows an open card whose step completes in that step's column and leaves it out of the hidden-done count", async () => {
+  it("keeps a completing step open while it holds an open card, open cards first, and names the problem", async () => {
     const t = await made(SEED);
     t.session.apply({ t: "step", op: "rename", step: "next", name: "Review" });
     t.session.apply({ t: "toStep", items: ["w"], step: "done" });
@@ -195,16 +227,17 @@ describe("Board by steps", () => {
     t.session.apply({ t: "schedule", item: "w", set: { status: "todo", progress: 0 } });
     await board(t);
     expect(heads()).toEqual(["NOW", "REVIEW", "LATER", "DONE"]);
-    expect(cardsIn("later")).toEqual(["w"]);
+    expect(cardsIn("later")).toEqual(["w", "d1"]);
     expect(cardsIn("done")).toEqual([]);
-    expect(all(".col-sub").map((e) => e.textContent)).toEqual(["1 done item is hidden.", "", "", ""]);
-    expect(one(".nnl").style.gridTemplateColumns).toBe("repeat(4, minmax(0, 1fr))");
-    expect(tabOrder(t.session.view(), BOARD)).toEqual(["soon", "mid", "u", "w"]);
-    act(() => {
-      fireEvent.change(moveSelect("w"), { target: { value: "now" } });
-    });
+    expect(one(".col-body", col("done")).textContent).toBe("Nothing here.");
+    expect(all(".board-line .board-problem").map((e) => e.textContent)).toEqual(["“Later” completes items but holds 1 item that is not done."]);
+    expect(document.querySelector(".col-collapse")).toBeNull();
+    expect(tabOrder(t.session.view(), BOARD, EMPTY_BOARD_PREFS)).toEqual(["soon", "mid", "u", "w", "d1"]);
+    moveVia("w", "Now");
     expect(cardsIn("now")).toEqual(["soon", "w"]);
     expect(cols()).toEqual(["now", "next", "done"]);
+    expect(one('[data-strip="done"]').dataset.col).toBe("later");
+    expect(all(".board-line .board-problem")).toEqual([]);
   });
 
   it("says so when every live step completes items, with the hidden-done count", async () => {
@@ -219,7 +252,7 @@ describe("Board by steps", () => {
     await board(t);
     expect(all(".nnl > .col")).toEqual([]);
     expect(one("[data-empty-board]").textContent).toBe("Every step in this plan completes items, so no open card has a column. 1 done item is hidden.");
-    expect(one(".nnl").style.gridTemplateColumns).toBe("minmax(0, 1fr)");
+    expect(all(".nnl > *").map((e) => e.dataset.col ?? "note")).toEqual(["note", "done"]);
   });
 
   it("shows the Horizon field by dates and hides it by steps", async () => {

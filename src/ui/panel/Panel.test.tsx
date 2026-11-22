@@ -865,7 +865,7 @@ describe("opens from every view (refinement 48)", () => {
     opened("t3", "Tracking: review results");
     tap(one('[data-chip="u1"]'));
     opened("u1", "Kids star parties");
-    click(screen.getByRole("tab", { name: "Now · Next · Later" }));
+    click(screen.getByRole("tab", { name: "Board" }));
     tap(one('[data-card="t3"]'));
     opened("t3", "Tracking: review results");
     click(screen.getByRole("tab", { name: "List" }));

@@ -93,6 +93,7 @@ export const label = {
   stepReordered: (name: string): string => `Reordered step ${q(name)}`,
   stepLimit: (name: string, limit: number | null): string => (limit === null ? `Removed the limit of ${q(name)}` : `Set the limit of ${q(name)} to ${limit}`),
   stepCompletes: (name: string, on: boolean): string => `${q(name)} ${on ? "now completes" : "no longer completes"} items`,
+  noneCompletes: (names: readonly string[]): string => `No step completes items: ${names.map(q).join(", ")} no longer ${names.length === 1 ? "does" : "do"}`,
   stepDeleted: (name: string, moved: number, to: string | null): string =>
     to === null || moved === 0 ? `Deleted step ${q(name)}` : `Deleted step ${q(name)} and moved ${items(moved)} to ${q(to)}`,
   toStep: (what: string, step: string): string => `Moved ${what} to ${q(step)}`,

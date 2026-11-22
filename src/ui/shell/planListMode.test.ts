@@ -104,6 +104,7 @@ describe("toolbarTier", () => {
   const ipad: readonly (readonly [string, number, ToolbarTier | null])[] = [
     ["1180", 1180, null],
     ["1179", 1179, "roomy"],
+    ["970, the owner's iPad in portrait, since the Board tab's label became Board", 970, "roomy"],
     ["ROOMY_MIN", ROOMY_MIN, "roomy"],
     ["ROOMY_MIN - 1", ROOMY_MIN - 1, "medium"],
     ["MEDIUM_MIN", MEDIUM_MIN, "medium"],

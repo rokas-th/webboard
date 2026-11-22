@@ -9,7 +9,7 @@ import { act } from "../test/act";
 import { ctxOf } from "../test/planCtx";
 import { buildAction } from "./build";
 import { Refused, type Built, type Ctx, type Intent } from "./intents";
-import { switchWrites } from "./steps";
+import { stepHolding, switchWrites, switchWritesOf } from "./steps";
 import { buildUndo } from "./undo";
 
 const TODAY = "2026-11-09";
@@ -266,6 +266,22 @@ describe("step completes", () => {
     refusedWith(steps(), { t: "step", op: "completes", step: "done", completes: true }, "Nothing to change.");
     refusedWith(steps(), { t: "step", op: "completes", step: "qa", completes: false }, "Nothing to change.");
   });
+
+  it("noneCompletes clears every completing step in one undoable action, and refuses when none completes", () => {
+    const ctx = ctxFrom([...DATES, w("ws:qa", QA), w("ws:next", { n: "Next", c: "violet", o: "a1", d: true })]);
+    const b = buildAction(ctx, { t: "step", op: "noneCompletes" });
+    expect(sorted(units(b)).filter((u) => u.startsWith("ws:"))).toEqual(["ws:done", "ws:next"]);
+    expect([valueAt(b, "ws:next"), valueAt(b, "ws:done")]).toEqual([
+      { n: "Next", c: "violet", o: "a1" },
+      { n: "Done", c: "lime", o: "a3" },
+    ]);
+    expect(b.action.lbl).toBe("No step completes items: “Next”, “Done” no longer do");
+    const after = applied(ctx, b);
+    expect(projectBoard(after.view.plan, after.view.derived).completing).toBeNull();
+    const undone = applied(after, buildUndo(after, b.action.id));
+    expect(projectBoard(undone.view.plan, undone.view.derived).steps.filter((s) => s.completes).map((s) => s.id)).toEqual(["next", "done"]);
+    refusedWith(after, { t: "step", op: "noneCompletes" }, "Nothing to change.");
+  });
 });
 
 describe("step delete", () => {
@@ -337,6 +353,26 @@ describe("step delete", () => {
     errorWith(steps(), { t: "step", op: "delete", step: "qa", to: "qa" }, "Step qa cannot take its own items");
     errorWith(steps(), { t: "step", op: "delete", step: "zz", to: "now" }, "Step zz is not in this plan");
     errorWith(steps(), { t: "step", op: "delete", step: "qa", to: "zz" }, "Step zz is not in this plan");
+  });
+});
+
+describe("stepHolding", () => {
+  it("counts the items a step holds, with the done and trashed ones as hidden", () => {
+    expect(stepHolding(steps().view, "qa")).toEqual({ held: 2, hidden: 1 });
+    expect(stepHolding(steps().view, "now")).toEqual({ held: 0, hidden: 0 });
+    expect(stepHolding(ctxFrom([...STEPS, w("wi:D1", "qa"), w("wi:T2", "qa")]).view, "qa")).toEqual({ held: 4, hidden: 2 });
+  });
+
+  it("counts by dates after the switch, as a delete would move them", () => {
+    const ctx = dates();
+    expect(switchWritesOf(ctx.view)).toEqual(switchWrites(ctx));
+    expect(stepHolding(ctx.view, "later")).toEqual({ held: 4, hidden: 2 });
+    expect(stepHolding(ctx.view, "now")).toEqual({ held: 2, hidden: 0 });
+    expect(stepHolding(ctx.view, "next")).toEqual({ held: 3, hidden: 0 });
+  });
+
+  it("throws for an unknown step", () => {
+    expect(() => stepHolding(steps().view, "zz")).toThrow("Step zz is not in this plan");
   });
 });
 

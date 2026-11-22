@@ -30,7 +30,9 @@ import { isSyncPane, SyncPanes } from "../sync/SyncPanes";
 import { ThemeBody } from "../theme/ThemePanel";
 import type { SettingsFrame } from "./frame";
 import { saveSection } from "./lastSection";
+import { Row, rowKey } from "./Row";
 import { filterSections, isPlanSection, sectionTitle, shownSections, type RowSpec, type SectionMatch, type SectionSpec } from "./sections";
+import { Workflow } from "./Workflow";
 
 export const SETTINGS_TITLE = "Settings";
 
@@ -79,17 +81,6 @@ interface Group {
   key: "app" | "plan";
   title: string;
   matches: readonly SectionMatch[];
-}
-
-const rowKey = (section: SettingsSection, row: string): string => `${section}.${row}`;
-
-function Row(p: { section: SettingsSection; row: string; label: string; className?: string; stack?: boolean; children: ReactNode }) {
-  return (
-    <div className={p.stack === true ? "settings-row settings-row-stack" : "settings-row"} data-settings-row={rowKey(p.section, p.row)}>
-      <span className="settings-label">{p.label}</span>
-      <div className={p.className === undefined ? "settings-control" : `settings-control ${p.className}`}>{p.children}</div>
-    </div>
-  );
 }
 
 const trashLine = (name: string): string => `Moves “${name}” to the Trash. Restore it from the plan list's Trash.`;
@@ -397,6 +388,8 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
       }
       case "overview":
         return <OverviewSection session={planSession(s.id)} readOnly={p.readOnly} />;
+      case "workflow":
+        return <Workflow session={planSession(s.id)} readOnly={p.readOnly} />;
       case "baselines":
         return <BaselinesSection session={planSession(s.id)} readOnly={p.readOnly} />;
       case "danger":

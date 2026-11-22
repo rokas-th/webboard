@@ -12,7 +12,7 @@ import { ZOOMS } from "./zooms";
 
 const TABS: readonly (readonly [ViewKind, string, string])[] = [
   ["timeline", "Timeline", "Timeline"],
-  ["board", "Now · Next · Later", "Board"],
+  ["board", "Board", "Board"],
   ["list", "List", "List"],
 ];
 

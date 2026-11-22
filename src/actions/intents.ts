@@ -35,6 +35,7 @@ export type StepIntent =
   | { t: "step"; op: "reorder"; step: StepId; after: StepId | null }
   | { t: "step"; op: "limit"; step: StepId; limit: number | null }
   | { t: "step"; op: "completes"; step: StepId; completes: boolean }
+  | { t: "step"; op: "noneCompletes" }
   | { t: "step"; op: "delete"; step: StepId; to: StepId | null };
 
 export type ToStepIntent = { t: "toStep"; items: readonly ItemId[]; step: StepId };

@@ -122,6 +122,15 @@ html[data-os="ios"] .settings-nav-row {
   min-height: 44px;
 }
 
+html[data-os="ios"] .settings-side {
+  gap: 8px;
+  padding-block: 8px;
+}
+
+html[data-os="ios"] .settings-nav {
+  gap: 8px;
+}
+
 .settings-empty {
   margin: 6px 8px;
   font-family: var(--prose);
@@ -386,4 +395,222 @@ html[data-os="ios"] .settings-row .settings-control button::before {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--amber);
+}
+
+.workflow-control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workflow-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 4px;
+  font-family: var(--prose);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workflow-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-head,
+.workflow-row {
+  display: grid;
+  grid-template-columns: 28px 28px minmax(0, 1fr) 64px 56px 76px 76px;
+  align-items: center;
+  gap: 8px;
+}
+
+.workflow-head {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.workflow-head span:nth-child(6) {
+  text-align: center;
+}
+
+.workflow-row {
+  min-height: 40px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.8);
+}
+
+.workflow-completes {
+  justify-self: center;
+}
+
+.workflow-completes-text {
+  display: none;
+}
+
+.settings-list .workflow-head {
+  display: none;
+}
+
+.settings-list .workflow-row {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.settings-list .workflow-completes {
+  display: flex;
+  gap: 8px;
+  width: auto;
+  padding-inline-end: 8px;
+}
+
+.settings-list .workflow-completes-text {
+  display: inline;
+}
+
+html[data-os="ios"] .workflow-head,
+html[data-os="ios"] .workflow-row {
+  grid-template-columns: 44px 44px minmax(0, 1fr) 60px 64px 76px 76px;
+  gap: 6px;
+}
+
+.workflow-row.dragging {
+  opacity: 0.5;
+}
+
+.workflow-row.drop-over {
+  box-shadow: inset 0 2px 0 var(--cyan);
+}
+
+.workflow-grip,
+.workflow-swatch,
+.workflow-completes {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+}
+
+.workflow-grip {
+  cursor: grab;
+  touch-action: none;
+}
+
+.workflow-grip-dots {
+  width: 8px;
+  height: 14px;
+  background-image: radial-gradient(circle, var(--dim) 1px, transparent 1.5px);
+  background-size: 4px 4px;
+}
+
+.workflow-swatch .swatch {
+  width: 12px;
+  height: 12px;
+}
+
+.workflow-name {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.workflow-count {
+  flex: none;
+  min-width: 60px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.workflow-count.over {
+  color: var(--amber);
+}
+
+.workflow-limit {
+  flex: none;
+  width: 56px;
+}
+
+.workflow-radio {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--dim);
+  border-radius: 50%;
+}
+
+[aria-checked="true"] > .workflow-radio {
+  border-color: var(--cyan);
+}
+
+[aria-checked="true"] > .workflow-radio::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cyan);
+}
+
+.workflow-delete {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 10px;
+}
+
+.workflow-none {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 4px 7px;
+  border: 0;
+  font-family: var(--prose);
+  font-size: 12.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+
+.workflow-add-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+html[data-os="ios"] .workflow-grip,
+html[data-os="ios"] .workflow-swatch,
+html[data-os="ios"] .workflow-completes {
+  width: 44px;
+  height: 44px;
+}
+
+html[data-os="ios"] .workflow-delete,
+html[data-os="ios"] .workflow-none,
+html[data-os="ios"] .workflow-add {
+  min-height: 44px;
+}
+
+html[data-os="ios"] .workflow-limit {
+  width: 64px;
+}
+
+html[data-os="ios"] .settings-list .workflow-completes {
+  width: auto;
+  min-width: 44px;
 }

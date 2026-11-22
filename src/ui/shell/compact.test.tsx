@@ -569,7 +569,7 @@ describe("Settings on a compact window", () => {
     act(() => lastUi()[1]({ settings: "sync" }));
     const sheet = screen.getByRole("dialog", { name: "Settings" });
     expect([sheet.classList.contains("sheet"), sheet.hasAttribute("data-settings-modal")]).toEqual([true, false]);
-    expect([...sheet.querySelectorAll<HTMLElement>("section.settings-group")].map((s) => s.dataset["section"])).toEqual(["general", "theme", "sync", "files", "overview", "working-time", "baselines", "danger"]);
+    expect([...sheet.querySelectorAll<HTMLElement>("section.settings-group")].map((s) => s.dataset["section"])).toEqual(["general", "theme", "sync", "files", "overview", "workflow", "working-time", "baselines", "danger"]);
   });
 });
 

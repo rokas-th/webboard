@@ -1,29 +1,67 @@
-import { useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { fmtShort, toIso, type Day } from "../../domain/dates";
-import type { Horizon, Item, ItemId, StepId } from "../../domain/model";
-import { projectBoard, type BoardProjection, type Step, type StepColumn, type StepMode } from "../../domain/steps";
+import { STEP_COLOURS, type Item, type ItemId, type StepColour, type StepId } from "../../domain/model";
+import { projectBoard, stepsOf, type Step } from "../../domain/steps";
+import { readPlatform } from "../../platform";
+import { haptic } from "../../services/haptics";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
+import type { PickSection, Point } from "../common/ContextMenu";
+import { STALE_CONFIRM } from "../common/NativeConfirm";
+import { pointBelow, usePickMenu } from "../common/pickMenu";
 import { toast } from "../common/Toast";
 import { groupPath, statusLabel, type StatusLabel } from "../list/groups";
+import { createdItem } from "../palette/commands";
 import { useRun } from "../run";
 import { useUiValue } from "../state";
 import { useDetail } from "../detail/DetailContext";
+import { duplicateRow } from "../duplicate";
 import { isClick } from "../timeline/gesture";
+import { useDeleteStep } from "./DeleteStep";
+import { HoldGesture, type HoldEvent } from "./hold";
+import { boardLayout, nearnessOf, statusOf, type BoardColumn, type BoardLayout } from "./layout";
+import { MoveAll } from "./MoveAll";
+import { useBoardPrefs, writeBoardPrefs, type BoardPrefs } from "./prefs";
+import { ColourPop, LimitPop, limitOfText } from "./StepPopovers";
+import {
+  addLabel,
+  BY_DATES,
+  CARD_MENU,
+  collapseLabel,
+  COLOUR_ROW,
+  COMPLETES_ROW,
+  countText,
+  DELETE,
+  DELETE_ROW,
+  doneStripLabel,
+  DRAFT_PLACEHOLDER,
+  draftLabel,
+  DROP_TO_FINISH,
+  DUPLICATE_ROW,
+  HIDE_ROW,
+  hiddenDoneText,
+  hiddenStripLabel,
+  INSERT_LEFT,
+  INSERT_RIGHT,
+  LATE,
+  LIMIT_ROW,
+  moreLabel,
+  MOVE_TO,
+  newStepName,
+  NO_STEP,
+  NO_STEP_LINE,
+  NOTHING_HERE,
+  OPEN_ROW,
+  overLimit,
+  RENAME,
+  renameLabel,
+  soonText,
+  STEP_MENU,
+} from "./text";
 
-export const DATED = "Dated items sit where their dates put them. Move them on the timeline.";
-export const NOTHING_HERE = "Nothing here.";
-export const NO_OPEN_STEP = "Every step in this plan completes items, so no open card has a column.";
+const NO_STEP_KEY = "no-step";
 
-const SUB: ReadonlyMap<StepId, string> = new Map([
-  ["now", "In progress, or starting within two weeks."],
-  ["next", "Starting within eight weeks."],
-  ["later", "Further out, or no dates yet."],
-]);
-
-const HORIZONS: readonly Horizon[] = ["now", "next", "later"];
-
-const NO_STEP = "no-step";
+export const STEP_DRAG = "application/x-webboard-step";
 
 const DOT: Readonly<Record<StatusLabel, string>> = {
   conflict: "dot conflict",
@@ -34,46 +72,25 @@ const DOT: Readonly<Record<StatusLabel, string>> = {
   "not started": "dot",
 };
 
-const hiddenLine = (n: number): string => (n === 0 ? "" : n === 1 ? " 1 done item is hidden." : ` ${n} done items are hidden.`);
+type HeadRow = "rename" | "colour" | "limit" | "completes" | "insert-left" | "insert-right" | "hide" | "delete";
 
-const horizonOf = (v: StepId): Horizon => {
-  const found = HORIZONS.find((h) => h === v);
-  if (found === undefined) throw new Error(`Board: no column ${v}`);
+const HEAD_ROWS: readonly HeadRow[] = ["rename", "colour", "limit", "completes", "insert-left", "insert-right", "hide", "delete"];
+
+const headRowOf = (id: string): HeadRow => {
+  const found = HEAD_ROWS.find((r) => r === id);
+  if (found === undefined) throw new Error(`Board: the step menu chose ${JSON.stringify(id)}, which is no row of it`);
   return found;
 };
 
-const colKey = (c: StepColumn): string => (c.step === null ? NO_STEP : c.step.id);
+type Pop = { kind: "colour" | "limit"; step: StepId; at: Point; back: HTMLElement };
 
-const colTitle = (c: StepColumn): string => (c.step === null ? "NO STEP" : c.step.name.toLocaleUpperCase());
+type HoldTarget = { k: "step"; step: StepId } | { k: "card"; item: ItemId; x: number; y: number };
 
-const datesSub = (id: StepId): string => {
-  const sub = SUB.get(id);
-  if (sub === undefined) throw new Error(`Board: no column ${id}`);
-  return sub;
-};
+type Holding = { target: HoldTarget; anchor: HTMLElement; pointer: number; held: boolean };
 
-export interface Columns {
-  shown: readonly StepColumn[];
-  done: number;
-  mode: StepMode;
-}
+const STEP_ROW = "step:";
 
-export function columnsFrom(board: BoardProjection): Columns {
-  const completing = board.completing;
-  const open = new Set(board.problems.flatMap((p) => (p.kind === "openInCompleting" ? p.items : [])));
-  const isCompleting = (c: StepColumn): boolean => completing !== null && c.step !== null && c.step.id === completing.id;
-  const finished = board.columns.filter(isCompleting).reduce((n, c) => n + c.items.filter((i) => !open.has(i.id)).length, 0);
-  const shown = board.columns.flatMap((c): StepColumn[] => {
-    if (!isCompleting(c)) return [c];
-    const stranded = c.items.filter((i) => open.has(i.id));
-    return stranded.length === 0 ? [] : [{ step: c.step, items: stranded }];
-  });
-  return { shown, done: finished + board.hiddenDone, mode: board.mode };
-}
-
-export function columnsOf(view: PlanView): Columns {
-  return columnsFrom(projectBoard(view.plan, view.derived));
-}
+const stepStyle = (c: StepColour): CSSProperties => ({ "--step": `var(--s-${c})` });
 
 const dayOf = (m: ReadonlyMap<ItemId, Day>, id: ItemId, what: string): string => {
   const d = m.get(id);
@@ -90,45 +107,471 @@ function When(p: { view: PlanView; item: Item }) {
   return <span className="when">{`${start} – ${dayOf(p.view.derived.end, p.item.id, "end")}`}</span>;
 }
 
+function Near(p: { view: PlanView; layout: BoardLayout; item: Item }) {
+  const near = nearnessOf(p.view, p.layout.mode, p.item);
+  if (near === null) return null;
+  if (near.kind === "late") return <span className="badge late">{LATE}</span>;
+  return <span className="badge soon">{soonText(near.days)}</span>;
+}
+
 const groupName = (view: PlanView, item: Item): string | null => (item.place.parent === null ? null : groupPath(view, item.place.parent));
+
+function BoardLine(p: { layout: BoardLayout; completing: boolean }) {
+  const l = p.layout;
+  return (
+    <p className="board-line" role="status">
+      {l.mode === "dates" && (
+        <span className="quiet-line" data-by-dates="">
+          {BY_DATES}
+        </span>
+      )}
+      {!p.completing && l.hiddenDone > 0 && (
+        <span className="quiet-line" data-done-hidden="">
+          {hiddenDoneText(l.hiddenDone)}
+        </span>
+      )}
+      {l.problems.map((text) => (
+        <span key={text} className="board-problem">
+          {text}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+function RenameInput(p: { step: Step; onCommit(name: string): void; onCancel(): void }) {
+  const [text, setText] = useState(p.step.name);
+  const input = useRef<HTMLInputElement>(null);
+  const ended = useRef(false);
+  useEffect(() => {
+    const el = input.current;
+    if (el === null) throw new Error("Board: the rename field rendered without its element");
+    el.focus();
+    el.select();
+  }, []);
+  return (
+    <input
+      ref={input}
+      type="text"
+      className="col-rename"
+      aria-label={renameLabel(p.step.name)}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          p.onCommit(text);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          ended.current = true;
+          p.onCancel();
+        }
+      }}
+      onBlur={() => {
+        if (!ended.current) p.onCommit(text);
+      }}
+    />
+  );
+}
+
+function DraftCard(p: { step: Step; onCommit(name: string): boolean; onDiscard(): void }) {
+  const [text, setText] = useState("");
+  const ended = useRef(false);
+  const end = (): void => {
+    if (ended.current) return;
+    if (text.trim() === "") {
+      ended.current = true;
+      p.onDiscard();
+      return;
+    }
+    ended.current = p.onCommit(text.trim());
+  };
+  return (
+    <div className="card card-draft">
+      <input
+        type="text"
+        className="card-draft-name"
+        aria-label={draftLabel(p.step.name)}
+        placeholder={DRAFT_PLACEHOLDER}
+        value={text}
+        autoFocus
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            end();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            ended.current = true;
+            p.onDiscard();
+          }
+        }}
+        onBlur={end}
+      />
+    </div>
+  );
+}
+
+const action = (id: string, title: string) => ({ id, title, checked: false, checkable: false });
+
+const headSections = (step: Step, hidden: boolean, readOnly: boolean): readonly PickSection[] => {
+  const hide = { id: "hide", title: HIDE_ROW, checked: hidden, checkable: true };
+  if (readOnly) return [{ title: null, rows: [hide] }];
+  return [
+    {
+      title: null,
+      rows: [action("rename", RENAME), action("colour", COLOUR_ROW), action("limit", LIMIT_ROW), { id: "completes", title: COMPLETES_ROW, checked: step.completes, checkable: true }],
+    },
+    { title: null, rows: [action("insert-left", INSERT_LEFT), action("insert-right", INSERT_RIGHT), hide] },
+    { title: null, rows: [action("delete", DELETE_ROW)] },
+  ];
+};
+
+const returnFocusOf = (anchor: HTMLElement): HTMLElement => {
+  if (anchor.matches(".col-more, .col-strip")) return anchor;
+  const more = anchor.querySelector<HTMLElement>(".col-more");
+  if (more === null) throw new Error("Board: a step menu opened from an element with no options button");
+  return more;
+};
 
 export function Board(p: { session: PlanSession; readOnly: boolean }) {
   const view = usePlanView(p.session);
-  const { ui } = useUiValue();
+  const { ui, setUi } = useUiValue();
   const detail = useDetail();
   const { run } = useRun(p.session);
+  const prefs = useBoardPrefs(view.plan.id);
+  const menu = usePickMenu(STEP_MENU);
+  const cardMenu = usePickMenu(CARD_MENU);
+  const deleting = useDeleteStep(p.session);
   const down = useRef<{ id: ItemId; x: number; y: number } | null>(null);
   const dragged = useRef<ItemId | null>(null);
+  const draggedStep = useRef<StepId | null>(null);
+  const holding = useRef<Holding | null>(null);
+  const gesture = useRef<HoldGesture | null>(null);
+  const onHoldRef = useRef<(events: readonly HoldEvent[]) => void>(() => undefined);
+  const suppressClick = useRef<StepId | null>(null);
+  const stopScroll = useRef<(() => void) | null>(null);
+  const lostRef = useRef<(e: PointerEvent) => void>(() => undefined);
+  const [liftedStep, setLiftedStep] = useState<StepId | null>(null);
+  const [liftedCard, setLiftedCard] = useState<ItemId | null>(null);
   const [over, setOver] = useState<StepId | null>(null);
+  const [draft, setDraft] = useState<StepId | null>(null);
+  const [renaming, setRenaming] = useState<StepId | null>(null);
+  const [pop, setPop] = useState<Pop | null>(null);
   const projection = projectBoard(view.plan, view.derived);
-  const { shown, done, mode } = columnsFrom(projection);
-  const targets: readonly Step[] = shown.flatMap((c) => (c.step === null ? [] : [c.step]));
+  const layout = boardLayout(view, projection, prefs);
+  const steps = projection.steps;
+  const live: ReadonlySet<StepId> = new Set(steps.map((s) => s.id));
+  const os = readPlatform(window).os;
+  const ios = os === "ios";
 
-  const targetOf = (v: string): StepId => {
-    const found = targets.find((s) => s.id === v);
-    if (found === undefined) throw new Error(`Board: no column ${v}`);
-    return found.id;
-  };
+  useEffect(() => {
+    const lost = (e: PointerEvent): void => lostRef.current(e);
+    window.addEventListener("pointerup", lost);
+    window.addEventListener("pointercancel", lost);
+    return () => {
+      window.removeEventListener("pointerup", lost);
+      window.removeEventListener("pointercancel", lost);
+      const g = gesture.current;
+      if (g !== null) g.cancelAll();
+      holding.current = null;
+      const unblock = stopScroll.current;
+      stopScroll.current = null;
+      if (unblock !== null) unblock();
+    };
+  }, []);
+
+  const setPrefs = (next: BoardPrefs): void => writeBoardPrefs(window.localStorage, view.plan.id, next, live);
+
+  const liveStep = (id: StepId): Step | null => stepsOf(p.session.view().plan).find((s) => s.id === id) ?? null;
 
   const moveTo = (id: ItemId, to: StepId): void => {
-    const item = view.plan.items.get(id);
-    if (item === undefined) throw new Error(`Board: dragged item ${id} is not in the plan`);
-    const current = projection.columnOf.get(id);
-    if (current === undefined || current === to) return;
-    if (mode === "steps") {
-      run({ t: "toStep", items: [id], step: to });
+    if (!view.plan.items.has(id)) throw new Error(`Board: dragged item ${id} is not in the plan`);
+    const now = p.session.view();
+    const current = projectBoard(now.plan, now.derived).columnOf.get(id);
+    if (current === undefined) {
+      toast(STALE_CONFIRM, "bad");
       return;
     }
-    if (item.schedule === null) throw new Error(`Board: item ${id} has no schedule`);
-    if (item.schedule.start !== null) {
-      toast(DATED);
+    if (current === to) return;
+    run({ t: "toStep", items: [id], step: to });
+  };
+
+  const reorderTo = (source: StepId, target: StepId): void => {
+    const all = stepsOf(p.session.view().plan);
+    const from = all.findIndex((s) => s.id === source);
+    const to = all.findIndex((s) => s.id === target);
+    if (from < 0 || to < 0) throw new Error(`Board: reorder from ${source} to ${target} names a step that is not live`);
+    if (from === to) return;
+    const after = to > from ? target : to === 0 ? null : all[to - 1].id;
+    run({ t: "step", op: "reorder", step: source, after });
+  };
+
+  const reveal = (id: StepId): void => {
+    const c = layout.columns.find((x) => x.kind !== "noStep" && x.step.id === id);
+    if (c === undefined) throw new Error(`Board: step ${id} has no column`);
+    if (c.kind === "hiddenStrip") setPrefs({ ...prefs, hidden: prefs.hidden.filter((h) => h !== id) });
+    if (c.kind === "doneStrip") setPrefs({ ...prefs, doneOpen: true });
+  };
+
+  const insert = (id: StepId, side: "left" | "right"): void => {
+    const all = stepsOf(p.session.view().plan);
+    const at = all.findIndex((s) => s.id === id);
+    if (at < 0) throw new Error(`Board: insert next to ${id}, which is not live`);
+    const after = side === "right" ? id : at === 0 ? null : all[at - 1].id;
+    const used = new Set(all.map((s) => s.colour));
+    const colour = STEP_COLOURS.find((c) => !used.has(c)) ?? "slate";
+    const name = newStepName(all.map((s) => s.name));
+    const built = run({ t: "step", op: "add", name, colour, after });
+    if (built === null) return;
+    const made = stepsOf(p.session.view().plan).find((s) => s.name === name);
+    if (made === undefined) throw new Error(`Board: the new step ${name} is not in the plan`);
+    setRenaming(made.id);
+  };
+
+  const onHeadChosen = (id: StepId, row: HeadRow, below: Point, back: HTMLElement): void => {
+    const step = liveStep(id);
+    if (step === null) {
+      toast(STALE_CONFIRM, "bad");
       return;
     }
-    run({ t: "schedule", item: id, set: { horizon: horizonOf(to) } });
+    switch (row) {
+      case "rename":
+        reveal(step.id);
+        setRenaming(step.id);
+        return;
+      case "colour":
+        setPop({ kind: "colour", step: step.id, at: below, back });
+        return;
+      case "limit":
+        setPop({ kind: "limit", step: step.id, at: below, back });
+        return;
+      case "completes":
+        run({ t: "step", op: "completes", step: step.id, completes: !step.completes });
+        return;
+      case "insert-left":
+        insert(step.id, "left");
+        return;
+      case "insert-right":
+        insert(step.id, "right");
+        return;
+      case "hide":
+        setPrefs({ ...prefs, hidden: prefs.hidden.includes(step.id) ? prefs.hidden.filter((h) => h !== step.id) : [...prefs.hidden, step.id] });
+        return;
+      case "delete":
+        deleting.ask(step.id);
+        return;
+    }
+  };
+
+  const openHead = (step: Step, anchor: HTMLElement, at: Point): void => {
+    const below = pointBelow(anchor);
+    const back = returnFocusOf(anchor);
+    menu.open(step.id, anchor, at, headSections(step, prefs.hidden.includes(step.id), p.readOnly), (row) => onHeadChosen(step.id, headRowOf(row), below, back));
+  };
+
+  const onHeadContext = (e: ReactMouseEvent<HTMLElement>, step: Step): void => {
+    e.preventDefault();
+    if (ios && holding.current !== null) return;
+    openHead(step, e.currentTarget, { x: e.clientX, y: e.clientY });
+  };
+
+  const cardSections = (item: ItemId): readonly PickSection[] => {
+    const open = { title: null, rows: [action("open", OPEN_ROW)] };
+    if (p.readOnly) return [open];
+    const current = projection.columnOf.get(item);
+    return [
+      open,
+      { title: MOVE_TO, rows: steps.map((s) => ({ id: `${STEP_ROW}${s.id}`, title: s.name, checked: s.id === current, checkable: true })) },
+      { title: null, rows: [action("duplicate", DUPLICATE_ROW), action("delete", DELETE)] },
+    ];
+  };
+
+  const onCardChosen = (item: ItemId, row: string): void => {
+    if (row === "open") {
+      detail.promote(item);
+      return;
+    }
+    if (row === "duplicate") {
+      duplicateRow(run, () => p.session.view(), ui, setUi, item);
+      return;
+    }
+    if (row === "delete") {
+      run({ t: "trash", items: [item] });
+      return;
+    }
+    if (!row.startsWith(STEP_ROW)) throw new Error(`Board: the card menu chose ${JSON.stringify(row)}, which is no row of it`);
+    const step = liveStep(row.slice(STEP_ROW.length));
+    if (step === null) {
+      toast(STALE_CONFIRM, "bad");
+      return;
+    }
+    moveTo(item, step.id);
+  };
+
+  const openCard = (item: ItemId, anchor: HTMLElement, at: Point): void => {
+    cardMenu.open(item, anchor, at, cardSections(item), (row) => onCardChosen(item, row));
+  };
+
+  const onCardContext = (e: ReactMouseEvent<HTMLElement>, item: ItemId): void => {
+    e.preventDefault();
+    if (ios && holding.current !== null) return;
+    openCard(item, e.currentTarget, { x: e.clientX, y: e.clientY });
+  };
+
+  const dropTargetAt = (x: number, y: number): StepId | null => {
+    const el = document.elementFromPoint(x, y);
+    const target = el === null ? null : el.closest<HTMLElement>("[data-drop]");
+    const id = target === null ? undefined : target.dataset.drop;
+    return id !== undefined && live.has(id) ? id : null;
+  };
+
+  const blockScroll = (): void => {
+    if (stopScroll.current !== null) return;
+    const stop = (e: Event): void => e.preventDefault();
+    document.addEventListener("touchmove", stop, { passive: false });
+    stopScroll.current = () => document.removeEventListener("touchmove", stop);
+  };
+
+  const endLift = (): void => {
+    const unblock = stopScroll.current;
+    stopScroll.current = null;
+    if (unblock !== null) unblock();
+    setLiftedStep(null);
+    setLiftedCard(null);
+    setOver(null);
+  };
+
+  const onMenuHold = (target: HoldTarget, anchor: HTMLElement): void => {
+    if (target.k === "card") {
+      openCard(target.item, anchor, pointBelow(anchor));
+      return;
+    }
+    const step = liveStep(target.step);
+    if (step === null) {
+      toast(STALE_CONFIRM, "bad");
+      return;
+    }
+    openHead(step, anchor, pointBelow(anchor));
+  };
+
+  const onHold = (events: readonly HoldEvent[], h: Holding | null): void => {
+    if (h === null) {
+      if (events.length > 0) throw new Error(`Board: a hold emitted ${events.map((e) => e.k).join(", ")} without a held header or card`);
+      return;
+    }
+    const target = h.target;
+    events.forEach((ev) => {
+      switch (ev.k) {
+        case "held":
+          h.held = true;
+          blockScroll();
+          if (target.k === "step") setLiftedStep(target.step);
+          else setLiftedCard(target.item);
+          haptic("medium");
+          return;
+        case "drag":
+          setOver(dropTargetAt(ev.x, ev.y));
+          return;
+        case "drop": {
+          const to = dropTargetAt(ev.x, ev.y);
+          endLift();
+          if (to === null) return;
+          if (target.k === "step") reorderTo(target.step, to);
+          else moveTo(target.item, to);
+          return;
+        }
+        case "menu":
+          endLift();
+          onMenuHold(target, h.anchor);
+          return;
+        case "cancel":
+          endLift();
+          return;
+        case "tap":
+          if (target.k === "card") detail.press({ item: target.item, x: target.x, y: target.y, at: performance.now() });
+          return;
+      }
+    });
+  };
+
+  const sample = (e: ReactPointerEvent<HTMLElement>) => ({ pointer: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp });
+
+  const gestureOf = (): HoldGesture => {
+    const known = gesture.current;
+    if (known !== null) return known;
+    const made = new HoldGesture({
+      schedule: (ms, fn) => {
+        const t = window.setTimeout(fn, ms);
+        return () => window.clearTimeout(t);
+      },
+      emit: (events) => onHoldRef.current(events),
+    });
+    gesture.current = made;
+    return made;
+  };
+
+  const released = (events: readonly HoldEvent[]): void => {
+    const h = holding.current;
+    holding.current = null;
+    if (h !== null && h.held && h.target.k === "step") suppressClick.current = h.target.step;
+    onHold(events, h);
+  };
+
+  useLayoutEffect(() => {
+    onHoldRef.current = (events) => onHold(events, holding.current);
+    lostRef.current = (e) => {
+      const h = holding.current;
+      if (h === null || h.pointer !== e.pointerId) return;
+      released(gestureOf().cancel(e.pointerId));
+    };
+  });
+
+  const holdDown = (e: ReactPointerEvent<HTMLElement>, target: HoldTarget): void => {
+    if (holding.current === null) holding.current = { target, anchor: e.currentTarget, pointer: e.pointerId, held: false };
+    onHold(gestureOf().down(sample(e)), holding.current);
+  };
+
+  const holdMove = (e: ReactPointerEvent<HTMLElement>): void => onHold(gestureOf().move(sample(e)), holding.current);
+
+  const holdUp = (e: ReactPointerEvent<HTMLElement>): void => released(gestureOf().up(sample(e)));
+
+  const holdCancel = (e: ReactPointerEvent<HTMLElement>): void => released(gestureOf().cancel(e.pointerId));
+
+  const touchOnIos = (e: ReactPointerEvent<HTMLElement>): boolean => ios && e.pointerType !== "mouse";
+
+  const headTouch = (step: Step) =>
+    !ios
+      ? {}
+      : {
+          onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
+            if (!touchOnIos(e)) return;
+            suppressClick.current = null;
+            const inner = e.target instanceof Element ? e.target.closest("button, input") : null;
+            if (inner !== null && inner !== e.currentTarget) return;
+            holdDown(e, { k: "step", step: step.id });
+          },
+          onPointerMove: (e: ReactPointerEvent<HTMLElement>) => {
+            if (touchOnIos(e)) holdMove(e);
+          },
+          onPointerUp: (e: ReactPointerEvent<HTMLElement>) => {
+            if (touchOnIos(e)) holdUp(e);
+          },
+          onPointerCancel: (e: ReactPointerEvent<HTMLElement>) => {
+            if (touchOnIos(e)) holdCancel(e);
+          },
+        };
+
+  const consumedHold = (step: Step): boolean => {
+    if (suppressClick.current !== step.id) return false;
+    suppressClick.current = null;
+    return true;
   };
 
   const onDown = (e: ReactPointerEvent<HTMLDivElement>, id: ItemId): void => {
-    if (e.button !== 0 || (e.target instanceof Element && e.target.closest("select") !== null)) {
+    if (e.button !== 0 || (os === "macos" && e.ctrlKey)) {
       down.current = null;
       return;
     }
@@ -156,13 +599,20 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
     e.dataTransfer.effectAllowed = "move";
   };
 
+  const onHeadDragStart = (e: ReactDragEvent<HTMLElement>, id: StepId): void => {
+    draggedStep.current = id;
+    e.dataTransfer.setData(STEP_DRAG, id);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
   const onDragEnd = (): void => {
     dragged.current = null;
+    draggedStep.current = null;
     setOver(null);
   };
 
   const onDragOver = (e: ReactDragEvent<HTMLElement>, to: StepId): void => {
-    if (dragged.current === null) return;
+    if (dragged.current === null && draggedStep.current === null) return;
     e.preventDefault();
     if (over !== to) setOver(to);
   };
@@ -175,34 +625,96 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   const onDrop = (e: ReactDragEvent<HTMLElement>, to: StepId): void => {
     e.preventDefault();
     const id = dragged.current;
+    const step = draggedStep.current;
     dragged.current = null;
+    draggedStep.current = null;
     setOver(null);
-    if (id !== null) moveTo(id, to);
+    if (step !== null) reorderTo(step, to);
+    else if (id !== null) moveTo(id, to);
   };
 
-  const sub = (c: StepColumn, first: boolean): string => {
-    if (mode === "steps") return first ? hiddenLine(done).trim() : "";
-    if (c.step === null) throw new Error("Board: a by-dates plan has no No step column");
-    return datesSub(c.step.id) + (c.step.id === "now" ? hiddenLine(done) : "");
+  const dropProps = (to: StepId) =>
+    p.readOnly
+      ? {}
+      : {
+          "data-drop": to,
+          onDragOver: (e: ReactDragEvent<HTMLElement>) => onDragOver(e, to),
+          onDragLeave,
+          onDrop: (e: ReactDragEvent<HTMLElement>) => onDrop(e, to),
+        };
+
+  const commitRename = (step: Step, name: string): void => {
+    if (liveStep(step.id) === null) return;
+    if (name.trim() === step.name) {
+      setRenaming(null);
+      return;
+    }
+    if (run({ t: "step", op: "rename", step: step.id, name }) !== null) setRenaming(null);
   };
 
-  const card = (item: Item, c: StepColumn) => {
+  const commitDraft = (step: Step, name: string): boolean => {
+    if (liveStep(step.id) === null) return true;
+    const built = run({ t: "create", kind: "task", name, parent: null, after: null, start: null, step: step.id });
+    if (built === null) return false;
+    setDraft(null);
+    setUi({ selected: createdItem(built) });
+    return true;
+  };
+
+  const pickColour = (id: StepId, c: StepColour): void => {
+    const step = liveStep(id);
+    setPop(null);
+    if (step === null) {
+      toast(STALE_CONFIRM, "bad");
+      return;
+    }
+    if (c !== step.colour) run({ t: "step", op: "colour", step: id, colour: c });
+  };
+
+  const applyLimit = (id: StepId, text: string): void => {
+    const step = liveStep(id);
+    if (step === null) {
+      setPop(null);
+      toast(STALE_CONFIRM, "bad");
+      return;
+    }
+    const limit = limitOfText(text);
+    if (limit === step.limit) {
+      setPop(null);
+      return;
+    }
+    if (run({ t: "step", op: "limit", step: id, limit }) !== null) setPop(null);
+  };
+
+  const card = (item: Item) => {
     const group = groupName(view, item);
+    const drags = !p.readOnly && !ios;
     return (
       <div
         key={item.id}
-        className={ui.selected === item.id ? "card selected" : "card"}
+        className={["card", ...(ui.selected === item.id ? ["selected"] : []), ...(liftedCard === item.id ? ["lifted"] : [])].join(" ")}
         data-card={item.id}
         tabIndex={0}
-        draggable={!p.readOnly}
-        onPointerDown={(e) => onDown(e, item.id)}
-        onPointerUp={(e) => onUp(e, item.id)}
-        onPointerCancel={() => {
-          down.current = null;
+        draggable={drags}
+        onPointerDown={(e) => {
+          if (touchOnIos(e)) holdDown(e, { k: "card", item: item.id, x: e.clientX, y: e.clientY });
+          else onDown(e, item.id);
         }}
+        onPointerMove={(e) => {
+          if (touchOnIos(e)) holdMove(e);
+        }}
+        onPointerUp={(e) => {
+          if (touchOnIos(e)) holdUp(e);
+          else onUp(e, item.id);
+        }}
+        onPointerCancel={(e) => {
+          if (touchOnIos(e)) holdCancel(e);
+          else down.current = null;
+        }}
+        onContextMenu={(e) => onCardContext(e, item.id)}
         onKeyDown={(e) => onKey(e, item.id)}
-        onDragStart={p.readOnly ? undefined : (e) => onDragStart(e, item.id)}
-        onDragEnd={p.readOnly ? undefined : onDragEnd}
+        onDragStart={drags ? (e) => onDragStart(e, item.id) : undefined}
+        onDragEnd={drags ? onDragEnd : undefined}
       >
         <div className="card-top">
           <span className={DOT[statusLabel(view, item.id)]} />
@@ -211,58 +723,163 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
         <div className="card-meta">
           <When view={view} item={item} />
           {group !== null && <span className="card-group">{group}</span>}
-          {!p.readOnly && (
-            <select className="move-to" aria-label="Move to" value={colKey(c)} onChange={(e) => moveTo(item.id, targetOf(e.target.value))}>
-              {c.step === null && (
-                <option value={NO_STEP} disabled>
-                  {colTitle(c)}
-                </option>
-              )}
-              {targets.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name.toLocaleUpperCase()}
-                </option>
-              ))}
-            </select>
-          )}
+          <Near view={view} layout={layout} item={item} />
         </div>
       </div>
     );
   };
 
-  if (shown.length === 0) {
+  const strip = (step: Step, count: number, hidden: boolean) => (
+    <button
+      key={step.id}
+      type="button"
+      className={["col-strip", hidden ? "strip-hidden" : "strip-done", ...(over === step.id ? ["over"] : []), ...(liftedStep === step.id ? ["lifted"] : [])].join(" ")}
+      style={stepStyle(step.colour)}
+      data-col={step.id}
+      data-strip={hidden ? "hidden" : "done"}
+      aria-label={hidden ? hiddenStripLabel(step.name, count) : doneStripLabel(step.name, count)}
+      draggable={!p.readOnly && !ios}
+      onDragStart={p.readOnly || ios ? undefined : (e) => onHeadDragStart(e, step.id)}
+      onDragEnd={p.readOnly || ios ? undefined : onDragEnd}
+      onClick={() => {
+        if (consumedHold(step)) return;
+        setPrefs(hidden ? { ...prefs, hidden: prefs.hidden.filter((id) => id !== step.id) } : { ...prefs, doneOpen: true });
+      }}
+      onContextMenu={(e) => onHeadContext(e, step)}
+      {...headTouch(step)}
+      {...dropProps(step.id)}
+    >
+      <span className="swatch" />
+      <span className="strip-count">{count}</span>
+      <span className="strip-name">{step.name}</span>
+    </button>
+  );
+
+  const stepColumn = (step: Step, items: readonly Item[], completing: boolean) => {
+    const past = step.limit !== null && items.length > step.limit;
+    const naming = renaming === step.id;
     return (
-      <div className="nnl" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-        <p className="note" data-empty-board>
-          {NO_OPEN_STEP + hiddenLine(done)}
-        </p>
-      </div>
+      <section
+        key={step.id}
+        className={["col", ...(over === step.id ? ["over"] : []), ...(liftedStep === step.id ? ["lifted"] : [])].join(" ")}
+        style={stepStyle(step.colour)}
+        data-col={step.id}
+        {...dropProps(step.id)}
+      >
+        <div
+          className="col-head"
+          draggable={!p.readOnly && !ios && !naming}
+          onDragStart={p.readOnly || ios || naming ? undefined : (e) => onHeadDragStart(e, step.id)}
+          onDragEnd={p.readOnly || ios || naming ? undefined : onDragEnd}
+          onContextMenu={(e) => onHeadContext(e, step)}
+          {...headTouch(step)}
+        >
+          <span className="swatch" />
+          {naming ? <RenameInput step={step} onCommit={(name) => commitRename(step, name)} onCancel={() => setRenaming(null)} /> : <h2>{step.name.toLocaleUpperCase()}</h2>}
+          <span className={past ? "col-count over" : "col-count"} title={past && step.limit !== null ? overLimit(step.limit) : undefined}>
+            {countText(items.length, step.limit)}
+          </span>
+          {!p.readOnly && (
+            <button type="button" className="col-btn col-add" aria-label={addLabel(step.name)} title={addLabel(step.name)} onClick={() => setDraft(step.id)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="M8 3v10M3 8h10" />
+              </svg>
+            </button>
+          )}
+          <button
+            type="button"
+            className="col-btn col-more"
+            aria-label={moreLabel(step.name)}
+            title={moreLabel(step.name)}
+            aria-haspopup="menu"
+            aria-expanded={menu.openFor === step.id}
+            onClick={(e) => openHead(step, e.currentTarget, pointBelow(e.currentTarget))}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+              <circle cx="3.5" cy="8" r="1.3" />
+              <circle cx="8" cy="8" r="1.3" />
+              <circle cx="12.5" cy="8" r="1.3" />
+            </svg>
+          </button>
+          {completing && prefs.doneOpen && items.every((i) => statusOf(view, i.id) === "done") && (
+            <button type="button" className="col-btn col-collapse" aria-label={collapseLabel(step.name)} title={collapseLabel(step.name)} onClick={() => setPrefs({ ...prefs, doneOpen: false })}>
+              <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="M10 3 5 8l5 5" />
+              </svg>
+            </button>
+          )}
+        </div>
+        <div className="col-body">
+          {draft === step.id && !p.readOnly && <DraftCard key={`draft-${step.id}`} step={step} onCommit={(name) => commitDraft(step, name)} onDiscard={() => setDraft(null)} />}
+          {items.length === 0 ? draft === step.id ? null : <p className="note">{completing ? DROP_TO_FINISH : NOTHING_HERE}</p> : items.map(card)}
+        </div>
+      </section>
     );
-  }
+  };
+
+  const noStepColumn = (items: readonly Item[]) => (
+    <section key={NO_STEP_KEY} className="col col-nostep" data-col={NO_STEP_KEY}>
+      <div className="col-head">
+        <span className="swatch warn" />
+        <h2>{NO_STEP}</h2>
+        <span className="col-badge">{items.length}</span>
+      </div>
+      <div className="col-note">
+        <span>{NO_STEP_LINE}</span>
+        {!p.readOnly && <MoveAll steps={steps} onPick={(step) => run({ t: "toStep", items: items.map((i) => i.id), step })} />}
+      </div>
+      <div className="col-body">{items.map(card)}</div>
+    </section>
+  );
+
+  const column = (c: BoardColumn) => {
+    if (c.kind === "noStep") return noStepColumn(c.items);
+    if (c.kind === "doneStrip") return strip(c.step, c.count, false);
+    if (c.kind === "hiddenStrip") return strip(c.step, c.count, true);
+    return stepColumn(c.step, c.items, c.completing);
+  };
+
+  const popStep = pop === null ? undefined : steps.find((s) => s.id === pop.step);
+  const popGone = pop !== null && popStep === undefined;
+
+  useEffect(() => {
+    if (!popGone) return;
+    setPop(null);
+    toast(STALE_CONFIRM, "bad");
+  }, [popGone]);
+
+  const draftGone = draft !== null && !live.has(draft);
+  useEffect(() => {
+    if (!draftGone) return;
+    setDraft(null);
+    toast(STALE_CONFIRM, "bad");
+  }, [draftGone]);
+
+  const renameGone = renaming !== null && !live.has(renaming);
+  useEffect(() => {
+    if (!renameGone) return;
+    setRenaming(null);
+    toast(STALE_CONFIRM, "bad");
+  }, [renameGone]);
 
   return (
-    <div className="nnl" style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}>
-      {shown.map((c, i) => {
-        const k = colKey(c);
-        const to = c.step === null || p.readOnly ? null : c.step.id;
-        return (
-          <section
-            key={k}
-            className={over !== null && over === to ? "col over" : "col"}
-            data-col={k}
-            onDragOver={to === null ? undefined : (e) => onDragOver(e, to)}
-            onDragLeave={to === null ? undefined : onDragLeave}
-            onDrop={to === null ? undefined : (e) => onDrop(e, to)}
-          >
-            <div className="col-head">
-              <h2>{colTitle(c)}</h2>
-              <span>{c.items.length}</span>
-            </div>
-            <div className="col-sub">{sub(c, i === 0)}</div>
-            <div className="col-body">{c.items.length === 0 ? <p className="note">{NOTHING_HERE}</p> : c.items.map((it) => card(it, c))}</div>
-          </section>
-        );
-      })}
+    <div className="board">
+      <BoardLine layout={layout} completing={projection.completing !== null} />
+      <div className="nnl">
+        {layout.empty !== null && (
+          <p className="note" data-empty-board="">
+            {layout.empty}
+          </p>
+        )}
+        {layout.columns.map(column)}
+      </div>
+      {menu.node}
+      {cardMenu.node}
+      {pop !== null && popStep !== undefined && pop.kind === "colour" && <ColourPop step={popStep} at={pop.at} back={pop.back} onPick={(c) => pickColour(popStep.id, c)} onClose={() => setPop(null)} />}
+      {pop !== null && popStep !== undefined && pop.kind === "limit" && (
+        <LimitPop step={popStep} at={pop.at} back={pop.back} onApply={(text) => applyLimit(popStep.id, text)} onClear={() => applyLimit(popStep.id, "")} onClose={() => setPop(null)} />
+      )}
+      {deleting.node}
     </div>
   );
 }

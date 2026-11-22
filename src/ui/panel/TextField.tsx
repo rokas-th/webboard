@@ -16,6 +16,7 @@ export function TextField(p: {
   min?: string;
   max?: string;
   inputMode?: "numeric";
+  placeholder?: string;
   field?: string;
   onCommit(next: string): boolean;
   onUnreadable?(): void;
@@ -66,6 +67,7 @@ export function TextField(p: {
       ref={input}
       type={p.type ?? "text"}
       inputMode={p.inputMode}
+      placeholder={p.placeholder}
       enterKeyHint={name ? "done" : undefined}
       autoCapitalize={name ? "sentences" : undefined}
       autoCorrect={name ? "off" : undefined}

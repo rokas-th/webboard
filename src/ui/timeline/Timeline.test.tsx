@@ -503,7 +503,7 @@ describe("today and baselines", () => {
     ]);
     const bar = one(".toolbar");
     act(() => {
-      fireEvent.click(within(bar).getByRole("tab", { name: "Now · Next · Later" }));
+      fireEvent.click(within(bar).getByRole("tab", { name: "Board" }));
     });
     expect(document.querySelectorAll(".seg-zoom").length).toBe(0);
     expect(within(bar).getByRole("button", { name: "Today" })).toBeTruthy();

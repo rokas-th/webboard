@@ -11,3 +11,5 @@ export const UNREADABLE_ID: string;
 export const UNREADABLE_LINE: string;
 export const UPDATE_VERSION: string;
 export const UPDATE_CHECK_FAILED: string;
+export const STEP_QA: string;
+export const STEP_GONE: string;
