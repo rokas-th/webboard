@@ -1,7 +1,10 @@
 import type { HolidayDay, HolidayKind, HolidayYear, RegionRef, Tuning } from "../domain/calendar";
 import { FIRST_PLAN_DATE, inPlanWindow, LAST_PLAN_DATE, toDay, WEEKDAYS, type IsoDate, type Weekday } from "../domain/dates";
 import {
+  MAX_ASSIGNEES,
+  MAX_INITIALS,
   MAX_LAG,
+  MAX_PERSON_NAME,
   MAX_STEP_LIMIT,
   MAX_STEP_NAME,
   MAX_TASK_DUR,
@@ -11,6 +14,8 @@ import {
   type ItemId,
   type ItemKind,
   type LinkType,
+  type PersonId,
+  type PersonValue,
   type PlanState,
   type Place,
   type Schedule,
@@ -20,7 +25,7 @@ import {
 } from "../domain/model";
 import type { ActionId, Cause, UnitKey, Write } from "../log/types";
 
-export type UnitKind = "pn" | "cr" | "cw" | "e" | "n" | "s" | "p" | "r" | "l" | "cc" | "ct" | "ch" | "b" | "a" | "ws" | "wi";
+export type UnitKind = "pn" | "cr" | "cw" | "e" | "n" | "s" | "p" | "r" | "l" | "cc" | "ct" | "ch" | "b" | "a" | "ws" | "wi" | "pp" | "pa";
 
 export interface Codec<T> {
   enc(x: T): unknown;
@@ -65,6 +70,8 @@ export interface Codecs {
   activity: Codec<boolean>;
   step: Codec<StepValue | null>;
   stepRef: Codec<StepId | null>;
+  person: Codec<PersonValue | null>;
+  assignees: Codec<readonly PersonId[] | null>;
 }
 
 const ID = /^[A-Za-z0-9_-]+$/;
@@ -78,7 +85,7 @@ const HOLIDAY_KINDS: readonly HolidayKind[] = ["public", "optional", "half"];
 const DIVISIONS = ["england-and-wales", "scotland", "northern-ireland"] as const;
 const CAUSES: readonly Cause[] = ["own", "push", "recalendar", "undo", "revert", "resolution"];
 const BARE: readonly UnitKind[] = ["pn", "cr", "cw"];
-const BY_ID: readonly UnitKind[] = ["e", "n", "s", "p", "r", "cc", "b", "a", "ws", "wi"];
+const BY_ID: readonly UnitKind[] = ["e", "n", "s", "p", "r", "cc", "b", "a", "ws", "wi", "pp", "pa"];
 
 const fail = (unit: string, message: string): Error => new Error(`${unit}: ${message}`);
 
@@ -159,11 +166,17 @@ const id = (unit: string, field: string, v: unknown): string => {
   return s;
 };
 
+const nameProblem = (field: string, s: string): string | null => {
+  if (s.length === 0) return `${field} is empty`;
+  if (/[\n\r]/.test(s)) return `${field} holds a line break: ${show(s)}`;
+  if (s.trim() !== s) return `${field} has spaces at its start or end: ${show(s)}`;
+  return null;
+};
+
 const nameRule = (unit: string, field: string, v: unknown): string => {
   const s = str(unit, field, v);
-  if (s.length === 0) throw fail(unit, `${field} is empty`);
-  if (/[\n\r]/.test(s)) throw fail(unit, `${field} holds a line break: ${show(v)}`);
-  if (s.trim() !== s) throw fail(unit, `${field} has spaces at its start or end: ${show(v)}`);
+  const why = nameProblem(field, s);
+  if (why !== null) throw fail(unit, why);
   return s;
 };
 
@@ -387,7 +400,45 @@ const stepRefSpec: Spec<StepId> = {
   dec: (v, unit) => id(unit, "value", v),
 };
 
-type Value<K extends keyof Codecs> = Codecs[K] extends Codec<infer T> ? T : never;
+const personNameWhy = (n: string): string | null =>
+  nameProblem("n", n) ?? ([...n].length > MAX_PERSON_NAME ? `n is longer than ${MAX_PERSON_NAME} characters` : null);
+
+const personName = (unit: string, v: unknown): string => {
+  const n = str(unit, "n", v);
+  const why = personNameWhy(n);
+  if (why !== null) throw fail(unit, why);
+  return n;
+};
+
+const initials = (unit: string, v: unknown): string => {
+  const i = str(unit, "i", v);
+  const length = [...i].length;
+  if (length < 1 || length > MAX_INITIALS || /\s/u.test(i)) throw fail(unit, `i is not 1 to ${MAX_INITIALS} characters without spaces: ${show(v)}`);
+  return i;
+};
+
+const personSpec: Spec<PersonValue> = {
+  enc: (x) => ({ n: x.n, i: x.i, c: x.c, o: x.o }),
+  dec: (v, unit) => {
+    const r = recordWith(unit, "value", v, ["n", "i", "c", "o"], []);
+    return { n: personName(unit, r.n), i: initials(unit, r.i), c: oneOf(unit, "c", r.c, STEP_COLOURS), o: orderRule(unit, "o", r.o) };
+  },
+};
+
+const assigneesSpec: Spec<readonly PersonId[]> = {
+  enc: (x) => [...x],
+  dec: (v, unit) => {
+    if (!Array.isArray(v)) throw fail(unit, `value is not a list: ${show(v)}`);
+    if (v.length > MAX_ASSIGNEES) throw fail(unit, `value has ${v.length} people, more than ${MAX_ASSIGNEES}`);
+    const ids = v.map((x, n) => id(unit, `value[${n}]`, x));
+    const twice = ids.find((x, n) => ids.indexOf(x) !== n);
+    if (twice !== undefined) throw fail(unit, `value repeats ${show(twice)}`);
+    if (ids.some((x, n) => n > 0 && ids[n - 1] > x)) throw fail(unit, `value is not sorted: ${show(v)}`);
+    return ids;
+  },
+};
+
+export type Value<K extends keyof Codecs> =Codecs[K] extends Codec<infer T> ? T : never;
 
 const SPECS: { [K in keyof Codecs]: Spec<Value<K>> } = {
   name: nameSpec,
@@ -405,6 +456,8 @@ const SPECS: { [K in keyof Codecs]: Spec<Value<K>> } = {
   activity: activitySpec,
   step: orNull(stepSpec),
   stepRef: orNull(stepRefSpec),
+  person: orNull(personSpec),
+  assignees: orNull(assigneesSpec),
 };
 
 export function decodeAs<K extends keyof Codecs>(codec: K, unit: UnitKey, v: unknown): Value<K> {
@@ -428,6 +481,8 @@ const CODEC_OF: Readonly<Record<UnitKind, keyof Codecs>> = {
   a: "activity",
   ws: "step",
   wi: "stepRef",
+  pp: "person",
+  pa: "assignees",
 };
 
 export const name: Codec<string> = codec(SPECS.name, "name");
@@ -445,6 +500,12 @@ export const baseline: Codec<BaselineValue | null> = codec(SPECS.baseline, "b");
 export const activity: Codec<boolean> = codec(SPECS.activity, "a");
 export const step: Codec<StepValue | null> = codec(SPECS.step, "ws");
 export const stepRef: Codec<StepId | null> = codec(SPECS.stepRef, "wi");
+export const person: Codec<PersonValue | null> = codec(SPECS.person, "pp");
+export const assignees: Codec<readonly PersonId[] | null> = codec(SPECS.assignees, "pa");
+export const personNameProblem = (n: string): string | null => {
+  const why = personNameWhy(n);
+  return why === null ? null : `pp: ${why}`;
+};
 
 const NAMED: Readonly<Record<keyof Codecs, Codec<unknown>>> = {
   name,
@@ -462,6 +523,8 @@ const NAMED: Readonly<Record<keyof Codecs, Codec<unknown>>> = {
   activity,
   step,
   stepRef,
+  person,
+  assignees,
 };
 
 export function codecOf(kind: UnitKind): Codec<unknown> {
@@ -522,6 +585,8 @@ export const key: {
   a(id: ActionId): UnitKey;
   ws(id: StepId): UnitKey;
   wi(item: ItemId): UnitKey;
+  pp(id: PersonId): UnitKey;
+  pa(item: ItemId): UnitKey;
 } = {
   pn: "pn",
   cr: "cr",
@@ -539,6 +604,8 @@ export const key: {
   a: (i) => checked(`a:${i}`),
   ws: (i) => checked(`ws:${i}`),
   wi: (i) => checked(`wi:${i}`),
+  pp: (i) => checked(`pp:${i}`),
+  pa: (i) => checked(`pa:${i}`),
 };
 
 export function linkEnds(u: UnitKey): { from: ItemId; to: ItemId } {
@@ -589,6 +656,8 @@ export function stateWrites(plan: PlanState, cause: Cause, ownTrashed: (id: Item
     ...[...plan.baselines.values()].map((b) => w(key.b(b.id), baseline.enc({ name: b.name, at: b.at, dates: b.dates }))),
     ...[...plan.workflow.steps].map(([id, s]) => w(key.ws(id), step.enc(s))),
     ...[...plan.workflow.items].map(([item, s]) => w(key.wi(item), stepRef.enc(s))),
+    ...[...plan.people.persons].map(([id, p]) => w(key.pp(id), person.enc(p))),
+    ...[...plan.people.assignees].map(([item, a]) => w(key.pa(item), assignees.enc(a))),
   ];
   writes.forEach(validateWrite);
   return writes;

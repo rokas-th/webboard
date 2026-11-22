@@ -420,6 +420,31 @@ describe("choices", () => {
     expect([...held]).toEqual([]);
   });
 
+  it("concurrent renames of one person raise a choice on pp:<id> and resolve", () => {
+    const person = (n: string): unknown => ({ n, i: "MO", c: "cyan", o: "a0" });
+    const base = [act("s0", ["a0"], [w("pp:mira", person("Mira"))], mac), act("m1", ["s0"], [w("pp:mira", person("Mira Okafor"))], mac), act("p1", ["s0"], [w("pp:mira", person("Mira O."))], iph)];
+    const { cs, held } = run(...base);
+    const c = only(cs);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["pp:mira"]);
+    expect(c.items).toEqual([]);
+    expect(labels(c)).toEqual(["Mac", "iPhone"]);
+    expect([...held]).toEqual([]);
+    const resolved = run(...base, act("r1", ["m1", "p1"], [w("pp:mira", person("Mira O."), "resolution")], { dev: "d1", meta: { resolves: c.id } }));
+    expect(resolved.cs).toEqual([]);
+    expect(resolved.plan.people.persons.get("mira")).toEqual(person("Mira O."));
+  });
+
+  it("concurrent different assignments of one item raise an items choice naming the item, equal ones none", () => {
+    const { cs, held } = run(act("m1", ["a0"], [w("pa:A", ["mira"])], mac), act("p1", ["a0"], [w("pa:A", ["ole"])], iph));
+    const c = only(cs);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["pa:A"]);
+    expect(c.items).toEqual(["A"]);
+    expect([...held]).toEqual([]);
+    expect(run(act("m1", ["a0"], [w("pa:A", ["mira"])], mac), act("p1", ["a0"], [w("pa:A", ["mira"])], iph)).cs).toEqual([]);
+  });
+
   it("orders choices by their first participant", () => {
     const { cs } = run(
       act("m1", ["a0"], [w("n:A", "Alpha one")], mac),

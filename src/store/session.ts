@@ -7,11 +7,13 @@ import { buildResolve, previewResolve, type Pick, type ResolveOptions, type Reso
 import { buildRevert, buildUndo, OfferRefused, undoChanges, undoOffer, type Offer } from "../actions/undo";
 import { yearOf, toDay, type IsoDate } from "../domain/dates";
 import { derive } from "../domain/derive";
+import { projectPeople } from "../domain/people";
 import type { ItemId, PlanId } from "../domain/model";
 import { newId } from "../log/ids";
 import { LogState } from "../log/state";
 import type { ActionId, DeviceId, SessionId, UnitKey } from "../log/types";
 import { choices, heldItems, type Choice } from "../plan/choices";
+import { formerPeople } from "../plan/former";
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { key, validateWrite } from "../plan/units";
@@ -187,6 +189,7 @@ export class PlanSession implements HolidayHost {
     return {
       plan,
       derived: derive(plan, held, today),
+      people: projectPeople(plan, formerPeople(this.log, plan)),
       choices: cs,
       held,
       pending: this.log.pending.length,

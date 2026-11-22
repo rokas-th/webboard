@@ -2,6 +2,7 @@ import { q, workingDays } from "../../actions/copy";
 import { regionKey } from "../../domain/calendar";
 import { fmtShort } from "../../domain/dates";
 import type { ItemId, PlanState, StepId } from "../../domain/model";
+import { peopleOf } from "../../domain/people";
 import { stepsOf, type Step } from "../../domain/steps";
 import type { ActionId, UnitKey } from "../../log/types";
 import { choiceOf, heldItems, type Choice } from "../../plan/choices";
@@ -20,6 +21,8 @@ const nameOf = (plan: PlanState, id: ItemId): string => {
 const signed = (n: number): string => (n < 0 ? `−${-n}` : `+${n}`);
 
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+const andList = (parts: readonly string[]): string => (parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`);
 
 const STATUS_TAIL: Readonly<Record<"todo" | "doing" | "done", string>> = { todo: "", doing: " · in progress", done: " · done" };
 
@@ -113,6 +116,18 @@ export function describeUnit(u: UnitKey, v: unknown, plan: PlanState, labels: Re
       const s = liveStep(plan, ref);
       return s === undefined ? "in a removed step" : `in step ${q(s.name)}`;
     }
+    case "pp": {
+      const p = decodeAs("person", u, v);
+      return p === null ? "removed" : `person ${q(p.n)} · ${p.i} · ${p.c}`;
+    }
+    case "pa": {
+      const ids = decodeAs("assignees", u, v) ?? [];
+      if (ids.length === 0) return "unassigned";
+      const live = peopleOf(plan).filter((p) => ids.includes(p.id));
+      const former = ids.length - live.length;
+      const formerPart = former === 0 ? [] : [former === 1 ? "a former person" : `${former} former people`];
+      return `assigned to ${andList([...live.map((p) => q(p.name)), ...formerPart])}`;
+    }
   }
 }
 
@@ -127,6 +142,7 @@ export function unitSubject(u: UnitKey, plan: PlanState): string {
     case "p":
     case "r":
     case "wi":
+    case "pa":
       return q(nameOf(plan, k.arg));
     case "l": {
       if (k.to === undefined) throw new Error(`Link ${u} has no successor`);
@@ -150,12 +166,16 @@ export function unitSubject(u: UnitKey, plan: PlanState): string {
       const s = liveStep(plan, k.arg);
       return s === undefined ? "A removed step" : `The step ${q(s.name)}`;
     }
+    case "pp": {
+      const p = peopleOf(plan).find((x) => x.id === k.arg);
+      return p === undefined ? "A removed person" : `The person ${q(p.name)}`;
+    }
   }
 }
 
 export function itemChoices(view: PlanView, item: ItemId): Choice[] {
   const links = [...view.plan.links.values()].filter((l) => l.from === item || l.to === item).map((l) => key.l(l.from, l.to));
-  const units = [key.e(item), key.n(item), key.s(item), key.p(item), key.r(item), key.wi(item), ...links];
+  const units = [key.e(item), key.n(item), key.s(item), key.p(item), key.r(item), key.wi(item), key.pa(item), ...links];
   const found = new Set(units.map((u) => choiceOf(view.choices, u)).filter((c): c is Choice => c !== null));
   return view.choices.filter((c) => found.has(c));
 }

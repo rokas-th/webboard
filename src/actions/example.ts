@@ -1,7 +1,7 @@
 import { generateNKeysBetween } from "fractional-indexing";
 import { workCalendar, type Calendar, type Closure, type WorkCalendar } from "../domain/calendar";
 import { toDay, toIso, yearOf, type Day, type IsoDate } from "../domain/dates";
-import { EMPTY_WORKFLOW, linkKey, type Baseline, type Item, type ItemId, type Link, type LinkKey, type PlanId, type PlanState, type Status } from "../domain/model";
+import { EMPTY_PEOPLE, EMPTY_WORKFLOW, linkKey, type Baseline, type Item, type ItemId, type Link, type LinkKey, type PlanId, type PlanState, type Status } from "../domain/model";
 import { earliest, endOf, type Sched } from "../domain/schedule";
 import { newId } from "../log/ids";
 import type { Action, DeviceId, SessionId } from "../log/types";
@@ -195,7 +195,7 @@ export function buildExample(a: { id: PlanId; dev: DeviceId; ses: SessionId; now
       }),
     ),
   };
-  const plan: PlanState = { id: a.id, name: EXAMPLE_NAME, items, links, calendar, baselines: new Map([[baseline.id, baseline]]), workflow: EMPTY_WORKFLOW };
+  const plan: PlanState = { id: a.id, name: EXAMPLE_NAME, items, links, calendar, baselines: new Map([[baseline.id, baseline]]), workflow: EMPTY_WORKFLOW, people: EMPTY_PEOPLE };
   const action: Action = { id: newId(), dev: a.dev, ses: a.ses, at: a.now, par: [], lbl: EXAMPLE_LABEL, w: stateWrites(plan, "own", () => false) };
   const notes = new Map(ROWS.flatMap((r): [ItemId, string][] => (r.note === undefined ? [] : [[idOf(r.name), r.note]])));
   return { action, newNotes: [...items.keys()], notes };

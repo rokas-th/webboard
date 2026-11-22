@@ -136,6 +136,30 @@ describe("describeUnit", () => {
     expect(describeUnit("wi:a", "later", plan, NONE)).toBe("in a removed step");
     expect(describeUnit("wi:a", "gone", plan, NONE)).toBe("in a removed step");
   });
+
+  it("reads a person and an item's assignees", async () => {
+    const base = await groupsPlan();
+    const plan: PlanState = {
+      ...base,
+      people: {
+        persons: new Map([
+          ["mira", { n: "Mira Okafor", i: "MO", c: "cyan", o: "a1" }],
+          ["ole", { n: "Ole Berg", i: "OB", c: "lime", o: "a0" }],
+          ["gone", null],
+        ]),
+        assignees: new Map(),
+      },
+    };
+    expect(describeUnit("pp:mira", { n: "Mira Okafor", i: "MO", c: "cyan", o: "a1" }, plan, NONE)).toBe("person “Mira Okafor” · MO · cyan");
+    expect(describeUnit("pp:mira", null, plan, NONE)).toBe("removed");
+    expect(describeUnit("pa:a", null, plan, NONE)).toBe("unassigned");
+    expect(describeUnit("pa:a", [], plan, NONE)).toBe("unassigned");
+    expect(describeUnit("pa:a", ["mira"], plan, NONE)).toBe("assigned to “Mira Okafor”");
+    expect(describeUnit("pa:a", ["gone", "mira"], plan, NONE)).toBe("assigned to “Mira Okafor” and a former person");
+    expect(describeUnit("pa:a", ["mira", "ole"], plan, NONE)).toBe("assigned to “Ole Berg” and “Mira Okafor”");
+    expect(describeUnit("pa:a", ["gone", "mira", "nobody", "ole"], plan, NONE)).toBe("assigned to “Ole Berg”, “Mira Okafor” and 2 former people");
+    expect(describeUnit("pa:a", ["gone"], plan, NONE)).toBe("assigned to a former person");
+  });
 });
 
 describe("unitSubject", () => {
@@ -166,6 +190,19 @@ describe("unitSubject", () => {
     expect(unitSubject("ws:gone", plan)).toBe("A removed step");
     expect(unitSubject("wi:a", plan)).toBe("“Review”");
     expect(() => unitSubject("wi:zz", plan)).toThrow(new Error("No item zz"));
+  });
+
+  it("names a person and an item's assignees", async () => {
+    const base = (await made(SEED)).session.view().plan;
+    const plan: PlanState = {
+      ...base,
+      people: { persons: new Map([["mira", { n: "Mira Okafor", i: "MO", c: "cyan", o: "a1" }], ["gone", null]]), assignees: new Map([["a", ["mira"]]]) },
+    };
+    expect(unitSubject("pp:mira", plan)).toBe("The person “Mira Okafor”");
+    expect(unitSubject("pp:gone", plan)).toBe("A removed person");
+    expect(unitSubject("pp:nobody", plan)).toBe("A removed person");
+    expect(unitSubject("pa:a", plan)).toBe("“Review”");
+    expect(() => unitSubject("pa:zz", plan)).toThrow(new Error("No item zz"));
   });
 });
 
@@ -214,6 +251,27 @@ describe("reachability helpers", () => {
     expect(item.items).toEqual(["A"]);
     expect(step.kind).toBe("items");
     expect(step.items).toEqual([]);
+    expect(itemChoices(view, "A")).toEqual([item]);
+    expect(itemChoices(view, "B")).toEqual([]);
+    expect([...view.held]).toEqual([]);
+  });
+
+  it("lists a clash on an item's assignees under that item, and a person clash under no item", async () => {
+    const t = await made(AB, {
+      clashes: [
+        { unit: "pa:A", mac: ["mira"], iphone: ["ole"] },
+        { unit: "pp:mira", mac: { n: "Mira Okafor", i: "MO", c: "cyan", o: "a0" }, iphone: { n: "Mira Oka", i: "MO", c: "cyan", o: "a0" } },
+      ],
+    });
+    const view = t.session.view();
+    expect(view.choices).toHaveLength(2);
+    const person = view.choices.find((c) => c.units.includes("pp:mira"));
+    const item = view.choices.find((c) => c.units.includes("pa:A"));
+    if (person === undefined || item === undefined) throw new Error("fixture: expected a person and an assignees choice");
+    expect(item.kind).toBe("items");
+    expect(item.items).toEqual(["A"]);
+    expect(person.kind).toBe("items");
+    expect(person.items).toEqual([]);
     expect(itemChoices(view, "A")).toEqual([item]);
     expect(itemChoices(view, "B")).toEqual([]);
     expect([...view.held]).toEqual([]);

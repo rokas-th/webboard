@@ -19,6 +19,8 @@ export const q = (name: string): string => `“${name}”`;
 
 export const items = (n: number): string => count(n, "item", "items");
 
+export const formerText = (name: string | null): string => (name === null ? "Former person" : `Former: ${name}`);
+
 export const workingDays = (n: number): string => count(n, "working day", "working days");
 
 export const deviceName = (devices: ReadonlyMap<DeviceId, string>, id: DeviceId): string =>
@@ -97,6 +99,16 @@ export const label = {
   stepDeleted: (name: string, moved: number, to: string | null): string =>
     to === null || moved === 0 ? `Deleted step ${q(name)}` : `Deleted step ${q(name)} and moved ${items(moved)} to ${q(to)}`,
   toStep: (what: string, step: string): string => `Moved ${what} to ${q(step)}`,
+  personAdded: (name: string): string => `Added ${q(name)} to people`,
+  personRenamed: (from: string, to: string): string => `Renamed person ${q(from)} to ${q(to)}`,
+  personInitials: (name: string, initials: string): string => `Set the initials of ${q(name)} to ${initials}`,
+  personColoured: (name: string, colour: StepColour): string => `Coloured ${q(name)} ${colour}`,
+  personReordered: (name: string): string => `Moved ${q(name)} in people`,
+  personRemoved: (name: string, n: number, to: string | null): string =>
+    n === 0 ? `Removed ${q(name)} from people` : to === null ? `Removed ${q(name)} from people and from ${items(n)}` : `Removed ${q(name)} and gave ${items(n)} to ${q(to)}`,
+  assigned: (name: string, what: string): string => `Assigned ${q(name)} to ${what}`,
+  unassigned: (name: string, what: string): string => `Unassigned ${q(name)} from ${what}`,
+  assigneesSet: (name: string): string => `Changed the assignees of ${q(name)}`,
 };
 
 export const sentence = {
@@ -146,4 +158,9 @@ export const refusal = {
   noOpenStep: "This plan has no step for new items. Add a step first.",
   stepLimit: "A limit is a whole number from 1 to 99.",
   horizonInSteps: "This plan uses steps. Move the item to a step instead.",
+  personNameLong: "A name has at most 64 characters.",
+  personNameTaken: (name: string): string => `There is already a person named ${q(name)}.`,
+  initials: "Initials are 1 to 3 characters without spaces.",
+  assigneesFull: (name: string): string => `${q(name)} already has 8 assignees.`,
+  assigneesMax: "An item has at most 8 assignees.",
 };

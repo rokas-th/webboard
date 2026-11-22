@@ -5,7 +5,7 @@ import { planRules } from "./rules";
 import { derive } from "../domain/derive";
 import { LogState } from "../log/state";
 import type { Action, Cause, Write } from "../log/types";
-import { EMPTY_WORKFLOW, type Item, type PlanState } from "../domain/model";
+import { EMPTY_PEOPLE, EMPTY_WORKFLOW, type Item, type PlanState } from "../domain/model";
 import type { HolidayYear } from "../domain/calendar";
 import { act } from "../test/act";
 
@@ -119,6 +119,7 @@ describe("projectPlan", () => {
       },
       baselines: new Map([["B1", { id: "B1", name: "Before", at: "2026-11-08", dates: { T: { start: "2026-11-16", dur: 3 } } }]]),
       workflow: EMPTY_WORKFLOW,
+      people: EMPTY_PEOPLE,
     };
     expect(projectPlan("P", log)).toEqual(expected);
   });
@@ -189,6 +190,58 @@ describe("projectPlan", () => {
     const plan = projectPlan("P", log);
     expect(plan.items.has("X")).toBe(false);
     expect(plan.workflow.items).toEqual(new Map());
+  });
+
+  it("reads pp and pa into people, keys sorted, nulls kept", () => {
+    const mira = { n: "Mira Okafor", i: "MO", c: "cyan", o: "a1" };
+    const log = logOf(
+      act("a0", [], [
+        ...plan0,
+        ...item("T", "task", "Spec", null, "a0", sched("2026-11-16")),
+        ...item("M", "milestone", "Ship", null, "a1", sched("2026-11-30", 0)),
+        ...item("U", "task", "Draft", null, "a2", sched(null)),
+        w("pp:ole", null),
+        w("pp:mira", mira),
+        w("pa:T", ["mira", "ole"]),
+        w("pa:M", null),
+        w("pa:U", []),
+      ]),
+    );
+    const plan = projectPlan("P", log);
+    expect(plan.people).toEqual({
+      persons: new Map([
+        ["mira", mira],
+        ["ole", null],
+      ]),
+      assignees: new Map([
+        ["M", null],
+        ["T", ["mira", "ole"]],
+        ["U", []],
+      ]),
+    });
+    expect([...plan.people.persons.keys()]).toEqual(["mira", "ole"]);
+    expect([...plan.people.assignees.keys()]).toEqual(["M", "T", "U"]);
+    expect(projectPlan("P", logOf(act("a0", [], [...plan0, ...item("T", "task", "Spec", null, "a0", sched(null))]))).people).toEqual(EMPTY_PEOPLE);
+    const assigned = applyWrites(plan, [w("pa:U", ["mira"]), w("pp:ole", { n: "Ole Berg", i: "OB", c: "lime", o: "a2" })]);
+    expect(assigned.people.assignees.get("U")).toEqual(["mira"]);
+    expect(assigned.people.persons.get("ole")).toEqual({ n: "Ole Berg", i: "OB", c: "lime", o: "a2" });
+    expect(applySchedules(plan, [w("s:T", sched("2026-11-18"))]).people).toEqual(plan.people);
+  });
+
+  it("a pa on a group throws", () => {
+    const log = logOf(act("a0", [], [...plan0, ...item("G", "group", "Phase", null, "a0"), w("pa:G", ["mira"])]));
+    expect(() => projectPlan("P", log)).toThrow("Group G has assignees");
+  });
+
+  it("a pa of an item no longer in the plan is not read", () => {
+    const c = act("c", ["a0"], item("X", "task", "Draft", null, "a5", sched("2026-11-16")));
+    const m = act("m", ["c"], [w("pa:X", ["mira"])], { dev: "d2" });
+    const u = act("u", ["m"], [w("a:c", false, "undo")], { meta: { undo: "c" } });
+    const log = logOf(act("a0", [], plan0), c, m, u);
+    expect(log.unit("pa:X")?.value).toEqual(["mira"]);
+    const plan = projectPlan("P", log);
+    expect(plan.items.has("X")).toBe(false);
+    expect(plan.people.assignees).toEqual(new Map());
   });
 
   it("sorts siblings by order, then id", () => {

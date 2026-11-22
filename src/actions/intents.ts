@@ -1,6 +1,6 @@
 import type { Calendar, HolidayYear } from "../domain/calendar";
 import type { IsoDate } from "../domain/dates";
-import type { BaselineId, ItemId, ItemKind, LinkKey, LinkType, Schedule, StepColour, StepId } from "../domain/model";
+import type { BaselineId, ItemId, ItemKind, LinkKey, LinkType, PersonId, Schedule, StepColour, StepId } from "../domain/model";
 import type { Conflict, Stop } from "../domain/schedule";
 import type { LogState } from "../log/state";
 import type { Action, DeviceId, SessionId } from "../log/types";
@@ -26,7 +26,21 @@ export type Intent =
   | { t: "planName"; name: string }
   | { t: "duplicate"; item: ItemId }
   | StepIntent
-  | ToStepIntent;
+  | ToStepIntent
+  | PersonIntent
+  | AssignIntent;
+
+export type PersonIntent =
+  | { t: "person"; op: "add"; name: string; initials: string; colour: StepColour; after: PersonId | null }
+  | { t: "person"; op: "rename"; person: PersonId; name: string }
+  | { t: "person"; op: "initials"; person: PersonId; initials: string }
+  | { t: "person"; op: "colour"; person: PersonId; colour: StepColour }
+  | { t: "person"; op: "reorder"; person: PersonId; after: PersonId | null }
+  | { t: "person"; op: "remove"; person: PersonId; to: PersonId | null };
+
+export type AssignIntent =
+  | { t: "assign" | "unassign"; items: readonly ItemId[]; person: PersonId }
+  | { t: "assignees"; item: ItemId; people: readonly PersonId[] };
 
 export type StepIntent =
   | { t: "step"; op: "add"; name: string; colour: StepColour; after: StepId | null }

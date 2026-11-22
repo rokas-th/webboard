@@ -207,6 +207,7 @@ describe("layout fixtures", () => {
       "choices",
       "choices-ios-pad",
       "converted",
+      "converted-people",
       "empty",
       "example",
       "long-names",

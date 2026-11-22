@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as dates from "../domain/dates";
-import { calendarSuffix, deviceName, fmtShort, items, pushSuffix, stopText, toastOf, workingDays } from "./copy";
+import { calendarSuffix, deviceName, fmtShort, formerText, items, pushSuffix, stopText, toastOf, workingDays } from "./copy";
 
 describe("copy", () => {
   it("re-exports fmtShort from domain/dates", () => {
@@ -48,5 +48,10 @@ describe("copy", () => {
   it("makes a toast from the label and its sentences", () => {
     expect(toastOf("Moved “Sprint 4” to the Trash", [])).toBe("Moved “Sprint 4” to the Trash.");
     expect(toastOf("Moved “Sprint 4” to the Trash", ["Undo brings it back."])).toBe("Moved “Sprint 4” to the Trash. Undo brings it back.");
+  });
+
+  it("names a former person by name, or without one", () => {
+    expect(formerText("Mira Okafor")).toBe("Former: Mira Okafor");
+    expect(formerText(null)).toBe("Former person");
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Codec, UnitKind } from "./units";
 import {
   activity,
+  assignees,
   baseline,
   closure,
   codecOf,
@@ -13,6 +14,8 @@ import {
   linkEnds,
   name,
   parseKey,
+  person,
+  personNameProblem,
   place,
   refs,
   region,
@@ -24,7 +27,7 @@ import {
   validateWrite,
   weekdays,
 } from "./units";
-import type { PlanState } from "../domain/model";
+import type { PersonValue, PlanState } from "../domain/model";
 import { LogState } from "../log/state";
 import type { Write } from "../log/types";
 import { act } from "../test/act";
@@ -337,6 +340,116 @@ describe("steps", () => {
       { u: "ws:review", v: { n: "Review", c: "violet", o: "a1" }, c: "own" },
       { u: "ws:later", v: null, c: "own" },
       { u: "wi:T1", v: "review", c: "own" },
+    ]);
+  });
+});
+
+describe("people", () => {
+  const mira: PersonValue = { n: "Mira Okafor", i: "MO", c: "cyan", o: "a0" };
+
+  it("pp round-trips every field and null", () => {
+    expect(person.enc(mira)).toEqual(mira);
+    expect(person.dec(mira)).toEqual(mira);
+    expect(person.dec({ n: "Ole", i: "ø", c: "slate", o: "Zz9" })).toEqual({ n: "Ole", i: "ø", c: "slate", o: "Zz9" });
+    expect(person.dec({ ...mira, i: "Mo" })).toEqual({ ...mira, i: "Mo" });
+    expect(person.dec({ ...mira, n: "x".repeat(64) })).toEqual({ ...mira, n: "x".repeat(64) });
+    expect(person.dec({ ...mira, n: "🔭".repeat(64), i: "🔭🔭🔭" })).toEqual({ ...mira, n: "🔭".repeat(64), i: "🔭🔭🔭" });
+    expect(person.dec(null)).toBeNull();
+    expect(person.enc(null)).toBeNull();
+    expect(codecOf("pp")).toBe(person);
+    expect(codecOf("pa")).toBe(assignees);
+    expect(() => validateWrite({ u: "pp:mira", v: mira, c: "own" })).not.toThrow();
+    expect(() => validateWrite({ u: "pp:mira", v: null, c: "own" })).not.toThrow();
+    expect(() => validateWrite({ u: "pp:mira", v: mira, c: "push" })).toThrow(new Error("pp:mira: push cannot write this unit"));
+  });
+
+  it("pp rejects", () => {
+    expect(() => person.dec({ ...mira, x: 1 })).toThrow("pp: value has unknown fields x");
+    expect(() => person.dec({ n: "Mira", i: "M", c: "cyan" })).toThrow("pp: value lacks o");
+    expect(() => person.dec({ ...mira, c: "#00ffff" })).toThrow('pp: c is not one of cyan, violet, magenta, lime, amber, coral, sky, slate: "#00ffff"');
+    expect(() => person.dec({ ...mira, n: "" })).toThrow("pp: n is empty");
+    expect(() => person.dec({ ...mira, n: " Mira" })).toThrow('pp: n has spaces at its start or end: " Mira"');
+    expect(() => person.dec({ ...mira, n: "x".repeat(65) })).toThrow("pp: n is longer than 64 characters");
+    expect(() => person.dec({ ...mira, i: "" })).toThrow('pp: i is not 1 to 3 characters without spaces: ""');
+    expect(() => person.dec({ ...mira, i: "ABCD" })).toThrow('pp: i is not 1 to 3 characters without spaces: "ABCD"');
+    expect(() => person.dec({ ...mira, i: "A B" })).toThrow('pp: i is not 1 to 3 characters without spaces: "A B"');
+    expect(() => person.dec({ ...mira, i: 3 })).toThrow("pp: i is not a string: 3");
+    expect(() => person.dec({ ...mira, o: "a.0" })).toThrow('pp: o is not made of 0-9, A-Z and a-z: "a.0"');
+    expect(() => validateWrite({ u: "pp:mira", v: { ...mira, x: 1 }, c: "own" })).toThrow("pp:mira: value has unknown fields x");
+  });
+
+  it("personNameProblem returns the codec's reason instead of throwing", () => {
+    expect(personNameProblem("Mira Okafor")).toBeNull();
+    expect(personNameProblem("x".repeat(64))).toBeNull();
+    expect(personNameProblem("")).toBe("pp: n is empty");
+    expect(personNameProblem("Lab ")).toBe('pp: n has spaces at its start or end: "Lab "');
+    expect(personNameProblem("Lab\nQA")).toBe('pp: n holds a line break: "Lab\\nQA"');
+    expect(personNameProblem("x".repeat(65))).toBe("pp: n is longer than 64 characters");
+  });
+
+  it("pa takes null, an empty list and a sorted list of ids", () => {
+    expect(assignees.dec(null)).toBeNull();
+    expect(assignees.dec([])).toEqual([]);
+    expect(assignees.dec(["Ole", "ana", "mira"])).toEqual(["Ole", "ana", "mira"]);
+    expect(assignees.enc(["a", "b"])).toEqual(["a", "b"]);
+    expect(assignees.enc(null)).toBeNull();
+    const eight = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    expect(assignees.dec(eight)).toEqual(eight);
+    expect(() => validateWrite({ u: "pa:T1", v: ["mira"], c: "own" })).not.toThrow();
+    expect(() => validateWrite({ u: "pa:T1", v: null, c: "own" })).not.toThrow();
+  });
+
+  it("pa rejects", () => {
+    expect(() => assignees.dec("a")).toThrow('pa: value is not a list: "a"');
+    expect(() => assignees.dec(["b", "a"])).toThrow('pa: value is not sorted: ["b","a"]');
+    expect(() => assignees.dec(["a", "a"])).toThrow('pa: value repeats "a"');
+    expect(() => assignees.dec(["a", "b", "c", "d", "e", "f", "g", "h", "i"])).toThrow("pa: value has 9 people, more than 8");
+    expect(() => assignees.dec(["a b"])).toThrow('pa: value[0] is not an id: "a b"');
+    expect(() => assignees.dec(["a", "b", "a b"])).toThrow('pa: value[2] is not an id: "a b"');
+    expect(() => assignees.enc(["b", "a"])).toThrow('pa: value is not sorted: ["b","a"]');
+    expect(() => validateWrite({ u: "pa:T1", v: ["b", "a"], c: "own" })).toThrow('pa:T1: value is not sorted: ["b","a"]');
+  });
+
+  it("parseKey reads pp:<id> and pa:<id> and refuses pp:", () => {
+    expect(key.pp("mira")).toBe("pp:mira");
+    expect(key.pa("T1")).toBe("pa:T1");
+    expect(parseKey("pp:mira")).toEqual({ kind: "pp", arg: "mira" });
+    expect(parseKey("pa:T1")).toEqual({ kind: "pa", arg: "T1" });
+    expect(() => parseKey("pp:")).toThrow("Malformed unit key “pp:”");
+    expect(() => parseKey("pa:a b")).toThrow("Malformed unit key “pa:a b”");
+    expect(() => parseKey("pp")).toThrow("Unknown unit key “pp”");
+    expect(() => key.pp("a.b")).toThrow("pp:a.b");
+  });
+
+  it("stateWrites writes no pp or pa for a plan without them, and one per entry with nulls for a plan with them", () => {
+    const log = new LogState(planRules);
+    log.add([
+      act("a0", [], [
+        { u: "pn", v: "Plan", c: "own" },
+        { u: "cr", v: null, c: "own" },
+        { u: "cw", v: [1, 2, 3, 4, 5], c: "own" },
+        { u: "e:T1", v: { k: "task", t: false }, c: "own" },
+        { u: "n:T1", v: "Survey", c: "own" },
+        { u: "s:T1", v: ["2026-11-09", 3, "todo", 0, "now"], c: "own" },
+        { u: "p:T1", v: [null, "a0"], c: "own" },
+      ]),
+    ]);
+    const plan = projectPlan("P", log);
+    const kinds = stateWrites(plan, "own", () => false).map((w) => parseKey(w.u).kind);
+    expect(kinds).not.toContain("pp");
+    expect(kinds).not.toContain("pa");
+    const withPeople: PlanState = {
+      ...plan,
+      people: {
+        persons: new Map([["mira", { n: "Mira Okafor", i: "MO", c: "cyan", o: "a0" }], ["ole", null]]),
+        assignees: new Map([["T1", ["mira", "ole"]], ["T2", null]]),
+      },
+    };
+    expect(stateWrites(withPeople, "own", () => false).filter((w) => ["pp", "pa"].includes(parseKey(w.u).kind))).toEqual([
+      { u: "pp:mira", v: { n: "Mira Okafor", i: "MO", c: "cyan", o: "a0" }, c: "own" },
+      { u: "pp:ole", v: null, c: "own" },
+      { u: "pa:T1", v: ["mira", "ole"], c: "own" },
+      { u: "pa:T2", v: null, c: "own" },
     ]);
   });
 });

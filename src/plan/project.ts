@@ -9,6 +9,9 @@ import {
   type ItemKind,
   type Link,
   type LinkKey,
+  type People,
+  type PersonId,
+  type PersonValue,
   type PlanId,
   type PlanState,
   type Schedule,
@@ -205,6 +208,18 @@ const build = (id: PlanId, t: Table): PlanState => {
         }),
     ),
   };
+  const people: People = {
+    persons: new Map(of("pp").sort(byArg).map((p): [PersonId, PersonValue | null] => [p.arg, decodeAs("person", p.u, p.v)])),
+    assignees: new Map(
+      of("pa")
+        .filter((p) => items.has(p.arg))
+        .sort(byArg)
+        .map((p): [ItemId, readonly PersonId[] | null] => {
+          if (items.get(p.arg)?.kind === "group") throw new Error(`Group ${p.arg} has assignees`);
+          return [p.arg, decodeAs("assignees", p.u, p.v)];
+        }),
+    ),
+  };
   const plan: PlanState = {
     id,
     name: decodeAs("name", "pn", t.live.get("pn")),
@@ -213,6 +228,7 @@ const build = (id: PlanId, t: Table): PlanState => {
     calendar,
     baselines: new Map(baselines),
     workflow,
+    people,
   };
   tables.set(plan, t);
   return plan;

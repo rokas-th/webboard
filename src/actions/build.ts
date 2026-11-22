@@ -18,6 +18,7 @@ import { hasPredecessor, itemOf, live, notInsideTrash } from "./lookup";
 import { normalizeName } from "./names";
 import { isCalendarWrite, settleText, unique } from "./settle";
 import { slotAfter } from "./slot";
+import { duplicatePeopleWrites, personDraft } from "./people";
 import { createStepWrites, duplicateStepWrites, stepDraft, switched } from "./steps";
 
 export { normalizeName };
@@ -283,7 +284,7 @@ const duplicateDraft = (ctx: Ctx, id: ItemId): Draft => {
     .map((l) => own(key.l(ids.has(l.from) ? copyOf(l.from) : l.from, copyOf(l.to)), codec.link.enc({ type: l.type, lag: l.lag })));
   const copies = originals.map((o): NoteCopy => [o.id, copyOf(o.id)]);
   return {
-    own: [...itemWrites, ...ordered.rekeyed, ...links, ...duplicateStepWrites(plan, copies)],
+    own: [...itemWrites, ...ordered.rekeyed, ...links, ...duplicateStepWrites(plan, copies), ...duplicatePeopleWrites(plan, copies)],
     roots: [],
     newNotes: originals.map((o) => copyOf(o.id)),
     noteCopies: copies,
@@ -517,6 +518,13 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
     case "step":
     case "toStep": {
       const d = stepDraft(ctx, intent);
+      return { own: d.own, ...none, ...plain(d.label, d.sentences) };
+    }
+    case "person":
+    case "assign":
+    case "unassign":
+    case "assignees": {
+      const d = personDraft(ctx, intent);
       return { own: d.own, ...none, ...plain(d.label, d.sentences) };
     }
     case "baseline": {

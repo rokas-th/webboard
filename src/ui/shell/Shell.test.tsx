@@ -1479,7 +1479,7 @@ describe("Shell on Registry.open", () => {
   it("shows the .gantt conversion report before it opens the imported plan", async () => {
     resetTauri({ ...memoryStore().answers, settings_read: offeredSettings, settings_write: () => null, device_info: () => ({ deviceId: "mac", platform: "macos" }) });
     const registry = await opened();
-    const report = { fileName: "Fixture Plan 20260901.gantt", name: "MESA 2027", counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1 }, dropped: ["TaskID on 4 items"] };
+    const report = { fileName: "Fixture Plan 20260901.gantt", name: "MESA 2027", counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1, people: 0, assignments: 0 }, dropped: ["TaskID on 4 items"] };
     vi.mocked(importPlan).mockImplementationOnce(async (r, review) => {
       await review(report);
       return { planId: await r.createPlan("MESA 2027"), converted: report };

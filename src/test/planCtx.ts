@@ -1,9 +1,11 @@
 import type { Ctx } from "../actions/intents";
 import type { IsoDate } from "../domain/dates";
 import { derive } from "../domain/derive";
+import { projectPeople } from "../domain/people";
 import type { LogState } from "../log/state";
 import type { DeviceId, SessionId } from "../log/types";
 import { choices, heldItems } from "../plan/choices";
+import { formerPeople } from "../plan/former";
 import { projectPlan } from "../plan/project";
 
 export const FIXTURE_DEVICES: ReadonlyMap<DeviceId, string> = new Map([
@@ -25,7 +27,7 @@ export function ctxOf(
   const cs = choices(log, plan, devices);
   const held = heldItems(cs, plan);
   return {
-    view: { plan, derived: derive(plan, held, today), choices: cs, held, pending: log.pending.length, today, unreadable: [], newer: false },
+    view: { plan, derived: derive(plan, held, today), people: projectPeople(plan, formerPeople(log, plan)), choices: cs, held, pending: log.pending.length, today, unreadable: [], newer: false },
     log,
     dev,
     ses: o.ses ?? "s-" + dev,

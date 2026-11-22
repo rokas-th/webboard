@@ -69,6 +69,26 @@ export const STEP_COLOURS: readonly StepColour[] = ["cyan", "violet", "magenta",
 export const MAX_STEP_NAME = 32;
 export const MAX_STEP_LIMIT = 99;
 
+export type PersonId = string;
+
+export interface PersonValue {
+  n: string;
+  i: string;
+  c: StepColour;
+  o: string;
+}
+
+export interface People {
+  persons: ReadonlyMap<PersonId, PersonValue | null>;
+  assignees: ReadonlyMap<ItemId, readonly PersonId[] | null>;
+}
+
+export const EMPTY_PEOPLE: People = { persons: new Map(), assignees: new Map() };
+
+export const MAX_PERSON_NAME = 64;
+export const MAX_INITIALS = 3;
+export const MAX_ASSIGNEES = 8;
+
 export interface PlanState {
   id: PlanId;
   name: string;
@@ -77,6 +97,7 @@ export interface PlanState {
   calendar: Calendar;
   baselines: ReadonlyMap<BaselineId, Baseline>;
   workflow: Workflow;
+  people: People;
 }
 
 export const scheduleOf = (it: Item): Schedule => {

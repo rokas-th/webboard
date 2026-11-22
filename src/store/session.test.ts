@@ -21,7 +21,7 @@ import { CH_ZH, CH_ZH_2026, CH_ZH_2027, FETCHED_AT, holidayDay } from "../test/f
 import { encodeLoad, memoryStore, type MemoryStore } from "../test/fixtures/store";
 import { ctxOf, PLAN_ID } from "../test/planCtx";
 import { commandsSince, commandsWith, hold, resetTauri, tauri, type Answer } from "../test/tauriMock";
-import { testSession, type TestSession } from "../test/session";
+import { MESA_SEED, SEED_ROOT, testSession, type TestSession } from "../test/session";
 import { encodeAction, LOCAL, PlanDoc, decodeAction } from "./doc";
 import { openPersisted, type PersistedDoc } from "./persist";
 import { NEWER_PLAN, PlanSession, usePlanView, type SessionDeps } from "./session";
@@ -1477,5 +1477,33 @@ describe("PlanSession: duplicate (product-7)", () => {
     expect([...ydoc.getMap("actions").keys()].sort()).toEqual(actions);
     expect([...ydoc.getMap("notes").keys()].sort()).toEqual(notes);
     expect(s.canUndo()).toBe(undo);
+  });
+});
+
+describe("people in the view", () => {
+  it("projects live and former people from the log, and an empty projection for a plan without them", async () => {
+    const plain = await testSession(MESA_SEED);
+    expect(plain.session.view().people).toEqual({ people: [], assignees: new Map(), problems: [] });
+    await plain.session.close();
+    const mira = { n: "Mira Okafor", i: "MO", c: "cyan", o: "a0" };
+    const ole = { n: "Ole Berg", i: "OB", c: "lime", o: "a1" };
+    const added = act("pp00000001", [SEED_ROOT], [{ u: "pp:mira", v: mira, c: "own" }, { u: "pp:ole", v: ole, c: "own" }]);
+    const assigned = act("pa00000001", [added.id], [{ u: "pa:t3", v: ["mira", "ole"], c: "own" }]);
+    const removed = act("pp00000002", [assigned.id], [{ u: "pp:ole", v: null, c: "own" }]);
+    const t = await testSession(MESA_SEED, { raw: Object.fromEntries([added, assigned, removed].map((a) => [a.id, encodeAction(a)])) });
+    const view = t.session.view();
+    expect(view.people.people).toEqual([{ id: "mira", name: "Mira Okafor", initials: "MO", colour: "cyan", order: "a0" }]);
+    expect(view.people.assignees).toEqual(
+      new Map([
+        [
+          "t3",
+          [
+            { kind: "live", person: { id: "mira", name: "Mira Okafor", initials: "MO", colour: "cyan", order: "a0" } },
+            { kind: "former", id: "ole", name: "Ole Berg", initials: "OB", colour: "lime" },
+          ],
+        ],
+      ]),
+    );
+    await t.session.close();
   });
 });

@@ -40,7 +40,7 @@ type Start = { kind: "none" } | { kind: "start"; start: string | null };
 
 const NO_START: Start = { kind: "none" };
 
-const ITEM_UNITS: readonly UnitKind[] = ["e", "n", "s", "p", "r", "wi"];
+const ITEM_UNITS: readonly UnitKind[] = ["e", "n", "s", "p", "r", "wi", "pa"];
 const CALENDAR_UNITS: readonly UnitKind[] = ["cr", "cw", "cc", "ct", "ch"];
 const FNV_OFFSET = 0xcbf29ce484222325n;
 const FNV_PRIME = 0x100000001b3n;

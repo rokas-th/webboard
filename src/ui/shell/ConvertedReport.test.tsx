@@ -6,7 +6,7 @@ import { CONVERTED_TITLE, ConvertedReport, closeConverted, OPEN_PLAN, showConver
 const REPORT: GanttReport = {
   fileName: "Fixture Plan 20260901.gantt",
   name: "Fixture Plan",
-  counts: { groups: 1, tasks: 2, milestones: 1, links: 1, notes: 0 },
+  counts: { groups: 1, tasks: 2, milestones: 1, links: 1, notes: 0, people: 0, assignments: 0 },
   dropped: ["TaskID on 4 items", "color on 4 items", "advanced.workTime"],
 };
 
@@ -55,6 +55,22 @@ describe("ConvertedReport", () => {
     expect(state.done()).toBe(true);
     expect(queryByRole("dialog")).toBeNull();
     expect(shownConverted()).toBeNull();
+  });
+
+  it("appends people and assignments when the plan has people", () => {
+    const { getByRole } = render(<ConvertedReport />);
+    act(() => {
+      void showConverted({ ...REPORT, counts: { ...REPORT.counts, people: 2, assignments: 3 } });
+    });
+    expect(textOf(getByRole("dialog"))).toContain("1 group, 2 tasks, 1 milestone, 1 link, 0 notes, 2 people, 3 assignments");
+  });
+
+  it("names one person and one assignment in the singular", () => {
+    const { getByRole } = render(<ConvertedReport frame="sheet" />);
+    act(() => {
+      void showConverted({ ...REPORT, counts: { ...REPORT.counts, people: 1, assignments: 1 } });
+    });
+    expect(textOf(getByRole("dialog"))).toContain("1 group, 2 tasks, 1 milestone, 1 link, 0 notes, 1 person, 1 assignment");
   });
 
   it("settles on Escape the same way", async () => {

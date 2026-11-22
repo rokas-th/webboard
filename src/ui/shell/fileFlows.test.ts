@@ -206,7 +206,7 @@ describe("importFlow", () => {
     const t = await named([{ name: "A", start: "2026-11-10" }]);
     const id = t.session.view().plan.id;
     const open = vi.fn<(id: PlanId) => void>();
-    const report = { fileName: "Fixture Plan 20260901.gantt", name: "MESA 2027", counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1 }, dropped: ["TaskID on 4 items"] };
+    const report = { fileName: "Fixture Plan 20260901.gantt", name: "MESA 2027", counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1, people: 0, assignments: 0 }, dropped: ["TaskID on 4 items"] };
     vi.mocked(importPlan).mockImplementationOnce(async (_r, review) => {
       await review(report);
       return { planId: id, converted: report };

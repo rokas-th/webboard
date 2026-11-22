@@ -3,7 +3,26 @@ import * as Y from "yjs";
 import type { Calendar } from "../domain/calendar";
 import { FIRST_PLAN_DATE, inPlanWindow, LAST_PLAN_DATE, toDay, toIso, type IsoDate, type Weekday } from "../domain/dates";
 import { derive } from "../domain/derive";
-import { EMPTY_WORKFLOW, linkKey, MAX_LAG, MAX_TASK_DUR, type Baseline, type Item, type ItemId, type Link, type LinkKey, type LinkType, type PlanState, type Status } from "../domain/model";
+import {
+  EMPTY_WORKFLOW,
+  linkKey,
+  MAX_ASSIGNEES,
+  MAX_LAG,
+  MAX_TASK_DUR,
+  STEP_COLOURS,
+  type Baseline,
+  type Item,
+  type ItemId,
+  type Link,
+  type LinkKey,
+  type LinkType,
+  type People,
+  type PersonId,
+  type PersonValue,
+  type PlanState,
+  type Status,
+} from "../domain/model";
+import { initialsOf, personNameKey } from "../domain/people";
 import type { Conflict } from "../domain/schedule";
 import { newId } from "../log/ids";
 import { LogState } from "../log/state";
@@ -11,7 +30,7 @@ import type { Action, DeviceId, SessionId } from "../log/types";
 import { choices, heldItems } from "../plan/choices";
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
-import { linkEnds, name as nameCodec, stateWrites } from "../plan/units";
+import { linkEnds, name as nameCodec, personNameProblem, stateWrites } from "../plan/units";
 import { PlanDoc } from "../store/doc";
 import { buildImport, encodeWbx, type ImportResult } from "../store/file";
 import { newPlanId } from "../store/plan-id";
@@ -24,11 +43,13 @@ export interface GanttCounts {
   milestones: number;
   links: number;
   notes: number;
+  people: number;
+  assignments: number;
 }
 
 export interface Resource {
   name: string;
-  id: boolean;
+  id: string | null;
   unit: boolean;
 }
 
@@ -316,13 +337,39 @@ const parseResources = (where: string, v: unknown): Resource[] =>
     onlyKeys(r, RESOURCE_KEYS, (k) => fail(where, `unknown field ${field}.${k}`));
     const name = textOf(where, `${field}.resourceName`, r.resourceName);
     if (name.trim() === "") throw fail(where, `${field}.resourceName is blank`);
-    return { name, id: "resourceId" in r, unit: "unit" in r };
+    return { name, id: resourceIdOf(where, field, r), unit: "unit" in r };
   });
 
-const noteOf = (where: string, info: unknown, resources: readonly Resource[]): string => {
-  const text = info === undefined || info === null ? "" : infoToText(textOf(where, "info", info), `${where} info`);
-  const line = resources.length === 0 ? "" : `Resources: ${resources.map((r) => r.name).join(", ")}`;
-  return [text, line].filter((s) => s !== "").join("\n");
+const resourceIdOf = (where: string, field: string, r: Raw): string | null => {
+  if (!("resourceId" in r)) return null;
+  const v = r.resourceId;
+  if (typeof v !== "string" && typeof v !== "number") throw fail(where, `${field}.resourceId is not text or a number: ${show(v)}`);
+  return show(v);
+};
+
+const groupedBy = (pairs: readonly (readonly [string, string])[]): ReadonlyMap<string, readonly string[]> =>
+  new Map([...new Set(pairs.map(([k]) => k))].map((k): [string, string[]] => [k, [...new Set(pairs.filter(([x]) => x === k).map(([, v]) => v))]]));
+
+const checkIdentities = (resources: readonly Resource[]): void => {
+  const pairs = resources.flatMap((r): [string, string][] => (r.id === null ? [] : [[r.id, r.name]]));
+  const renamed = [...groupedBy(pairs)].find(([, names]) => names.length > 1);
+  if (renamed !== undefined) throw new GanttError(`The .gantt file gives resourceId ${renamed[0]} the names ${renamed[1].map(show).join(" and ")}`);
+  const split = [...groupedBy(pairs.map(([id, n]) => [n, id]))].find(([, ids]) => ids.length > 1);
+  if (split !== undefined) throw new GanttError(`The .gantt file has two resources named ${show(split[0])} (${split[1].join(", ")})`);
+};
+
+const noteOf = (where: string, info: unknown): string => (info === undefined || info === null ? "" : infoToText(textOf(where, "info", info), `${where} info`));
+
+const checkPersonName = (where: string, field: string, name: string): void => {
+  const why = personNameProblem(name);
+  if (why !== null) throw fail(where, `${field} cannot be a WebBoard person name (${why})`);
+};
+
+const checkAssignable = (where: string, resources: readonly Resource[]): void => {
+  resources.forEach((r, i) => checkPersonName(where, `resources[${i}].resourceName`, r.name));
+  const twice = resources.find((r, i) => resources.findIndex((q) => q.name === r.name) !== i);
+  if (twice !== undefined) throw fail(where, `resources names ${show(twice.name)} twice`);
+  if (resources.length > MAX_ASSIGNEES) throw fail(where, `has ${resources.length} resources; WebBoard assigns at most ${MAX_ASSIGNEES} people to an item`);
 };
 
 const parseLeaf = (where: string, t: Raw, tz: string): Leaf => {
@@ -350,10 +397,12 @@ const flatten = (data: readonly unknown[], parent: number | null, tz: string, se
     onlyKeys(t, TASK_KEYS, (k) => fail(where, `unknown field ${k}`));
     const subtasks = t.subtasks === undefined ? [] : listOf(where, "subtasks", t.subtasks);
     const resources = parseResources(where, t.resources);
+    const name = checkedName(where, "TaskName", t.TaskName);
+    if (subtasks.length === 0) checkAssignable(where, resources);
     const node: Source = {
       id,
-      name: checkedName(where, "TaskName", t.TaskName),
-      note: noteOf(where, t.info, resources),
+      name,
+      note: noteOf(where, t.info),
       resources,
       coloured: t.color !== undefined && t.color !== null,
       parent,
@@ -386,7 +435,7 @@ interface Parsed {
   tz: string;
   workdays: Weekday[];
   sources: Source[];
-  topResources: number;
+  topResources: readonly Resource[];
   workTime: boolean;
   display: string[];
   dependencyConflict: string | null;
@@ -414,11 +463,14 @@ const parseSource = (text: string, year: number): Parsed => {
   const dependencyConflict = "dependencyConflict" in adv ? textOf("advanced", "dependencyConflict", adv.dependencyConflict) : null;
   const data = listOf("The .gantt file", "data", top.data);
   if (data.length === 0) throw new GanttError("The .gantt file has no tasks in data");
+  const sources = flatten(data, null, tz, new Set());
+  const topResources = parseResources("The .gantt file", top.resources);
+  checkIdentities([...sources.flatMap((s) => s.resources), ...topResources]);
   return {
     tz,
     workdays,
-    sources: flatten(data, null, tz, new Set()),
-    topResources: listOf("The .gantt file", "resources", top.resources).length,
+    sources,
+    topResources,
     workTime: adv.workTime !== undefined,
     display: DISPLAY_KEYS.filter((k) => k in adv),
     dependencyConflict,
@@ -435,22 +487,61 @@ export function countsOf(plan: PlanState, notes: ReadonlyMap<ItemId, string>): G
     milestones: kinds.filter((k) => k === "milestone").length,
     links: plan.links.size,
     notes: [...notes.values()].filter((t) => t !== "").length,
+    people: [...plan.people.persons.values()].filter((p) => p !== null).length,
+    assignments: [...plan.people.assignees.values()].reduce((n, a) => n + (a === null ? 0 : a.length), 0),
   };
 }
 
+export const countsText = (c: GanttCounts): string =>
+  [
+    plural(c.groups, "group"),
+    plural(c.tasks, "task"),
+    plural(c.milestones, "milestone"),
+    plural(c.links, "link"),
+    plural(c.notes, "note"),
+    ...(c.people > 0 ? [plural(c.people, "person", "people"), plural(c.assignments, "assignment")] : []),
+  ].join(", ");
+
+const peopleFrom = (sources: readonly Source[], idOf: (task: number) => ItemId): People => {
+  const leaves = sources.filter((s) => s.leaf !== null);
+  const names = [...new Set(leaves.flatMap((s) => s.resources.map((r) => r.name)))];
+  const clash = names.find((n, i) => names.findIndex((m) => personNameKey(m) === personNameKey(n)) !== i);
+  if (clash !== undefined) {
+    const first = names.find((m) => personNameKey(m) === personNameKey(clash));
+    throw new GanttError(`The .gantt file names resources ${show(first)} and ${show(clash)}, which WebBoard would show as one person`);
+  }
+  const orders = generateNKeysBetween(null, null, names.length);
+  const ids = new Map(names.map((n): [string, PersonId] => [n, newId()]));
+  const personOf = (n: string): PersonId => lookup(ids, n, "person id");
+  return {
+    persons: new Map(
+      names.map((n, i): [PersonId, PersonValue] => [personOf(n), { n, i: initialsOf(n), c: STEP_COLOURS[i % STEP_COLOURS.length], o: orders[i] }]),
+    ),
+    assignees: new Map(
+      leaves.flatMap((s): [ItemId, readonly PersonId[]][] => (s.resources.length === 0 ? [] : [[idOf(s.id), s.resources.map((r) => personOf(r.name)).sort()]])),
+    ),
+  };
+};
+
 const droppedOf = (p: Parsed): string[] => {
   const groups = p.sources.filter((s) => s.leaf === null).length;
+  const staffed = p.sources.filter((s) => s.leaf === null && s.resources.length > 0);
   const coloured = p.sources.filter((s) => s.coloured).length;
   const resources = p.sources.flatMap((s) => s.resources);
-  const ids = resources.filter((r) => r.id).length;
+  const ids = resources.filter((r) => r.id !== null).length;
   const units = resources.filter((r) => r.unit).length;
+  const people = new Set(p.sources.filter((s) => s.leaf !== null).flatMap((s) => s.resources.map((r) => r.name)));
+  const idle = [...new Set(p.topResources.map((r) => r.name))].filter((n) => !people.has(n));
+  const staffing = staffed.map((s) => `${show(s.name)} has ${s.resources.map((r) => show(r.name)).join(", ")}`).join("; ");
+  const top = `${plural(p.topResources.length, "entry", "entries")}${idle.length === 0 ? "" : `; on no task or milestone: ${idle.map(show).join(", ")}`}`;
   return [
     `TaskID on ${plural(p.sources.length, "item")}`,
     ...(coloured === 0 ? [] : [`color on ${plural(coloured, "item")}`]),
     ...(groups === 0 ? [] : [`group dates, duration and progress on ${plural(groups, "group")} (WebBoard derives group spans)`]),
+    ...(staffed.length === 0 ? [] : [`resources on ${plural(staffed.length, "group")} (WebBoard assigns people to tasks and milestones only): ${staffing}`]),
     ...(ids === 0 ? [] : [`resources[].resourceId on ${plural(ids, "resource")}`]),
     ...(units === 0 ? [] : [`resources[].unit on ${plural(units, "resource")}`]),
-    ...(p.topResources === 0 ? [] : [`the top-level resources list (${plural(p.topResources, "entry", "entries")})`]),
+    ...(p.topResources.length === 0 ? [] : [`the top-level resources list (${top})`]),
     ...(p.workTime ? ["advanced.workTime"] : []),
     ...(p.display.length === 0 ? [] : [`advanced display settings: ${p.display.join(", ")}`]),
     ...(p.dependencyConflict === null
@@ -591,7 +682,7 @@ export function convertGantt(a: { text: string; fileName: string; name?: string;
     dates: Object.fromEntries(leaves.map(({ s, leaf }) => [idOf(s.id), { start: leaf.start, dur: leaf.dur }])),
   };
   const calendar: Calendar = { region: null, workdays: parsed.workdays, closures: new Map(), tuning: new Map(), holidays: new Map() };
-  const plan: PlanState = { id: newPlanId(), name: planName, items, links, calendar, baselines: new Map([[baseline.id, baseline]]), workflow: EMPTY_WORKFLOW };
+  const plan: PlanState = { id: newPlanId(), name: planName, items, links, calendar, baselines: new Map([[baseline.id, baseline]]), workflow: EMPTY_WORKFLOW, people: peopleFrom(sources, idOf) };
   const action: Action = { id: newId(), dev: a.dev, ses: a.ses, at: a.now, par: [], lbl: `Converted from ${a.fileName}`, w: stateWrites(plan, "own", () => false) };
   const check: GanttCheck = { sources, ids, today: at };
   const log = logOf(action, "WebBoard refuses the plan", (m) => new GanttError(m));
@@ -663,6 +754,7 @@ function checkImported(r: ImportResult, g: GanttPlan): GanttCounts {
       ...differs(`${label(i.id)}: order`, b.place.order, i.place.order),
       ...differs(`${label(i.id)}: schedule`, b.schedule, i.schedule),
       ...differs(`${label(i.id)}: note`, r.notes.get(to(i.id)) ?? "", g.notes.get(i.id) ?? ""),
+      ...differs(`${label(i.id)}: assignees`, back.people.assignees.get(to(i.id)) ?? null, g.plan.people.assignees.get(i.id) ?? null),
     ];
   });
   const links = [...g.plan.links.values()].flatMap((l) => {
@@ -684,6 +776,7 @@ function checkImported(r: ImportResult, g: GanttPlan): GanttCounts {
     ...differs("calendar", back.calendar, g.plan.calendar),
     ...differs("the number of baselines", back.baselines.size, g.plan.baselines.size),
     ...baselines,
+    ...differs("people", back.people.persons, g.plan.people.persons),
   ];
   if (mismatches.length > 0) throw new Error(`The written plan does not read back as the converted plan:\n${mismatches.join("\n")}`);
   checkFidelity(log, back, { ...g.check, ids: new Map([...g.check.ids].map(([task, item]): [number, ItemId] => [task, to(item)])) });

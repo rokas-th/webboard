@@ -5,7 +5,8 @@ import { buildResolve, canPick, type Pick, type ResolveOptions } from "../action
 import { buildRevert, buildUndo, undoOffer } from "../actions/undo";
 import type { Calendar, Closure, Tuning } from "../domain/calendar";
 import { toDay, toIso, type IsoDate, type Weekday } from "../domain/dates";
-import type { Item, ItemId, ItemKind, LinkType, Status, Horizon, StepId } from "../domain/model";
+import type { Item, ItemId, ItemKind, LinkType, PersonId, Status, Horizon, StepId } from "../domain/model";
+import { initialsOf, peopleOf, storedAssigneesOf } from "../domain/people";
 import { STEP_COLOURS, stepsOf } from "../domain/steps";
 import { newId } from "../log/ids";
 import { LogState } from "../log/state";
@@ -105,8 +106,20 @@ const STEP_NAMES = ["Review", "QA", "Ship", "Now"];
 const STEP_OPS = ["add", "rename", "colour", "reorder", "limit", "completes", "delete"] as const;
 const STEP_LIMITS = [null, 1, 3, 99, 100];
 
+const PEOPLE_INTENTS = [
+  ["person", 8],
+  ["assign", 10],
+  ["unassign", 4],
+  ["assignees", 3],
+] as const;
+
+const PERSON_NAMES = ["Mira Okafor", "Ole Berg", "Ana Ruiz", "mira okafor"];
+const PERSON_OPS = ["add", "rename", "initials", "colour", "reorder", "remove"] as const;
+const PERSON_INITIALS = ["MO", "Mo", "OB", "AR", "X"];
+
 export interface SimOptions {
   steps: boolean;
+  people?: boolean;
 }
 
 const weighted = <K extends string>(table: readonly (readonly [K, number])[], roll: number): K => {
@@ -151,7 +164,7 @@ const actionIds = (doc: PlanDoc): Set<ActionId> => new Set(doc.ydoc.getMap("acti
 
 export function simulate(seed: number, opts: SimOptions = { steps: false }): SimResult {
   const r = rngOf(seed);
-  const intents: readonly (readonly [Intent["t"], number])[] = opts.steps ? [...INTENTS, ...STEP_INTENTS] : INTENTS;
+  const intents: readonly (readonly [Intent["t"], number])[] = [...INTENTS, ...(opts.steps ? STEP_INTENTS : []), ...(opts.people === true ? PEOPLE_INTENTS : [])];
   const int = (lo: number, hi: number): number => lo + Math.floor(r() * (hi - lo + 1));
   const pick = <T>(xs: readonly T[]): T => {
     if (xs.length === 0) throw new Error("pick from an empty list");
@@ -323,6 +336,12 @@ export function simulate(seed: number, opts: SimOptions = { steps: false }): Sim
         if (live.length === 0 || scheduled.length === 0) return { t: "planName", name: pick(NAMES) };
         return { t: "toStep", items: [...new Set([pick(scheduled).id, ...(chance(0.3) ? [pick(scheduled).id] : [])])], step: pick(live).id };
       }
+      case "person":
+        return personIntentFor(view);
+      case "assign":
+      case "unassign":
+      case "assignees":
+        return assignIntentFor(view, t);
       default:
         throw new Error(`The simulator has no generator for ${t}`);
     }
@@ -349,6 +368,51 @@ export function simulate(seed: number, opts: SimOptions = { steps: false }): Sim
       case "delete":
         return { t: "step", op, step, to: anyOrNull(others) };
     }
+  };
+
+  const personIntentFor = (view: PlanView): Intent => {
+    const live = peopleOf(view.plan);
+    const op = pick(PERSON_OPS);
+    const anyOrNull = (ids: readonly PersonId[]): PersonId | null => (ids.length === 0 || chance(0.3) ? null : pick(ids));
+    if (live.length === 0 || op === "add") {
+      const name = pick(PERSON_NAMES);
+      return { t: "person", op: "add", name, initials: initialsOf(name), colour: pick(STEP_COLOURS), after: anyOrNull(live.map((x) => x.id)) };
+    }
+    const person = pick(live).id;
+    const others = live.filter((x) => x.id !== person).map((x) => x.id);
+    switch (op) {
+      case "rename":
+        return { t: "person", op, person, name: pick(PERSON_NAMES) };
+      case "initials":
+        return { t: "person", op, person, initials: pick(PERSON_INITIALS) };
+      case "colour":
+        return { t: "person", op, person, colour: pick(STEP_COLOURS) };
+      case "reorder":
+        return { t: "person", op, person, after: anyOrNull(others) };
+      case "remove":
+        return { t: "person", op, person, to: anyOrNull(others) };
+    }
+  };
+
+  const assignIntentFor = (view: PlanView, t: "assign" | "unassign" | "assignees"): Intent => {
+    const plan = view.plan;
+    const live = peopleOf(plan).map((p) => p.id);
+    const targets = nonGroups([...plan.items.values()]);
+    if (live.length === 0 || targets.length === 0) return personIntentFor(view);
+    const busy = targets.filter((it) => storedAssigneesOf(plan, it.id).length > 0);
+    const target = (): Item => pick(busy.length > 0 && chance(0.5) ? busy : targets);
+    if (t === "assignees") {
+      const it = target();
+      const kept = storedAssigneesOf(plan, it.id).filter(() => chance(0.5));
+      const added = live.filter((id) => !kept.includes(id) && chance(0.4));
+      return { t, item: it.id, people: [...kept, ...added] };
+    }
+    const held = targets.filter((it) => storedAssigneesOf(plan, it.id).some((id) => live.includes(id)));
+    if (t === "unassign" && held.length > 0) {
+      const it = pick(held);
+      return { t, items: [it.id], person: pick(storedAssigneesOf(plan, it.id).filter((id) => live.includes(id))) };
+    }
+    return { t, items: [...new Set([target().id, ...(chance(0.3) ? [target().id] : [])])], person: pick(live) };
   };
 
   const stepIntent = (d: Device): void => {
@@ -505,6 +569,13 @@ export function simulate(seed: number, opts: SimOptions = { steps: false }): Sim
         const b = buildAction(ctx, { t: "link", from: chain[k], to, type: "FS", lag: 0 });
         record(opening, { action: b.action, kind: "link", view: ctx.view }, b.newNotes);
       });
+    }),
+  );
+  (opts.people === true ? PERSON_NAMES.slice(0, 2) : []).forEach((name) =>
+    stepAt(-1, () => {
+      const ctx = ctxFor(opening);
+      const b = buildAction(ctx, { t: "person", op: "add", name, initials: initialsOf(name), colour: pick(STEP_COLOURS), after: null });
+      record(opening, { action: b.action, kind: "person", view: ctx.view }, b.newNotes);
     }),
   );
   devices.slice(1).forEach((d) => send(opening, d));

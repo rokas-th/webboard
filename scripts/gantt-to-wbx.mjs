@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
-import { convertGantt, GanttError, readBack } from "../src/import/gantt.ts";
+import { convertGantt, countsText, GanttError, readBack } from "../src/import/gantt.ts";
 import { newId } from "../src/log/ids.ts";
 import { writeNew } from "./write-new.mjs";
 
@@ -28,15 +28,13 @@ function parseArgs(argv) {
   return { input, output: given ?? input.slice(0, -".gantt".length) + ".webboard", name };
 }
 
-const showCounts = (c) => `${c.groups} groups, ${c.tasks} tasks, ${c.milestones} milestones, ${c.links} links, ${c.notes} notes`;
-
 function main() {
   const { input, output, name } = parseArgs(process.argv.slice(2));
   if (existsSync(output)) throw new ArgError(`${output} already exists; the converter does not overwrite files`);
   const g = convertGantt({ text: readFileSync(input, "utf8"), fileName: basename(input), name, dev: newId(), ses: newId(), now: Date.now() });
   writeNew(output, g.bytes, (written) => readBack(written, basename(output), g));
   console.log(`Plan: ${g.plan.name}`);
-  console.log(`Counts: ${showCounts(g.counts)}`);
+  console.log(`Counts: ${countsText(g.counts)}`);
   console.log(
     "Fidelity: every task and milestone shows the .gantt file's start, end and status, in the converted plan and in the written file read back; nothing unscheduled, held or in conflict",
   );

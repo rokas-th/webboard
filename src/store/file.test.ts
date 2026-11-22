@@ -4,7 +4,7 @@ import { Refused } from "../actions/intents";
 import type { Closure } from "../domain/calendar";
 import { derive } from "../domain/derive";
 import { stepModeOf } from "../domain/steps";
-import { linkKey, type Baseline, type Item, type ItemId, type Link, type PlanState, type StepId } from "../domain/model";
+import { linkKey, type Baseline, type Item, type ItemId, type Link, type PersonId, type PlanState, type StepId } from "../domain/model";
 import { LogState } from "../log/state";
 import type { Action, Write } from "../log/types";
 import { choices } from "../plan/choices";
@@ -109,6 +109,10 @@ function renamed(plan: PlanState, back: (id: string) => string, id: string): Pla
     workflow: {
       steps: plan.workflow.steps,
       items: new Map([...plan.workflow.items].map(([item, step]): [ItemId, StepId | null] => [back(item), step])),
+    },
+    people: {
+      persons: plan.people.persons,
+      assignees: new Map([...plan.people.assignees].map(([item, ids]): [ItemId, readonly PersonId[] | null] => [back(item), ids])),
     },
   };
 }
@@ -388,6 +392,50 @@ describe("fresh ids", () => {
     expect(plan.workflow).toEqual({ steps: new Map(), items: new Map() });
     expect(r.action.w.some((w) => w.u.startsWith("ws:") || w.u.startsWith("wi:"))).toBe(false);
     expect(stepModeOf(plan)).toBe("dates");
+  });
+
+  it("a .webboard with pp and pa round-trips them (item ids remapped, person ids kept), format version 1", () => {
+    const mira = { n: "Mira Okafor", i: "MO", c: "cyan", o: "a1" };
+    const peopled: readonly Action[] = [
+      ...FRESH_SOURCE,
+      act("a1", ["a0"], [own("pp:mira", mira), own("pp:ole", null), own("pa:T1", ["mira", "ole"]), own("pa:T2", null)], { dev: "dev-A" }),
+    ];
+    const bytes = fileOf(peopled, FRESH_NOTES);
+    expect(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(4, true)).toBe(1);
+    const source = projectPlan(SOURCE_ID, logOf(peopled));
+    const r = importOf(bytes);
+    const plan = importedPlan(r);
+    const t1 = r.idMap.get("T1");
+    const t2 = r.idMap.get("T2");
+    if (t1 === undefined || t2 === undefined) throw new Error("T1 or T2 has no new id");
+    expect(new Set(r.idMap.keys())).toEqual(new Set(["G", "T1", "T2", "C1", "B1"]));
+    expect(plan.people).toEqual({
+      persons: new Map([
+        ["mira", mira],
+        ["ole", null],
+      ]),
+      assignees: new Map<ItemId, readonly PersonId[] | null>([
+        [t1, ["mira", "ole"]],
+        [t2, null],
+      ]),
+    });
+    expect(renamed(plan, inverse(r.idMap), SOURCE_ID)).toEqual(source);
+    const peopleWrites = r.action.w.filter((w) => w.u.startsWith("pp:") || w.u.startsWith("pa:"));
+    expect(new Map(peopleWrites.map((w) => [w.u, w]))).toEqual(
+      new Map([
+        ["pp:mira", own("pp:mira", mira)],
+        ["pp:ole", own("pp:ole", null)],
+        [`pa:${t1}`, own(`pa:${t1}`, ["mira", "ole"])],
+        [`pa:${t2}`, own(`pa:${t2}`, null)],
+      ]),
+    );
+    expect(peopleWrites).toHaveLength(4);
+  });
+
+  it("a plan without people imports with none", () => {
+    const r = importOf(freshFile());
+    expect(importedPlan(r).people).toEqual({ persons: new Map(), assignees: new Map() });
+    expect(r.action.w.some((w) => w.u.startsWith("pp:") || w.u.startsWith("pa:"))).toBe(false);
   });
 
   it("a second import shares no id with the first", () => {
@@ -728,7 +776,7 @@ describe("import of a .gantt file", () => {
     expect(imported.converted).toEqual({
       fileName: GANTT_FILE,
       name: "Fixture Plan",
-      counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1 },
+      counts: { groups: 1, tasks: 2, milestones: 1, links: 2, notes: 1, people: 0, assignments: 0 },
       dropped: expect.arrayContaining(["TaskID on 4 items", "color on 4 items", "advanced.workTime"]),
     });
     const session = await reg.session(imported.planId);

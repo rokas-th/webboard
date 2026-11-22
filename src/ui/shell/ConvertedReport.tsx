@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { GanttCounts, GanttReport } from "../../import/gantt";
+import { countsText, type GanttReport } from "../../import/gantt";
 import { Dialog } from "../common/Dialog";
 import { Sheet } from "../common/Sheet";
 
@@ -45,16 +45,11 @@ const subscribe = (cb: () => void): (() => void) => {
 
 const snapshot = (): Shown | null => shown;
 
-const count = (n: number, one: string): string => `${n} ${n === 1 ? one : `${one}s`}`;
-
-const countsLine = (c: GanttCounts): string =>
-  [count(c.groups, "group"), count(c.tasks, "task"), count(c.milestones, "milestone"), count(c.links, "link"), count(c.notes, "note")].join(", ");
-
 function ReportText(p: { report: GanttReport }) {
   return (
     <>
       <p>{`Plan “${p.report.name}” from ${p.report.fileName}`}</p>
-      <p>{countsLine(p.report.counts)}</p>
+      <p>{countsText(p.report.counts)}</p>
       <p>Not carried over:</p>
       <ul className="converted-dropped">
         {p.report.dropped.map((d) => (

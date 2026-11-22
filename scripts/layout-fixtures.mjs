@@ -636,6 +636,36 @@ const GANTT_SOURCE = {
   },
 };
 
+const GANTT_PEOPLE_SOURCE = {
+  ...GANTT_SOURCE,
+  data: [
+    ganttTask(1, "Phase", "2026-09-07", "2026-09-18", 10, {
+      Predecessor: null,
+      color: "#999999",
+      subtasks: [
+        ganttTask(2, "Survey", "2026-09-07", "2026-09-11", 5, {
+          Progress: 100,
+          info: "<p>Site &amp; access</p>",
+          resources: [{ resourceId: "r1", resourceName: "Mira Okafor" }],
+        }),
+        ganttTask(3, "Build", "2026-09-14", "2026-09-18", 5, {
+          Progress: 40,
+          Predecessor: "2FS",
+          resources: [
+            { resourceId: "r2", resourceName: "Ole Berg" },
+            { resourceId: "r1", resourceName: "Mira Okafor" },
+          ],
+        }),
+        ganttTask(4, "Handover", "2026-09-18", "2026-09-18", 0, { Predecessor: "3FF" }),
+      ],
+    }),
+  ],
+  resources: [
+    { resourceId: "r1", resourceName: "Mira Okafor" },
+    { resourceId: "r2", resourceName: "Ole Berg" },
+  ],
+};
+
 function picked(name, file) {
   const encoded = Buffer.from(name, "utf8");
   const length = Buffer.alloc(4);
@@ -643,13 +673,13 @@ function picked(name, file) {
   return Buffer.concat([length, encoded, file]);
 }
 
-function converted() {
+function converted(source) {
   const f = fixtureOf([]);
   return {
     ...f,
     ipc: {
       ...f.ipc,
-      plan_import: { __bytes: picked(CONVERTED_FILE, Buffer.from(JSON.stringify(GANTT_SOURCE))).toString("base64") },
+      plan_import: { __bytes: picked(CONVERTED_FILE, Buffer.from(JSON.stringify(source))).toString("base64") },
     },
   };
 }
@@ -717,7 +747,8 @@ export function buildFixtures() {
     "sync-dialog": copyOf(mesaOnMac),
     "sync-space": inSpace(mesaOnMac, false),
     "sync-local": syncLocal(),
-    converted: converted(),
+    converted: converted(GANTT_SOURCE),
+    "converted-people": converted(GANTT_PEOPLE_SOURCE),
     "sync-receiving": inSpace(unreadable, false),
     "sync-removed": removed,
     "sync-removed-ios-pad": onIosPad(removed),

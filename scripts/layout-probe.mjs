@@ -1035,6 +1035,18 @@ function states() {
       within_(".converted-dropped li", ".converted-dropped", 5),
     ],
   });
+  add("converted-report/people", "converted-people", {
+    place: null,
+    sizes: "desktop-and-compact",
+    dialog: true,
+    actions: [
+      click(".empty-state button", "Import plan…"),
+      expect('[role="dialog"] p', `Plan “Probe plan” from ${CONVERTED_FILE}`),
+      expect('[role="dialog"] p', "1 group, 2 tasks, 1 milestone, 2 links, 1 note, 2 people, 3 assignments"),
+      count(".converted-dropped li", 7),
+      within_(".converted-dropped li", '[role="dialog"]', 7),
+    ],
+  });
   const TOGGLE = '.toolbar button[aria-label="Plan list"]';
   const hiddenPlace = { view: "timeline", zoom: "W", sidebarOpen: false };
   const hiddenList = [viewExpect("timeline"), count(".sidebar", 0), count(".sidebar-resizer", 0), count(".plan-overlay-layer", 0), count(`${TOGGLE}[aria-expanded="false"]`, 1), oneLine(".toolbar"), edgeAt(".main", "left", 0)];

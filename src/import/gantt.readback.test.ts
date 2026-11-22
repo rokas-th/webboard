@@ -3,7 +3,7 @@ import type { Write } from "../log/types";
 import { existence, name } from "../plan/units";
 import { AppError } from "../services/ipc";
 import type { ImportResult } from "../store/file";
-import { GANTT_FILE, ganttBytes } from "../test/fixtures/gantt";
+import { GANTT_FILE, ganttBytes, ganttWithPeople } from "../test/fixtures/gantt";
 import { GanttError, importGantt } from "./gantt";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
@@ -24,13 +24,13 @@ vi.mock("../store/file", async (actual) => {
   };
 });
 
-const run = () => importGantt({ bytes: ganttBytes(), fileName: GANTT_FILE, dev: "dev-R", ses: "ses-R", now: Date.UTC(2026, 10, 10) });
+const run = (bytes: Uint8Array = ganttBytes()) => importGantt({ bytes, fileName: GANTT_FILE, dev: "dev-R", ses: "ses-R", now: Date.UTC(2026, 10, 10) });
 
 const withWrites = (r: ImportResult, edit: (w: readonly Write[]) => Write[]): ImportResult => ({ ...r, action: { ...r.action, w: edit(r.action.w) } });
 
-const caught = (): unknown => {
+const caught = (bytes?: Uint8Array): unknown => {
   try {
-    run();
+    run(bytes);
   } catch (e) {
     return e;
   }
@@ -62,6 +62,13 @@ describe("importGantt reads its own plan back", () => {
   it("refuses a read-back that lost a link, as a converter bug", () => {
     tamper.result = (r) => withWrites(r, (ws) => ws.filter((w) => !w.u.startsWith("l:")));
     asBug(caught(), /^The written plan does not read back as the converted plan:\n[\s\S]*- the number of links reads back as 0, not 2/);
+  });
+
+  it("refuses a read-back that lost an assignment, as a converter bug", () => {
+    const bytes = ganttBytes(ganttWithPeople());
+    expect(run(bytes).report.counts).toMatchObject({ people: 2, assignments: 3 });
+    tamper.result = (r) => withWrites(r, (ws) => ws.filter((w) => !(w.u.startsWith("pa:") && Array.isArray(w.v) && w.v.length === 2)));
+    asBug(caught(bytes), /^The written plan does not read back as the converted plan:\n- Task 3 Build: assignees reads back as null, not \["[\w-]+","[\w-]+"\]$/);
   });
 
   it("refuses a read-back the log rules refuse, as a converter bug", () => {

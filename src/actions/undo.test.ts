@@ -309,6 +309,43 @@ describe("buildUndo", () => {
     expect(keptAfterOverride([], "wi:PR", "now", "next")).toEqual(["“Plan review” was changed since on the iPhone — kept"]);
   });
 
+  it("kept lines name a person, a removed person and an item's assignees", () => {
+    const person = (n: string): unknown => ({ n, i: "MO", c: "cyan", o: "a0" });
+    expect(keptAfterOverride([], "pp:mira", person("Mira"), person("Mira Okafor"))).toEqual(["The person “Mira Okafor” was changed since on the iPhone — kept"]);
+    expect(keptAfterOverride([], "pp:mira", person("Mira Okafor"), null)).toEqual(["The removed person “Mira Okafor” was changed since on the iPhone — kept"]);
+    expect(keptAfterOverride([], "pp:zz", null, null)).toEqual(["A removed person was changed since on the iPhone — kept"]);
+    expect(keptAfterOverride([], "pa:PR", ["mira"], ["ole"])).toEqual(["“Plan review” was changed since on the iPhone — kept"]);
+  });
+
+  it("undo of a person removal restores the person and every list, keeping an assignee list changed since", () => {
+    const person = (n: string, o: string): unknown => ({ n, i: "MO", c: "cyan", o });
+    const people = act("pe", ["a0"], [w("pp:mira", person("Mira Okafor", "a0")), w("pp:ole", person("Ole Berg", "a1")), w("pa:PR", ["mira"]), w("pa:A", ["mira", "ole"])], mac);
+    const ctx = ctxFrom(people);
+    const removed = buildAction(ctx, { t: "person", op: "remove", person: "mira", to: "ole" });
+    expect(removed.action.w.map((x) => x.u)).toEqual(["pp:mira", "pa:A", "pa:PR"]);
+    const after = applied(ctx, removed);
+    const theirs = buildAction(on(after, "d2"), { t: "assignees", item: "A", people: [] });
+    const changed = applied(after, theirs);
+    const undo = buildUndo(changed, removed.action.id);
+    expect(undo.preview.kept).toEqual(["“A” was changed since on the iPhone — kept"]);
+    const undone = applied(changed, undo);
+    expect(undone.view.plan.people.persons.get("mira")).toEqual(person("Mira Okafor", "a0"));
+    expect(undone.view.plan.people.assignees.get("PR")).toEqual(["mira"]);
+    expect(undone.view.plan.people.assignees.get("A")).toBeNull();
+  });
+
+  it("an undone create that assigned people keeps no line for the orphaned assignees", () => {
+    const made = act("c", ["a0"], [...item("X", "Coat", "a5", sched("2026-11-16", 2)), w("pa:X", ["mira"])], mac);
+    const moved = act("m", ["c"], [w("pa:X", ["ole"])], iph);
+    const ctx = ctxFrom(made, moved);
+    expect(valueOf(ctx, "pa:X")).toEqual(["ole"]);
+    const undo = buildUndo(ctx, "c");
+    expect(undo.preview.kept).toEqual([]);
+    const after = applied(ctx, undo);
+    expect(after.view.plan.items.has("X")).toBe(false);
+    expect(after.view.plan.people.assignees.has("X")).toBe(false);
+  });
+
   it.each([
     ["this Mac", "d1"],
     ["a peer", "d2"],

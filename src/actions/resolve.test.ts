@@ -285,6 +285,44 @@ describe("resolving a step choice", () => {
   });
 });
 
+describe("resolving a person choice", () => {
+  const MIRA = { n: "Mira Okafor", i: "MO", c: "cyan", o: "a0" };
+  const ONE: Write[] = [...item("A", "task", "Alpha", null, "a0", sched("2026-11-16", 2)), w("pp:mira", MIRA)];
+
+  it("concurrent renames of one person raise a choice on pp:<id> and resolve", () => {
+    const ctx = ctxFrom(ONE);
+    const mine = buildAction(ctx, { t: "person", op: "rename", person: "mira", name: "Mira Okafor-Lund" }).action;
+    const theirs = act("p1", ["a0"], [w("pp:mira", { ...MIRA, n: "Mira O." })], iph);
+    const both = add(ctx, mine, theirs);
+    const live = both.view.plan.people.persons.get("mira");
+    if (live === undefined || live === null) throw new Error("no live mira");
+    const c = only(both);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["pp:mira"]);
+    expect(c.items).toEqual([]);
+    const b = buildResolve(both, c, { side: sideKey(c, "iPhone") }, ON);
+    expect(b.action.w).toEqual([w("pp:mira", { ...MIRA, n: "Mira O." }, "resolution")]);
+    expect(b.action.lbl).toBe("Kept the iPhone version of the person “Mira O.”");
+    const after = applied(both, b);
+    expect(after.view.choices).toEqual([]);
+    expect(after.view.plan.people.persons.get("mira")).toEqual({ ...MIRA, n: "Mira O." });
+    const settled = buildAction(both, { t: "person", op: "rename", person: "mira", name: "Mira Final" });
+    expect(settled.toast).toBe(`Renamed person “${live.n}” to “Mira Final”. The person “Mira Final” is settled.`);
+  });
+
+  it("a choice on an item's assignees names the item and settles by an assignees edit", () => {
+    const ctx = ctxFrom([...ONE, w("pp:ole", { n: "Ole Berg", i: "OB", c: "lime", o: "a1" })]);
+    const mine = buildAction(ctx, { t: "assign", items: ["A"], person: "mira" }).action;
+    const theirs = act("p1", ["a0"], [w("pa:A", ["ole"])], iph);
+    const both = add(ctx, mine, theirs);
+    const c = only(both);
+    expect(c.units).toEqual(["pa:A"]);
+    expect(c.items).toEqual(["A"]);
+    const settled = buildAction(both, { t: "assignees", item: "A", people: ["mira", "ole"] });
+    expect(settled.toast).toBe("Changed the assignees of “Alpha”. “Alpha” is settled; no items remain.");
+  });
+});
+
 describe("resolving a calendar choice", () => {
   const CAL: Write[] = [
     ...item("T", "task", "T", null, "a0", sched("2026-11-20", 2)),

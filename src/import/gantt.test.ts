@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Item, ItemId, PlanState } from "../domain/model";
+import type { Item, ItemId, PersonId, PlanState } from "../domain/model";
+import { peopleOf } from "../domain/people";
 import { LogState } from "../log/state";
 import { childrenOf, projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { buildImport } from "../store/file";
-import { convertGantt, defaultPlanName, GanttError, htmlToText, importGantt, infoToText, localDate, readBack, standardOffset, type GanttPlan } from "./gantt";
+import { convertGantt, countsText, defaultPlanName, GanttError, htmlToText, importGantt, infoToText, localDate, readBack, standardOffset, type GanttPlan } from "./gantt";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
 
@@ -105,6 +106,18 @@ const mutate = (id: number, patch: Task): Task[] => {
   return walk(tasks());
 };
 
+const patched = (patches: Readonly<Record<number, Task>>): Task[] => {
+  const walk = (ts: Task[]): Task[] =>
+    ts.map((t) => {
+      const patch = typeof t.TaskID === "number" ? patches[t.TaskID] : undefined;
+      const inner = Array.isArray(t.subtasks) ? { ...t, subtasks: walk(t.subtasks as Task[]) } : t;
+      return patch === undefined ? inner : { ...inner, ...patch };
+    });
+  return walk(tasks());
+};
+
+const named = (...names: string[]): Task => ({ resources: names.map((resourceName) => ({ resourceName })) });
+
 const project = (g: GanttPlan): PlanState => {
   const log = new LogState(planRules);
   expect(log.add([g.action]).refused).toEqual([]);
@@ -162,22 +175,81 @@ describe("convertGantt", () => {
     expect(plan.calendar.holidays.size).toBe(0);
   });
 
-  it("turns info and resources into notes, groups included, and gives an empty item no note", () => {
+  it("turns info into notes, groups included, and gives an empty item no note", () => {
     const g = convert();
     const plan = project(g);
     const noteOf = (name: string): string | undefined => g.notes.get(byName(plan, name).id);
-    expect(noteOf("Design")).toBe("Fish & chips\nLine two\nthree & A\nResources: Lab, QA");
+    expect(noteOf("Design")).toBe("Fish & chips\nLine two\nthree & A");
     expect(noteOf("Parallel")).toBe("plain text note");
     expect(noteOf("Phase A")).toBe("Group info");
     expect(noteOf("Build")).toBeUndefined();
     expect(noteOf("Phase B")).toBeUndefined();
     expect([...g.newNotes].sort()).toEqual([...plan.items.keys()].sort());
-    expect(g.counts).toEqual({ groups: 3, tasks: 5, milestones: 1, links: 6, notes: 3 });
+    expect(g.counts).toEqual({ groups: 3, tasks: 5, milestones: 1, links: 6, notes: 3, people: 2, assignments: 2 });
   });
 
-  it("writes a resources-only note when info is empty", () => {
+  it("a task with resources and no info gets no note", () => {
     const g = convert(source(mutate(3, { resources: [{ resourceId: 7, resourceName: "Shop" }] })));
-    expect(g.notes.get(byName(project(g), "Build").id)).toBe("Resources: Shop");
+    expect(g.notes.get(byName(project(g), "Build").id)).toBeUndefined();
+  });
+
+  it("makes one person per distinct resource name, in first-appearance order, assigned to its tasks", () => {
+    const g = convert(source(patched({ 3: named("QA", "Shop"), 8: named("Lab"), 9: named("Mira Okafor") })));
+    const plan = project(g);
+    const people = peopleOf(plan);
+    expect(people.map((p) => [p.name, p.initials, p.colour])).toEqual([
+      ["Lab", "L", "cyan"],
+      ["QA", "Q", "violet"],
+      ["Shop", "S", "magenta"],
+      ["Mira Okafor", "MO", "lime"],
+    ]);
+    expect(people.map((p) => p.order)).toEqual([...people.map((p) => p.order)].sort());
+    const idOf = new Map(people.map((p): [string, PersonId] => [p.name, p.id]));
+    const ids = (...names: string[]): PersonId[] => names.map((n) => idOf.get(n) ?? "missing").sort();
+    expect(new Map([...plan.people.assignees].map(([item, list]) => [plan.items.get(item)?.name, list]))).toEqual(
+      new Map([
+        ["Design", ids("Lab", "QA")],
+        ["Build", ids("QA", "Shop")],
+        ["Late", ids("Lab")],
+        ["Back", ids("Mira Okafor")],
+      ]),
+    );
+    expect(plan.people).toEqual(g.plan.people);
+    expect(g.counts).toMatchObject({ people: 4, assignments: 6 });
+  });
+
+  it("drops group resources and lists them", () => {
+    const g = convert(source(patched({ 1: named("Board"), 6: named("Lab", "Board") })));
+    const plan = project(g);
+    expect(peopleOf(plan).map((p) => p.name)).toEqual(["Lab", "QA"]);
+    expect([...plan.people.assignees.keys()].map((item) => plan.items.get(item)?.name)).toEqual(["Design"]);
+    expect(g.dropped).toContain('resources on 2 groups (WebBoard assigns people to tasks and milestones only): "Phase A" has "Board"; "Sub" has "Lab", "Board"');
+    expect(g.notes.get(byName(plan, "Phase A").id)).toBe("Group info");
+  });
+
+  it("makes one person of a resourceId used on several tasks, and of a name with no resourceId", () => {
+    const g = convert(
+      source(patched({ 3: { resources: [{ resourceId: "r1", resourceName: "Lab" }] }, 8: { resources: [{ resourceName: "Lab" }] } })),
+    );
+    const plan = project(g);
+    expect(peopleOf(plan).map((p) => p.name)).toEqual(["Lab", "QA"]);
+    expect(g.counts).toMatchObject({ people: 2, assignments: 4 });
+  });
+
+  it("names top-level resources that sit on no task or milestone", () => {
+    const g = convert(
+      source(tasks(), {}, { resources: [{ resourceId: "r1", resourceName: "Lab" }, { resourceId: "r7", resourceName: "Board" }, { resourceName: "Shop" }] }),
+    );
+    expect(g.dropped).toContain('the top-level resources list (3 entries; on no task or milestone: "Board", "Shop")');
+    expect(peopleOf(project(g)).map((p) => p.name)).toEqual(["Lab", "QA"]);
+  });
+
+  it("reports no people for a file without resources", () => {
+    const g = convert(source(mutate(2, { resources: [] })));
+    expect(g.plan.people.persons.size).toBe(0);
+    expect(g.plan.people.assignees.size).toBe(0);
+    expect(g.counts).toEqual({ groups: 3, tasks: 5, milestones: 1, links: 6, notes: 3, people: 0, assignments: 0 });
+    expect(g.dropped.some((d) => d.startsWith("resources on"))).toBe(false);
   });
 
   it("records one baseline named Imported plan at the file's date stamp", () => {
@@ -220,6 +292,15 @@ describe("convertGantt", () => {
     const g = convert(source(mutate(2, { StartDate: "2026-09-06T22:30:00.000Z" })));
     expect(byName(project(g), "Design").schedule?.start).toBe("2026-09-07");
   });
+});
+
+describe("countsText", () => {
+  const base = { groups: 1, tasks: 2, milestones: 1, links: 1, notes: 0, people: 0, assignments: 0 };
+  it("leaves people out when there are none", () => expect(countsText(base)).toBe("1 group, 2 tasks, 1 milestone, 1 link, 0 notes"));
+  it("names one person and one assignment in the singular", () =>
+    expect(countsText({ ...base, people: 1, assignments: 1 })).toBe("1 group, 2 tasks, 1 milestone, 1 link, 0 notes, 1 person, 1 assignment"));
+  it("names several people and assignments in the plural", () =>
+    expect(countsText({ ...base, groups: 3, people: 2, assignments: 3 })).toBe("3 groups, 2 tasks, 1 milestone, 1 link, 0 notes, 2 people, 3 assignments"));
 });
 
 describe("localDate", () => {
@@ -324,6 +405,10 @@ describe("convertGantt refuses what it cannot map", () => {
   const refuses = (src: unknown, pattern: RegExp, fileName = FILE): void => {
     expect(() => convert(src, fileName)).toThrow(pattern);
   };
+  const ganttRefuses = (src: unknown, pattern: RegExp): void => {
+    expect(() => convert(src)).toThrow(GanttError);
+    refuses(src, pattern);
+  };
 
   it("an unknown DurationUnit", () => refuses(source(mutate(3, { DurationUnit: "hour" })), /Task 3: DurationUnit .*"hour"/));
   it("a link type outside FS, SS, FF and SF", () => refuses(source(mutate(3, { Predecessor: "2XS" })), /Task 3: Predecessor .*link type "XS"/));
@@ -367,6 +452,25 @@ describe("convertGantt refuses what it cannot map", () => {
     refuses(source(mutate(3, { resources: [{ resourceId: "r1", resourceName: "Lab", cost: 5 }] })), /Task 3: unknown field resources\[0\]\.cost/));
   it("a blank resourceName", () =>
     refuses(source(mutate(3, { resources: [{ resourceId: "r1", resourceName: "  " }] })), /Task 3: resources\[0\]\.resourceName is blank/));
+  it("a resourceName WebBoard cannot hold as a person name", () =>
+    ganttRefuses(source(mutate(3, named("Lab "))), /^Task 3: resources\[0\]\.resourceName cannot be a WebBoard person name \(pp: n has spaces at its start or end: "Lab "\)$/));
+  it("a resourceName longer than 64 characters", () =>
+    ganttRefuses(source(mutate(3, named("Lab", "x".repeat(65)))), /^Task 3: resources\[1\]\.resourceName cannot be a WebBoard person name \(pp: n is longer than 64 characters\)$/));
+  it("the same resource twice on one task", () => ganttRefuses(source(mutate(3, named("Lab", "QA", "Lab"))), /^Task 3: resources names "Lab" twice$/));
+  it("more than 8 resources on one task", () =>
+    ganttRefuses(source(mutate(3, named("A", "B", "C", "D", "E", "F", "G", "H", "I"))), /^Task 3: has 9 resources; WebBoard assigns at most 8 people to an item$/));
+  it("one resourceId under two names", () =>
+    ganttRefuses(source(mutate(3, { resources: [{ resourceId: "r1", resourceName: "Shop" }] })), /^The \.gantt file gives resourceId "r1" the names "Lab" and "Shop"$/));
+  it("one resource name under two resourceIds, across tasks", () =>
+    ganttRefuses(source(mutate(3, { resources: [{ resourceId: 7, resourceName: "Lab" }] })), /^The \.gantt file has two resources named "Lab" \("r1", 7\)$/));
+  it("one resourceId under two names in the top-level list", () =>
+    ganttRefuses(source(tasks(), {}, { resources: [{ resourceId: "r2", resourceName: "Board" }] }), /^The \.gantt file gives resourceId "r2" the names "QA" and "Board"$/));
+  it("a resourceId that is neither text nor a number", () =>
+    ganttRefuses(source(mutate(3, { resources: [{ resourceId: null, resourceName: "Shop" }] })), /^Task 3: resources\[0\]\.resourceId is not text or a number: null$/));
+  it("a top-level resources entry it does not know", () =>
+    ganttRefuses(source(tasks(), {}, { resources: [{ resourceId: "r1", resourceName: "Lab", cost: 5 }] }), /^The \.gantt file: unknown field resources\[0\]\.cost$/));
+  it("resource names that differ only in case", () =>
+    ganttRefuses(source(mutate(3, named("lab"))), /^The \.gantt file names resources "Lab" and "lab", which WebBoard would show as one person$/));
   it("a task without resources", () => {
     const data = mutate(3, {});
     const phase = data[0].subtasks as Task[];
@@ -482,6 +586,9 @@ describe("the .webboard round trip", () => {
     );
     expect(new Map([...r.notes].filter(([, t]) => t !== ""))).toEqual(new Map([...g.notes].map(([k, t]) => [to(k), t])));
     expect([...r.newNotes].sort()).toEqual([...back.items.keys()].sort());
+    expect(g.plan.people.persons.size).toBe(2);
+    expect(back.people.persons).toEqual(g.plan.people.persons);
+    expect(back.people.assignees).toEqual(new Map([...g.plan.people.assignees].map(([k, a]) => [to(k), a])));
   });
 
   it("counts the read-back plan the way the conversion counted it", () => {
@@ -519,6 +626,17 @@ describe("readBack", () => {
     const links = new Map([...g.plan.links].map(([k, l]) => [k, l.lag === 2 ? { ...l, lag: 3 } : l.type === "SF" ? { ...l, type: "FS" as const } : l]));
     expect(() => readBack(g.bytes, OUT, { ...g, plan: { ...g.plan, links } })).toThrow(
       /link Task 3 Build → Task 7 Parallel reads back as SS\+2, not SS\+3[\s\S]*link Task 8 Late → Task 9 Back reads back as SF, not FS/,
+    );
+  });
+
+  it("refuses bytes whose people or assignees differ", () => {
+    const g = convert(source(mutate(3, named("Lab"))));
+    const [lab] = peopleOf(g.plan);
+    const renamed = new Map([...g.plan.people.persons].map(([k, v]) => [k, v === null ? v : { ...v, n: `${v.n} B` }]));
+    expect(() => readBack(g.bytes, OUT, { ...g, plan: { ...g.plan, people: { ...g.plan.people, persons: renamed } } })).toThrow(/- people reads back as .*"Lab".*, not .*"Lab B"/);
+    const assignees = new Map([...g.plan.people.assignees].map(([k, a]): [ItemId, readonly PersonId[] | null] => [k, g.plan.items.get(k)?.name === "Build" ? null : a]));
+    expect(() => readBack(g.bytes, OUT, { ...g, plan: { ...g.plan, people: { ...g.plan.people, assignees } } })).toThrow(
+      `- Task 3 Build: assignees reads back as ["${lab.id}"], not null`,
     );
   });
 
