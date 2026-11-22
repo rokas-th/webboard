@@ -52,11 +52,15 @@ The server runs with `npm ci --prefix server`, then `cp server/.dev.vars.example
 npm test                               # interface and domain (Vitest, jsdom)
 npm run lint
 npx tsc -b                             # type check
+npm run build                          # the script tests and the layout probe read dist/
+npx playwright install chromium-headless-shell  # once: the browser the layout probe drives
 npm run test:scripts                   # Node tests for scripts/ and the Linux installer test
 npm ci --prefix server                 # once, before the server tests
 npm test --prefix server               # Worker and Durable Objects in workerd
 cargo test --workspace --no-fail-fast  # store, holidays, sync client, Tauri commands
 ```
+
+`src/log/budget.test.ts` holds timing budgets measured on an Apple silicon Mac and runs on macOS only. On a slower or busy machine it can fail with nothing wrong: run it again on its own (`npx vitest run src/log/budget.test.ts`) before reading it as a regression.
 
 Holiday tests that call the real services are marked `#[ignore]` and run only on request (`cargo test -p webboard-core --test holidays -- --ignored`). One of them appends a report to the file named by `WEBBOARD_PROBES_OUT`, which must be an absolute path; it fails if that variable is unset or relative.
 
