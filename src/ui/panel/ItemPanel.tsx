@@ -2,6 +2,7 @@ import { useContext, useEffect, useId, useRef, useState, type KeyboardEvent as R
 import { fmtNear, isCalendarDate, toIso, type Day, type IsoDate } from "../../domain/dates";
 import { MAX_TASK_DUR, type Horizon, type Item, type ItemId, type PlanState, type Schedule, type Status } from "../../domain/model";
 import { statusPreds } from "../../domain/derive";
+import { stepModeOf } from "../../domain/steps";
 import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
@@ -183,7 +184,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
         onCommit={(next) => isCalendarDate(next) && schedule({ start: next })}
         onUnreadable={dateUnreadable}
       />
-      {sc.start === null && <HorizonField item={it} horizon={sc.horizon} readOnly={p.readOnly} run={p.run} />}
+      {sc.start === null && stepModeOf(p.view.plan) === "dates" && <HorizonField item={it} horizon={sc.horizon} readOnly={p.readOnly} run={p.run} />}
       {!milestone && (
         <>
           <label>Duration</label>

@@ -1,7 +1,8 @@
 import { q, workingDays } from "../../actions/copy";
 import { regionKey } from "../../domain/calendar";
 import { fmtShort } from "../../domain/dates";
-import type { ItemId, PlanState } from "../../domain/model";
+import type { ItemId, PlanState, StepId } from "../../domain/model";
+import { stepsOf, type Step } from "../../domain/steps";
 import type { ActionId, UnitKey } from "../../log/types";
 import { choiceOf, heldItems, type Choice } from "../../plan/choices";
 import { decodeAs, key, parseKey } from "../../plan/units";
@@ -101,8 +102,21 @@ export function describeUnit(u: UnitKey, v: unknown, plan: PlanState, labels: Re
       if (label === undefined) throw new Error(`No label for action ${k.arg}`);
       return `this change is undone: ${label}`;
     }
+    case "ws": {
+      const s = decodeAs("step", u, v);
+      if (s === null) return "removed";
+      return `step ${q(s.n)} · ${s.c}${s.d === true ? " · completes" : ""}${s.l === undefined ? "" : ` · limit ${s.l}`}`;
+    }
+    case "wi": {
+      const ref = decodeAs("stepRef", u, v);
+      if (ref === null) return "no step";
+      const s = liveStep(plan, ref);
+      return s === undefined ? "in a removed step" : `in step ${q(s.name)}`;
+    }
   }
 }
+
+const liveStep = (plan: PlanState, id: StepId): Step | undefined => stepsOf(plan).find((s) => s.id === id);
 
 export function unitSubject(u: UnitKey, plan: PlanState): string {
   const k = parseKey(u);
@@ -112,6 +126,7 @@ export function unitSubject(u: UnitKey, plan: PlanState): string {
     case "s":
     case "p":
     case "r":
+    case "wi":
       return q(nameOf(plan, k.arg));
     case "l": {
       if (k.to === undefined) throw new Error(`Link ${u} has no successor`);
@@ -131,12 +146,16 @@ export function unitSubject(u: UnitKey, plan: PlanState): string {
     }
     case "a":
       return "The change";
+    case "ws": {
+      const s = liveStep(plan, k.arg);
+      return s === undefined ? "A removed step" : `The step ${q(s.name)}`;
+    }
   }
 }
 
 export function itemChoices(view: PlanView, item: ItemId): Choice[] {
   const links = [...view.plan.links.values()].filter((l) => l.from === item || l.to === item).map((l) => key.l(l.from, l.to));
-  const units = [key.e(item), key.n(item), key.s(item), key.p(item), key.r(item), ...links];
+  const units = [key.e(item), key.n(item), key.s(item), key.p(item), key.r(item), key.wi(item), ...links];
   const found = new Set(units.map((u) => choiceOf(view.choices, u)).filter((c): c is Choice => c !== null));
   return view.choices.filter((c) => found.has(c));
 }

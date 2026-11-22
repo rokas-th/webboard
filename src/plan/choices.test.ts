@@ -392,6 +392,34 @@ describe("choices", () => {
     expect([...held]).toEqual([]);
   });
 
+  it("concurrent renames of one step raise a choice on ws:<id> and resolve", () => {
+    const step = (n: string): unknown => ({ n, c: "amber", o: "a1V" });
+    const { cs, held } = run(act("s0", ["a0"], [w("ws:qa", step("QA"))], mac), act("m1", ["s0"], [w("ws:qa", step("Review"))], mac), act("p1", ["s0"], [w("ws:qa", step("Check"))], iph));
+    const c = only(cs);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["ws:qa"]);
+    expect(c.items).toEqual([]);
+    expect(labels(c)).toEqual(["Mac", "iPhone"]);
+    expect([...held]).toEqual([]);
+    const resolved = run(
+      act("s0", ["a0"], [w("ws:qa", step("QA"))], mac),
+      act("m1", ["s0"], [w("ws:qa", step("Review"))], mac),
+      act("p1", ["s0"], [w("ws:qa", step("Check"))], iph),
+      act("r1", ["m1", "p1"], [w("ws:qa", step("Check"), "resolution")], { dev: "d1", meta: { resolves: c.id } }),
+    );
+    expect(resolved.cs).toEqual([]);
+    expect(resolved.plan.workflow.steps.get("qa")).toEqual(step("Check"));
+  });
+
+  it("concurrent step moves of one item raise an items choice naming the item", () => {
+    const { cs, held } = run(act("m1", ["a0"], [w("wi:A", "now")], mac), act("p1", ["a0"], [w("wi:A", "next")], iph));
+    const c = only(cs);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["wi:A"]);
+    expect(c.items).toEqual(["A"]);
+    expect([...held]).toEqual([]);
+  });
+
   it("orders choices by their first participant", () => {
     const { cs } = run(
       act("m1", ["a0"], [w("n:A", "Alpha one")], mac),

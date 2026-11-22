@@ -3,7 +3,8 @@ import * as Y from "yjs";
 import { Refused } from "../actions/intents";
 import type { Closure } from "../domain/calendar";
 import { derive } from "../domain/derive";
-import { linkKey, type Baseline, type Item, type Link, type PlanState } from "../domain/model";
+import { stepModeOf } from "../domain/steps";
+import { linkKey, type Baseline, type Item, type ItemId, type Link, type PlanState, type StepId } from "../domain/model";
 import { LogState } from "../log/state";
 import type { Action, Write } from "../log/types";
 import { choices } from "../plan/choices";
@@ -105,6 +106,10 @@ function renamed(plan: PlanState, back: (id: string) => string, id: string): Pla
         { ...b, id: back(b.id), dates: Object.fromEntries(Object.entries(b.dates).map(([k, d]) => [back(k), d])) },
       ]),
     ),
+    workflow: {
+      steps: plan.workflow.steps,
+      items: new Map([...plan.workflow.items].map(([item, step]): [ItemId, StepId | null] => [back(item), step])),
+    },
   };
 }
 
@@ -333,6 +338,56 @@ describe("fresh ids", () => {
     expect(r.action.meta).toEqual({ imported: "Bridge.webboard" });
     expect(r.action.par).toEqual([]);
     expect(r.action.w.some((w) => w.u.startsWith("a:"))).toBe(false);
+  });
+
+  it("a .webboard with ws and wi round-trips them (item ids remapped, step ids kept), format version 1", () => {
+    const stepped: readonly Action[] = [
+      ...FRESH_SOURCE,
+      act(
+        "a1",
+        ["a0"],
+        [own("ws:review", { n: "Review", c: "violet", o: "a1V", l: 4 }), own("ws:later", null), own("wi:T1", "review"), own("wi:T2", null)],
+        { dev: "dev-A" },
+      ),
+    ];
+    const bytes = fileOf(stepped, FRESH_NOTES);
+    expect(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(4, true)).toBe(1);
+    const source = projectPlan(SOURCE_ID, logOf(stepped));
+    const r = importOf(bytes);
+    const plan = importedPlan(r);
+    const t1 = r.idMap.get("T1");
+    const t2 = r.idMap.get("T2");
+    if (t1 === undefined || t2 === undefined) throw new Error("T1 or T2 has no new id");
+    expect(new Set(r.idMap.keys())).toEqual(new Set(["G", "T1", "T2", "C1", "B1"]));
+    expect(plan.workflow).toEqual({
+      steps: new Map([
+        ["later", null],
+        ["review", { n: "Review", c: "violet", o: "a1V", l: 4 }],
+      ]),
+      items: new Map<ItemId, StepId | null>([
+        [t1, "review"],
+        [t2, null],
+      ]),
+    });
+    expect(renamed(plan, inverse(r.idMap), SOURCE_ID)).toEqual(source);
+    const stepWrites = r.action.w.filter((w) => w.u.startsWith("ws:") || w.u.startsWith("wi:"));
+    expect(new Map(stepWrites.map((w) => [w.u, w]))).toEqual(
+      new Map([
+        ["ws:later", own("ws:later", null)],
+        ["ws:review", own("ws:review", { n: "Review", c: "violet", o: "a1V", l: 4 })],
+        [`wi:${t1}`, own(`wi:${t1}`, "review")],
+        [`wi:${t2}`, own(`wi:${t2}`, null)],
+      ]),
+    );
+    expect(stepWrites).toHaveLength(4);
+  });
+
+  it("a plan without units imports by dates", () => {
+    const r = importOf(freshFile());
+    const plan = importedPlan(r);
+    expect(plan.workflow).toEqual({ steps: new Map(), items: new Map() });
+    expect(r.action.w.some((w) => w.u.startsWith("ws:") || w.u.startsWith("wi:"))).toBe(false);
+    expect(stepModeOf(plan)).toBe("dates");
   });
 
   it("a second import shares no id with the first", () => {

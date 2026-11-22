@@ -14,8 +14,7 @@ const rowOrder = (view: PlanView, collapsed: ReadonlySet<ItemId>): ItemId[] => t
 export function tabOrder(view: PlanView, ui: Pick<UiState, "view" | "collapsed">): readonly ItemId[] {
   if (ui.view === "timeline") return rowOrder(view, ui.collapsed);
   if (ui.view === "list") return listOrder(view);
-  const { cards } = columnsOf(view);
-  return [...cards.now, ...cards.next, ...cards.later].map((i) => i.id);
+  return columnsOf(view).shown.flatMap((c) => c.items.map((i) => i.id));
 }
 
 export function phoneOrder(view: PlanView, tab: PhoneTab, collapsed: ReadonlySet<ItemId>): readonly ItemId[] {

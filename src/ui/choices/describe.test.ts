@@ -121,6 +121,21 @@ describe("describeUnit", () => {
     expect(describeUnit("a:x1", false, plan, new Map([["x1", "Moved “Review”"]]))).toBe("this change is undone: Moved “Review”");
     expect(() => describeUnit("a:x1", false, plan, NONE)).toThrow(new Error("No label for action x1"));
   });
+
+  it("reads a step and an item's step", async () => {
+    const base = await groupsPlan();
+    const plan: PlanState = { ...base, workflow: { steps: new Map([["qa", { n: "QA", c: "sky", o: "a1V" }], ["later", null]]), items: new Map() } };
+    expect(describeUnit("ws:qa", { n: "QA", c: "sky", o: "a1V" }, plan, NONE)).toBe("step “QA” · sky");
+    expect(describeUnit("ws:qa", { n: "Ship", c: "lime", o: "a1V", d: true }, plan, NONE)).toBe("step “Ship” · lime · completes");
+    expect(describeUnit("ws:qa", { n: "QA", c: "sky", o: "a1V", l: 4 }, plan, NONE)).toBe("step “QA” · sky · limit 4");
+    expect(describeUnit("ws:done", { n: "Done", c: "lime", o: "a3", d: true, l: 12 }, plan, NONE)).toBe("step “Done” · lime · completes · limit 12");
+    expect(describeUnit("ws:qa", null, plan, NONE)).toBe("removed");
+    expect(describeUnit("wi:a", null, plan, NONE)).toBe("no step");
+    expect(describeUnit("wi:a", "qa", plan, NONE)).toBe("in step “QA”");
+    expect(describeUnit("wi:a", "now", plan, NONE)).toBe("in step “Now”");
+    expect(describeUnit("wi:a", "later", plan, NONE)).toBe("in a removed step");
+    expect(describeUnit("wi:a", "gone", plan, NONE)).toBe("in a removed step");
+  });
 });
 
 describe("unitSubject", () => {
@@ -140,6 +155,17 @@ describe("unitSubject", () => {
     expect(unitSubject("b:B2", plan)).toBe("A removed baseline");
     expect(unitSubject("a:x1", plan)).toBe("The change");
     expect(() => unitSubject("n:zz", plan)).toThrow(new Error("No item zz"));
+  });
+
+  it("names a step and an item's step", async () => {
+    const base = (await made(SEED)).session.view().plan;
+    const plan: PlanState = { ...base, workflow: { steps: new Map([["qa", { n: "QA", c: "sky", o: "a1V" }], ["later", null]]), items: new Map([["a", "qa"]]) } };
+    expect(unitSubject("ws:qa", plan)).toBe("The step “QA”");
+    expect(unitSubject("ws:next", plan)).toBe("The step “Next”");
+    expect(unitSubject("ws:later", plan)).toBe("A removed step");
+    expect(unitSubject("ws:gone", plan)).toBe("A removed step");
+    expect(unitSubject("wi:a", plan)).toBe("“Review”");
+    expect(() => unitSubject("wi:zz", plan)).toThrow(new Error("No item zz"));
   });
 });
 
@@ -170,6 +196,27 @@ describe("reachability helpers", () => {
     expect(view.choices).toHaveLength(2);
     expect(itemChoices(view, "A").map((c) => c.id)).toEqual(view.choices.map((c) => c.id));
     expect(itemChoices(view, "B").map((c) => c.units)).toEqual([["l:A>B"]]);
+  });
+
+  it("lists a clash on an item's step under that item, and a step clash under no item", async () => {
+    const t = await made(AB, {
+      clashes: [
+        { unit: "wi:A", mac: "next", iphone: "later" },
+        { unit: "ws:qa", mac: { n: "QA", c: "sky", o: "a1V" }, iphone: { n: "Check", c: "sky", o: "a1V" } },
+      ],
+    });
+    const view = t.session.view();
+    expect(view.choices).toHaveLength(2);
+    const step = view.choices.find((c) => c.units.includes("ws:qa"));
+    const item = view.choices.find((c) => c.units.includes("wi:A"));
+    if (step === undefined || item === undefined) throw new Error("fixture: expected a step and an item-step choice");
+    expect(item.kind).toBe("items");
+    expect(item.items).toEqual(["A"]);
+    expect(step.kind).toBe("items");
+    expect(step.items).toEqual([]);
+    expect(itemChoices(view, "A")).toEqual([item]);
+    expect(itemChoices(view, "B")).toEqual([]);
+    expect([...view.held]).toEqual([]);
   });
 
   it("finds the choice that holds the held items", async () => {

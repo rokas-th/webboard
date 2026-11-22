@@ -1,7 +1,8 @@
-import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing";
+import { generateNKeysBetween } from "fractional-indexing";
 import { closureTooLong, regionKey, workCalendar, type Calendar, type Closure, type Tuning, type WorkCalendar } from "../domain/calendar";
 import { FIRST_PLAN_DATE, fmtNear, inPlanWindow, LAST_PLAN_DATE, isCalendarDate, toDay, toIso, type Day, type IsoDate } from "../domain/dates";
 import { derive, goneSet, lockOf, schedView, type Derived } from "../domain/derive";
+import { stepModeOf } from "../domain/steps";
 import { linkKey, MAX_LAG, MAX_TASK_DUR, type Item, type ItemId, type Link, type Place, type PlanState, type Schedule } from "../domain/model";
 import { lagThatHolds, push, recalendar, wouldLoop, type Conflict, type PushResult, type RecalResult, type Sched, type SchedView, type Stop } from "../domain/schedule";
 import { newId } from "../log/ids";
@@ -13,7 +14,13 @@ import * as codec from "../plan/units";
 import { key, validateWrite } from "../plan/units";
 import { items, label, pushSuffix, q, refusal, sentence, toastOf } from "./copy";
 import { HeldRefused, Refused, type Built, type Ctx, type Intent, type NoteCopy, type Preview } from "./intents";
+import { hasPredecessor, itemOf, live, notInsideTrash } from "./lookup";
+import { normalizeName } from "./names";
 import { isCalendarWrite, settleText, unique } from "./settle";
+import { slotAfter } from "./slot";
+import { createStepWrites, duplicateStepWrites, stepDraft, switched } from "./steps";
+
+export { normalizeName };
 
 export interface Derivation {
   writes: readonly Write[];
@@ -32,39 +39,6 @@ interface Draft {
 }
 
 const own = (u: UnitKey, v: unknown): Write => ({ u, v, c: "own" });
-
-export function normalizeName(raw: string): string {
-  const name = raw.replace(/\s+/g, (run) => (/[\n\r\t]/.test(run) ? " " : run)).trim();
-  if (name.length === 0) throw new Refused(refusal.emptyName);
-  return name;
-}
-
-const itemOf = (plan: PlanState, id: ItemId): Item => {
-  const it = plan.items.get(id);
-  if (it === undefined) throw new Error(`Item ${id} is not in this plan`);
-  return it;
-};
-
-const trashRootAbove = (plan: PlanState, it: Item): Item | null => {
-  const above = (at: ItemId | null, found: Item | null): Item | null => {
-    if (at === null) return found;
-    const p = itemOf(plan, at);
-    return above(p.place.parent, p.trashed ? p : found);
-  };
-  return above(it.place.parent, null);
-};
-
-const notInsideTrash = (plan: PlanState, it: Item): Item => {
-  const root = trashRootAbove(plan, it);
-  if (root !== null) throw new Refused(refusal.inside(it.name, root.name));
-  return it;
-};
-
-const live = (plan: PlanState, id: ItemId): Item => {
-  const it = notInsideTrash(plan, itemOf(plan, id));
-  if (it.trashed) throw new Refused(refusal.trashed(it.name));
-  return it;
-};
 
 const scheduleOf = (it: Item): Schedule => {
   if (it.schedule === null) throw new Error(`Group ${it.id} has no schedule`);
@@ -103,8 +77,6 @@ const bounded = (s: Schedule): Schedule => {
 
 const schedWrite = (id: ItemId, s: Schedule): Write => own(key.s(id), codec.sched.enc(bounded(s)));
 
-const hasPredecessor = (plan: PlanState, id: ItemId): boolean => liveLinks(plan).some((l) => l.to === id);
-
 const untrashedDescendants = (plan: PlanState, group: ItemId): Item[] =>
   childrenOf(plan, group)
     .filter((c) => !c.trashed)
@@ -119,22 +91,13 @@ interface Ordered {
 }
 
 const orderAfter = (plan: PlanState, parent: ItemId | null, after: ItemId | null, self: ItemId | null): Ordered => {
-  const sibs = childrenOf(plan, parent).filter((s) => s.id !== self);
-  const a = after === null ? null : sibs.find((s) => s.id === after);
-  if (a === undefined) throw new Error(`Item ${after} is not a child of ${parent ?? "the top level"}`);
-  const at = a === null ? 0 : sibs.indexOf(a) + 1;
-  const next = at < sibs.length ? sibs[at] : null;
-  if (a === null || next === null || next.place.order !== a.place.order) {
-    return { order: generateKeyBetween(a?.place.order ?? null, next?.place.order ?? null), rekeyed: [] };
-  }
-  const first = sibs.findIndex((s) => s.place.order === a.place.order);
-  const run = sibs.filter((s) => s.place.order === a.place.order);
-  const last = first + run.length;
-  const keys = generateNKeysBetween(first > 0 ? sibs[first - 1].place.order : null, last < sibs.length ? sibs[last].place.order : null, run.length + 1);
-  const slot = at - first;
+  const sibs = childrenOf(plan, parent)
+    .filter((s) => s.id !== self)
+    .map((s) => ({ id: s.id, order: s.place.order }));
+  const slot = slotAfter(sibs, after, () => new Error(`Item ${after} is not a child of ${parent ?? "the top level"}`));
   return {
-    order: keys[slot],
-    rekeyed: run.map((s, k) => own(key.p(s.id), codec.place.enc({ parent, order: keys[k < slot ? k : k + 1] }))),
+    order: slot.order,
+    rekeyed: slot.rekeyed.map((r) => own(key.p(r.id), codec.place.enc({ parent, order: r.order }))),
   };
 };
 
@@ -318,11 +281,12 @@ const duplicateDraft = (ctx: Ctx, id: ItemId): Draft => {
   const links = liveLinks(plan)
     .filter((l) => ids.has(l.to) && !gone.has(l.from))
     .map((l) => own(key.l(ids.has(l.from) ? copyOf(l.from) : l.from, copyOf(l.to)), codec.link.enc({ type: l.type, lag: l.lag })));
+  const copies = originals.map((o): NoteCopy => [o.id, copyOf(o.id)]);
   return {
-    own: [...itemWrites, ...ordered.rekeyed, ...links],
+    own: [...itemWrites, ...ordered.rekeyed, ...links, ...duplicateStepWrites(plan, copies)],
     roots: [],
     newNotes: originals.map((o) => copyOf(o.id)),
-    noteCopies: originals.map((o): NoteCopy => [o.id, copyOf(o.id)]),
+    noteCopies: copies,
     ...plain(label.duplicated(it.kind, it.name, name, originals.length - 1, links.length)),
   };
 };
@@ -333,6 +297,7 @@ const scheduleDraft = (ctx: Ctx, id: ItemId, set: Partial<Schedule>): Draft => {
   const plan = ctx.view.plan;
   const it = live(plan, id);
   const sc = scheduleOf(it);
+  if (set.horizon !== undefined && stepModeOf(plan) === "steps") throw new Refused(refusal.horizonInSteps);
   if (set.dur !== undefined) checkDur(it, set.dur);
   checkStart(set.start);
   if (set.progress !== undefined && (!Number.isInteger(set.progress) || set.progress < 0 || set.progress > 100)) {
@@ -393,6 +358,7 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
       const placed = own(key.p(id), codec.place.enc({ parent: intent.parent, order: ordered.order }));
       const base = [own(key.e(id), codec.existence.enc({ k: intent.kind, t: false })), own(key.n(id), codec.name.enc(name)), placed, ...ordered.rekeyed];
       const text = label.added(intent.kind, name);
+      const stepped = createStepWrites(ctx, id, intent.kind, intent.step);
       if (intent.kind === "group") {
         if (intent.start !== null || intent.dur !== undefined) throw new Error("A group has no start or duration");
         return { own: base, roots: [], newNotes: [id], ...plain(text) };
@@ -403,12 +369,18 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
       checkStart(intent.start);
       const cal = workCalendar(plan.calendar);
       const start = intent.start === null ? null : toIso(cal.snapF(toDay(intent.start)));
+      const made = {
+        own: [...base, schedWrite(id, { start, dur, status: stepped.done ? "done" : "todo", progress: stepped.done ? 100 : 0, horizon: "later" }), ...stepped.own],
+        label: text,
+        sentences: [],
+      };
+      const d = intent.step === undefined ? made : switched(ctx, made);
       return {
-        own: [...base, schedWrite(id, { start, dur, status: "todo", progress: 0, horizon: "later" })],
+        own: d.own,
         roots: [],
         newNotes: [id],
         ownStarts: start === null ? [] : [key.s(id)],
-        ...plain(text),
+        ...plain(d.label, d.sentences),
       };
     }
     case "rename": {
@@ -542,6 +514,11 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
       return fixDraft(ctx, intent.conflict, intent.how);
     case "duplicate":
       return duplicateDraft(ctx, intent.item);
+    case "step":
+    case "toStep": {
+      const d = stepDraft(ctx, intent);
+      return { own: d.own, ...none, ...plain(d.label, d.sentences) };
+    }
     case "baseline": {
       if (intent.op === "save") {
         const name = normalizeName(intent.name);

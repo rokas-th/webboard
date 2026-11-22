@@ -5,7 +5,7 @@ import { planRules } from "./rules";
 import { derive } from "../domain/derive";
 import { LogState } from "../log/state";
 import type { Action, Cause, Write } from "../log/types";
-import type { Item, PlanState } from "../domain/model";
+import { EMPTY_WORKFLOW, type Item, type PlanState } from "../domain/model";
 import type { HolidayYear } from "../domain/calendar";
 import { act } from "../test/act";
 
@@ -118,6 +118,7 @@ describe("projectPlan", () => {
         holidays: new Map([[2027, zh]]),
       },
       baselines: new Map([["B1", { id: "B1", name: "Before", at: "2026-11-08", dates: { T: { start: "2026-11-16", dur: 3 } } }]]),
+      workflow: EMPTY_WORKFLOW,
     };
     expect(projectPlan("P", log)).toEqual(expected);
   });
@@ -137,6 +138,57 @@ describe("projectPlan", () => {
       new PlanIncomplete("Plan P is not complete yet: it has no holiday region"),
     );
     expect(projectPlan("P", logOf(act("a0", [], [w("pn", "Plan"), w("cw", [1]), w("cr", null)]))).calendar.region).toBeNull();
+  });
+
+  it("reads ws and wi into workflow, nulls kept", () => {
+    const log = logOf(
+      act("a0", [], [
+        ...plan0,
+        ...item("T", "task", "Spec", null, "a0", sched("2026-11-16")),
+        ...item("M", "milestone", "Ship", null, "a1", sched("2026-11-30", 0)),
+        ...item("U", "task", "Draft", null, "a2", sched(null)),
+        w("ws:review", { n: "Review", c: "violet", o: "a1V", l: 3 }),
+        w("ws:later", null),
+        w("ws:done", { n: "Shipped", c: "lime", o: "a3", d: true }),
+        w("wi:T", "review"),
+        w("wi:M", null),
+      ]),
+    );
+    const plan = projectPlan("P", log);
+    expect(plan.workflow).toEqual({
+      steps: new Map([
+        ["done", { n: "Shipped", c: "lime", o: "a3", d: true }],
+        ["later", null],
+        ["review", { n: "Review", c: "violet", o: "a1V", l: 3 }],
+      ]),
+      items: new Map([
+        ["M", null],
+        ["T", "review"],
+      ]),
+    });
+    expect([...plan.workflow.steps.keys()]).toEqual(["done", "later", "review"]);
+    expect([...plan.workflow.items.keys()]).toEqual(["M", "T"]);
+    expect(projectPlan("P", logOf(act("a0", [], [...plan0, ...item("T", "task", "Spec", null, "a0", sched(null))]))).workflow).toEqual(EMPTY_WORKFLOW);
+    const moved = applyWrites(plan, [w("wi:U", "later"), w("ws:later", { n: "Later", c: "slate", o: "a2" })]);
+    expect(moved.workflow.items.get("U")).toBe("later");
+    expect(moved.workflow.steps.get("later")).toEqual({ n: "Later", c: "slate", o: "a2" });
+    expect(applySchedules(plan, [w("s:T", sched("2026-11-18"))]).workflow).toEqual(plan.workflow);
+  });
+
+  it("a wi on a group throws", () => {
+    const log = logOf(act("a0", [], [...plan0, ...item("G", "group", "Phase", null, "a0"), w("wi:G", "now")]));
+    expect(() => projectPlan("P", log)).toThrow("Group G has a step");
+  });
+
+  it("a wi of an item no longer in the plan is not read", () => {
+    const c = act("c", ["a0"], item("X", "task", "Draft", null, "a5", sched("2026-11-16")));
+    const m = act("m", ["c"], [w("wi:X", "next")], { dev: "d2" });
+    const u = act("u", ["m"], [w("a:c", false, "undo")], { meta: { undo: "c" } });
+    const log = logOf(act("a0", [], plan0), c, m, u);
+    expect(log.unit("wi:X")?.value).toBe("next");
+    const plan = projectPlan("P", log);
+    expect(plan.items.has("X")).toBe(false);
+    expect(plan.workflow.items).toEqual(new Map());
   });
 
   it("sorts siblings by order, then id", () => {

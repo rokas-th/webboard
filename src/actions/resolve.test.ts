@@ -260,6 +260,31 @@ describe("buildResolve", () => {
   });
 });
 
+describe("resolving a step choice", () => {
+  const ONE: Write[] = [...item("A", "task", "Alpha", null, "a0", sched("2026-11-16", 2)), w("ws:qa", { n: "QA", c: "amber", o: "a1V" })];
+
+  it("concurrent renames of one step raise a choice on ws:<id> and resolve", () => {
+    const ctx = ctxFrom(ONE);
+    const mine = act("m1", ["a0"], [w("ws:qa", { n: "Review", c: "amber", o: "a1V" })], mac);
+    const theirs = act("p1", ["a0"], [w("ws:qa", { n: "Check", c: "amber", o: "a1V" })], iph);
+    const both = add(ctx, mine, theirs);
+    const live = both.view.plan.workflow.steps.get("qa");
+    if (live === undefined || live === null) throw new Error("no live qa");
+    const c = only(both);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["ws:qa"]);
+    expect(c.items).toEqual([]);
+    const b = buildResolve(both, c, { side: sideKey(c, "iPhone") }, ON);
+    expect(b.action.w).toEqual([w("ws:qa", { n: "Check", c: "amber", o: "a1V" }, "resolution")]);
+    expect(b.action.lbl).toBe("Kept the iPhone version of the step “Check”");
+    const after = applied(both, b);
+    expect(after.view.choices).toEqual([]);
+    expect(after.view.plan.workflow.steps.get("qa")).toEqual({ n: "Check", c: "amber", o: "a1V" });
+    const settled = buildAction(both, { t: "step", op: "rename", step: "qa", name: "Final" });
+    expect(settled.toast).toBe(`Renamed step “${live.n}” to “Final”. The step “Final” is settled.`);
+  });
+});
+
 describe("resolving a calendar choice", () => {
   const CAL: Write[] = [
     ...item("T", "task", "T", null, "a0", sched("2026-11-20", 2)),

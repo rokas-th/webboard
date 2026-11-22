@@ -1,13 +1,13 @@
 import type { Calendar, HolidayYear } from "../domain/calendar";
 import type { IsoDate } from "../domain/dates";
-import type { BaselineId, ItemId, ItemKind, LinkKey, LinkType, Schedule } from "../domain/model";
+import type { BaselineId, ItemId, ItemKind, LinkKey, LinkType, Schedule, StepColour, StepId } from "../domain/model";
 import type { Conflict, Stop } from "../domain/schedule";
 import type { LogState } from "../log/state";
 import type { Action, DeviceId, SessionId } from "../log/types";
 import type { PlanView } from "../store/doc";
 
 export type Intent =
-  | { t: "create"; kind: ItemKind; name: string; parent: ItemId | null; after: ItemId | null; start: IsoDate | null; dur?: number }
+  | { t: "create"; kind: ItemKind; name: string; parent: ItemId | null; after: ItemId | null; start: IsoDate | null; dur?: number; step?: StepId }
   | { t: "rename"; item: ItemId; name: string }
   | { t: "schedule"; item: ItemId; set: Partial<Schedule> }
   | { t: "move"; items: readonly ItemId[]; days: number }
@@ -24,7 +24,20 @@ export type Intent =
   | { t: "baseline"; op: "rename"; id: BaselineId; name: string }
   | { t: "baseline"; op: "remove"; id: BaselineId }
   | { t: "planName"; name: string }
-  | { t: "duplicate"; item: ItemId };
+  | { t: "duplicate"; item: ItemId }
+  | StepIntent
+  | ToStepIntent;
+
+export type StepIntent =
+  | { t: "step"; op: "add"; name: string; colour: StepColour; after: StepId | null }
+  | { t: "step"; op: "rename"; step: StepId; name: string }
+  | { t: "step"; op: "colour"; step: StepId; colour: StepColour }
+  | { t: "step"; op: "reorder"; step: StepId; after: StepId | null }
+  | { t: "step"; op: "limit"; step: StepId; limit: number | null }
+  | { t: "step"; op: "completes"; step: StepId; completes: boolean }
+  | { t: "step"; op: "delete"; step: StepId; to: StepId | null };
+
+export type ToStepIntent = { t: "toStep"; items: readonly ItemId[]; step: StepId };
 
 export interface Preview {
   itemsChanged: number;

@@ -1,6 +1,21 @@
 import type { Calendar, Closure, HolidayYear, Tuning } from "../domain/calendar";
 import type { IsoDate } from "../domain/dates";
-import { linkKey, type Baseline, type BaselineId, type Item, type ItemId, type ItemKind, type Link, type LinkKey, type PlanId, type PlanState, type Schedule } from "../domain/model";
+import {
+  linkKey,
+  type Baseline,
+  type BaselineId,
+  type Item,
+  type ItemId,
+  type ItemKind,
+  type Link,
+  type LinkKey,
+  type PlanId,
+  type PlanState,
+  type Schedule,
+  type StepId,
+  type StepValue,
+  type Workflow,
+} from "../domain/model";
 import { need } from "../domain/need";
 import type { LogState } from "../log/state";
 import type { UnitKey, Write } from "../log/types";
@@ -176,13 +191,28 @@ const build = (id: PlanId, t: Table): PlanState => {
       return [p.arg, v === null ? null : { id: p.arg, ...v }];
     }),
   );
+  const items = projectItems(itemIds(parsed), t);
+  const byArg = (a: Parsed, b: Parsed): number => cmp(a.arg, b.arg);
+  const workflow: Workflow = {
+    steps: new Map(of("ws").sort(byArg).map((p): [StepId, StepValue | null] => [p.arg, decodeAs("step", p.u, p.v)])),
+    items: new Map(
+      of("wi")
+        .filter((p) => items.has(p.arg))
+        .sort(byArg)
+        .map((p): [ItemId, StepId | null] => {
+          if (items.get(p.arg)?.kind === "group") throw new Error(`Group ${p.arg} has a step`);
+          return [p.arg, decodeAs("stepRef", p.u, p.v)];
+        }),
+    ),
+  };
   const plan: PlanState = {
     id,
     name: decodeAs("name", "pn", t.live.get("pn")),
-    items: projectItems(itemIds(parsed), t),
+    items,
     links: new Map(links),
     calendar,
     baselines: new Map(baselines),
+    workflow,
   };
   tables.set(plan, t);
   return plan;

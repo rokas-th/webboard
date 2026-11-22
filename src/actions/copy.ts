@@ -1,5 +1,5 @@
 import { CLOSURE_TOO_LONG } from "../domain/calendar";
-import type { Horizon, ItemKind, LinkType, Status } from "../domain/model";
+import type { Horizon, ItemKind, LinkType, Status, StepColour } from "../domain/model";
 import type { Lock } from "../domain/schedule";
 import type { DeviceId } from "../log/types";
 
@@ -87,12 +87,22 @@ export const label = {
     const parts = [...(n === 0 ? [] : [items(n)]), ...(links === 0 ? [] : [count(links, "link", "links")])];
     return `Duplicated ${kind} ${q(from)} as ${q(to)}${parts.length === 0 ? "" : " with " + parts.join(" and ")}`;
   },
+  stepAdded: (name: string): string => `Added step ${q(name)}`,
+  stepRenamed: (from: string, to: string): string => `Renamed step ${q(from)} to ${q(to)}`,
+  stepColoured: (name: string, colour: StepColour): string => `Coloured step ${q(name)} ${colour}`,
+  stepReordered: (name: string): string => `Reordered step ${q(name)}`,
+  stepLimit: (name: string, limit: number | null): string => (limit === null ? `Removed the limit of ${q(name)}` : `Set the limit of ${q(name)} to ${limit}`),
+  stepCompletes: (name: string, on: boolean): string => `${q(name)} ${on ? "now completes" : "no longer completes"} items`,
+  stepDeleted: (name: string, moved: number, to: string | null): string =>
+    to === null || moved === 0 ? `Deleted step ${q(name)}` : `Deleted step ${q(name)} and moved ${items(moved)} to ${q(to)}`,
+  toStep: (what: string, step: string): string => `Moved ${what} to ${q(step)}`,
 };
 
 export const sentence = {
   trashUndo: "Undo brings it back.",
   trashUndoMany: "Undo brings them back.",
   calendarUndo: "Undo puts the old one back.",
+  switched: "Cards now keep their steps. Undo goes back to dates.",
 };
 
 export const refusal = {
@@ -125,4 +135,14 @@ export const refusal = {
   fixed: "This conflict is already fixed.",
   doneProgress: "A done item is at 100 %.",
   doneSetProgress: (name: string): string => `${q(name)} is done. Mark it in progress to set its progress.`,
+  stepNameLong: "A step name has at most 32 characters.",
+  stepNameTaken: (name: string): string => `There is already a step named ${q(name)}.`,
+  lastStep: "A plan keeps at least one step.",
+  stepNotEmpty: (name: string, n: number, hidden: number): string =>
+    `${q(name)} holds ${items(n)}${hidden === 0 ? "" : hidden === n ? ` that ${n === 1 ? "is" : "are"} done or in the Trash` : `, ${hidden} of them done or in the Trash`}. Choose a step to move them to.`,
+  lastOpenStep: "A plan keeps at least one step that does not complete items.",
+  stepHoldsOpen: (name: string, n: number): string => `${q(name)} holds ${items(n)} that ${n === 1 ? "is not done. Move it" : "are not done. Move them"} to another step first.`,
+  noOpenStep: "This plan has no step for new items. Add a step first.",
+  stepLimit: "A limit is a whole number from 1 to 99.",
+  horizonInSteps: "This plan uses steps. Move the item to a step instead.",
 };

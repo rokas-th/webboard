@@ -5,7 +5,8 @@ import { buildResolve, canPick, type Pick, type ResolveOptions } from "../action
 import { buildRevert, buildUndo, undoOffer } from "../actions/undo";
 import type { Calendar, Closure, Tuning } from "../domain/calendar";
 import { toDay, toIso, type IsoDate, type Weekday } from "../domain/dates";
-import type { Item, ItemId, ItemKind, LinkType, Status, Horizon } from "../domain/model";
+import type { Item, ItemId, ItemKind, LinkType, Status, Horizon, StepId } from "../domain/model";
+import { STEP_COLOURS, stepsOf } from "../domain/steps";
 import { newId } from "../log/ids";
 import { LogState } from "../log/state";
 import type { Action, ActionId, DeviceId, SessionId } from "../log/types";
@@ -95,6 +96,19 @@ const INTENTS = [
   ["planName", 2],
 ] as const;
 
+const STEP_INTENTS = [
+  ["step", 10],
+  ["toStep", 12],
+] as const;
+
+const STEP_NAMES = ["Review", "QA", "Ship", "Now"];
+const STEP_OPS = ["add", "rename", "colour", "reorder", "limit", "completes", "delete"] as const;
+const STEP_LIMITS = [null, 1, 3, 99, 100];
+
+export interface SimOptions {
+  steps: boolean;
+}
+
 const weighted = <K extends string>(table: readonly (readonly [K, number])[], roll: number): K => {
   const total = table.reduce((n, [, w]) => n + w, 0);
   const at = roll * total;
@@ -135,8 +149,9 @@ const noteTexts = (doc: PlanDoc): Map<ItemId, string> => {
 
 const actionIds = (doc: PlanDoc): Set<ActionId> => new Set(doc.ydoc.getMap("actions").keys());
 
-export function simulate(seed: number): SimResult {
+export function simulate(seed: number, opts: SimOptions = { steps: false }): SimResult {
   const r = rngOf(seed);
+  const intents: readonly (readonly [Intent["t"], number])[] = opts.steps ? [...INTENTS, ...STEP_INTENTS] : INTENTS;
   const int = (lo: number, hi: number): number => lo + Math.floor(r() * (hi - lo + 1));
   const pick = <T>(xs: readonly T[]): T => {
     if (xs.length === 0) throw new Error("pick from an empty list");
@@ -231,7 +246,7 @@ export function simulate(seed: number): SimResult {
     const items = [...plan.items.values()];
     const groups = items.filter((i) => i.kind === "group");
     const scheduled = nonGroups(items);
-    const t = items.length < 4 || (items.length < 7 && chance(0.15)) ? "create" : weighted(INTENTS, r());
+    const t = items.length < 4 || (items.length < 7 && chance(0.15)) ? "create" : weighted(intents, r());
     const parentPick = (): ItemId | null => (groups.length === 0 || chance(0.5) ? null : pick(groups).id);
     const durFor = (it: Item): number => (it.kind === "milestone" ? 0 : int(1, 6));
     switch (t) {
@@ -243,6 +258,8 @@ export function simulate(seed: number): SimResult {
         if (kind === "group") return { t: "create", kind, name: pick(NAMES), parent, after, start: null };
         const start = chance(0.85) ? pick(DATES) : null;
         const dur = chance(0.3) ? undefined : kind === "milestone" ? 0 : int(1, 5);
+        const live = opts.steps ? stepsOf(plan) : [];
+        if (live.length > 0 && chance(0.3)) return { t: "create", kind, name: pick(NAMES), parent, after, start, dur, step: pick(live).id };
         return { t: "create", kind, name: pick(NAMES), parent, after, start, dur };
       }
       case "rename":
@@ -299,6 +316,38 @@ export function simulate(seed: number): SimResult {
       }
       case "planName":
         return { t: "planName", name: pick(NAMES) };
+      case "step":
+        return stepIntentFor(view);
+      case "toStep": {
+        const live = stepsOf(plan);
+        if (live.length === 0 || scheduled.length === 0) return { t: "planName", name: pick(NAMES) };
+        return { t: "toStep", items: [...new Set([pick(scheduled).id, ...(chance(0.3) ? [pick(scheduled).id] : [])])], step: pick(live).id };
+      }
+      default:
+        throw new Error(`The simulator has no generator for ${t}`);
+    }
+  };
+
+  const stepIntentFor = (view: PlanView): Intent => {
+    const live = stepsOf(view.plan);
+    const op = pick(STEP_OPS);
+    const anyOrNull = (ids: readonly StepId[]): StepId | null => (ids.length === 0 || chance(0.3) ? null : pick(ids));
+    if (live.length === 0 || op === "add") return { t: "step", op: "add", name: pick(STEP_NAMES), colour: pick(STEP_COLOURS), after: anyOrNull(live.map((x) => x.id)) };
+    const step = pick(live).id;
+    const others = live.filter((x) => x.id !== step).map((x) => x.id);
+    switch (op) {
+      case "rename":
+        return { t: "step", op, step, name: pick(STEP_NAMES) };
+      case "colour":
+        return { t: "step", op, step, colour: pick(STEP_COLOURS) };
+      case "reorder":
+        return { t: "step", op, step, after: anyOrNull(others) };
+      case "limit":
+        return { t: "step", op, step, limit: pick(STEP_LIMITS) };
+      case "completes":
+        return { t: "step", op, step, completes: chance(0.6) };
+      case "delete":
+        return { t: "step", op, step, to: anyOrNull(others) };
     }
   };
 

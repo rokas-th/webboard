@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import type { Calendar } from "../domain/calendar";
 import { FIRST_PLAN_DATE, inPlanWindow, LAST_PLAN_DATE, toDay, toIso, type IsoDate, type Weekday } from "../domain/dates";
 import { derive } from "../domain/derive";
-import { linkKey, MAX_LAG, MAX_TASK_DUR, type Baseline, type Item, type ItemId, type Link, type LinkKey, type LinkType, type PlanState, type Status } from "../domain/model";
+import { EMPTY_WORKFLOW, linkKey, MAX_LAG, MAX_TASK_DUR, type Baseline, type Item, type ItemId, type Link, type LinkKey, type LinkType, type PlanState, type Status } from "../domain/model";
 import type { Conflict } from "../domain/schedule";
 import { newId } from "../log/ids";
 import { LogState } from "../log/state";
@@ -591,7 +591,7 @@ export function convertGantt(a: { text: string; fileName: string; name?: string;
     dates: Object.fromEntries(leaves.map(({ s, leaf }) => [idOf(s.id), { start: leaf.start, dur: leaf.dur }])),
   };
   const calendar: Calendar = { region: null, workdays: parsed.workdays, closures: new Map(), tuning: new Map(), holidays: new Map() };
-  const plan: PlanState = { id: newPlanId(), name: planName, items, links, calendar, baselines: new Map([[baseline.id, baseline]]) };
+  const plan: PlanState = { id: newPlanId(), name: planName, items, links, calendar, baselines: new Map([[baseline.id, baseline]]), workflow: EMPTY_WORKFLOW };
   const action: Action = { id: newId(), dev: a.dev, ses: a.ses, at: a.now, par: [], lbl: `Converted from ${a.fileName}`, w: stateWrites(plan, "own", () => false) };
   const check: GanttCheck = { sources, ids, today: at };
   const log = logOf(action, "WebBoard refuses the plan", (m) => new GanttError(m));

@@ -7,7 +7,7 @@ import { applyWrites, projectPlan } from "../plan/project";
 import { parseKey, type UnitKind } from "../plan/units";
 import { items, q } from "./copy";
 import type { Ctx } from "./intents";
-import { baselineName } from "./names";
+import { baselineName, stepNameIn } from "./names";
 
 export const CALENDAR_UNITS: ReadonlySet<UnitKind> = new Set<UnitKind>(["cr", "cw", "cc", "ct", "ch"]);
 
@@ -15,7 +15,7 @@ export const isCalendarWrite = (x: Write): boolean => CALENDAR_UNITS.has(parseKe
 
 export const unique = <T>(xs: readonly T[]): T[] => [...new Set(xs)];
 
-const ITEM_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["e", "n", "s", "p", "r"]);
+const ITEM_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["e", "n", "s", "p", "r", "wi"]);
 
 export const itemOfUnit = (u: UnitKey): ItemId | null => {
   const k = parseKey(u);
@@ -47,6 +47,11 @@ const unitSubject = (log: LogState, plans: readonly PlanState[], u: UnitKey): st
   if (k.kind === "pn") return "the plan name";
   if (k.kind === "a") return "the change";
   if (k.kind === "b") return `baseline ${q(baselineName(log, plans, u, k.arg))}`;
+  if (k.kind === "ws") {
+    const step = stepNameIn(log, plans, u, k.arg);
+    if (step === null) return "a removed step";
+    return step.removed ? `the removed step ${q(step.name)}` : `the step ${q(step.name)}`;
+  }
   throw new Error(`No subject for ${u}`);
 };
 

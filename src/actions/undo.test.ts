@@ -300,6 +300,40 @@ describe("buildUndo", () => {
     expect(keptAfterOverride([saved], "b:B1", BASELINE("Q3"), BASELINE("Q4"))).toEqual(["Baseline “Q4” was changed since on the iPhone — kept"]);
   });
 
+  it("kept lines name a step and an item's step", () => {
+    const step = (n: string): unknown => ({ n, c: "amber", o: "a1V" });
+    expect(keptAfterOverride([], "ws:qa", step("QA"), step("Review"))).toEqual(["The step “Review” was changed since on the iPhone — kept"]);
+    expect(keptAfterOverride([], "ws:now", step("Today"), null)).toEqual(["The removed step “Today” was changed since on the iPhone — kept"]);
+    expect(keptAfterOverride([], "ws:later", null, null)).toEqual(["The removed step “Later” was changed since on the iPhone — kept"]);
+    expect(keptAfterOverride([], "ws:zz", null, null)).toEqual(["A removed step was changed since on the iPhone — kept"]);
+    expect(keptAfterOverride([], "wi:PR", "now", "next")).toEqual(["“Plan review” was changed since on the iPhone — kept"]);
+  });
+
+  it.each([
+    ["this Mac", "d1"],
+    ["a peer", "d2"],
+  ])("undo and revert of a create by steps whose card was then moved on %s neither throw nor keep the orphaned step", (_where, dev) => {
+    const base = ctxFrom(act("s1", ["a0"], [w("ws:qa", { n: "QA", c: "amber", o: "a1V" })], mac));
+    const made = buildAction(base, { t: "create", kind: "task", name: "Coat", parent: null, after: null, start: null });
+    const e = made.action.w.find((x) => x.u.startsWith("e:"));
+    if (e === undefined) throw new Error("no create");
+    const id = e.u.slice(2);
+    expect(made.action.w.map((x) => x.u)).toContain(`wi:${id}`);
+    const created = applied(base, made);
+    const moved = applied(created, buildAction(on(created, dev), { t: "toStep", items: [id], step: "qa" }));
+    const ctx = on(moved, "d1");
+    expect(ctx.log.unit(`wi:${id}`)?.value).toBe("qa");
+    const undo = buildUndo(ctx, made.action.id);
+    expect(undo.preview.kept).toEqual([]);
+    expect(undo.toast).toBe("Undid: Added task “Coat”.");
+    const revert = buildRevert(ctx, made.action.id);
+    expect(revert.preview.kept).toEqual([]);
+    expect(revert.toast).toBe("Reverted: Added task “Coat”.");
+    const after = applied(ctx, undo);
+    expect(after.view.plan.items.has(id)).toBe(false);
+    expect(after.view.plan.workflow.items.has(id)).toBe(false);
+  });
+
   it("an item already in the Trash whose rename was overridden is kept, not moved to the Trash", () => {
     const ctx = ctxFrom(
       act("c", ["a0"], item("X", "X", "a3", sched("2026-11-17", 2)), mac),

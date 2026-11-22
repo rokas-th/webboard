@@ -1,9 +1,26 @@
 import type { HolidayDay, HolidayKind, HolidayYear, RegionRef, Tuning } from "../domain/calendar";
 import { FIRST_PLAN_DATE, inPlanWindow, LAST_PLAN_DATE, toDay, WEEKDAYS, type IsoDate, type Weekday } from "../domain/dates";
-import { MAX_LAG, MAX_TASK_DUR, type BaselineId, type Horizon, type ItemId, type ItemKind, type LinkType, type PlanState, type Place, type Schedule, type Status } from "../domain/model";
+import {
+  MAX_LAG,
+  MAX_STEP_LIMIT,
+  MAX_STEP_NAME,
+  MAX_TASK_DUR,
+  STEP_COLOURS,
+  type BaselineId,
+  type Horizon,
+  type ItemId,
+  type ItemKind,
+  type LinkType,
+  type PlanState,
+  type Place,
+  type Schedule,
+  type Status,
+  type StepId,
+  type StepValue,
+} from "../domain/model";
 import type { ActionId, Cause, UnitKey, Write } from "../log/types";
 
-export type UnitKind = "pn" | "cr" | "cw" | "e" | "n" | "s" | "p" | "r" | "l" | "cc" | "ct" | "ch" | "b" | "a";
+export type UnitKind = "pn" | "cr" | "cw" | "e" | "n" | "s" | "p" | "r" | "l" | "cc" | "ct" | "ch" | "b" | "a" | "ws" | "wi";
 
 export interface Codec<T> {
   enc(x: T): unknown;
@@ -46,6 +63,8 @@ export interface Codecs {
   holidayYear: Codec<HolidayYear | null>;
   baseline: Codec<BaselineValue | null>;
   activity: Codec<boolean>;
+  step: Codec<StepValue | null>;
+  stepRef: Codec<StepId | null>;
 }
 
 const ID = /^[A-Za-z0-9_-]+$/;
@@ -59,7 +78,7 @@ const HOLIDAY_KINDS: readonly HolidayKind[] = ["public", "optional", "half"];
 const DIVISIONS = ["england-and-wales", "scotland", "northern-ireland"] as const;
 const CAUSES: readonly Cause[] = ["own", "push", "recalendar", "undo", "revert", "resolution"];
 const BARE: readonly UnitKind[] = ["pn", "cr", "cw"];
-const BY_ID: readonly UnitKind[] = ["e", "n", "s", "p", "r", "cc", "b", "a"];
+const BY_ID: readonly UnitKind[] = ["e", "n", "s", "p", "r", "cc", "b", "a", "ws", "wi"];
 
 const fail = (unit: string, message: string): Error => new Error(`${unit}: ${message}`);
 
@@ -71,11 +90,13 @@ const isRecord = (v: unknown): v is Record<string, unknown> => {
   return proto === Object.prototype || proto === null;
 };
 
-const record = (unit: string, field: string, v: unknown, keys: readonly string[]): Record<string, unknown> => {
+const record = (unit: string, field: string, v: unknown, keys: readonly string[]): Record<string, unknown> => recordWith(unit, field, v, keys, []);
+
+const recordWith = (unit: string, field: string, v: unknown, required: readonly string[], optional: readonly string[]): Record<string, unknown> => {
   if (!isRecord(v)) throw fail(unit, `${field} is not an object: ${show(v)}`);
-  const extra = Object.keys(v).filter((k) => !keys.includes(k));
+  const extra = Object.keys(v).filter((k) => !required.includes(k) && !optional.includes(k));
   if (extra.length > 0) throw fail(unit, `${field} has unknown fields ${extra.join(", ")}`);
-  const missing = keys.filter((k) => !(k in v));
+  const missing = required.filter((k) => !(k in v));
   if (missing.length > 0) throw fail(unit, `${field} lacks ${missing.join(", ")}`);
   return v;
 };
@@ -205,12 +226,17 @@ const schedSpec: Spec<Schedule> = {
   },
 };
 
+const orderRule = (unit: string, field: string, v: unknown): string => {
+  const o = str(unit, field, v);
+  if (!ORDER.test(o)) throw fail(unit, `${field} is not made of 0-9, A-Z and a-z: ${show(v)}`);
+  return o;
+};
+
 const placeSpec: Spec<Place> = {
   enc: (x) => [x.parent, x.order],
   dec: (v, unit) => {
     const [parent, order] = tuple(unit, v, 2);
-    const o = str(unit, "order", order);
-    if (!ORDER.test(o)) throw fail(unit, `order is not made of 0-9, A-Z and a-z: ${show(order)}`);
+    const o = orderRule(unit, "order", order);
     return { parent: parent === null ? null : id(unit, "parent", parent), order: o };
   },
 };
@@ -340,6 +366,27 @@ const activitySpec: Spec<boolean> = {
   dec: (v, unit) => bool(unit, "value", v),
 };
 
+const stepName = (unit: string, v: unknown): string => {
+  const n = nameRule(unit, "n", v);
+  if ([...n].length > MAX_STEP_NAME) throw fail(unit, `n is longer than ${MAX_STEP_NAME} characters`);
+  return n;
+};
+
+const stepSpec: Spec<StepValue> = {
+  enc: (x) => ({ n: x.n, c: x.c, o: x.o, ...(x.d === true ? { d: true } : {}), ...(x.l === undefined ? {} : { l: x.l }) }),
+  dec: (v, unit) => {
+    const r = recordWith(unit, "value", v, ["n", "c", "o"], ["d", "l"]);
+    if ("d" in r && r.d !== true) throw fail(unit, `d is not true: ${show(r.d)}`);
+    const base: StepValue = { n: stepName(unit, r.n), c: oneOf(unit, "c", r.c, STEP_COLOURS), o: orderRule(unit, "o", r.o) };
+    return { ...base, ...("d" in r ? { d: true } : {}), ...("l" in r ? { l: int(unit, "l", r.l, 1, MAX_STEP_LIMIT) } : {}) };
+  },
+};
+
+const stepRefSpec: Spec<StepId> = {
+  enc: (x) => x,
+  dec: (v, unit) => id(unit, "value", v),
+};
+
 type Value<K extends keyof Codecs> = Codecs[K] extends Codec<infer T> ? T : never;
 
 const SPECS: { [K in keyof Codecs]: Spec<Value<K>> } = {
@@ -356,6 +403,8 @@ const SPECS: { [K in keyof Codecs]: Spec<Value<K>> } = {
   holidayYear: orNull(holidayYearSpec),
   baseline: orNull(baselineSpec),
   activity: activitySpec,
+  step: orNull(stepSpec),
+  stepRef: orNull(stepRefSpec),
 };
 
 export function decodeAs<K extends keyof Codecs>(codec: K, unit: UnitKey, v: unknown): Value<K> {
@@ -377,6 +426,8 @@ const CODEC_OF: Readonly<Record<UnitKind, keyof Codecs>> = {
   ch: "holidayYear",
   b: "baseline",
   a: "activity",
+  ws: "step",
+  wi: "stepRef",
 };
 
 export const name: Codec<string> = codec(SPECS.name, "name");
@@ -392,6 +443,8 @@ export const tuning: Codec<Tuning | null> = codec(SPECS.tuning, "ct");
 export const holidayYear: Codec<HolidayYear | null> = codec(SPECS.holidayYear, "ch");
 export const baseline: Codec<BaselineValue | null> = codec(SPECS.baseline, "b");
 export const activity: Codec<boolean> = codec(SPECS.activity, "a");
+export const step: Codec<StepValue | null> = codec(SPECS.step, "ws");
+export const stepRef: Codec<StepId | null> = codec(SPECS.stepRef, "wi");
 
 const NAMED: Readonly<Record<keyof Codecs, Codec<unknown>>> = {
   name,
@@ -407,6 +460,8 @@ const NAMED: Readonly<Record<keyof Codecs, Codec<unknown>>> = {
   holidayYear,
   baseline,
   activity,
+  step,
+  stepRef,
 };
 
 export function codecOf(kind: UnitKind): Codec<unknown> {
@@ -465,6 +520,8 @@ export const key: {
   ch(y: number): UnitKey;
   b(id: BaselineId): UnitKey;
   a(id: ActionId): UnitKey;
+  ws(id: StepId): UnitKey;
+  wi(item: ItemId): UnitKey;
 } = {
   pn: "pn",
   cr: "cr",
@@ -480,6 +537,8 @@ export const key: {
   ch: (y) => checked(`ch:${y}`),
   b: (i) => checked(`b:${i}`),
   a: (i) => checked(`a:${i}`),
+  ws: (i) => checked(`ws:${i}`),
+  wi: (i) => checked(`wi:${i}`),
 };
 
 export function linkEnds(u: UnitKey): { from: ItemId; to: ItemId } {
@@ -528,6 +587,8 @@ export function stateWrites(plan: PlanState, cause: Cause, ownTrashed: (id: Item
     ]),
     ...[...plan.links.values()].map((l) => w(key.l(l.from, l.to), link.enc({ type: l.type, lag: l.lag }))),
     ...[...plan.baselines.values()].map((b) => w(key.b(b.id), baseline.enc({ name: b.name, at: b.at, dates: b.dates }))),
+    ...[...plan.workflow.steps].map(([id, s]) => w(key.ws(id), step.enc(s))),
+    ...[...plan.workflow.items].map(([item, s]) => w(key.wi(item), stepRef.enc(s))),
   ];
   writes.forEach(validateWrite);
   return writes;

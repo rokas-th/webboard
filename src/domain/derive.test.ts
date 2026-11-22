@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { derive, schedView } from "./derive";
 import type { Calendar } from "./calendar";
 import { toDay, type IsoDate } from "./dates";
-import { linkKey, type Baseline, type Horizon, type Item, type ItemId, type ItemKind, type Link, type PlanState, type Status } from "./model";
+import { EMPTY_WORKFLOW, linkKey, type Baseline, type Horizon, type Item, type ItemId, type ItemKind, type Link, type PlanState, type Status } from "./model";
 import type { Conflict } from "./schedule";
 import { CH_ZH, CH_ZH_2026 } from "../test/fixtures/calendars";
 import { ln } from "../test/fixtures/sched";
@@ -56,6 +56,7 @@ const plan = (
   links: new Map(links.map((l) => [linkKey(l.from, l.to), l] as const)),
   calendar: o.calendar ?? CH_ZH,
   baselines: new Map((o.baselines ?? []).map((b) => [b.id, b] as const)),
+  workflow: EMPTY_WORKFLOW,
 });
 
 const NONE: ReadonlySet<ItemId> = new Set();

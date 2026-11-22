@@ -47,6 +47,28 @@ export interface Baseline {
   dates: Readonly<Record<ItemId, { start: IsoDate; dur: number }>>;
 }
 
+export type StepId = string;
+export type StepColour = "cyan" | "violet" | "magenta" | "lime" | "amber" | "coral" | "sky" | "slate";
+
+export interface StepValue {
+  n: string;
+  c: StepColour;
+  o: string;
+  d?: true;
+  l?: number;
+}
+
+export interface Workflow {
+  steps: ReadonlyMap<StepId, StepValue | null>;
+  items: ReadonlyMap<ItemId, StepId | null>;
+}
+
+export const EMPTY_WORKFLOW: Workflow = { steps: new Map(), items: new Map() };
+
+export const STEP_COLOURS: readonly StepColour[] = ["cyan", "violet", "magenta", "lime", "amber", "coral", "sky", "slate"];
+export const MAX_STEP_NAME = 32;
+export const MAX_STEP_LIMIT = 99;
+
 export interface PlanState {
   id: PlanId;
   name: string;
@@ -54,6 +76,7 @@ export interface PlanState {
   links: ReadonlyMap<LinkKey, Link>;
   calendar: Calendar;
   baselines: ReadonlyMap<BaselineId, Baseline>;
+  workflow: Workflow;
 }
 
 export const scheduleOf = (it: Item): Schedule => {

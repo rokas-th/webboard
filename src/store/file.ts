@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import type { Baseline, BaselineId, Item, ItemId, Link, LinkKey, PlanId, PlanState } from "../domain/model";
+import type { Baseline, BaselineId, Item, ItemId, Link, LinkKey, PlanId, PlanState, StepId, Workflow } from "../domain/model";
 import { linkKey } from "../domain/model";
 import type { Closure } from "../domain/calendar";
 import { newId } from "../log/ids";
@@ -219,7 +219,11 @@ function remap(plan: PlanState, planId: PlanId): { plan: PlanState; idMap: Reado
       return [id, { ...b, id, dates: Object.fromEntries(Object.entries(b.dates).map(([item, d]) => [fresh(item), { ...d }])) }];
     }),
   );
-  return { plan: { id: planId, name: plan.name, items, links, calendar: { ...plan.calendar, closures }, baselines }, idMap };
+  const workflow: Workflow = {
+    steps: plan.workflow.steps,
+    items: new Map([...plan.workflow.items].map(([item, step]): [ItemId, StepId | null] => [fresh(item), step])),
+  };
+  return { plan: { id: planId, name: plan.name, items, links, calendar: { ...plan.calendar, closures }, baselines, workflow }, idMap };
 }
 
 export function buildImport(bytes: Uint8Array, fileName: string, dev: DeviceId, ses: SessionId, now: number): ImportResult {

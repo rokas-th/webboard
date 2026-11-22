@@ -17,11 +17,19 @@ import {
   refs,
   region,
   sched,
+  stateWrites,
+  step,
+  stepRef,
   tuning,
   validateWrite,
   weekdays,
 } from "./units";
+import type { PlanState } from "../domain/model";
+import { LogState } from "../log/state";
 import type { Write } from "../log/types";
+import { act } from "../test/act";
+import { projectPlan } from "./project";
+import { planRules } from "./rules";
 
 const zh = { region: "oh:CH:CH-ZH", year: 2027, days: [{ date: "2027-01-01", name: "Neujahrstag", kind: "public", sourceId: "oh-1", scope: null }], fetchedAt: "2026-11-01" };
 
@@ -247,6 +255,89 @@ describe("codecs", () => {
       ["a", activity as Codec<unknown>],
     ];
     kinds.forEach(([kind, codec]) => expect(codecOf(kind)).toBe(codec));
+  });
+});
+
+describe("steps", () => {
+  it("ws round-trips each field; d and l are optional", () => {
+    const full = { n: "Review", c: "violet", o: "a1", d: true, l: 5 };
+    expect(step.enc({ n: "Review", c: "violet", o: "a1", d: true, l: 5 })).toEqual(full);
+    expect(step.dec(full)).toEqual(full);
+    expect(step.enc({ n: "Review", c: "violet", o: "a1" })).toEqual({ n: "Review", c: "violet", o: "a1" });
+    expect(step.dec({ n: "Review", c: "violet", o: "a1" })).toEqual({ n: "Review", c: "violet", o: "a1" });
+    expect(step.dec({ n: "QA", c: "lime", o: "Zz9", l: 99 })).toEqual({ n: "QA", c: "lime", o: "Zz9", l: 99 });
+    expect(step.dec(null)).toBeNull();
+    expect(step.enc(null)).toBeNull();
+    expect(codecOf("ws")).toBe(step);
+    expect(codecOf("wi")).toBe(stepRef);
+    expect(() => validateWrite({ u: "ws:review", v: full, c: "own" })).not.toThrow();
+    expect(() => validateWrite({ u: "ws:now", v: null, c: "own" })).not.toThrow();
+    expect(() => validateWrite({ u: "ws:review", v: full, c: "push" })).toThrow(new Error("ws:review: push cannot write this unit"));
+  });
+
+  it("ws rejects", () => {
+    const ok = { n: "Review", c: "cyan", o: "a0" };
+    expect(() => step.dec({ ...ok, x: 1 })).toThrow("ws: value has unknown fields x");
+    expect(() => step.dec({ n: "Review", c: "cyan" })).toThrow("ws: value lacks o");
+    expect(() => step.dec({ ...ok, c: "#00ffff" })).toThrow('ws: c is not one of cyan, violet, magenta, lime, amber, coral, sky, slate: "#00ffff"');
+    expect(() => step.dec({ ...ok, n: "" })).toThrow("ws: n is empty");
+    expect(() => step.dec({ ...ok, n: "x".repeat(33) })).toThrow("ws: n is longer than 32 characters");
+    expect(step.dec({ ...ok, n: "x".repeat(32) })).toEqual({ ...ok, n: "x".repeat(32) });
+    expect(step.dec({ ...ok, n: "🔭".repeat(32) })).toEqual({ ...ok, n: "🔭".repeat(32) });
+    expect(() => step.dec({ ...ok, d: false })).toThrow("ws: d is not true: false");
+    expect(() => step.dec({ ...ok, l: 0 })).toThrow("ws: l is not a whole number from 1 to 99: 0");
+    expect(() => step.dec({ ...ok, l: 100 })).toThrow("ws: l is not a whole number from 1 to 99: 100");
+    expect(() => step.dec({ ...ok, o: "a.0" })).toThrow('ws: o is not made of 0-9, A-Z and a-z: "a.0"');
+    expect(() => validateWrite({ u: "ws:review", v: { ...ok, x: 1 }, c: "own" })).toThrow("ws:review: value has unknown fields x");
+  });
+
+  it("wi takes a step id or null and rejects `a b`", () => {
+    expect(stepRef.dec("review")).toBe("review");
+    expect(stepRef.dec(null)).toBeNull();
+    expect(stepRef.enc("now")).toBe("now");
+    expect(() => stepRef.dec("a b")).toThrow('wi: value is not an id: "a b"');
+    expect(() => stepRef.dec(3)).toThrow("wi: value is not a string: 3");
+    expect(() => validateWrite({ u: "wi:T1", v: "a b", c: "own" })).toThrow('wi:T1: value is not an id: "a b"');
+    expect(() => validateWrite({ u: "wi:T1", v: "later", c: "own" })).not.toThrow();
+  });
+
+  it("parseKey reads ws:<id> and wi:<id> and refuses ws:", () => {
+    expect(key.ws("review")).toBe("ws:review");
+    expect(key.wi("T1")).toBe("wi:T1");
+    expect(parseKey("ws:review")).toEqual({ kind: "ws", arg: "review" });
+    expect(parseKey("wi:T1")).toEqual({ kind: "wi", arg: "T1" });
+    expect(() => parseKey("ws:")).toThrow("Malformed unit key “ws:”");
+    expect(() => parseKey("wi:a b")).toThrow("Malformed unit key “wi:a b”");
+    expect(() => parseKey("ws")).toThrow("Unknown unit key “ws”");
+    expect(() => key.ws("a.b")).toThrow("ws:a.b");
+  });
+
+  it("stateWrites writes no ws or wi for a plan without them", () => {
+    const log = new LogState(planRules);
+    log.add([
+      act("a0", [], [
+        { u: "pn", v: "Plan", c: "own" },
+        { u: "cr", v: null, c: "own" },
+        { u: "cw", v: [1, 2, 3, 4, 5], c: "own" },
+        { u: "e:T1", v: { k: "task", t: false }, c: "own" },
+        { u: "n:T1", v: "Survey", c: "own" },
+        { u: "s:T1", v: ["2026-11-09", 3, "todo", 0, "now"], c: "own" },
+        { u: "p:T1", v: [null, "a0"], c: "own" },
+      ]),
+    ]);
+    const plan = projectPlan("P", log);
+    const kinds = stateWrites(plan, "own", () => false).map((w) => parseKey(w.u).kind);
+    expect(kinds).not.toContain("ws");
+    expect(kinds).not.toContain("wi");
+    const withSteps: PlanState = {
+      ...plan,
+      workflow: { steps: new Map([["review", { n: "Review", c: "violet", o: "a1" }], ["later", null]]), items: new Map([["T1", "review"]]) },
+    };
+    expect(stateWrites(withSteps, "own", () => false).filter((w) => ["ws", "wi"].includes(parseKey(w.u).kind))).toEqual([
+      { u: "ws:review", v: { n: "Review", c: "violet", o: "a1" }, c: "own" },
+      { u: "ws:later", v: null, c: "own" },
+      { u: "wi:T1", v: "review", c: "own" },
+    ]);
   });
 });
 

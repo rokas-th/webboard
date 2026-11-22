@@ -7,7 +7,7 @@ import { decodeAs, key, parseKey, type UnitKind } from "../plan/units";
 import { previewOf } from "./build";
 import { deviceName, linkText, q, toastOf } from "./copy";
 import { Refused, type Built, type Ctx } from "./intents";
-import { baselineName } from "./names";
+import { baselineName, stepNameIn } from "./names";
 
 export interface Offer {
   choice: string;
@@ -24,7 +24,7 @@ export class OfferRefused extends Refused {
   }
 }
 
-const ITEM_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["e", "n", "s", "p", "r"]);
+const ITEM_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["e", "n", "s", "p", "r", "wi"]);
 const CALENDAR_KINDS: ReadonlySet<UnitKind> = new Set<UnitKind>(["cr", "cw", "cc", "ct", "ch"]);
 const ORPHAN_UNITS = [key.n, key.s, key.p] as const;
 
@@ -68,6 +68,11 @@ const subjectOf = (log: LogState, plans: readonly PlanState[], w: Write): Subjec
     return { id: w.u, item: null, text: `The link ${linkText(nameOf(log, plans, k.arg), nameOf(log, plans, k.to))}` };
   }
   if (k.kind === "b") return { id: w.u, item: null, text: `Baseline ${q(baselineName(log, plans, w.u, k.arg))}` };
+  if (k.kind === "ws") {
+    const step = stepNameIn(log, plans, w.u, k.arg);
+    if (step === null) return { id: w.u, item: null, text: "A removed step" };
+    return { id: w.u, item: null, text: step.removed ? `The removed step ${q(step.name)}` : `The step ${q(step.name)}` };
+  }
   throw new Error(`No subject for ${w.u}`);
 };
 
@@ -104,6 +109,8 @@ const keptLines = (ctx: Ctx, fork: LogState, after: PlanState, flipped: readonly
       .filter((w) => parseKey(w.u).kind !== "a")
       .forEach((w) => {
         if (frontierHolds(holder, w.u, x)) return;
+        const k = parseKey(w.u);
+        if (k.kind === "wi" && !after.items.has(k.arg)) return;
         const s = subjectOf(fork, plans, w);
         if (lines.has(s.id)) return;
         const orphan = s.item === null ? undefined : trashedBy(fork, a, s.item);

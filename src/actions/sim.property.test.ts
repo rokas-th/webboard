@@ -4,15 +4,16 @@ import { toDay } from "../domain/dates";
 import { lockOf as statusLock, schedView } from "../domain/derive";
 import type { ItemId } from "../domain/model";
 import { replay, type LogState } from "../log/state";
-import { OWNER_CAUSES, type Action, type ActionId, type UnitKey, type Write } from "../log/types";
-import { choices, heldItems, type Choice, type ChoiceSide } from "../plan/choices";
+import type { Action, ActionId, UnitKey, Write } from "../log/types";
+import { heldItems, type Choice, type ChoiceSide } from "../plan/choices";
 import { projectPlan } from "../plan/project";
 import { planRules } from "../plan/rules";
 import { decodeAs, parseKey } from "../plan/units";
 import { buildResolve } from "./resolve";
 import { act } from "../test/act";
 import { simulate, SIM_TODAY, type SimBuilt, type SimResult } from "../test/sim";
-import { ctxOf, FIXTURE_DEVICES, PLAN_ID } from "../test/planCtx";
+import { ctxOf, PLAN_ID } from "../test/planCtx";
+import { actionOf, lostWrites, viewOf } from "../test/simChecks";
 
 const ids = vi.hoisted(() => {
   const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -65,18 +66,6 @@ const property = (check: (seed: number, sim: SimResult) => void): void =>
     }),
     PARAMS,
   );
-
-const viewOf = (log: LogState) => {
-  const plan = projectPlan(PLAN_ID, log);
-  const cs = choices(log, plan, FIXTURE_DEVICES);
-  return { plan, choices: cs, held: heldItems(cs, plan) };
-};
-
-const actionOf = (log: LogState, id: ActionId): Action => {
-  const a = log.get(id);
-  if (a === undefined) throw new Error(`Action ${id} is not ready`);
-  return a;
-};
 
 const ancestry = (sim: SimResult, par: readonly ActionId[]): Action[] => {
   const byId = new Map([sim.root, ...sim.built.map((b) => b.action)].map((a) => [a.id, a]));
@@ -185,23 +174,6 @@ const pushViolations = (b: SimBuilt): string[] =>
     .map((x) => ({ x, lock: lockOf(b, parseKey(x.u).arg) }))
     .filter(({ lock }) => lock !== null)
     .map(({ x, lock }) => `${b.kind} ${b.action.id} pushes ${x.u} (${lock})`);
-
-const lostWrites = (log: LogState): string[] =>
-  log
-    .order()
-    .filter((id) => log.active(id))
-    .flatMap((id) =>
-      actionOf(log, id)
-        .w.filter((x) => OWNER_CAUSES.has(x.c))
-        .filter((x) => {
-          const st = log.unit(x.u);
-          if (st !== undefined && (st.from === id || planRules.same(x.u, st.value, x.v) || (st.clash ?? []).includes(id))) return false;
-          return !log.writers(x.u).some((w) => w !== id && log.active(w) && log.seen(id, w));
-        })
-        .map((x) => `${id} ${x.u} = ${JSON.stringify(x.v)}, now ${JSON.stringify(stateOf(log, x.u))}`),
-    );
-
-const stateOf = (log: LogState, u: UnitKey) => log.unit(u) ?? null;
 
 describe("simulated devices", () => {
   it(

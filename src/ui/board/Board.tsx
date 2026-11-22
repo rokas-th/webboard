@@ -1,8 +1,7 @@
 import { useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { fmtShort, toIso, type Day } from "../../domain/dates";
-import { goneSet } from "../../domain/derive";
-import type { Horizon, Item, ItemId } from "../../domain/model";
-import { childrenOf } from "../../plan/project";
+import type { Horizon, Item, ItemId, StepId } from "../../domain/model";
+import { projectBoard, type BoardProjection, type Step, type StepColumn, type StepMode } from "../../domain/steps";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { toast } from "../common/Toast";
@@ -14,12 +13,17 @@ import { isClick } from "../timeline/gesture";
 
 export const DATED = "Dated items sit where their dates put them. Move them on the timeline.";
 export const NOTHING_HERE = "Nothing here.";
+export const NO_OPEN_STEP = "Every step in this plan completes items, so no open card has a column.";
 
-const COLUMNS: readonly { h: Horizon; title: string; sub: string }[] = [
-  { h: "now", title: "NOW", sub: "In progress, or starting within two weeks." },
-  { h: "next", title: "NEXT", sub: "Starting within eight weeks." },
-  { h: "later", title: "LATER", sub: "Further out, or no dates yet." },
-];
+const SUB: ReadonlyMap<StepId, string> = new Map([
+  ["now", "In progress, or starting within two weeks."],
+  ["next", "Starting within eight weeks."],
+  ["later", "Further out, or no dates yet."],
+]);
+
+const HORIZONS: readonly Horizon[] = ["now", "next", "later"];
+
+const NO_STEP = "no-step";
 
 const DOT: Readonly<Record<StatusLabel, string>> = {
   conflict: "dot conflict",
@@ -32,36 +36,43 @@ const DOT: Readonly<Record<StatusLabel, string>> = {
 
 const hiddenLine = (n: number): string => (n === 0 ? "" : n === 1 ? " 1 done item is hidden." : ` ${n} done items are hidden.`);
 
-const horizonOf = (v: string): Horizon => {
-  const found = COLUMNS.find((c) => c.h === v);
+const horizonOf = (v: StepId): Horizon => {
+  const found = HORIZONS.find((h) => h === v);
   if (found === undefined) throw new Error(`Board: no column ${v}`);
-  return found.h;
+  return found;
+};
+
+const colKey = (c: StepColumn): string => (c.step === null ? NO_STEP : c.step.id);
+
+const colTitle = (c: StepColumn): string => (c.step === null ? "NO STEP" : c.step.name.toLocaleUpperCase());
+
+const datesSub = (id: StepId): string => {
+  const sub = SUB.get(id);
+  if (sub === undefined) throw new Error(`Board: no column ${id}`);
+  return sub;
 };
 
 export interface Columns {
-  cards: Readonly<Record<Horizon, readonly Item[]>>;
-  column: ReadonlyMap<ItemId, Horizon>;
+  shown: readonly StepColumn[];
   done: number;
+  mode: StepMode;
+}
+
+export function columnsFrom(board: BoardProjection): Columns {
+  const completing = board.completing;
+  const open = new Set(board.problems.flatMap((p) => (p.kind === "openInCompleting" ? p.items : [])));
+  const isCompleting = (c: StepColumn): boolean => completing !== null && c.step !== null && c.step.id === completing.id;
+  const finished = board.columns.filter(isCompleting).reduce((n, c) => n + c.items.filter((i) => !open.has(i.id)).length, 0);
+  const shown = board.columns.flatMap((c): StepColumn[] => {
+    if (!isCompleting(c)) return [c];
+    const stranded = c.items.filter((i) => open.has(i.id));
+    return stranded.length === 0 ? [] : [{ step: c.step, items: stranded }];
+  });
+  return { shown, done: finished + board.hiddenDone, mode: board.mode };
 }
 
 export function columnsOf(view: PlanView): Columns {
-  const gone = goneSet(view.plan);
-  const walk = (parent: ItemId | null): Item[] =>
-    childrenOf(view.plan, parent).flatMap((i) => (gone.has(i.id) ? [] : i.kind === "group" ? walk(i.id) : [i]));
-  const items = walk(null);
-  const column = new Map<ItemId, Horizon>();
-  const done = items.filter((i) => {
-    const h = view.derived.horizon.get(i.id);
-    if (h !== undefined) {
-      column.set(i.id, h);
-      return false;
-    }
-    if (view.derived.status.get(i.id) !== "done") throw new Error(`Board: item ${i.id} has no horizon`);
-    return true;
-  }).length;
-  const inColumn = (h: Horizon): Item[] => items.filter((i) => column.get(i.id) === h);
-  const cards = { now: inColumn("now"), next: inColumn("next"), later: inColumn("later") };
-  return { cards, column, done };
+  return columnsFrom(projectBoard(view.plan, view.derived));
 }
 
 const dayOf = (m: ReadonlyMap<ItemId, Day>, id: ItemId, what: string): string => {
@@ -88,20 +99,32 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   const { run } = useRun(p.session);
   const down = useRef<{ id: ItemId; x: number; y: number } | null>(null);
   const dragged = useRef<ItemId | null>(null);
-  const [over, setOver] = useState<Horizon | null>(null);
-  const { cards, column, done } = columnsOf(view);
+  const [over, setOver] = useState<StepId | null>(null);
+  const projection = projectBoard(view.plan, view.derived);
+  const { shown, done, mode } = columnsFrom(projection);
+  const targets: readonly Step[] = shown.flatMap((c) => (c.step === null ? [] : [c.step]));
 
-  const moveTo = (id: ItemId, h: Horizon): void => {
+  const targetOf = (v: string): StepId => {
+    const found = targets.find((s) => s.id === v);
+    if (found === undefined) throw new Error(`Board: no column ${v}`);
+    return found.id;
+  };
+
+  const moveTo = (id: ItemId, to: StepId): void => {
     const item = view.plan.items.get(id);
     if (item === undefined) throw new Error(`Board: dragged item ${id} is not in the plan`);
-    const current = column.get(id);
-    if (current === undefined || current === h) return;
+    const current = projection.columnOf.get(id);
+    if (current === undefined || current === to) return;
+    if (mode === "steps") {
+      run({ t: "toStep", items: [id], step: to });
+      return;
+    }
     if (item.schedule === null) throw new Error(`Board: item ${id} has no schedule`);
     if (item.schedule.start !== null) {
       toast(DATED);
       return;
     }
-    run({ t: "schedule", item: id, set: { horizon: h } });
+    run({ t: "schedule", item: id, set: { horizon: horizonOf(to) } });
   };
 
   const onDown = (e: ReactPointerEvent<HTMLDivElement>, id: ItemId): void => {
@@ -138,10 +161,10 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
     setOver(null);
   };
 
-  const onDragOver = (e: ReactDragEvent<HTMLElement>, h: Horizon): void => {
+  const onDragOver = (e: ReactDragEvent<HTMLElement>, to: StepId): void => {
     if (dragged.current === null) return;
     e.preventDefault();
-    if (over !== h) setOver(h);
+    if (over !== to) setOver(to);
   };
 
   const onDragLeave = (e: ReactDragEvent<HTMLElement>): void => {
@@ -149,15 +172,21 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
     setOver(null);
   };
 
-  const onDrop = (e: ReactDragEvent<HTMLElement>, h: Horizon): void => {
+  const onDrop = (e: ReactDragEvent<HTMLElement>, to: StepId): void => {
     e.preventDefault();
     const id = dragged.current;
     dragged.current = null;
     setOver(null);
-    if (id !== null) moveTo(id, h);
+    if (id !== null) moveTo(id, to);
   };
 
-  const card = (item: Item, h: Horizon) => {
+  const sub = (c: StepColumn, first: boolean): string => {
+    if (mode === "steps") return first ? hiddenLine(done).trim() : "";
+    if (c.step === null) throw new Error("Board: a by-dates plan has no No step column");
+    return datesSub(c.step.id) + (c.step.id === "now" ? hiddenLine(done) : "");
+  };
+
+  const card = (item: Item, c: StepColumn) => {
     const group = groupName(view, item);
     return (
       <div
@@ -183,10 +212,15 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
           <When view={view} item={item} />
           {group !== null && <span className="card-group">{group}</span>}
           {!p.readOnly && (
-            <select className="move-to" aria-label="Move to" value={h} onChange={(e) => moveTo(item.id, horizonOf(e.target.value))}>
-              {COLUMNS.map((c) => (
-                <option key={c.h} value={c.h}>
-                  {c.title}
+            <select className="move-to" aria-label="Move to" value={colKey(c)} onChange={(e) => moveTo(item.id, targetOf(e.target.value))}>
+              {c.step === null && (
+                <option value={NO_STEP} disabled>
+                  {colTitle(c)}
+                </option>
+              )}
+              {targets.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name.toLocaleUpperCase()}
                 </option>
               ))}
             </select>
@@ -196,25 +230,36 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
     );
   };
 
+  if (shown.length === 0) {
+    return (
+      <div className="nnl" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+        <p className="note" data-empty-board>
+          {NO_OPEN_STEP + hiddenLine(done)}
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="nnl">
-      {COLUMNS.map((c) => {
-        const list = cards[c.h];
+    <div className="nnl" style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}>
+      {shown.map((c, i) => {
+        const k = colKey(c);
+        const to = c.step === null || p.readOnly ? null : c.step.id;
         return (
           <section
-            key={c.h}
-            className={over === c.h ? "col over" : "col"}
-            data-col={c.h}
-            onDragOver={p.readOnly ? undefined : (e) => onDragOver(e, c.h)}
-            onDragLeave={p.readOnly ? undefined : onDragLeave}
-            onDrop={p.readOnly ? undefined : (e) => onDrop(e, c.h)}
+            key={k}
+            className={over !== null && over === to ? "col over" : "col"}
+            data-col={k}
+            onDragOver={to === null ? undefined : (e) => onDragOver(e, to)}
+            onDragLeave={to === null ? undefined : onDragLeave}
+            onDrop={to === null ? undefined : (e) => onDrop(e, to)}
           >
             <div className="col-head">
-              <h2>{c.title}</h2>
-              <span>{list.length}</span>
+              <h2>{colTitle(c)}</h2>
+              <span>{c.items.length}</span>
             </div>
-            <div className="col-sub">{c.sub + (c.h === "now" ? hiddenLine(done) : "")}</div>
-            <div className="col-body">{list.length === 0 ? <p className="note">{NOTHING_HERE}</p> : list.map((i) => card(i, c.h))}</div>
+            <div className="col-sub">{sub(c, i === 0)}</div>
+            <div className="col-body">{c.items.length === 0 ? <p className="note">{NOTHING_HERE}</p> : c.items.map((it) => card(it, c))}</div>
           </section>
         );
       })}
