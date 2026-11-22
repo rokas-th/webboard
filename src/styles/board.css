@@ -319,7 +319,9 @@ html[data-os="ios"] .col-head .col-rename {
 }
 
 .card-meta .card-group {
+  flex: 1 1 0;
   min-width: 0;
+  max-width: max-content;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -331,6 +333,14 @@ html[data-os="ios"] .col-head .col-rename {
 
 .card-meta .unsched {
   color: var(--amber);
+}
+
+.card-people {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: -2px 0 -2px auto;
 }
 
 

@@ -6,7 +6,10 @@ import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { fs, MESA_SEED, testSession, type SeedItem, type TestSession } from "../../test/session";
 import { testRegistry } from "../../test/shell";
-import { clearToasts } from "../common/Toast";
+import { render } from "@testing-library/react";
+import { createElement } from "react";
+import { STALE_CONFIRM } from "../common/NativeConfirm";
+import { clearToasts, Toasts } from "../common/Toast";
 import { runWith } from "../run";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { UiState } from "../state";
@@ -743,6 +746,93 @@ describe("duplicate (product-7)", () => {
     const copy = childrenOf(t.session.view().plan, null).find((i) => i.name === "One day copy");
     if (copy === undefined) throw new Error("no copy");
     expect(h.setUi.mock.calls).toEqual([[{ selected: copy.id, follow: copy.id }]]);
+  });
+});
+
+describe("assign commands", () => {
+  const crew = (t: TestSession): Record<string, string> => {
+    t.session.apply({ t: "person", op: "add", name: "Mira Okafor", initials: "MO", colour: "violet", after: null });
+    const mira = t.session.view().people.people[0].id;
+    t.session.apply({ t: "person", op: "add", name: "Ole Berg", initials: "OB", colour: "lime", after: mira });
+    return Object.fromEntries(t.session.view().people.people.map((p) => [p.initials, p.id]));
+  };
+
+  const assigns = (ctx: CommandCtx): [string, string, string][] => commands(ctx).filter((c) => c.group === "Assign").map((c) => [c.id, c.group, c.label]);
+
+  it("offers one command per live person for a selected task or milestone, Unassign for the held ones", async () => {
+    const t = await made(SMALL);
+    const p = crew(t);
+    t.session.apply({ t: "assign", items: ["a"], person: p.OB });
+    expect(assigns(harness(t, { selected: "a" }).ctx)).toEqual([
+      [`assign:${p.MO}`, "Assign", "Assign to Mira Okafor"],
+      [`assign:${p.OB}`, "Assign", "Unassign Ole Berg"],
+    ]);
+    expect(assigns(harness(t, { selected: "m" }).ctx).map(([, , label]) => label)).toEqual(["Assign to Mira Okafor", "Assign to Ole Berg"]);
+  });
+
+  it("runs assign and unassign on the selection, each one undo entry", async () => {
+    const t = await made(SMALL);
+    const p = crew(t);
+    t.session.apply({ t: "assign", items: ["a"], person: p.OB });
+    const apply = vi.spyOn(t.session, "apply");
+    find(harness(t, { selected: "a" }).ctx, `assign:${p.MO}`).run();
+    find(harness(t, { selected: "a" }).ctx, `assign:${p.OB}`).run();
+    expect(created(apply)).toEqual([
+      { t: "assign", items: ["a"], person: p.MO },
+      { t: "unassign", items: ["a"], person: p.OB },
+    ]);
+    expect(t.session.view().people.assignees.get("a")?.map((x) => (x.kind === "live" ? x.person.name : null))).toEqual(["Mira Okafor"]);
+    t.session.undo();
+    expect(t.session.view().people.assignees.get("a")?.map((x) => (x.kind === "live" ? x.person.name : null))).toEqual(["Mira Okafor", "Ole Berg"]);
+  });
+
+  it("offers none for a group, a trashed item, a read-only plan, no selection or a plan without people", async () => {
+    const t = await made(SMALL);
+    expect(assigns(harness(t, { selected: "a" }).ctx)).toEqual([]);
+    crew(t);
+    expect(assigns(harness(t, { selected: "g1" }).ctx)).toEqual([]);
+    expect(assigns({ ...harness(t, { selected: "a" }).ctx, readOnly: true })).toEqual([]);
+    expect(assigns(harness(t).ctx)).toEqual([]);
+    t.session.apply({ t: "trash", items: ["one"] });
+    expect(assigns(harness(t, { selected: "one" }).ctx)).toEqual([]);
+  });
+
+  it("toasts the stale confirmation when the person or the item went away after listing", async () => {
+    const t = await made(SMALL);
+    const p = crew(t);
+    const listed = harness(t, { selected: "a" }).ctx;
+    const mira = find(listed, `assign:${p.MO}`);
+    const ole = find(listed, `assign:${p.OB}`);
+    t.session.apply({ t: "person", op: "remove", person: p.MO, to: null });
+    const apply = vi.spyOn(t.session, "apply");
+    mira.run();
+    t.session.apply({ t: "trash", items: ["a"] });
+    ole.run();
+    expect(created(apply)).toEqual([{ t: "trash", items: ["a"] }]);
+    const shown = render(createElement(Toasts));
+    const toasts = [...shown.container.querySelectorAll(".toast")];
+    expect(toasts.map((e) => [e.className, e.textContent?.includes(STALE_CONFIRM)])).toEqual([
+      ["toast bad", true],
+      ["toast bad", true],
+    ]);
+    shown.unmount();
+  });
+
+  it("throws, without a toast, when the item is no longer in the plan at all", async () => {
+    const t = await made(SMALL);
+    const p = crew(t);
+    const mira = find(harness(t, { selected: "a" }).ctx, `assign:${p.MO}`);
+    const real = t.session.view();
+    const items = new Map([...real.plan.items].filter(([id]) => id !== "a"));
+    const view = vi.spyOn(t.session, "view").mockReturnValue({ ...real, plan: { ...real.plan, items } });
+    const apply = vi.spyOn(t.session, "apply");
+    expect(() => mira.run()).toThrow("Palette: assign names item a, which is not in the plan");
+    expect(apply).not.toHaveBeenCalled();
+    view.mockRestore();
+    apply.mockRestore();
+    const shown = render(createElement(Toasts));
+    expect(shown.container.querySelectorAll(".toast")).toHaveLength(0);
+    shown.unmount();
   });
 });
 

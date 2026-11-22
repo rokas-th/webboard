@@ -551,7 +551,7 @@ describe("the plan group: Overview, Baselines, Danger zone", () => {
       ["app", "App"],
       ["plan", name],
     ]);
-    expect(navItems(m.root())).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "Workflow", "Working time", "Baselines", "Danger zone"]);
+    expect(navItems(m.root())).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "People", "Workflow", "Working time", "Baselines", "Danger zone"]);
     fireEvent.click(within(nav(m.root())).getByRole("button", { name: "Danger zone" }));
     expect([m.onSection.mock.calls, m.root().getAttribute("aria-label"), shownSection(m.root())]).toEqual([[["danger"]], "Danger zone", ["danger"]]);
     await t.session.close();
@@ -1018,7 +1018,7 @@ describe("Settings in the sheet frame", () => {
     const list = sheet.querySelector(".settings-list");
     if (list === null) throw new Error("no list");
     const order = [...list.querySelectorAll<HTMLElement>("p.settings-list-plan, section.settings-group > h2")].map((el) => el.textContent);
-    expect(order).toEqual(["General", "Theme", "Sync", "Import & export", t.session.view().plan.name, "Overview", "Workflow", "Working time", "Baselines", "Danger zone"]);
+    expect(order).toEqual(["General", "Theme", "Sync", "Import & export", t.session.view().plan.name, "Overview", "People", "Workflow", "Working time", "Baselines", "Danger zone"]);
     await t.session.close();
   });
 

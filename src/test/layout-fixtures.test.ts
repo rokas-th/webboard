@@ -4,7 +4,9 @@ import type { InvokeArgs } from "@tauri-apps/api/core";
 import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, OUT_OF_RANGE, STEP_GONE, STEP_QA, UNREADABLE_ID, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "../../scripts/layout-fixtures.mjs";
 import { normalizeName } from "../actions/build";
 import { derive } from "../domain/derive";
+import { projectPeople } from "../domain/people";
 import { projectBoard } from "../domain/steps";
+import { formerPeople } from "../plan/former";
 import { LogState } from "../log/state";
 import type { Action, Cause, DeviceId } from "../log/types";
 import { choices, heldItems } from "../plan/choices";
@@ -142,7 +144,7 @@ function decoded(f: Fixture, doc: string) {
   return { ydoc, actions, log, plan, cs, held: heldItems(cs, plan) };
 }
 
-const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
+const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "mesa-people-ios-pad": "iPad", "mesa-people-ios-phone": "iPhone", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
 
 const openRegistries: Registry[] = [];
 
@@ -215,6 +217,9 @@ describe("layout fixtures", () => {
       "mesa-ios-pad",
       "mesa-ios-phone",
       "mesa-linux",
+      "mesa-people",
+      "mesa-people-ios-pad",
+      "mesa-people-ios-phone",
       "mesa-steps",
       "mesa-steps-ios-pad",
       "phone-choice",
@@ -387,7 +392,7 @@ describe("layout fixtures", () => {
       const answered = Object.keys(f.ipc).filter((cmd) => cmd in UIKIT);
       expect([name, answered]).toEqual([name, f.platform.os === "ios" ? Object.keys(UIKIT) : []]);
     });
-    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(9);
+    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(11);
   });
 
   it("every fixture carries a platform global its device_info agrees with", () => {
@@ -519,6 +524,38 @@ describe("layout fixtures", () => {
     expect(fixture("mesa-steps-ios-pad").docs).toEqual(f.docs);
     expect(fixture("mesa-steps-ios-pad").ipc).toEqual({ ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" }, ...UIKIT });
     expect(fixture("mesa-steps-ios-pad").platform).toEqual({ os: "ios", idiom: "pad" });
+  });
+
+  it("mesa-people is mesa plus three actions that add four people, assign three open cards and remove Dana Lee, who stays on t4 as a former person", () => {
+    const f = fixture("mesa-people");
+    const doc = only(planDocs(f));
+    const d = decoded(f, doc);
+    const base = decoded(fixture("mesa"), only(planDocs(fixture("mesa"))));
+    expect(d.actions).toHaveLength(base.actions.length + 3);
+    expect(shapeOf(d.plan)).toEqual(shapeOf(base.plan));
+    expect(d.cs).toEqual([]);
+    expect([...d.plan.people.persons]).toEqual([
+      ["ana", { n: "Ana Ruiz", i: "AR", c: "coral", o: "a2" }],
+      ["dana", null],
+      ["mira", { n: "Mira Okafor", i: "MO", c: "violet", o: "a0" }],
+      ["ole", { n: "Ole Berg", i: "OB", c: "lime", o: "a1" }],
+    ]);
+    const people = projectPeople(d.plan, formerPeople(d.log, d.plan));
+    expect(people.people.map((p) => p.name)).toEqual(["Mira Okafor", "Ole Berg", "Ana Ruiz"]);
+    expect([...people.assignees].map(([item, list]) => [item, list.map((a) => (a.kind === "live" ? a.person.initials : `former ${a.initials ?? "?"} ${a.name ?? "?"}`))])).toEqual([
+      ["t2", ["MO", "AR"]],
+      ["t3", ["OB"]],
+      ["t4", ["former DL Dana Lee"]],
+    ]);
+    const board = projectBoard(d.plan, derive(d.plan, d.held, "2026-11-09"));
+    const open = board.columns.filter((c) => c.step === null || !c.step.completes).flatMap((c) => c.items.map((i) => i.id));
+    expect(["t2", "t3", "t4"].filter((id) => !open.includes(id))).toEqual([]);
+    expect(fixture("mesa-people-ios-pad").docs).toEqual(f.docs);
+    expect(fixture("mesa-people-ios-pad").ipc).toEqual({ ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" }, ...UIKIT });
+    expect(fixture("mesa-people-ios-pad").platform).toEqual({ os: "ios", idiom: "pad" });
+    expect(fixture("mesa-people-ios-phone").docs).toEqual(f.docs);
+    expect(fixture("mesa-people-ios-phone").ipc).toEqual({ ...f.ipc, device_info: { deviceId: "iphone", platform: "ios" }, ...UIKIT });
+    expect(fixture("mesa-people-ios-phone").platform).toEqual({ os: "ios", idiom: "phone" });
   });
 
   it("scale holds 1,000 items and 2,000 links with nothing pending", () => {
@@ -690,8 +727,8 @@ describe("layout fixtures", () => {
     for (const [name, f] of Object.entries(FIXTURES).filter(([n]) => n !== "example")) {
       resetTauri(answersOf(f));
       setPlatform(f.platform);
-      if (name === "mesa-ios-phone") setScreen(390, 844);
-      if (name === "mesa-ios-pad" || name === "mesa-steps-ios-pad") setScreen(834, 1194);
+      if (name === "mesa-ios-phone" || name === "mesa-people-ios-phone") setScreen(390, 844);
+      if (name === "mesa-ios-pad" || name === "mesa-steps-ios-pad" || name === "mesa-people-ios-pad") setScreen(834, 1194);
       const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
       try {
         expect(registry.device.name).toBe(DEVICE_NAMES[name] ?? "Mac");

@@ -292,6 +292,21 @@ function mesaStepsLog() {
   return log;
 }
 
+const MESA_PEOPLE = [
+  ["mira", { n: "Mira Okafor", i: "MO", c: "violet", o: "a0" }],
+  ["ole", { n: "Ole Berg", i: "OB", c: "lime", o: "a1" }],
+  ["ana", { n: "Ana Ruiz", i: "AR", c: "coral", o: "a2" }],
+  ["dana", { n: "Dana Lee", i: "DL", c: "sky", o: "a3" }],
+];
+
+function mesaPeopleLog() {
+  const log = mesaLog("mesaO");
+  log.act({ lbl: "Added 4 people", w: MESA_PEOPLE.map(([id, value]) => own(`pp:${id}`, { ...value })) });
+  log.act({ lbl: "Assigned people to 3 items", w: [own("pa:t2", ["ana", "mira"]), own("pa:t3", ["ole"]), own("pa:t4", ["dana"])] });
+  log.act({ lbl: `Removed ${q("Dana Lee")} from people`, w: [own("pp:dana", null)] });
+  return log;
+}
+
 function choicesLog() {
   const log = mesaLog("mesaC");
   const head = log.head();
@@ -711,6 +726,7 @@ export function buildFixtures() {
   const scale = fixtureOf([{ id: PLAN_IDS.scale, name: "Scale: 1,000 items", log: scaleLog() }]);
   const choices = fixtureOf([mesa(choicesLog())]);
   const mesaSteps = fixtureOf([mesa(mesaStepsLog())]);
+  const mesaPeople = fixtureOf([mesa(mesaPeopleLog())]);
   const removed = inSpace(mesaOnMac, true);
   const phoneRemoved = inSpace(mesaOnMac, true, [PLAN_IDS.mesa]);
   const status = withStatusYears(fixtureOf([{ id: PLAN_IDS.status, name: LONG.plan, log: statusLog() }]));
@@ -725,6 +741,9 @@ export function buildFixtures() {
     "mesa-ios-pad": onIosPad(mesaOnMac),
     "mesa-steps": mesaSteps,
     "mesa-steps-ios-pad": onIosPad(mesaSteps),
+    "mesa-people": mesaPeople,
+    "mesa-people-ios-phone": onIosPhone(mesaPeople),
+    "mesa-people-ios-pad": onIosPad(mesaPeople),
     scale,
     "scale-print": { ...scale, ipc: { ...scale.ipc, print_window: null } },
     choices,

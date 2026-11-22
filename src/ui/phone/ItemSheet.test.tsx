@@ -6,6 +6,7 @@ import type { PlanSession } from "../../store/session";
 import { IPHONE, setPlatform } from "../../test/platform";
 import { phoneRegistry } from "../../test/phone";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
+import { themed } from "../../test/theme";
 import { setScreen } from "../../test/setup";
 import { withSync } from "../../test/withSync";
 import { bannerText } from "../choices/describe";
@@ -77,14 +78,16 @@ const shown = (t: TestSession, item: ItemId) => {
   const onClose = vi.fn();
   const api: DetailApi = { press: vi.fn(), step: vi.fn(), promote: vi.fn(), rename: vi.fn(), order: [item] };
   render(
-    <OpenChoice.Provider value={vi.fn()}>
-      <UiContext.Provider value={{ ui: { ...UI, selected: item }, setUi: vi.fn() }}>
-        <DetailContext.Provider value={api}>
-          <ItemSheet session={t.session} item={item} local="Mac" naming={false} onNamed={() => undefined} onClose={onClose} />
-        </DetailContext.Provider>
-      </UiContext.Provider>
-      <Toasts />
-    </OpenChoice.Provider>,
+    themed(
+      <OpenChoice.Provider value={vi.fn()}>
+        <UiContext.Provider value={{ ui: { ...UI, selected: item }, setUi: vi.fn() }}>
+          <DetailContext.Provider value={api}>
+            <ItemSheet session={t.session} item={item} local="Mac" naming={false} onNamed={() => undefined} onClose={onClose} />
+          </DetailContext.Provider>
+        </UiContext.Provider>
+        <Toasts />
+      </OpenChoice.Provider>,
+    ),
   );
   return { onClose };
 };

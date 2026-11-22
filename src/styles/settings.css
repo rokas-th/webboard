@@ -614,3 +614,154 @@ html[data-os="ios"] .settings-list .workflow-completes {
   width: auto;
   min-width: 44px;
 }
+
+.people-control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+
+.people-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 4px;
+  font-family: var(--prose);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.people-line:empty {
+  display: none;
+}
+
+.people-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.people-head,
+.people-row {
+  display: grid;
+  grid-template-columns: 28px 28px minmax(0, 1fr) 64px 64px 76px;
+  align-items: center;
+  gap: 8px;
+}
+
+.people-head {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.people-row {
+  min-height: 40px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.8);
+}
+
+.people-row.dragging {
+  opacity: 0.5;
+}
+
+.people-row.drop-over {
+  box-shadow: inset 0 2px 0 var(--cyan);
+}
+
+.people-grip,
+.people-avatar,
+.people-grip-gap,
+.people-avatar-gap {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+}
+
+.people-grip {
+  cursor: grab;
+  touch-action: none;
+}
+
+.people-name,
+.people-draft-name {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.people-draft-name {
+  grid-column: 3 / -1;
+}
+
+.people-initials {
+  flex: none;
+  width: 64px;
+}
+
+.people-count {
+  flex: none;
+  min-width: 60px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.people-remove {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 10px;
+}
+
+.people-foot {
+  margin-top: 4px;
+}
+
+.people-add-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-list .people-head {
+  display: none;
+}
+
+.settings-list .people-row {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+html[data-os="ios"] .people-head,
+html[data-os="ios"] .people-row {
+  grid-template-columns: 44px 44px minmax(0, 1fr) 64px 60px 84px;
+  gap: 6px;
+}
+
+html[data-os="ios"] .people-grip,
+html[data-os="ios"] .people-avatar,
+html[data-os="ios"] .people-grip-gap,
+html[data-os="ios"] .people-avatar-gap {
+  width: 44px;
+  height: 44px;
+}
+
+html[data-os="ios"] .people-remove,
+html[data-os="ios"] .people-add {
+  min-height: 44px;
+}
+
+html[data-os="ios"] .people-remove {
+  min-width: 44px;
+}

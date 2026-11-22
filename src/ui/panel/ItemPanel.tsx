@@ -21,6 +21,8 @@ import { dateUnreadable, EndField, WholeField } from "./typed";
 import { DUR_NOT_WHOLE } from "../copy";
 import { bindTextarea, type NoteBinding } from "./noteBinding";
 import { TextField } from "./TextField";
+import { AssigneesField } from "../people/AssigneesField";
+import { ASSIGNEES } from "../people/text";
 
 export const TOP_LEVEL = "Top level";
 
@@ -163,6 +165,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
   const it = p.item;
   const sc = scheduleOf(it);
   const statusId = useId();
+  const assigneesId = useId();
   const dated = sc.start !== null && !it.trashed;
   const milestone = it.kind === "milestone";
   const derivedFromPreds = milestone && statusPreds(p.view.plan, it.id).length > 0;
@@ -261,6 +264,8 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
           ))}
         </select>
       )}
+      <label id={assigneesId}>{ASSIGNEES}</label>
+      <AssigneesField view={p.view} item={it} readOnly={p.readOnly} run={p.run} labelledBy={assigneesId} />
       {!milestone && (
         <>
           <label>Progress</label>

@@ -82,6 +82,8 @@ export const CHROME = Object.freeze({
   choiceBanners: [`.choice-banner ${CONTROL}`],
   boardHead: [".col-head .col-btn", ".col-strip"],
   workflowRows: [".workflow-row button", ".workflow-add"],
+  peopleRows: [".people-row button", ".people-add"],
+  assignees: [".assignees .chip-x", ".assignees .chip-add"],
 });
 const hitChrome = (...groups) => ({ hit44: groups.flatMap((g) => CHROME[g]) });
 const READY_MS = 5000;
@@ -112,6 +114,8 @@ const count = (selector, n) => ({ count: [selector, n] });
 const loaded = (selector) => ({ loaded: selector });
 const click = (selector, text) => ({ click: text === undefined ? [selector] : [selector, text] });
 const tap = (selector, text) => ({ tap: [selector, text] });
+const context = (selector, text) => ({ context: text === undefined ? [selector] : [selector, text] });
+const contrastMore = () => ({ contrastMore: true });
 const swipe = (selector, dx, dy) => ({ swipe: [selector, dx, dy] });
 const doubleClick = (selector, text, dx) => ({ doubleClick: [selector, text ?? null, dx ?? 0] });
 const doubleTap = (selector, text) => ({ doubleTap: [selector, text ?? null] });
@@ -125,11 +129,13 @@ const shown = (selector, n) => ({ shown: [selector, n] });
 const width = (selector, min, max) => ({ width: [selector, min, max] });
 const height = (selector, min, max) => ({ height: [selector, min, max] });
 const heightShare = (selector, min, max) => ({ heightShare: [selector, min, max] });
+const peopleKeepHeight = (selector, min) => ({ peopleKeepHeight: [selector, min] });
 const chart = (min) => ({ chart: min });
 const aligned = () => ({ aligned: true });
 const style = (selector, prop, value, pseudo) => ({ style: pseudo === undefined ? [selector, prop, value] : [selector, prop, value, pseudo] });
 const valued = (selector, text) => ({ valued: [selector, text] });
 const ellipsed = (selector) => ({ ellipsed: selector });
+const relabel = (selector, text) => ({ relabel: [selector, text] });
 const within_ = (selector, box, n) => ({ within: [selector, box, n] });
 const fitLabels = () => ({ fitLabels: true });
 const monthCut = () => ({ monthCut: true });
@@ -332,9 +338,9 @@ function states() {
   const SETTINGS_SHEET = '.sheet[role="dialog"][aria-label="Settings"]';
   const SETTINGS_GEAR = '.toolbar button[aria-label="Settings"]';
   const APP_LABELS = ["General", "Theme", "Sync", "Import & export"];
-  const PLAN_LABELS = ["Overview", "Workflow", "Working time", "Baselines", "Danger zone"];
+  const PLAN_LABELS = ["Overview", "People", "Workflow", "Working time", "Baselines", "Danger zone"];
   const SECTION_LABELS = [...APP_LABELS, ...PLAN_LABELS];
-  const SECTION_SLUGS = ["general", "theme", "sync", "files", "overview", "workflow", "working-time", "baselines", "danger"];
+  const SECTION_SLUGS = ["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "baselines", "danger"];
   const PLAN_NAME = "MESA 1.0";
   const sectionOn = (label) => [expect(`${SETTINGS_MODAL} .modal-head h3`, label), expect(`${SETTINGS_MODAL} .settings-nav-item[aria-current="page"]`, label), count(`${SETTINGS_MODAL} section.settings-section:not([hidden])`, 1)];
   const sectionChecks = (scope) => [
@@ -343,6 +349,20 @@ function states() {
     ["sync", "Sync", [expect(`${scope} .settings-status.cyan`, "Local only"), count(`${scope} .settings-sync .sync-tabs [role="tab"]`, 4), expect(`${scope} .settings-sync [role="tab"][aria-selected="true"]`, "Set up sync"), expect(`${scope} .settings-sync .sync-pane[data-settings-row="sync.setup"] button`, "Create or join space"), count(`${scope} .settings-row[data-settings-row^="sync."] button`, 0)]],
     ["files", "Import & export", [expect(`${scope} [data-settings-row="files.import"] button`, "Import plan…"), expect(`${scope} [data-settings-row="files.export"] button`, "Export plan…")]],
     ["overview", "Overview", [expect(`${scope} [data-settings-row="overview.name"] .settings-label`, "Name"), count(`${scope} [data-settings-row="overview.name"] input.settings-plan-name[aria-label="Plan name"]`, 1), inWindow(`${scope} input.settings-plan-name`)]],
+    [
+      "people",
+      "People",
+      [
+        expect(`${scope} [data-settings-row="people.people"] .settings-label`, "People"),
+        expect(`${scope} [data-settings-row="people.people"] p.settings-line.people-empty`, "No people yet. Add someone to assign tasks and milestones."),
+        count(`${scope} p.people-line[role="status"]:empty`, 1),
+        style(`${scope} p.people-line`, "display", "none"),
+        count(`${scope} li.people-row`, 0),
+        count(`${scope} .people-head`, 0),
+        expect(`${scope} [data-settings-row="people.people"] .people-foot`, "Order here is the order of avatars on cards. Up to 8 people per item."),
+        expect(`${scope} [data-settings-row="people.add"] button.people-add`, "+ Add person"),
+      ],
+    ],
     [
       "workflow",
       "Workflow",
@@ -388,6 +408,7 @@ function states() {
       ],
     ],
   ];
+  const revealLastNav = reveal(`${SETTINGS_MODAL} .settings-nav-item`, "Danger zone");
   const modalFrame = (lo, hi) => [width(SETTINGS_MODAL, lo, 780), height(SETTINGS_MODAL, hi, 580), width(`${SETTINGS_MODAL} .settings-side`, 212, 212), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL)];
   add("about", "mesa", {
     dialog: true,
@@ -448,11 +469,13 @@ function states() {
       click(SETTINGS_GEAR),
       ...sectionOn("General"),
       ...modalFrame(780, 580),
+      revealLastNav,
       hitChrome("dialogHead", "settingsNav"),
       click(`${SETTINGS_MODAL} .settings-nav-item`, "Import & export"),
       ...sectionOn("Import & export"),
       expect(`${SETTINGS_SHOWN} [data-settings-row="files.import"] button`, "Import plan…"),
       expect(`${SETTINGS_SHOWN} [data-settings-row="files.export"] button`, "Export plan…"),
+      revealLastNav,
       hitChrome("dialogHead", "settingsNav", "settingsRows"),
     ],
   });
@@ -478,6 +501,54 @@ function states() {
       click('.colour-pop [data-colour="amber"]'),
       count(".colour-pop", 0),
       count(`${SETTINGS_SHOWN} li.workflow-row[data-step="next"][style*="--s-amber"]`, 1),
+    ],
+  });
+  const PEOPLE_ROW = (id) => `${SETTINGS_SHOWN} li.people-row[data-person="${id}"]`;
+  const peopleOpened = [click(SETTINGS_GEAR), click(`${SETTINGS_MODAL} .settings-nav-item`, "People"), ...sectionOn("People"), ...modalFrame(780, 580)];
+  const peopleRows = [
+    count(`${SETTINGS_SHOWN} li.people-row`, 3),
+    count(`${SETTINGS_SHOWN} li.people-row[data-person="dana"]`, 0),
+    count(`${SETTINGS_SHOWN} .people-empty`, 0),
+    expect(`${PEOPLE_ROW("mira")} input.people-name[aria-label="Name of Mira Okafor"]`),
+    expect(`${PEOPLE_ROW("mira")} button.people-avatar[aria-label="Colour of Mira Okafor"] .avatar`, "MO"),
+    valued(`${PEOPLE_ROW("ole")} input.people-initials`, "OB"),
+    expect(`${PEOPLE_ROW("mira")} .people-count`, "1 item"),
+    expect(`${PEOPLE_ROW("ole")} .people-count`, "1 item"),
+    expect(`${PEOPLE_ROW("ana")} .people-count`, "1 item"),
+    expect(`${PEOPLE_ROW("ana")} button.people-remove[aria-label="Remove Ana Ruiz"]`, "Remove…"),
+    expect(`${SETTINGS_SHOWN} [data-settings-row="people.add"] button.people-add`, "+ Add person"),
+  ];
+  add("settings-people/desk", "mesa-people", {
+    sizes: "desktop-and-compact",
+    dialog: true,
+    actions: [
+      ...peopleOpened,
+      ...peopleRows,
+      inWindow(`${SETTINGS_SHOWN} button.people-add`),
+      click(`${PEOPLE_ROW("mira")} button.people-avatar`),
+      expect('.colour-pop[role="dialog"] .step-pop-title', "Colour · Mira Okafor"),
+      count('.colour-pop [role="radio"]', 8),
+      count('.colour-pop [role="radio"][aria-checked="true"][data-colour="violet"]', 1),
+      count(".colour-pop > .popover-close:last-child", 1),
+      width(".colour-pop .popover-close", 20, 20),
+      corner(".colour-pop .popover-close", ".colour-pop", "top-trailing", 12),
+      inWindow(".colour-pop"),
+      uncovered('.colour-pop [role="radio"]'),
+      uncovered(".colour-pop .popover-close"),
+      click('.colour-pop [data-colour="amber"]'),
+      count(".colour-pop", 0),
+      count(`${PEOPLE_ROW("mira")} .avatar[style*="--s-amber"]`, 1),
+    ],
+  });
+  add("settings-people/pad-landscape", "mesa-people-ios-pad", {
+    sizes: "ipad-11-landscape",
+    dialog: true,
+    actions: [
+      ...peopleOpened,
+      ...peopleRows,
+      height(PEOPLE_ROW("ole"), 52, 54),
+      width(`${PEOPLE_ROW("ole")} button.people-grip`, 44, 44),
+      hitChrome("dialogHead", "peopleRows"),
     ],
   });
   add("settings-sheet/phone", "mesa", {
@@ -548,6 +619,23 @@ function states() {
         ...sectionChecks(group)[i][2],
       ],
     });
+  });
+  const PHONE_PEOPLE = `${SETTINGS_SHEET} section.settings-group[data-section="people"]`;
+  add("phone-settings/people-rows", "mesa-people-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-head button", "Plans"),
+      click(".plans-sheet button.plans-settings-row", "Settings…"),
+      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+      reveal(`${PHONE_PEOPLE} > h2.settings-group-title`, "People"),
+      count(`${PHONE_PEOPLE} li.people-row`, 3),
+      expect(`${PHONE_PEOPLE} li.people-row[data-person="mira"] button.people-avatar .avatar`, "MO"),
+      reveal(`${PHONE_PEOPLE} li.people-row[data-person="ole"]`),
+      width(`${PHONE_PEOPLE} li.people-row[data-person="ole"] button.people-grip`, 44, 44),
+      height(`${PHONE_PEOPLE} li.people-row[data-person="ole"] button.people-avatar`, 44, 44),
+      hitChrome("peopleRows"),
+    ],
   });
   add("light-timeline", "mesa", {
     theme: { v: 1, mode: "fixed", active: "paper", dark: "cyberdeck", light: "daylight", mine: [] },
@@ -736,6 +824,66 @@ function states() {
       expect(".modal .modal-actions .button-danger", "Delete and move"),
       count(".modal .modal-head .modal-close", 1),
       inWindow(".modal"),
+    ],
+  });
+  const T2 = '[data-card="t2"]';
+  const T4 = '[data-card="t4"]';
+  const avatarChecks = [
+    viewExpect("board"),
+    count(`${T2} .card-meta > .card-people:last-child`, 1),
+    expect(`${T2} .card-people[aria-label="Assignees: Mira Okafor, Ana Ruiz"] .avatar:not(.former)`, "MO"),
+    expect(`${T2} .card-people .avatar-more`, "+1"),
+    expect(`${T4} .card-people[aria-label="Assignees: Former: Dana Lee"] .avatar.former`, "DL"),
+    count(`${T4} .card-people .avatar-more`, 0),
+    count('[data-card="t5"] .card-people', 0),
+    width(`${T2} .avatar`, 18, 18),
+    height(`${T2} .avatar`, 18, 18),
+    style(`${T2} .avatar`, "background-color", "rgb(169, 139, 255)"),
+    style(`${T2} .avatar`, "color", "rgb(10, 10, 20)"),
+    peopleKeepHeight(".card:has(.card-people)", 3),
+  ];
+  add("board/avatars", "mesa-people", {
+    place: boardPlace,
+    actions: [...avatarChecks, style(`${T2} .avatar`, "box-shadow", "none")],
+  });
+  add("board/avatars-contrast", "mesa-people", {
+    place: boardPlace,
+    actions: [contrastMore(), ...avatarChecks, style(`${T2} .avatar`, "box-shadow", "rgb(234, 243, 255) 0px 0px 0px 1.5px"), style(`${T4} .avatar`, "box-shadow", "rgb(234, 243, 255) 0px 0px 0px 1.5px")],
+  });
+  add("board/avatars-long-group", "mesa-people", {
+    place: boardPlace,
+    actions: [
+      viewExpect("board"),
+      count('[data-card="t3"] .card-meta > .card-people:last-child', 1),
+      relabel('[data-card="t3"] .card-group', "Commission › Mirror cell and optics"),
+      peopleKeepHeight('[data-card="t3"]', 1),
+      ellipsed('[data-card="t3"] .card-group'),
+      peopleKeepHeight(".card:has(.card-people)", 3),
+      expect('[data-card="t3"] .card-people .avatar', "OB"),
+    ],
+  });
+  const ASSIGN_ROWS = '.context-menu [role="group"][aria-label="Assign"] [role="menuitemcheckbox"]';
+  add("board/card-menu-assign", "mesa-people", {
+    place: boardPlace,
+    actions: [
+      viewExpect("board"),
+      context(T2),
+      count('.context-menu[role="menu"]', 1),
+      count(ASSIGN_ROWS, 3),
+      count(`${ASSIGN_ROWS}[aria-checked="true"]`, 2),
+      expect(`${ASSIGN_ROWS}[aria-checked="false"]`, "Ole Berg"),
+      count('.context-menu [role="separator"]', 3),
+      inWindow(".context-menu"),
+    ],
+  });
+  add("board/ipad-card-menu", "mesa-people-ios-pad", {
+    sizes: "ipad-11-landscape",
+    place: boardPlace,
+    panes: { closed: ["list", "inspector"] },
+    actions: [
+      context(T2),
+      count(".context-menu", 0),
+      askedExactly([[0, ["Open", "group Move to", "Now ✓", "Next", "Later", "Done", "group Assign", "Mira Okafor ✓", "Ole Berg", "Ana Ruiz ✓", "Duplicate", "Delete"]]]),
     ],
   });
   add("example/list", "example", {
@@ -1019,6 +1167,42 @@ function states() {
     dialog: true,
     actions: [viewExpect("timeline"), click('.slot-panel .summary-row[data-summary-row="baselines"]'), ...sectionOn("Baselines"), ...sectionChecks(SETTINGS_SHOWN)[SECTION_SLUGS.indexOf("baselines")][2]],
   });
+  const T2_NAME = "Dome shell delivery, crane and bolts";
+  const T4_NAME = "Camera and filter kit";
+  const DESK_ASSIGNEES = '.slot-panel [data-detail] .assignees[data-detail-field="assignees"]';
+  add("detail/assignees", "mesa-people", {
+    sizes: "standard",
+    panes: OUTLINE_CLOSED,
+    actions: [
+      viewExpect("timeline"),
+      click(".tl-row .name", T2_NAME),
+      count('.slot-panel [data-detail-item="t2"]', 1),
+      reveal(`${DESK_ASSIGNEES} .chip-add`, "Assign…"),
+      count(`${DESK_ASSIGNEES} .who-chip`, 2),
+      expect(`${DESK_ASSIGNEES} .who-chip:nth-child(1) .who-name`, "Mira Okafor"),
+      expect(`${DESK_ASSIGNEES} .who-chip:nth-child(2) .who-name`, "Ana Ruiz"),
+      expect(`${DESK_ASSIGNEES} .who-chip:nth-child(1) .avatar`, "MO"),
+      expect(`${DESK_ASSIGNEES} button.chip-x[aria-label="Unassign Mira Okafor"]`),
+      height(`${DESK_ASSIGNEES} .who-chip`, 28, 28),
+      width(`${DESK_ASSIGNEES} .chip-x`, 22, 22),
+      height(`${DESK_ASSIGNEES} .chip-add`, 28, 28),
+      width(`${DESK_ASSIGNEES} .avatar`, 18, 18),
+      click(`${DESK_ASSIGNEES} .chip-add`, "Assign…"),
+      count('.context-menu[role="menu"][aria-label="Assign"]', 1),
+      count('.context-menu [role="menuitemcheckbox"]', 3),
+      count('.context-menu [role="menuitemcheckbox"][aria-checked="true"]', 2),
+      count(".context-menu .context-menu-title", 0),
+      inWindow(".context-menu"),
+      key("Escape", "Escape"),
+      count(".context-menu", 0),
+      click(".tl-row .name", T4_NAME),
+      count('.slot-panel [data-detail-item="t4"]', 1),
+      reveal(`${DESK_ASSIGNEES} .who-chip.former .who-name`, "Former: Dana Lee"),
+      count(`${DESK_ASSIGNEES} .who-chip`, 1),
+      expect(`${DESK_ASSIGNEES} .who-chip.former .avatar.former`, "DL"),
+      expect(`${DESK_ASSIGNEES} button.chip-x[aria-label="Unassign Former: Dana Lee"]`),
+    ],
+  });
   add("history", "mesa", {
     actions: [click(HISTORY_ROW), reveal(".slot-panel .panel h2", "History"), width(".slot-panel .history li button", 1, 90), count(".slot-panel .history li", 40)],
   });
@@ -1231,6 +1415,35 @@ function states() {
     panes: OUTLINE_CLOSED,
     actions: [viewExpect("board"), tap(".card .card-name", PICKED), expect(".slot-panel .detail .kind", "TASK"), count(".slot-panel .detail-head .inspector-close", 1), hitChrome("detailHead")],
   });
+  add("ios44/pad-landscape/assignees", "mesa-people-ios-pad", {
+    place: { view: "board", zoom: "W" },
+    sizes: "ipad-11-landscape",
+    panes: OUTLINE_CLOSED,
+    actions: [
+      viewExpect("board"),
+      tap(".card .card-name", T2_NAME),
+      count('.slot-panel [data-detail-item="t2"]', 1),
+      reveal(".slot-panel .assignees .chip-add", "Assign…"),
+      count(".slot-panel .assignees .who-chip", 2),
+      count(".slot-panel .assignees .chip-x", 2),
+      height(".slot-panel .assignees .who-chip", 44, 44),
+      hitChrome("assignees"),
+    ],
+  });
+  add("ios44/phone/assignees", "mesa-people-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-list .prow .prow-name", T2_NAME),
+      expect('.sheet[role="dialog"] [data-detail="sheet"] .detail-body'),
+      count('.sheet [data-detail-item="t2"]', 1),
+      reveal(".sheet .assignees .chip-add", "Assign…"),
+      count(".sheet .assignees .who-chip", 2),
+      count(".sheet .assignees .chip-x", 2),
+      height(".sheet .assignees .who-chip", 44, 44),
+      hitChrome("assignees"),
+    ],
+  });
   const PICKED_BAR = '.tl-chart .bar[data-bar="t3"]';
   add("detail/pair-ipad-bar", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
@@ -1271,12 +1484,12 @@ function states() {
   add("ios44/pad-portrait/settings", "mesa-ios-pad", {
     sizes: "ipad-11-portrait",
     dialog: true,
-    actions: [viewExpect("timeline"), ...settingsFromMore, ...sectionOn("General"), count(".sheet", 0), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL), hitChrome("dialogHead", "settingsNav")],
+    actions: [viewExpect("timeline"), ...settingsFromMore, ...sectionOn("General"), count(".sheet", 0), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL), revealLastNav, hitChrome("dialogHead", "settingsNav")],
   });
   add("ios44/pad-landscape/plan", "mesa-ios-pad", { sizes: "ipad-landscapes", panes: OUTLINE_CLOSED, actions: [...fullShell, hitChrome("toolbar", "planList", "summaryRows")] });
   add("ios44/pad-landscape/settings", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
-    actions: [viewExpect("timeline"), click(SETTINGS_GEAR), ...sectionOn("General"), inWindow(SETTINGS_MODAL), hitChrome("dialogHead", "settingsNav")],
+    actions: [viewExpect("timeline"), click(SETTINGS_GEAR), ...sectionOn("General"), inWindow(SETTINGS_MODAL), revealLastNav, hitChrome("dialogHead", "settingsNav")],
   });
   const OVERLAY = '.plan-overlay[role="dialog"][aria-label="Plans"]';
   add("ipad-mode/overlay", "mesa-ios-pad", {
@@ -2552,6 +2765,20 @@ window.__probeAct = function (a) {
     }
     return { at: [x, y] };
   }
+  if (a.context !== undefined) {
+    var cx = matching(a.context[0], a.context[1]);
+    if (cx.hit === undefined) return { fail: missed(a.context[0], a.context[1], cx.nodes) };
+    cx.hit.scrollIntoView({ block: "nearest", inline: "nearest" });
+    var cr = cx.hit.getBoundingClientRect();
+    var cxx = Math.min(cr.left + 6, cr.right - 1);
+    var cxy = (cr.top + cr.bottom) / 2;
+    var cfront = document.elementFromPoint(cxx, cxy);
+    if (cfront === null || !(cfront === cx.hit || cx.hit.contains(cfront))) {
+      return { fail: a.context[0] + " " + JSON.stringify(a.context[1]) + " is covered at " + Math.round(cxx) + "," + Math.round(cxy) +
+        " by " + (cfront === null ? "nothing" : cfront.tagName.toLowerCase() + "." + String(cfront.className)) };
+    }
+    return { context: [cxx, cxy] };
+  }
   if (a.doubleClick !== undefined || a.doubleTap !== undefined) {
     var dd = a.doubleClick !== undefined ? a.doubleClick : a.doubleTap;
     var dm = matching(dd[0], dd[1] === null ? undefined : dd[1]);
@@ -2888,11 +3115,32 @@ window.__probeAct = function (a) {
     if (hh < a.height[1] - 0.5 || hh > a.height[2] + 0.5) return { fail: a.height[0] + " is " + Math.round(hh * 10) / 10 + " px high, not " + a.height[1] + ".." + a.height[2] };
     return { ok: true };
   }
+  if (a.peopleKeepHeight !== undefined) {
+    var keepCards = Array.prototype.slice.call(document.querySelectorAll(a.peopleKeepHeight[0])).filter(onScreen);
+    if (keepCards.length < a.peopleKeepHeight[1]) return { fail: "only " + keepCards.length + " " + a.peopleKeepHeight[0] + " on screen, not " + a.peopleKeepHeight[1] };
+    for (var kc = 0; kc < keepCards.length; kc++) {
+      var keepPeople = keepCards[kc].querySelector(".card-people");
+      if (keepPeople === null) return { fail: a.peopleKeepHeight[0] + " #" + kc + " has no .card-people" };
+      var keepWith = keepCards[kc].getBoundingClientRect().height;
+      var keepDisplay = keepPeople.style.display;
+      keepPeople.style.display = "none";
+      var keepWithout = keepCards[kc].getBoundingClientRect().height;
+      keepPeople.style.display = keepDisplay;
+      if (Math.abs(keepWith - keepWithout) > 0.5) return { fail: "card " + keepCards[kc].getAttribute("data-card") + " is " + tenth(keepWith) + " px high with its avatars and " + tenth(keepWithout) + " px without them" };
+    }
+    return { ok: true };
+  }
   if (a.heightShare !== undefined) {
     var tall = Array.prototype.slice.call(document.querySelectorAll(a.heightShare[0])).filter(onScreen)[0];
     if (tall === undefined) return { fail: "no " + a.heightShare[0] + " on screen to measure" };
     var share = (tall.getBoundingClientRect().height / window.innerHeight) * 100;
     if (share < a.heightShare[1] || share > a.heightShare[2]) return { fail: a.heightShare[0] + " is " + Math.round(share * 10) / 10 + " % of the window's height, not " + a.heightShare[1] + ".." + a.heightShare[2] + " %" };
+    return { ok: true };
+  }
+  if (a.relabel !== undefined) {
+    var relabelled = document.querySelectorAll(a.relabel[0]);
+    if (relabelled.length !== 1) return { fail: a.relabel[0] + " matches " + relabelled.length + " elements, not 1 to relabel" };
+    relabelled[0].textContent = a.relabel[1];
     return { ok: true };
   }
   if (a.fill !== undefined) {
@@ -3534,6 +3782,12 @@ async function pointer(cdp, sessionId, [x, y]) {
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 }, sessionId);
 }
 
+async function rightClick(cdp, sessionId, [x, y]) {
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, sessionId);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "right", buttons: 2, clickCount: 1 }, sessionId);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "right", buttons: 0, clickCount: 1 }, sessionId);
+}
+
 const PAIR_GAP_MS = 120;
 
 async function mouseDouble(cdp, sessionId, [x, y, dx]) {
@@ -3572,7 +3826,7 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
   const checked = () => {
     if (traffic.current.crash !== null) throw traffic.current.crash;
   };
-  await cdp.send("Emulation.setEmulatedMedia", { media: "" }, sessionId);
+  await cdp.send("Emulation.setEmulatedMedia", { media: "", features: [] }, sessionId);
   const nav = await cdp.send("Page.navigate", { url: `${origin}/?state=${encodeURIComponent(state.name)}` }, sessionId);
   checked();
   if (typeof nav.errorText === "string" && nav.errorText !== "") return unreached(`navigation to ${state.name} failed: ${nav.errorText}`);
@@ -3586,10 +3840,13 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
       await press(cdp, sessionId, action.key);
     } else if (action.media !== undefined) {
       await cdp.send("Emulation.setEmulatedMedia", { media: action.media }, sessionId);
+    } else if (action.contrastMore !== undefined) {
+      await cdp.send("Emulation.setEmulatedMedia", { media: "", features: [{ name: "prefers-contrast", value: "more" }] }, sessionId);
     } else {
       const got = await evaluate(cdp, sessionId, `window.__probeAct(${JSON.stringify(action)})`, true);
       if (got.fail !== undefined) return unreached(`${describeAction(action)}: ${got.fail}`);
       if (got.at !== undefined) await pointer(cdp, sessionId, got.at);
+      if (got.context !== undefined) await rightClick(cdp, sessionId, got.context);
       if (got.swipe !== undefined) await touchSwipe(cdp, sessionId, got.swipe);
       if (got.doubleClick !== undefined) await mouseDouble(cdp, sessionId, got.doubleClick);
       if (got.doubleTap !== undefined) await touchDouble(cdp, sessionId, got.doubleTap);

@@ -337,7 +337,7 @@ export function Workflow(p: { session: PlanSession; readOnly: boolean }) {
             setPop(null);
           }}
         >
-          <ColourPop step={popStep} at={pop.at} back={pop.back} onPick={(c) => pickColour(popStep.id, c)} onClose={() => setPop(null)} />
+          <ColourPop name={popStep.name} colour={popStep.colour} at={pop.at} back={pop.back} onPick={(c) => pickColour(popStep.id, c)} onClose={() => setPop(null)} />
         </div>
       )}
       {deleting.node}

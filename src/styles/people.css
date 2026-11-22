@@ -1,0 +1,138 @@
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex: none;
+  font-family: var(--display);
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--void);
+  background: var(--person);
+}
+
+.avatar.former {
+  color: var(--amber);
+  background: var(--panel-2);
+  border: 1px dashed var(--amber);
+}
+
+.avatar-more {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+@media (prefers-contrast: more) {
+  .avatar {
+    box-shadow: 0 0 0 1.5px var(--heading);
+  }
+}
+
+.assignees {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.assignees:focus-visible {
+  outline: none;
+}
+
+.who-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 2px 2px 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--void);
+  font-family: var(--prose);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.who-chip.former {
+  color: var(--amber);
+  border-style: dashed;
+}
+
+.who-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.who-chip > .who-name:last-child {
+  padding-right: 8px;
+}
+
+.chip-x {
+  display: grid;
+  place-items: center;
+  flex: none;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  color: var(--dim);
+}
+
+.chip-x svg {
+  width: 10px;
+  height: 10px;
+}
+
+@media (hover: hover) {
+  .chip-x:hover:not(:disabled) {
+    color: var(--text);
+    background: rgba(var(--text-rgb), 0.08);
+  }
+}
+
+.chip-add {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 0 10px;
+  border-style: dashed;
+  border-radius: 14px;
+  font-size: 10px;
+}
+
+html[data-os="ios"] .who-chip,
+html[data-os="ios"] .chip-add {
+  min-height: 44px;
+  border-radius: 22px;
+}
+
+html[data-os="ios"] .who-chip {
+  padding: 0 0 0 4px;
+}
+
+html[data-os="ios"] .chip-add {
+  min-width: 44px;
+  justify-content: center;
+}
+
+html[data-os="ios"] .chip-x {
+  width: 44px;
+  height: 44px;
+  margin: -1px 0;
+}

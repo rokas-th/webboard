@@ -82,7 +82,7 @@ const assignable = (plan: PlanState, id: ItemId): Item => {
 
 const sameList = (a: readonly PersonId[], b: readonly PersonId[]): boolean => a.length === b.length && a.every((x, n) => x === b[n]);
 
-const holders = (plan: PlanState, person: PersonId): readonly [ItemId, readonly PersonId[]][] =>
+export const holders = (plan: PlanState, person: PersonId): readonly [ItemId, readonly PersonId[]][] =>
   [...plan.people.assignees].flatMap(([item, ids]): [ItemId, readonly PersonId[]][] => {
     if (ids === null || !ids.includes(person)) return [];
     const it = plan.items.get(item);

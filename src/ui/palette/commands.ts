@@ -16,6 +16,10 @@ import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { PlanListMode } from "../shell/planListMode";
 import { readBoardPrefs } from "../board/prefs";
 import { stepPatch, tabOrder } from "../detail/order";
+import { STALE_CONFIRM } from "../common/NativeConfirm";
+import { toast } from "../common/Toast";
+import { heldOf } from "../people/assign";
+import { ASSIGN, assignToLabel, unassignLabel } from "../people/text";
 import { lastSection } from "../settings/lastSection";
 import type { SettingsSection, SyncPane, UiState, ViewKind, Zoom } from "../state";
 
@@ -196,8 +200,31 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
   });
   const copy = ctx.readOnly ? [] : [duplicate];
   if (it.kind === "group") return [...opening, ...nudges, ...order, ...copy, trash];
-  if (!dated(it)) return [...opening, ...order, ...copy, trash];
-  return [...opening, ...nudges, ...resizes, ...order, ...copy, trash];
+  const assigns = ctx.readOnly ? [] : assignCommands(session, run, sel);
+  if (!dated(it)) return [...opening, ...order, ...copy, trash, ...assigns];
+  return [...opening, ...nudges, ...resizes, ...order, ...copy, trash, ...assigns];
+}
+
+function assignCommands(session: PlanSession, run: (i: Intent) => Built | null, item: ItemId): Command[] {
+  const view = session.view();
+  const held = new Set(heldOf(view, item));
+  return view.people.people.map(
+    (p): Command => ({
+      id: `assign:${p.id}`,
+      group: ASSIGN,
+      label: held.has(p.id) ? unassignLabel(p.name) : assignToLabel(p.name),
+      run: () => {
+        const now = session.view();
+        const it = now.plan.items.get(item);
+        if (it === undefined) throw new Error(`Palette: assign names item ${item}, which is not in the plan`);
+        if (it.trashed || !now.people.people.some((x) => x.id === p.id)) {
+          toast(STALE_CONFIRM, "bad");
+          return;
+        }
+        run({ t: held.has(p.id) ? "unassign" : "assign", items: [item], person: p.id });
+      },
+    }),
+  );
 }
 
 function settingsAt(ctx: CommandCtx, section: SettingsSection): void {

@@ -30,6 +30,7 @@ import { isSyncPane, SyncPanes } from "../sync/SyncPanes";
 import { ThemeBody } from "../theme/ThemePanel";
 import type { SettingsFrame } from "./frame";
 import { saveSection } from "./lastSection";
+import { People } from "./People";
 import { Row, rowKey } from "./Row";
 import { filterSections, isPlanSection, sectionTitle, shownSections, type RowSpec, type SectionMatch, type SectionSpec } from "./sections";
 import { Workflow } from "./Workflow";
@@ -388,6 +389,8 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
       }
       case "overview":
         return <OverviewSection session={planSession(s.id)} readOnly={p.readOnly} />;
+      case "people":
+        return <People session={planSession(s.id)} readOnly={p.readOnly} />;
       case "workflow":
         return <Workflow session={planSession(s.id)} readOnly={p.readOnly} />;
       case "baselines":

@@ -1,0 +1,59 @@
+export const ASSIGN = "Assign";
+
+export const UNKNOWN_INITIALS = "?";
+
+export const ASSIGNEES = "Assignees";
+
+export const UNASSIGNED = "Unassigned";
+
+export const ASSIGN_MORE = "Assign…";
+
+export const ADD_PEOPLE_IN_SETTINGS = "Add people in Settings…";
+
+export const moreText = (n: number): string => `+${n}`;
+
+export const assigneesLabel = (names: readonly string[]): string => `Assignees: ${names.join(", ")}`;
+
+export const assignToLabel = (name: string): string => `Assign to ${name}`;
+
+export const unassignLabel = (name: string): string => `Unassign ${name}`;
+
+export const PEOPLE = "People";
+
+export const PEOPLE_HEAD: readonly string[] = ["", "", "Name", "Initials", "Items", ""];
+
+export const PEOPLE_EMPTY = "No people yet. Add someone to assign tasks and milestones.";
+
+export const PEOPLE_FOOT = "Order here is the order of avatars on cards. Up to 8 people per item.";
+
+export const ADD_PERSON = "+ Add person";
+
+export const NEW_PERSON_PLACEHOLDER = "Name";
+
+export const NEW_PERSON_LABEL = "Name of the new person";
+
+export const REMOVE_ROW = "Remove…";
+
+export const REMOVE_PERSON = "Remove person";
+
+export const REMOVE = "Remove";
+
+export const GIVE_TO_GROUP = "Give the items to";
+
+export const sameNameText = (name: string): string => `More than one person is named “${name}”. Rename one.`;
+
+export const personReorderLabel = (name: string): string => `Reorder ${name}`;
+
+export const personColourLabel = (name: string): string => `Colour of ${name}`;
+
+export const personNameLabel = (name: string): string => `Name of ${name}`;
+
+export const personInitialsLabel = (name: string): string => `Initials of ${name}`;
+
+export const removePersonLabel = (name: string): string => `Remove ${name}`;
+
+export const removeEmptyText = (name: string): string => `Remove “${name}” from this plan? No item is assigned to them.`;
+
+export const removeHeldText = (name: string, n: number): string => `“${name}” is assigned to ${n === 1 ? "1 item" : `${n} items`}. Give them to…`;
+
+export const trashedOfThem = (n: number): string => `${n} of them ${n === 1 ? "is" : "are"} in the Trash.`;

@@ -4,6 +4,7 @@ import { stepHolding } from "../../actions/steps";
 import type { StepColour, StepId } from "../../domain/model";
 import { stepsOf, type Step } from "../../domain/steps";
 import { CANCEL_LABEL, usesNativeAlert } from "../../services/alert";
+import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { Dialog } from "../common/Dialog";
 import { NativeConfirm, STALE_CONFIRM } from "../common/NativeConfirm";
@@ -26,25 +27,33 @@ export function deleteRefusal(steps: readonly Step[], step: StepId): string | nu
   return null;
 }
 
+type Asking = { step: Step; native: boolean };
+
+const emptyNow = (view: PlanView, step: StepId): boolean => {
+  const steps = stepsOf(view.plan);
+  return steps.some((s) => s.id === step) && deleteRefusal(steps, step) === null && stepHolding(view, step).held === 0;
+};
+
+function NativeDelete(p: { session: PlanSession; step: Step; current: boolean; onClose(): void }) {
+  const { run } = useRun(p.session);
+  return (
+    <NativeConfirm
+      ask={{ title: DELETE_STEP, message: deleteEmptyText(p.step.name), confirm: { label: DELETE, destructive: true }, cancel: CANCEL_LABEL }}
+      current={p.current}
+      run={() => {
+        run({ t: "step", op: "delete", step: p.step.id, to: null });
+      }}
+      onClose={p.onClose}
+    />
+  );
+}
+
 function EmptyDelete(p: { session: PlanSession; step: Step; onClose(): void }) {
   const { run } = useRun(p.session);
   const remove = (): void => {
     run({ t: "step", op: "delete", step: p.step.id, to: null });
     p.onClose();
   };
-  if (usesNativeAlert()) {
-    const live = stepsOf(p.session.view().plan).some((s) => s.id === p.step.id);
-    return (
-      <NativeConfirm
-        ask={{ title: DELETE_STEP, message: deleteEmptyText(p.step.name), confirm: { label: DELETE, destructive: true }, cancel: CANCEL_LABEL }}
-        current={live}
-        run={() => {
-          run({ t: "step", op: "delete", step: p.step.id, to: null });
-        }}
-        onClose={p.onClose}
-      />
-    );
-  }
   return (
     <Dialog label={DELETE_STEP} onClose={p.onClose}>
       <p className="delete-step-text">{deleteEmptyText(p.step.name)}</p>
@@ -116,10 +125,11 @@ function Gone(p: { why: string; onClose(): void }) {
   return null;
 }
 
-export function DeleteStep(p: { session: PlanSession; step: StepId; onClose(): void }) {
+function DeleteStep(p: { session: PlanSession; asking: Asking; onClose(): void }) {
   const view = usePlanView(p.session);
+  if (p.asking.native) return <NativeDelete session={p.session} step={p.asking.step} current={emptyNow(view, p.asking.step.id)} onClose={p.onClose} />;
   const steps = stepsOf(view.plan);
-  const step = steps.find((s) => s.id === p.step);
+  const step = steps.find((s) => s.id === p.asking.step.id);
   if (step === undefined) return <Gone why={STALE_CONFIRM} onClose={p.onClose} />;
   const refused = deleteRefusal(steps, step.id);
   if (refused !== null) return <Gone why={refused} onClose={p.onClose} />;
@@ -129,18 +139,22 @@ export function DeleteStep(p: { session: PlanSession; step: StepId; onClose(): v
 }
 
 export function useDeleteStep(session: PlanSession): DeleteStepAsk {
-  const [asking, setAsking] = useState<StepId | null>(null);
+  const [asking, setAsking] = useState<Asking | null>(null);
   const close = useCallback(() => setAsking(null), []);
   const ask = useCallback(
-    (step: StepId): void => {
-      const why = deleteRefusal(stepsOf(session.view().plan), step);
+    (id: StepId): void => {
+      const view = session.view();
+      const steps = stepsOf(view.plan);
+      const why = deleteRefusal(steps, id);
       if (why !== null) {
         toast(why, "bad");
         return;
       }
-      setAsking(step);
+      const step = steps.find((s) => s.id === id);
+      if (step === undefined) throw new Error(`DeleteStep: step ${id} passed the refusal check but is not in this plan`);
+      setAsking({ step, native: usesNativeAlert() && stepHolding(view, id).held === 0 });
     },
     [session],
   );
-  return { ask, node: asking === null ? null : <DeleteStep session={session} step={asking} onClose={close} /> };
+  return { ask, node: asking === null ? null : <DeleteStep session={session} asking={asking} onClose={close} /> };
 }

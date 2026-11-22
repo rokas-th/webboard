@@ -4,6 +4,7 @@ import { Refused, type Built, type Intent } from "../../actions/intents";
 import type { ItemId } from "../../domain/model";
 import { NEWER_PLAN, type PlanSession } from "../../store/session";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
+import { themed } from "../../test/theme";
 import { clearToasts, Toasts } from "../common/Toast";
 import { useReadOnly } from "../phone/readOnly";
 import { OpenChoice } from "../run";
@@ -82,26 +83,28 @@ const show = (
   const container = o.container ?? "column";
   const text = container === "modal" ? COLLAPSE_TEXT : promoteText(o.command ?? true);
   render(
-    <OpenChoice.Provider value={vi.fn()}>
-      <UiContext.Provider value={{ ui: { ...UI, selected: item }, setUi: vi.fn() }}>
-        <DetailContext.Provider value={api}>
-          <ItemDetail
-            session={t.session}
-            item={item}
-            container={container}
-            local="Mac"
-            command={o.command ?? true}
-            readOnly={o.readOnly ?? false}
-            naming={false}
-            onNamed={() => undefined}
-            onExpand={onExpand}
-            expandLabel={text.label}
-            expandTitle={text.title}
-            {...(o.onClose === undefined ? {} : { onClose: o.onClose })}
-          />
-        </DetailContext.Provider>
-      </UiContext.Provider>
-    </OpenChoice.Provider>,
+    themed(
+      <OpenChoice.Provider value={vi.fn()}>
+        <UiContext.Provider value={{ ui: { ...UI, selected: item }, setUi: vi.fn() }}>
+          <DetailContext.Provider value={api}>
+            <ItemDetail
+              session={t.session}
+              item={item}
+              container={container}
+              local="Mac"
+              command={o.command ?? true}
+              readOnly={o.readOnly ?? false}
+              naming={false}
+              onNamed={() => undefined}
+              onExpand={onExpand}
+              expandLabel={text.label}
+              expandTitle={text.title}
+              {...(o.onClose === undefined ? {} : { onClose: o.onClose })}
+            />
+          </DetailContext.Provider>
+        </UiContext.Provider>
+      </OpenChoice.Provider>,
+    ),
   );
   return { step, press, onExpand };
 };
@@ -181,25 +184,27 @@ describe("ItemDetail's header", () => {
     const drawn = (container: Container, label: string): string | null | undefined => {
       cleanup();
       render(
-        <OpenChoice.Provider value={vi.fn()}>
-          <UiContext.Provider value={{ ui: { ...UI, selected: "b" }, setUi: vi.fn() }}>
-            <DetailContext.Provider value={{ press: vi.fn(), step: vi.fn(), promote: vi.fn(), rename: vi.fn(), order: ["b"] }}>
-              <ItemDetail
-                session={t.session}
-                item="b"
-                container={container}
-                local="Mac"
-                command
-                readOnly={false}
-                naming={false}
-                onNamed={() => undefined}
-                onExpand={() => undefined}
-                expandLabel={label}
-                expandTitle={label}
-              />
-            </DetailContext.Provider>
-          </UiContext.Provider>
-        </OpenChoice.Provider>,
+        themed(
+          <OpenChoice.Provider value={vi.fn()}>
+            <UiContext.Provider value={{ ui: { ...UI, selected: "b" }, setUi: vi.fn() }}>
+              <DetailContext.Provider value={{ press: vi.fn(), step: vi.fn(), promote: vi.fn(), rename: vi.fn(), order: ["b"] }}>
+                <ItemDetail
+                  session={t.session}
+                  item="b"
+                  container={container}
+                  local="Mac"
+                  command
+                  readOnly={false}
+                  naming={false}
+                  onNamed={() => undefined}
+                  onExpand={() => undefined}
+                  expandLabel={label}
+                  expandTitle={label}
+                />
+              </DetailContext.Provider>
+            </UiContext.Provider>
+          </OpenChoice.Provider>,
+        ),
       );
       expect(buttonOf("detail-expand").getAttribute("aria-label")).toBe(label);
       return glyph();
@@ -266,24 +271,26 @@ describe("ItemDetail's header", () => {
     const api: DetailApi = { press: vi.fn(), step: vi.fn(), promote: vi.fn(), rename: vi.fn(), order: [] };
     expect(() =>
       render(
-        <OpenChoice.Provider value={vi.fn()}>
-          <UiContext.Provider value={{ ui: { ...UI, selected: "nope" }, setUi: vi.fn() }}>
-            <DetailContext.Provider value={api}>
-              <ItemModal
-                session={t.session}
-                item="nope"
-                local="Mac"
-                command
-                readOnly={false}
-                naming={false}
-                memo={null}
-                onNamed={() => undefined}
-                onRename={() => undefined}
-                onClose={() => undefined}
-              />
-            </DetailContext.Provider>
-          </UiContext.Provider>
-        </OpenChoice.Provider>,
+        themed(
+          <OpenChoice.Provider value={vi.fn()}>
+            <UiContext.Provider value={{ ui: { ...UI, selected: "nope" }, setUi: vi.fn() }}>
+              <DetailContext.Provider value={api}>
+                <ItemModal
+                  session={t.session}
+                  item="nope"
+                  local="Mac"
+                  command
+                  readOnly={false}
+                  naming={false}
+                  memo={null}
+                  onNamed={() => undefined}
+                  onRename={() => undefined}
+                  onClose={() => undefined}
+                />
+              </DetailContext.Provider>
+            </UiContext.Provider>
+          </OpenChoice.Provider>,
+        ),
       ),
     ).toThrow("ItemModal: no item nope");
   });
@@ -306,6 +313,7 @@ describe("ItemDetail's body", () => {
       ["dur", "input"],
       ["end", "input"],
       ["status", "select"],
+      ["assignees", "div"],
       ["progress", "input"],
       ["group", "select"],
       ["deps", "select"],
@@ -410,14 +418,16 @@ describe("ItemDetail's body, from the phone's item sheet", () => {
     const apply = vi.spyOn(t.session, "apply");
     const api: DetailApi = { press: vi.fn(), step: vi.fn(), promote: vi.fn(), rename: vi.fn(), order: [] };
     render(
-      <OpenChoice.Provider value={vi.fn()}>
-        <UiContext.Provider value={{ ui: { ...UI, selected: item }, setUi: vi.fn() }}>
-          <DetailContext.Provider value={api}>
-            <Live session={t.session} item={item} />
-          </DetailContext.Provider>
-        </UiContext.Provider>
-        <Toasts />
-      </OpenChoice.Provider>,
+      themed(
+        <OpenChoice.Provider value={vi.fn()}>
+          <UiContext.Provider value={{ ui: { ...UI, selected: item }, setUi: vi.fn() }}>
+            <DetailContext.Provider value={api}>
+              <Live session={t.session} item={item} />
+            </DetailContext.Provider>
+          </UiContext.Provider>
+          <Toasts />
+        </OpenChoice.Provider>,
+      ),
     );
     return { apply };
   };

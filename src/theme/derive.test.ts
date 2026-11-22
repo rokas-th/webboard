@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { contrast, isHex, mix } from "./colour";
-import { derive, HEX_TOKENS, schemeOf, type Seeds } from "./derive";
-import { PRESETS } from "./presets";
+import { STEP_COLOURS, type StepColour } from "../domain/model";
+import { contrast, isHex, luminance, mix, type Hex } from "./colour";
+import { derive, HEX_TOKENS, schemeOf, SLOT_BASES, SLOT_RATIO, slotOf, type Seeds, type Tokens } from "./derive";
+import { PRESETS, tokensOf } from "./presets";
 
 const seedsOf = (id: string): Seeds => {
   const t = PRESETS.find((p) => p.id === id);
@@ -75,5 +76,79 @@ describe("derive", () => {
       const t = derive(p.seeds);
       expect(HEX_TOKENS.filter((k) => !isHex(t[k]))).toEqual([]);
     });
+  });
+
+  it("derives slots that reach 4.5 on void, panel and panel-2 in every preset", () => {
+    const slot = (t: Tokens, c: StepColour): Hex => {
+      switch (c) {
+        case "cyan":
+          return t.cyan;
+        case "magenta":
+          return t.magenta;
+        case "amber":
+          return t.amber;
+        case "slate":
+          return t.dim;
+        case "violet":
+          return t["s-violet"];
+        case "lime":
+          return t["s-lime"];
+        case "coral":
+          return t["s-coral"];
+        case "sky":
+          return t["s-sky"];
+      }
+    };
+    expect(STEP_COLOURS).toHaveLength(8);
+    const short = PRESETS.flatMap((p) => {
+      const t = tokensOf(p);
+      return STEP_COLOURS.flatMap((c) =>
+        [t.void, t.panel, t["panel-2"]].filter((on) => contrast(slot(t, c), on) < 4.5).map((on) => `${p.id} ${c} ${slot(t, c)} on ${on}: ${contrast(slot(t, c), on).toFixed(2)}`),
+      );
+    });
+    expect(short).toEqual([]);
+  });
+
+  it("keeps every person slot at 4.5 on void, panel and panel-2 whenever the text and dim checks pass, the text fallback included", () => {
+    const greys = Array.from({ length: 52 }, (_, i) => Math.min(255, i * 5).toString(16).padStart(2, "0").toUpperCase()).map((v): Hex => `#${v}${v}${v}`);
+    const tints: readonly Hex[] = ["#0A0A14", "#14100A", "#0B1630", "#F4EFE6", "#E9EDF3", "#FFF8E0", "#6E6E6E", "#7A6A8A", "#8A8A6A", "#9A9A9A", "#5A5A5A"];
+    const grounds = [...greys, ...tints];
+    const texts = [...greys, ...tints];
+    const pairs = grounds.flatMap((ground) => texts.map((text): Seeds => ({ ground, text, accent: "#24E0FF", highlight: "#FFB020", danger: "#FF3D6E" })));
+    const governed = pairs.map((s) => ({ s, t: derive(s) })).filter(({ s, t }) => contrast(s.text, s.ground) >= 4.5 && contrast(t.dim, t["panel-2"]) >= 4.5);
+    expect(governed.length).toBeGreaterThan(50);
+    const textShort = governed.filter(({ s, t }) => {
+      return [t.void, t.panel, t["panel-2"]].some((on) => contrast(s.text, on) < 4.5);
+    });
+    expect(textShort).toEqual([]);
+    const short = governed.flatMap(({ s, t }) => {
+      return (["s-violet", "s-lime", "s-coral", "s-sky"] as const).flatMap((k) =>
+        [t.void, t.panel, t["panel-2"]].filter((on) => contrast(t[k], on) < 4.5).map((on) => `${s.ground}/${s.text} ${k} ${t[k]} on ${on}: ${contrast(t[k], on).toFixed(2)}`),
+      );
+    });
+    expect(short).toEqual([]);
+  });
+
+  it("keeps Cyberdeck's four slots at their bases", () => {
+    const t = tokensOf(PRESETS.filter((p) => p.id === "cyberdeck")[0]);
+    expect({ "s-violet": t["s-violet"], "s-lime": t["s-lime"], "s-coral": t["s-coral"], "s-sky": t["s-sky"] }).toEqual(SLOT_BASES);
+    expect(SLOT_BASES).toEqual({ "s-violet": "#A98BFF", "s-lime": "#9BE84A", "s-coral": "#FF7D5C", "s-sky": "#5CA8FF" });
+    expect(SLOT_RATIO).toBe(4.6);
+  });
+
+  it("darkens lime on a light ground toward the text, at the first step that reaches the ratio", () => {
+    const s = seedsOf("daylight");
+    const t = derive(s);
+    expect(luminance(t["s-lime"])).toBeLessThan(luminance(SLOT_BASES["s-lime"]));
+    const on = [t.void, t.panel, t["panel-2"]];
+    const worst = (c: Hex): number => Math.min(...on.map((x) => contrast(c, x)));
+    const k = Array.from({ length: 40 }, (_, i) => i + 1).find((n) => worst(mix(SLOT_BASES["s-lime"], s.text, n / 40)) >= SLOT_RATIO);
+    expect(k).toBeDefined();
+    expect(t["s-lime"]).toBe(mix(SLOT_BASES["s-lime"], s.text, (k ?? 0) / 40));
+  });
+
+  it("returns the base when it already reads, and the text when no mix reaches the ratio", () => {
+    expect(slotOf("#A98BFF", "#C8D3E0", ["#0A0A14"])).toBe("#A98BFF");
+    expect(slotOf("#9BE84A", "#A0E050", ["#9BE84A"])).toBe("#A0E050");
   });
 });

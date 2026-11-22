@@ -9,6 +9,7 @@ import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/timeline.css";
 import "./styles/board.css";
+import "./styles/people.css";
 import "./styles/list.css";
 import "./styles/panel.css";
 import "./styles/detail.css";

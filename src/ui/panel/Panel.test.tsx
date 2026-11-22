@@ -5,6 +5,7 @@ import { childrenOf } from "../../plan/project";
 import { READ_ONLY, type HistoryEntry, type PlanSession } from "../../store/session";
 import { deleteClash } from "../../test/fixtures/deleteClash";
 import { fs, MESA_SEED, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
+import { themed } from "../../test/theme";
 import { shellFor } from "../../test/shell";
 import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
@@ -212,16 +213,18 @@ describe("ItemPanel fields", () => {
   it("lets the End field hold an end past 2199 that the longest task allows", async () => {
     const t = await made([{ id: "Late", name: "Late", start: "2199-06-03", dur: 400 }]);
     render(
-      <OpenChoice.Provider value={vi.fn()}>
-        <UiContext.Provider
-          value={{
-            ui: { plan: null, view: "timeline", zoom: "W", selected: "Late", collapsed: new Set(), baseline: null, dialog: null, reveal: null, follow: null, naming: null, settings: null, syncPane: null, sidebarOpen: true, sidebarWidth: null },
-            setUi: vi.fn(),
-          }}
-        >
-          <ItemPanel session={t.session} item="Late" local="Mac" command={true} naming={false} onNamed={() => undefined} />
-        </UiContext.Provider>
-      </OpenChoice.Provider>,
+      themed(
+        <OpenChoice.Provider value={vi.fn()}>
+          <UiContext.Provider
+            value={{
+              ui: { plan: null, view: "timeline", zoom: "W", selected: "Late", collapsed: new Set(), baseline: null, dialog: null, reveal: null, follow: null, naming: null, settings: null, syncPane: null, sidebarOpen: true, sidebarWidth: null },
+              setUi: vi.fn(),
+            }}
+          >
+            <ItemPanel session={t.session} item="Late" local="Mac" command={true} naming={false} onNamed={() => undefined} />
+          </UiContext.Provider>
+        </OpenChoice.Provider>,
+      ),
     );
     const end = document.querySelector('input[aria-label="End"]');
     if (!(end instanceof HTMLInputElement)) throw new Error("no End field");

@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { refusal } from "../../actions/copy";
+import type { StepColour } from "../../domain/model";
+import { peopleOf } from "../../domain/people";
 import { stepModeOf, stepsOf } from "../../domain/steps";
 import type { PlanSession } from "../../store/session";
 import { IPAD, MAC, setPlatform, stubVisualViewport } from "../../test/platform";
@@ -83,6 +85,22 @@ const stepId = (t: TestSession, name: string): string => {
   const found = stepsOf(t.session.view().plan).find((s) => s.name === name);
   if (found === undefined) throw new Error("no step " + name);
   return found.id;
+};
+
+const CREW: readonly (readonly [string, string, StepColour])[] = [
+  ["Mira Okafor", "MO", "violet"],
+  ["Ole Berg", "OB", "lime"],
+  ["Ana Ruiz", "AR", "coral"],
+];
+
+const addPeople = (t: TestSession, crew: readonly (readonly [string, string, StepColour])[]): Record<string, string> => {
+  act(() => {
+    crew.forEach(([name, initials, colour]) => {
+      const known = peopleOf(t.session.view().plan);
+      t.session.apply({ t: "person", op: "add", name, initials, colour, after: known.length === 0 ? null : known[known.length - 1].id });
+    });
+  });
+  return Object.fromEntries(peopleOf(t.session.view().plan).map((p) => [p.initials, p.id]));
 };
 
 const SEED: SeedItem[] = [
@@ -1132,6 +1150,53 @@ describe("Board headers on iPad", () => {
     }
   });
 
+  it("reports no stale confirmation after a confirmed native step delete when React renders on its own schedule", async () => {
+    const { t, unstub } = await ipadBoard();
+    const actEnv = Reflect.get(globalThis, "IS_REACT_ACT_ENVIRONMENT");
+    try {
+      act(() => {
+        t.session.apply({ t: "step", op: "add", name: "QA", colour: "amber", after: "later" });
+      });
+      tauri.answers.alert_ask = () => "confirm";
+      openMenu("QA");
+      await settle();
+      chooseNative("delete");
+      Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", false);
+      await new Promise<void>((r) => setTimeout(r, 40));
+      expect([stepsOf(t.session.view().plan).some((s) => s.name === "QA"), toastTexts().filter((text) => text === STALE_CONFIRM)]).toEqual([false, []]);
+    } finally {
+      Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", actEnv);
+      unstub();
+    }
+  });
+
+  it("reports a step deleted elsewhere once when the native alert is answered afterwards", async () => {
+    const { t, unstub } = await ipadBoard();
+    try {
+      act(() => {
+        t.session.apply({ t: "step", op: "add", name: "QA", colour: "amber", after: "later" });
+      });
+      const qa = stepId(t, "QA");
+      const answer: { send: ((a: string) => void) | null } = { send: null };
+      tauri.answers.alert_ask = () => new Promise<string>((r) => (answer.send = r));
+      openMenu("QA");
+      await settle();
+      chooseNative("delete");
+      await settle();
+      act(() => {
+        t.session.apply({ t: "step", op: "delete", step: qa, to: null });
+      });
+      await settle();
+      const send = answer.send;
+      if (send === null) throw new Error("the alert was not asked");
+      send("confirm");
+      await settle();
+      expect(toastTexts().filter((text) => text === STALE_CONFIRM)).toHaveLength(1);
+    } finally {
+      unstub();
+    }
+  });
+
   it("a header hold plays one haptic and lifts it; a move reorders and a still release opens the menu", async () => {
     const { t, unstub } = await ipadBoard();
     try {
@@ -1375,5 +1440,198 @@ describe("Board headers on iPad", () => {
     } finally {
       unstub();
     }
+  });
+
+  it("sends the Assign section to the native card menu with the people as titles, and a choice assigns", async () => {
+    resetTauri({});
+    setPlatform(IPAD);
+    const unstub = stubVisualViewport();
+    try {
+      const t = await made(SEED);
+      const ids = addPeople(t, CREW);
+      act(() => {
+        t.session.apply({ t: "assign", items: ["u"], person: ids.AR });
+      });
+      render(withSync(shellFor(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } }).ui));
+      await settle();
+      fireEvent.click(screen.getByRole("tab", { name: "Board" }));
+      act(() => {
+        fireEvent.contextMenu(card("u"), { clientX: 60, clientY: 60 });
+      });
+      await settle();
+      expect(document.querySelector(".context-menu")).toBeNull();
+      expect(lastAsk().sections.map((s) => [s.title, s.rows.map((r) => [r.id, r.title, r.checked])])).toEqual([
+        [null, [["open", "Open", false]]],
+        [
+          "Move to",
+          [
+            ["step:now", "Now", false],
+            ["step:next", "Next", true],
+            ["step:later", "Later", false],
+            ["step:done", "Done", false],
+          ],
+        ],
+        [
+          "Assign",
+          [
+            [`person:${ids.MO}`, "Mira Okafor", false],
+            [`person:${ids.OB}`, "Ole Berg", false],
+            [`person:${ids.AR}`, "Ana Ruiz", true],
+          ],
+        ],
+        [
+          null,
+          [
+            ["duplicate", "Duplicate", false],
+            ["delete", "Delete", false],
+          ],
+        ],
+      ]);
+      const apply = vi.spyOn(t.session, "apply");
+      chooseNative(`person:${ids.OB}`);
+      expect(apply.mock.calls).toEqual([[{ t: "assign", items: ["u"], person: ids.OB }]]);
+      expect(one(".card-people", card("u")).getAttribute("aria-label")).toBe("Assignees: Ole Berg, Ana Ruiz");
+    } finally {
+      unstub();
+    }
+  });
+});
+
+describe("Board people", () => {
+  const openCardMenu = (id: string): void => {
+    act(() => {
+      fireEvent.contextMenu(card(id), { clientX: 200, clientY: 150 });
+    });
+  };
+
+  it("ends an assigned card's meta with the first avatar and +1, labelled with every name, and leaves unassigned cards bare", async () => {
+    const t = await made(SEED);
+    const ids = addPeople(t, CREW);
+    act(() => {
+      t.session.apply({ t: "assign", items: ["u"], person: ids.AR });
+      t.session.apply({ t: "assign", items: ["u"], person: ids.MO });
+    });
+    await board(t);
+    const people = one(".card-meta > .card-people:last-child", card("u"));
+    expect(people.getAttribute("aria-label")).toBe("Assignees: Mira Okafor, Ana Ruiz");
+    expect(people.getAttribute("title")).toBe("Assignees: Mira Okafor, Ana Ruiz");
+    expect(all(".avatar", people).map((a) => [a.className, a.textContent, a.style.getPropertyValue("--person")])).toEqual([["avatar", "MO", "var(--s-violet)"]]);
+    expect(one(".avatar-more", people).textContent).toBe("+1");
+    expect(all("[data-card] .card-people").map((e) => e.closest("[data-card]")?.getAttribute("data-card"))).toEqual(["u"]);
+    expect(card("w").querySelector(".card-people, .avatar")).toBeNull();
+  });
+
+  it("shows a person removed while a peer assigned them as a former avatar with their initials and no count", async () => {
+    const t = await made(SEED);
+    const ids = addPeople(t, [["Dana Lee", "DL", "sky"]]);
+    const phone = await t.peer("iphone");
+    sessions.push(phone.session);
+    phone.session.apply({ t: "assign", items: ["w"], person: ids.DL });
+    act(() => {
+      t.session.apply({ t: "person", op: "remove", person: ids.DL, to: null });
+      phone.sync();
+    });
+    await board(t);
+    const people = one(".card-people", card("w"));
+    expect(people.getAttribute("aria-label")).toBe("Assignees: Former: Dana Lee");
+    expect(all(".avatar", people).map((a) => [a.className, a.textContent, a.style.getPropertyValue("--person")])).toEqual([["avatar former", "DL", ""]]);
+    expect(people.querySelector(".avatar-more")).toBeNull();
+  });
+
+  it("offers Assign between Move to and Duplicate, checks the held people, and a choice toggles one person", async () => {
+    const t = await made(SEED);
+    const ids = addPeople(t, CREW);
+    act(() => {
+      t.session.apply({ t: "assign", items: ["u"], person: ids.MO });
+    });
+    await board(t);
+    openCardMenu("u");
+    expect(menuRows()).toEqual([
+      ["Open", null],
+      ["Now", "false"],
+      ["Next", "true"],
+      ["Later", "false"],
+      ["Done", "false"],
+      ["Mira Okafor", "true"],
+      ["Ole Berg", "false"],
+      ["Ana Ruiz", "false"],
+      ["Duplicate", null],
+      ["Delete", null],
+    ]);
+    expect(all('[role^="menuitem"]', screen.getByRole("group", { name: "Assign" })).map((e) => e.textContent)).toEqual(["Mira Okafor", "Ole Berg", "Ana Ruiz"]);
+    const apply = vi.spyOn(t.session, "apply");
+    choose("Ole Berg");
+    openCardMenu("u");
+    choose("Mira Okafor");
+    expect(apply.mock.calls).toEqual([[{ t: "assign", items: ["u"], person: ids.OB }], [{ t: "unassign", items: ["u"], person: ids.MO }]]);
+    expect(one(".card-people", card("u")).getAttribute("aria-label")).toBe("Assignees: Ole Berg");
+    act(() => {
+      t.session.undo();
+    });
+    expect(one(".card-people", card("u")).getAttribute("aria-label")).toBe("Assignees: Mira Okafor, Ole Berg");
+  });
+
+  it("toasts the refusal when a ninth person is assigned", async () => {
+    const t = await made(SEED);
+    const nine = Array.from({ length: 9 }, (_, i): readonly [string, string, StepColour] => [`Person ${i + 1}`, `P${i + 1}`, "slate"]);
+    const ids = addPeople(t, nine);
+    act(() => {
+      nine.slice(0, 8).forEach(([, initials]) => t.session.apply({ t: "assign", items: ["u"], person: ids[initials] }));
+    });
+    await board(t);
+    expect(one(".avatar-more", card("u")).textContent).toBe("+7");
+    openCardMenu("u");
+    choose("Person 9");
+    expect(toastTexts()).toEqual([refusal.assigneesFull("u")]);
+    expect(toastTexts()).toEqual(["“u” already has 8 assignees."]);
+  });
+
+  it("says so when a person removed while the menu was open is chosen", async () => {
+    const t = await made(SEED);
+    const ids = addPeople(t, CREW);
+    await board(t);
+    openCardMenu("u");
+    act(() => {
+      t.session.apply({ t: "person", op: "remove", person: ids.OB, to: null });
+    });
+    const apply = vi.spyOn(t.session, "apply");
+    choose("Ole Berg");
+    expect(apply).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual([STALE_CONFIRM]);
+  });
+
+  it("says so when an Assign row picks a card that went to the Trash while its menu was open", async () => {
+    const t = await made(SEED);
+    addPeople(t, CREW);
+    await board(t);
+    openCardMenu("u");
+    act(() => {
+      t.session.apply({ t: "trash", items: ["u"] });
+    });
+    const apply = vi.spyOn(t.session, "apply");
+    choose("Ana Ruiz");
+    expect(apply).not.toHaveBeenCalled();
+    expect(toastTexts()).toEqual([STALE_CONFIRM]);
+  });
+
+  it("offers no Assign section when the plan has no people", async () => {
+    const t = await made(SEED);
+    await board(t);
+    openCardMenu("u");
+    expect(screen.queryByRole("group", { name: "Assign" })).toBeNull();
+    expect(menuRows().map(([title]) => title)).toEqual(["Open", "Now", "Next", "Later", "Done", "Duplicate", "Delete"]);
+  });
+
+  it("offers only Open on a read-only plan, people or not, and still shows the avatars", async () => {
+    const t = await made(SEED);
+    const ids = addPeople(t, CREW);
+    act(() => {
+      t.session.apply({ t: "assign", items: ["u"], person: ids.MO });
+      t.session.setReadOnly(true);
+    });
+    await board(t);
+    openCardMenu("u");
+    expect(menuRows()).toEqual([["Open", null]]);
+    expect(one(".card-people .avatar", card("u")).textContent).toBe("MO");
   });
 });

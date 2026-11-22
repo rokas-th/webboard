@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { childrenOf } from "../../plan/project";
 import type { PlanSession } from "../../store/session";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
+import { themed } from "../../test/theme";
 import { clearToasts } from "../common/Toast";
 import { DetailContext, type DetailApi } from "../detail/DetailContext";
 import { ItemSheet } from "../phone/ItemSheet";
@@ -51,11 +52,13 @@ const made = async (): Promise<TestSession> => {
 const panel = (t: TestSession, ui: Partial<UiState> = {}, readOnly = false) => {
   const setUi = vi.fn<(p: Partial<UiState>) => void>();
   render(
-    <OpenChoice.Provider value={vi.fn()}>
-      <UiContext.Provider value={{ ui: { ...UI, ...ui }, setUi }}>
-        <ItemPanel session={t.session} item="a" local="Mac" command={true} readOnly={readOnly} naming={false} onNamed={() => undefined} />
-      </UiContext.Provider>
-    </OpenChoice.Provider>,
+    themed(
+      <OpenChoice.Provider value={vi.fn()}>
+        <UiContext.Provider value={{ ui: { ...UI, ...ui }, setUi }}>
+          <ItemPanel session={t.session} item="a" local="Mac" command={true} readOnly={readOnly} naming={false} onNamed={() => undefined} />
+        </UiContext.Provider>
+      </OpenChoice.Provider>,
+    ),
   );
   return setUi;
 };
@@ -110,13 +113,15 @@ describe("Duplicate in the item panel (product-7)", () => {
     const setUi = vi.fn<(p: Partial<UiState>) => void>();
     const api: DetailApi = { press: vi.fn(), step: vi.fn(), promote: vi.fn(), rename: vi.fn(), order: ["a", "b"] };
     render(
-      <OpenChoice.Provider value={vi.fn()}>
-        <UiContext.Provider value={{ ui: UI, setUi }}>
-          <DetailContext.Provider value={api}>
-            <ItemSheet session={t.session} item="a" local="Mac" naming={false} onNamed={() => undefined} onClose={() => undefined} />
-          </DetailContext.Provider>
-        </UiContext.Provider>
-      </OpenChoice.Provider>,
+      themed(
+        <OpenChoice.Provider value={vi.fn()}>
+          <UiContext.Provider value={{ ui: UI, setUi }}>
+            <DetailContext.Provider value={api}>
+              <ItemSheet session={t.session} item="a" local="Mac" naming={false} onNamed={() => undefined} onClose={() => undefined} />
+            </DetailContext.Provider>
+          </UiContext.Provider>
+        </OpenChoice.Provider>,
+      ),
     );
     expect(screen.getByRole("button", { name: "Move up" })).toBeTruthy();
     act(() => {

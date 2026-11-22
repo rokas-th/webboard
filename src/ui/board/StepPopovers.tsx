@@ -41,8 +41,8 @@ function Floating(p: { at: Point; children: ReactNode }) {
   );
 }
 
-export function ColourPop(p: { step: Step; at: Point; back: HTMLElement; onPick(c: StepColour): void; onClose(): void }) {
-  const [focused, setFocused] = useState<StepColour>(p.step.colour);
+export function ColourPop(p: { name: string; colour: StepColour; at: Point; back: HTMLElement; onPick(c: StepColour): void; onClose(): void }) {
+  const [focused, setFocused] = useState<StepColour>(p.colour);
   const grid = useRef<HTMLDivElement>(null);
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
     const by = swatchStep(e.key);
@@ -59,23 +59,23 @@ export function ColourPop(p: { step: Step; at: Point; back: HTMLElement; onPick(
   };
   return (
     <Floating at={p.at}>
-      <Popover label={colourTitle(p.step.name)} className="colour-pop" returnFocus={p.back} onClose={p.onClose}>
+      <Popover label={colourTitle(p.name)} className="colour-pop" returnFocus={p.back} onClose={p.onClose}>
         <div className="step-pop-body">
-          <h3 className="step-pop-title">{colourTitle(p.step.name)}</h3>
-          <div ref={grid} className="colour-grid" role="radiogroup" aria-label={colourTitle(p.step.name)} onKeyDown={onKeyDown}>
+          <h3 className="step-pop-title">{colourTitle(p.name)}</h3>
+          <div ref={grid} className="colour-grid" role="radiogroup" aria-label={colourTitle(p.name)} onKeyDown={onKeyDown}>
             {STEP_COLOURS.map((c) => (
               <button
                 key={c}
                 type="button"
                 role="radio"
-                aria-checked={c === p.step.colour}
+                aria-checked={c === p.colour}
                 aria-label={colourName(c)}
                 title={colourName(c)}
-                className={c === p.step.colour ? "colour-swatch on" : "colour-swatch"}
+                className={c === p.colour ? "colour-swatch on" : "colour-swatch"}
                 style={swatchStyle(c)}
                 data-colour={c}
                 tabIndex={c === focused ? 0 : -1}
-                autoFocus={c === p.step.colour}
+                autoFocus={c === p.colour}
                 onFocus={() => setFocused(c)}
                 onClick={() => p.onPick(c)}
               />

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { fmtShort, toIso, type Day } from "../../domain/dates";
-import { STEP_COLOURS, type Item, type ItemId, type StepColour, type StepId } from "../../domain/model";
+import { STEP_COLOURS, type Item, type ItemId, type PersonId, type StepColour, type StepId } from "../../domain/model";
+import { peopleOf } from "../../domain/people";
 import { projectBoard, stepsOf, type Step } from "../../domain/steps";
 import { readPlatform } from "../../platform";
 import { haptic } from "../../services/haptics";
@@ -16,6 +17,9 @@ import { useRun } from "../run";
 import { useUiValue } from "../state";
 import { useDetail } from "../detail/DetailContext";
 import { duplicateRow } from "../duplicate";
+import { assigneeName, assignSection, cardPeople, heldOf, personOfRow } from "../people/assign";
+import { Avatar } from "../people/Avatar";
+import { assigneesLabel, moreText } from "../people/text";
 import { isClick } from "../timeline/gesture";
 import { useDeleteStep } from "./DeleteStep";
 import { HoldGesture, type HoldEvent } from "./hold";
@@ -115,6 +119,19 @@ function Near(p: { view: PlanView; layout: BoardLayout; item: Item }) {
 }
 
 const groupName = (view: PlanView, item: Item): string | null => (item.place.parent === null ? null : groupPath(view, item.place.parent));
+
+function CardPeople(p: { view: PlanView; item: Item }) {
+  const list = p.view.people.assignees.get(p.item.id) ?? [];
+  const shown = cardPeople(list);
+  if (shown === null) return null;
+  const label = assigneesLabel(list.map(assigneeName));
+  return (
+    <span className="card-people" role="img" aria-label={label} title={label}>
+      <Avatar assignee={shown.first} />
+      {shown.more > 0 && <span className="avatar-more">{moreText(shown.more)}</span>}
+    </span>
+  );
+}
 
 function BoardLine(p: { layout: BoardLayout; completing: boolean }) {
   const l = p.layout;
@@ -382,14 +399,27 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
     const open = { title: null, rows: [action("open", OPEN_ROW)] };
     if (p.readOnly) return [open];
     const current = projection.columnOf.get(item);
+    const assign = assignSection(view.people.people, heldOf(view, item));
     return [
       open,
       { title: MOVE_TO, rows: steps.map((s) => ({ id: `${STEP_ROW}${s.id}`, title: s.name, checked: s.id === current, checkable: true })) },
+      ...(assign === null ? [] : [assign]),
       { title: null, rows: [action("duplicate", DUPLICATE_ROW), action("delete", DELETE)] },
     ];
   };
 
-  const onCardChosen = (item: ItemId, row: string): void => {
+  const toggleAssignee = (item: ItemId, person: PersonId, held: boolean): void => {
+    const now = p.session.view().plan;
+    const it = now.items.get(item);
+    if (it === undefined) throw new Error(`Board: the card menu assigned item ${item}, which is not in the plan`);
+    if (it.trashed || !peopleOf(now).some((x) => x.id === person)) {
+      toast(STALE_CONFIRM, "bad");
+      return;
+    }
+    run({ t: held ? "unassign" : "assign", items: [item], person });
+  };
+
+  const onCardChosen = (item: ItemId, row: string, held: readonly PersonId[]): void => {
     if (row === "open") {
       detail.promote(item);
       return;
@@ -402,6 +432,11 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
       run({ t: "trash", items: [item] });
       return;
     }
+    const person = personOfRow(row);
+    if (person !== null) {
+      toggleAssignee(item, person, held.includes(person));
+      return;
+    }
     if (!row.startsWith(STEP_ROW)) throw new Error(`Board: the card menu chose ${JSON.stringify(row)}, which is no row of it`);
     const step = liveStep(row.slice(STEP_ROW.length));
     if (step === null) {
@@ -412,7 +447,8 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   };
 
   const openCard = (item: ItemId, anchor: HTMLElement, at: Point): void => {
-    cardMenu.open(item, anchor, at, cardSections(item), (row) => onCardChosen(item, row));
+    const held = heldOf(view, item);
+    cardMenu.open(item, anchor, at, cardSections(item), (row) => onCardChosen(item, row, held));
   };
 
   const onCardContext = (e: ReactMouseEvent<HTMLElement>, item: ItemId): void => {
@@ -724,6 +760,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
           <When view={view} item={item} />
           {group !== null && <span className="card-group">{group}</span>}
           <Near view={view} layout={layout} item={item} />
+          <CardPeople view={view} item={item} />
         </div>
       </div>
     );
@@ -875,7 +912,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
       </div>
       {menu.node}
       {cardMenu.node}
-      {pop !== null && popStep !== undefined && pop.kind === "colour" && <ColourPop step={popStep} at={pop.at} back={pop.back} onPick={(c) => pickColour(popStep.id, c)} onClose={() => setPop(null)} />}
+      {pop !== null && popStep !== undefined && pop.kind === "colour" && <ColourPop name={popStep.name} colour={popStep.colour} at={pop.at} back={pop.back} onPick={(c) => pickColour(popStep.id, c)} onClose={() => setPop(null)} />}
       {pop !== null && popStep !== undefined && pop.kind === "limit" && (
         <LimitPop step={popStep} at={pop.at} back={pop.back} onApply={(text) => applyLimit(popStep.id, text)} onClear={() => applyLimit(popStep.id, "")} onClose={() => setPop(null)} />
       )}
