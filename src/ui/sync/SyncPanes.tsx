@@ -5,12 +5,11 @@ import { SPACE_PREFIX } from "../../store/plan-id";
 import { chipText, holdsPlan, type SyncState } from "../../sync/manager";
 import { canReload, syncActions } from "../../sync/reload";
 import { useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
-import { Dialog, focusables } from "../common/Dialog";
-import { Sheet } from "../common/Sheet";
+import { focusables } from "../common/Dialog";
 import { toast } from "../common/Toast";
 import { ReloadButton } from "../shell/PlanFailed";
 import { exportFlow } from "../shell/fileFlows";
-import { NativeReload, RELOAD_LABEL, ReloadConfirmBody } from "../shell/ReloadConfirm";
+import { ReloadConfirm } from "../shell/ReloadConfirm";
 import type { SyncPane } from "../state";
 import { DevicesPane } from "./DevicesPane";
 import { JoinPane } from "./JoinPane";
@@ -25,6 +24,8 @@ export const PANE_LABELS: Record<SyncPane, string> = {
 };
 
 export const PANE_ORDER: readonly SyncPane[] = ["setup", "join", "pair", "devices"];
+
+export const isSyncPane = (id: string): id is SyncPane => PANE_ORDER.some((k) => k === id);
 
 export function resolvePane(state: SyncState, pane: SyncPane | null): SyncPane {
   if (pane !== null) return pane;
@@ -112,34 +113,27 @@ function IndexActions(p: { offer: string | null; asking: boolean; reloadRef: Ref
   );
 }
 
-export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet"; onPane(pane: SyncPane): void; onClose(): void }) {
+export function SyncPanes(p: { pane: SyncPane | null; frame: "dialog" | "sheet"; onPane(pane: SyncPane): void }) {
   const { state } = useSyncState();
   const registry = useSyncRegistry();
   const [opened] = useState(() => resolvePane(state, null));
   const [confirm, setConfirm] = useState<string | null>(null);
   const reloadRef = useRef<HTMLButtonElement>(null);
-  const paneRef = useRef<HTMLDivElement>(null);
-  const confirmRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const confirming = useRef(false);
   const native = usesNativeAlert();
   useEffect(() => {
     if (confirm !== null) {
       confirming.current = true;
-      if (native) return;
-      const root = confirmRef.current;
-      if (root === null) throw new Error("Reload confirmation rendered without its element");
-      const [first] = focusables(root);
-      if (first === undefined) throw new Error("Reload confirmation has nothing to focus");
-      first.focus();
       return;
     }
     if (!confirming.current) return;
     confirming.current = false;
-    const pane = paneRef.current;
-    if (pane === null) throw new Error("Sync rendered without its pane");
+    const root = rootRef.current;
+    if (root === null) throw new Error("Sync rendered without its panes");
     const reload = reloadRef.current;
-    const target = reload !== null && !reload.disabled ? reload : focusables(pane)[0];
-    if (target === undefined) throw new Error("Sync pane has nothing to focus");
+    const target = reload !== null && !reload.disabled ? reload : focusables(root)[0];
+    if (target === undefined) throw new Error("Sync panes have nothing to focus");
     target.focus();
   }, [confirm]);
   const pane = p.pane ?? opened;
@@ -148,60 +142,31 @@ export function SyncDialog(p: { pane: SyncPane | null; frame?: "dialog" | "sheet
   const holds = error !== null && error.doc !== null && !error.doc.startsWith(SPACE_PREFIX) && holdsPlan(registry, error.doc);
   const errorDoc = error !== null && indexDoc ? error.doc : null;
   const offer = errorDoc !== null && registry.indexErrorOf(errorDoc)?.code === "store.corrupt" && !registry.spaceReadOnly() ? errorDoc : null;
-  const body = (
-    <>
-      {error !== null && (
-        <div className="sync-status">
-          {error.message !== null && <p className="sync-message bad">{error.message}</p>}
-          {indexDoc ? <IndexActions offer={offer} asking={native && confirm !== null} reloadRef={reloadRef} onReload={setConfirm} /> : <SyncActionButtons holds={holds} onReset={() => p.onPane("join")} />}
-        </div>
-      )}
-      <div className="sync-tabs" role="tablist" aria-label="Sync">
-        {PANE_ORDER.map((k) => (
-          <button key={k} type="button" role="tab" aria-selected={pane === k} className={pane === k ? "active" : undefined} onClick={() => p.onPane(k)}>
-            {PANE_LABELS[k]}
-          </button>
-        ))}
-      </div>
-      <section className="sync-pane" role="tabpanel" aria-label={PANE_LABELS[pane]}>
-        {pane === "setup" && <SetupPane />}
-        {pane === "join" && <JoinPane />}
-        {pane === "pair" && <PairPane />}
-        {pane === "devices" && <DevicesPane />}
-      </section>
-    </>
-  );
   const cancel = (): void => setConfirm(null);
-  const html = native ? null : confirm;
-  const asked = native && confirm !== null ? <NativeReload registry={registry} docId={confirm} offered={offer === confirm} onClose={cancel} /> : null;
-  const label = html === null ? "Sync" : RELOAD_LABEL;
-  const onClose = html === null ? p.onClose : cancel;
-  if (p.frame === "sheet") {
-    return (
-      <Sheet open title={label} onClose={onClose}>
-        {asked}
-        {html !== null && (
-          <div ref={confirmRef} className="reload-sheet">
-            <ReloadConfirmBody registry={registry} docId={html} onClose={cancel} />
+  return (
+    <>
+      <div ref={rootRef} className="sync-panes">
+        {error !== null && (
+          <div className="sync-status">
+            {error.message !== null && <p className="sync-message bad">{error.message}</p>}
+            {indexDoc ? <IndexActions offer={offer} asking={native && confirm !== null} reloadRef={reloadRef} onReload={setConfirm} /> : <SyncActionButtons holds={holds} onReset={() => p.onPane("join")} />}
           </div>
         )}
-        <div ref={paneRef} className="sync-sheet" hidden={html !== null}>
-          {body}
+        <div className="sync-tabs" role="tablist" aria-label="Sync">
+          {PANE_ORDER.map((k) => (
+            <button key={k} type="button" role="tab" aria-selected={pane === k} className={pane === k ? "active" : undefined} onClick={() => p.onPane(k)}>
+              {PANE_LABELS[k]}
+            </button>
+          ))}
         </div>
-      </Sheet>
-    );
-  }
-  return (
-    <Dialog label={label} wide onClose={onClose}>
-      {asked}
-      {html !== null && (
-        <div ref={confirmRef}>
-          <ReloadConfirmBody registry={registry} docId={html} onClose={cancel} />
-        </div>
-      )}
-      <div ref={paneRef} hidden={html !== null}>
-        {body}
+        <section className="sync-pane" role="tabpanel" aria-label={PANE_LABELS[pane]} data-settings-row={`sync.${pane}`}>
+          {pane === "setup" && <SetupPane />}
+          {pane === "join" && <JoinPane />}
+          {pane === "pair" && <PairPane />}
+          {pane === "devices" && <DevicesPane />}
+        </section>
       </div>
-    </Dialog>
+      {confirm !== null && <ReloadConfirm registry={registry} docId={confirm} offered={offer === confirm} frame={p.frame} onClose={cancel} />}
+    </>
   );
 }

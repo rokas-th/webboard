@@ -46,6 +46,7 @@ const UI: UiState = {
   follow: null,
   naming: null,
   settings: null,
+  syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,
 };
@@ -146,7 +147,7 @@ describe("commands()", () => {
     const h = harness(t, { selected: "a" }, ["p2"]);
     const all = ids(h.ctx);
     const keyed = ["palette", "undo", "redo", "new-task", "view-timeline", "view-board", "view-list", "nudge+1", "nudge-1", "nudge+5", "nudge-5", "resize+1", "resize-1", "resize+5", "resize-5", "trash", "today", "select-next", "select-prev", "duplicate", "print", "detail-modal", "detail-open", "rename"];
-    const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", "zoom-F", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "settings", "about"];
+    const more = ["new-milestone", "new-group", "zoom-W", "zoom-M", "zoom-Q", "zoom-F", `baseline-show:${baseline}`, "open-plan:p2", "new-plan", "calendar", "save-baseline", "go-first-conflict", "plan-settings", "settings", "about"];
     const goTo = ["g1", "a", "b", "one", "m", "u"].map((x) => `goto:${x}`);
     expect([...keyed, ...more, ...goTo].filter((x) => !all.includes(x))).toEqual([]);
     expect(all.filter((x) => x === "close-dialog" || x === "deselect")).toEqual([]);
@@ -214,7 +215,7 @@ describe("commands()", () => {
     const cmd = find(ctx, id);
     expect([cmd.label, cmd.group]).toEqual([label, "File"]);
     cmd.run();
-    expect(h.setUi.mock.calls).toEqual([[{ dialog: { t: "sync", pane } }]]);
+    expect(h.setUi.mock.calls).toEqual([[{ settings: "sync", syncPane: pane }]]);
   });
 
   it("runs export through exportFlow once, on the open session", async () => {
@@ -256,13 +257,23 @@ describe("commands()", () => {
     expect(h.newPlan).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the palette, Settings at About and the calendar through UI state", async () => {
+  it("opens the palette, Settings at General for About and Settings at Working time for the calendar through UI state", async () => {
     const t = await made(SMALL);
     const h = harness(t);
     ["palette", "about", "calendar"].forEach((id) => find(h.ctx, id).run());
-    expect(h.setUi.mock.calls).toEqual([[{ dialog: { t: "palette" } }], [{ settings: "about" }], [{ dialog: { t: "calendar" } }]]);
+    expect(h.setUi.mock.calls).toEqual([[{ dialog: { t: "palette" } }], [{ settings: "general" }], [{ settings: "working-time" }]]);
     expect(h.preview.mock.calls).toEqual([[null]]);
     expect([find(h.ctx, "about").label, find(h.ctx, "about").group]).toEqual(["About WebBoard", "Help"]);
+  });
+
+  it("offers Plan settings… with a plan only, opening Settings at Overview", async () => {
+    const t = await made(SMALL);
+    const h = harness(t);
+    const command = find(h.ctx, "plan-settings");
+    expect([command.label, command.group, command.keys]).toEqual(["Plan settings…", "Plan", undefined]);
+    command.run();
+    expect([h.setUi.mock.calls, h.preview.mock.calls]).toEqual([[[{ settings: "overview" }]], [[null]]]);
+    expect(ids({ ...h.ctx, session: null, run: null, undo: null, redo: null })).not.toContain("plan-settings");
   });
 
   it.each([
@@ -277,14 +288,18 @@ describe("commands()", () => {
       ["Theme…", "View"],
       ["Use Cyberdeck theme", "View"],
     ]);
+    expect([find({ ...ctx, command: true }, "settings").keys, find({ ...ctx, command: false }, "settings").keys]).toEqual(["⌘,", "Ctrl ,"]);
+    find(ctx, "settings").run();
+    window.localStorage.setItem("webboard.settings", JSON.stringify({ v: 1, at: "sync" }));
     find(ctx, "settings").run();
     find(ctx, "theme").run();
-    expect(h.setUi.mock.calls).toEqual([[{ settings: "theme" }], [{ settings: "theme" }]]);
-    expect(h.preview.mock.calls).toEqual([[null], [null]]);
+    window.localStorage.removeItem("webboard.settings");
+    expect(h.setUi.mock.calls).toEqual([[{ settings: "general" }], [{ settings: "sync" }], [{ settings: "theme" }]]);
+    expect(h.preview.mock.calls).toEqual([[null], [null], [null]]);
     expect(h.useCyberdeck).not.toHaveBeenCalled();
     find(ctx, "theme-cyberdeck").run();
     expect(h.useCyberdeck).toHaveBeenCalledTimes(1);
-    expect(h.setUi).toHaveBeenCalledTimes(2);
+    expect(h.setUi).toHaveBeenCalledTimes(3);
   });
 
   it("switches views and zooms, and jumps to today", async () => {

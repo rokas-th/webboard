@@ -131,8 +131,10 @@ export function useCloseGuard(guard: DraftGuard | null): void {
   });
 }
 
+export type AfterClose = () => void;
+
 export interface CloseRequest {
-  close(reason: CloseReason): void;
+  close(reason: CloseReason, then?: AfterClose): boolean;
   scope(children: ReactNode): ReactNode;
 }
 
@@ -148,6 +150,7 @@ export function useRequestClose(ref: RefObject<HTMLElement | null>, onClose: () 
   const mounted = useRef(false);
   const latest = useRef(onClose);
   const back = useRef<Element | null>(null);
+  const after = useRef<AfterClose | null>(null);
   const [asking, setAsking] = useState<DraftGuard | null>(null);
   useLayoutEffect(() => {
     latest.current = onClose;
@@ -159,29 +162,31 @@ export function useRequestClose(ref: RefObject<HTMLElement | null>, onClose: () 
     };
   }, []);
   const close = useCallback(
-    (reason: CloseReason): void => {
-      if (inline.current) return;
+    (reason: CloseReason, then?: AfterClose): boolean => {
+      if (inline.current) return false;
       const waiting = native.current;
       if (waiting !== null) {
-        if (performance.now() - waiting.at < ASK_WAIT_MS) return;
+        if (performance.now() - waiting.at < ASK_WAIT_MS) return false;
         native.current = null;
         throw new Error(`${what}'s discard ask got no answer from iOS within ${ASK_WAIT_MS} ms`);
       }
       const root = ref.current;
       if (root === null) throw new Error(`${what} closed without its element`);
       const was = document.activeElement;
-      if (reason !== "escape" && !flushSync(() => commitFocus(root, what))) return;
+      if (reason !== "escape" && !flushSync(() => commitFocus(root, what))) return false;
       const held = slot.current;
       const guard = held === null ? null : held.guard;
       if (guard === null) {
         latest.current();
-        return;
+        then?.();
+        return true;
       }
       if (!usesNativeAlert()) {
         inline.current = true;
         back.current = was;
+        after.current = then ?? null;
         setAsking(guard);
-        return;
+        return false;
       }
       const token = Symbol("discard ask");
       native.current = { at: performance.now(), token };
@@ -190,7 +195,9 @@ export function useRequestClose(ref: RefObject<HTMLElement | null>, onClose: () 
         (answer) => {
           if (!current()) return;
           native.current = null;
-          if (answer === "confirm" && mounted.current) latest.current();
+          if (answer !== "confirm" || !mounted.current) return;
+          latest.current();
+          then?.();
         },
         (e: unknown) => {
           if (current()) native.current = null;
@@ -198,11 +205,13 @@ export function useRequestClose(ref: RefObject<HTMLElement | null>, onClose: () 
           toast(e.message, "bad", detailsOf(e));
         },
       );
+      return false;
     },
     [ref, what],
   );
   const keep = (): void => {
     inline.current = false;
+    after.current = null;
     flushSync(() => setAsking(null));
     const root = ref.current;
     if (root === null) throw new Error(`${what} kept editing without its element`);
@@ -213,8 +222,11 @@ export function useRequestClose(ref: RefObject<HTMLElement | null>, onClose: () 
   const discard = (): void => {
     inline.current = false;
     back.current = null;
+    const then = after.current;
+    after.current = null;
     flushSync(() => setAsking(null));
     latest.current();
+    then?.();
   };
   const scope = (children: ReactNode): ReactNode => (
     <GuardContext.Provider value={slot}>
@@ -232,7 +244,10 @@ function DiscardAsk(p: { guard: DraftGuard; onKeep(): void; onDiscard(): void })
   const discardRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const messageId = useId();
-  useOverlayEntry(scrimRef, () => p.onKeep());
+  useOverlayEntry(scrimRef, () => {
+    p.onKeep();
+    return true;
+  });
   useEffect(() => {
     const keep = keepRef.current;
     if (keep === null) throw new Error("The discard ask rendered without Keep editing");
@@ -287,18 +302,18 @@ function DiscardAsk(p: { guard: DraftGuard; onKeep(): void; onDiscard(): void })
 
 interface OverlayEntry {
   element: RefObject<HTMLElement | null>;
-  requestClose(reason: CloseReason): void;
+  requestClose(reason: CloseReason, then?: AfterClose): boolean;
 }
 
 const overlays: OverlayEntry[] = [];
 
-export function useOverlayEntry(element: RefObject<HTMLElement | null>, requestClose: (reason: CloseReason) => void): void {
+export function useOverlayEntry(element: RefObject<HTMLElement | null>, requestClose: (reason: CloseReason, then?: AfterClose) => boolean): void {
   const latest = useRef(requestClose);
   useLayoutEffect(() => {
     latest.current = requestClose;
   });
   useEffect(() => {
-    const entry: OverlayEntry = { element, requestClose: (reason) => latest.current(reason) };
+    const entry: OverlayEntry = { element, requestClose: (reason, then) => latest.current(reason, then) };
     overlays.push(entry);
     return () => {
       const at = overlays.indexOf(entry);
@@ -306,6 +321,12 @@ export function useOverlayEntry(element: RefObject<HTMLElement | null>, requestC
       overlays.splice(at, 1);
     };
   }, [element]);
+}
+
+export function requestCloseOf(el: HTMLElement, reason: CloseReason, then?: AfterClose): boolean {
+  const entry = overlays.find((o) => o.element.current === el);
+  if (entry === undefined) throw new Error("requestCloseOf: the element is no open overlay");
+  return entry.requestClose(reason, then);
 }
 
 export function closeTopOverlay(): boolean {

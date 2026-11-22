@@ -1,11 +1,14 @@
 import { act, cleanup, fireEvent, render, renderHook, within } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { toast } from "../common/Toast";
+import { fixedClock } from "../../services/clock";
 import { ImageReadError, readImageColours } from "../../theme/image";
 import { DEFAULT_STORE, THEME_KEY, type ThemeStore } from "../../theme/store";
 import { ThemeProvider } from "../../theme/ThemeContext";
 import { installMatchMedia, setSystemDark } from "../../test/matchMedia";
-import { SettingsView } from "../settings/SettingsPanel";
+import type { SettingsFrame } from "../settings/frame";
+import { SettingsView } from "../settings/Settings";
 import { DISCARDED, useCanHover } from "./ThemePanel";
 
 vi.mock("../common/Toast", () => ({ toast: vi.fn() }));
@@ -24,11 +27,33 @@ afterEach(() => {
 
 const voidNow = (): string => document.documentElement.style.getPropertyValue("--void");
 
-const settings = (frame: "panel" | "sheet", hover: boolean, onClose: () => void) => (
-  <SettingsView frame={frame} tab="theme" hover={hover} onTab={() => undefined} onClose={onClose} onSync={() => undefined} sync={{ kind: "off" }} syncName={() => null} updates={null} />
+const FILES = { creating: false, importing: false, newPlan: () => undefined, newExample: () => undefined, importPlan: () => undefined };
+
+const settings = (frame: SettingsFrame, hover: boolean, onClose: () => void) => (
+  <SettingsView
+    frame={frame}
+    section="theme"
+    session={null}
+    readOnly={false}
+    device="Mac"
+    clock={fixedClock("2026-11-09")}
+    hover={hover}
+    closer={createRef()}
+    files={FILES}
+    onSection={() => undefined}
+    onClose={onClose}
+    syncPane={null}
+    onSyncPane={() => undefined}
+    onTrashPlan={() => undefined}
+    sync={{ kind: "off" }}
+    syncName={() => null}
+    updates={null}
+    syncPanes={null}
+    planLocked={false}
+  />
 );
 
-const mount = (frame: "panel" | "sheet", hover = false, store: ThemeStore = DEFAULT_STORE) => {
+const mount = (frame: SettingsFrame, hover = false, store: ThemeStore = DEFAULT_STORE) => {
   const onClose = vi.fn();
   const view = render(
     <ThemeProvider storage={window.localStorage} initial={{ store, unreadable: null }}>
@@ -74,20 +99,20 @@ const saveAs = (root: HTMLElement, name: string): void => {
 const notes = (root: HTMLElement): string[] => [...root.querySelectorAll(".theme-notes li")].map((li) => li.textContent ?? "");
 
 describe("the Theme tab of Settings", () => {
-  it("sits in the Theme tab of Settings in both frames", () => {
+  it("sits in the Theme section of Settings in both frames", () => {
     expect(DISCARDED).toBe("Unsaved colours discarded.");
-    const a = mount("panel");
-    const region = a.getByRole("region", { name: "Settings" });
-    expect(within(region).getByRole("heading", { level: 2, name: "Settings" })).toBeTruthy();
-    expect(within(region).getByRole("tabpanel", { name: "Theme" })).toBeTruthy();
+    const a = mount("modal");
+    const modal = a.getByRole("dialog", { name: "Theme" });
+    expect(within(modal).getByRole("heading", { level: 3, name: "Theme" })).toBeTruthy();
+    expect(within(modal).getByRole("region", { name: "Theme" }).querySelector(".theme-body")).not.toBeNull();
     a.unmount();
     const b = mount("sheet");
-    expect(within(b.getByRole("dialog", { name: "Settings" })).getByRole("tabpanel", { name: "Theme" })).toBeTruthy();
+    expect(within(b.getByRole("dialog", { name: "Settings" })).getByRole("region", { name: "Theme" }).querySelector(".theme-body")).not.toBeNull();
   });
 
   it("lists 15 built-in cards under WebBoard and From colorfetcher.com, without Yours", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     const grid = cards(region);
     expect(within(grid).getAllByRole("button")).toHaveLength(15);
     expect(within(grid).getByRole("heading", { name: "WebBoard" })).toBeTruthy();
@@ -97,8 +122,8 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("chooses a card on click", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     fireEvent.click(card(region, /^Paper/));
     expect(card(region, /^Paper/).getAttribute("aria-pressed")).toBe("true");
     expect(card(region, /^Cyberdeck/).getAttribute("aria-pressed")).toBe("false");
@@ -107,8 +132,8 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("previews on hover and restores when the pointer leaves the cards", () => {
-    const { getByRole } = mount("panel", true);
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal", true);
+    const region = getByRole("region", { name: "Theme" });
     fireEvent.pointerEnter(card(region, /^Phosphor/));
     expect(voidNow()).toBe("#060C09");
     fireEvent.pointerLeave(cards(region));
@@ -120,15 +145,15 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("does not preview without hover", () => {
-    const { getByRole } = mount("panel", false);
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal", false);
+    const region = getByRole("region", { name: "Theme" });
     fireEvent.pointerEnter(card(region, /^Phosphor/));
     expect(voidNow()).toBe("#0A0A14");
   });
 
   it("shows the slot selects when following the system and tags the cards", () => {
-    const { getByRole, getByLabelText, queryByLabelText } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole, getByLabelText, queryByLabelText } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     expect(queryByLabelText("When dark")).toBeNull();
     const sw = getByRole("switch", { name: "Follow the system" });
     expect(sw.getAttribute("aria-checked")).toBe("false");
@@ -147,8 +172,8 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("normalises hex fields and marks bad ones invalid", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     typeHex(region, "Accent", "24e0ff");
     expect(hexField(region, "Accent").value).toBe("#24E0FF");
     expect(hexField(region, "Accent").getAttribute("aria-invalid")).toBe("false");
@@ -162,16 +187,16 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("follows the colour picker", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     fireEvent.change(within(region).getByLabelText("Background"), { target: { value: "#222233" } });
     expect(voidNow()).toBe("#222233");
     expect(hexField(region, "Background").value).toBe("#222233");
   });
 
   it("offers Fix for a failing check and only saves once it passes", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     expect(saveButton(region).disabled).toBe(true);
     typeHex(region, "Accent", "#333344");
     const row = checkRow(region, "Accent on background");
@@ -182,8 +207,8 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("shows ratios, degrees and yes/no with badges", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     const text = checkRow(region, "Text on background");
     expect(within(text).getByText(/^\d+\.\d:1$/)).toBeTruthy();
     expect(within(text).getByText("AAA")).toBeTruthy();
@@ -193,8 +218,8 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("saves, refuses a duplicate name, and deletes in two steps", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     typeHex(region, "Accent", "#7CC4FF");
     saveAs(region, "Night shift");
     const grid = cards(region);
@@ -214,8 +239,8 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("saves changes to an edited theme of your own", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     typeHex(region, "Accent", "#7CC4FF");
     saveAs(region, "Night shift");
     typeHex(region, "Accent", "#7CC4EE");
@@ -227,8 +252,8 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("makes a theme from a pasted palette", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     fireEvent.change(within(region).getByPlaceholderText("Paste hex codes, or the CSS variables colorfetcher.com exports"), { target: { value: SUNSET } });
     fireEvent.click(within(region).getByRole("button", { name: "Make a dark theme" }));
     expect(notes(region)[0]).toBe("Used 6 colours.");
@@ -238,8 +263,8 @@ describe("the Theme tab of Settings", () => {
 
   it("never offers a pasted palette as changes to the saved theme on show", () => {
     const night = { id: "mine-1", name: "Night", note: "Yours", group: "mine" as const, seeds: { ground: "#0B1630", text: "#C9D6EA", accent: "#7CC4FF", highlight: "#FFD166", danger: "#FF6B88" } };
-    const { getByRole } = mount("panel", false, { ...DEFAULT_STORE, active: "mine-1", mine: [night] });
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal", false, { ...DEFAULT_STORE, active: "mine-1", mine: [night] });
+    const region = getByRole("region", { name: "Theme" });
     fireEvent.change(within(region).getByPlaceholderText("Paste hex codes, or the CSS variables colorfetcher.com exports"), { target: { value: SUNSET } });
     fireEvent.click(within(region).getByRole("button", { name: "Make a dark theme" }));
     expect(within(region).getByText("Unsaved")).toBeTruthy();
@@ -250,8 +275,8 @@ describe("the Theme tab of Settings", () => {
 
   it("says so when a pasted palette replaces unsaved edits of a saved theme", () => {
     const night = { id: "mine-1", name: "Night", note: "Yours", group: "mine" as const, seeds: { ground: "#0B1630", text: "#C9D6EA", accent: "#7CC4FF", highlight: "#FFD166", danger: "#FF6B88" } };
-    const { getByRole } = mount("panel", false, { ...DEFAULT_STORE, active: "mine-1", mine: [night] });
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal", false, { ...DEFAULT_STORE, active: "mine-1", mine: [night] });
+    const region = getByRole("region", { name: "Theme" });
     typeHex(region, "Accent", "#7CC4EE");
     expect(within(region).getByRole("button", { name: "Save changes" })).toBeTruthy();
     fireEvent.change(within(region).getByPlaceholderText("Paste hex codes, or the CSS variables colorfetcher.com exports"), { target: { value: SUNSET } });
@@ -263,8 +288,8 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("asks for at least three pasted colours", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     const area = within(region).getByPlaceholderText("Paste hex codes, or the CSS variables colorfetcher.com exports");
     fireEvent.change(area, { target: { value: "#123456" } });
     fireEvent.click(within(region).getByRole("button", { name: "Make a light theme" }));
@@ -276,8 +301,8 @@ describe("the Theme tab of Settings", () => {
 
   it("reads colours from an image and shows its errors as a note", async () => {
     vi.mocked(readImageColours).mockResolvedValueOnce(["#FFEABA", "#FEC759", "#FF96A6", "#292214"]);
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     fireEvent.click(within(region).getByRole("button", { name: "From an image" }));
     expect(within(region).getByText("Drop an image here, or choose one. It stays on this device.")).toBeTruthy();
     const input = within(region).getByLabelText("Choose an image");
@@ -298,11 +323,11 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("discards a draft on close, toasts, and restores the committed theme", () => {
-    const { getByRole, onClose } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole, onClose } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     typeHex(region, "Background", "#222222");
     expect(voidNow()).toBe("#222222");
-    fireEvent.click(within(getByRole("region", { name: "Settings" })).getAllByRole("button", { name: "Close" })[0]);
+    fireEvent.click(within(getByRole("dialog", { name: "Theme" })).getAllByRole("button", { name: "Close" })[0]);
     expect(toast).toHaveBeenCalledWith(DISCARDED);
     expect(voidNow()).toBe("#0A0A14");
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -316,23 +341,23 @@ describe("the Theme tab of Settings", () => {
   });
 
   it("closes on Escape inside the panel", () => {
-    const { getByRole, onClose } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole, onClose } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     fireEvent.keyDown(hexField(region, "Text"), { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("tags a saved theme that fails today's checks", () => {
     const murky = { id: "mine-1", name: "Murky", note: "Yours", group: "mine" as const, seeds: { ground: "#0A0A14", text: "#C8D3E0", accent: "#333344", highlight: "#FFB000", danger: "#FF3B6B" } };
-    const { getByRole } = mount("panel", false, { ...DEFAULT_STORE, mine: [murky] });
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal", false, { ...DEFAULT_STORE, mine: [murky] });
+    const region = getByRole("region", { name: "Theme" });
     expect(within(card(region, /^Murky/)).getByText("Fails checks")).toBeTruthy();
     expect(within(card(region, /^Cyberdeck/)).queryByText("Fails checks")).toBeNull();
   });
 
   it("goes back to Cyberdeck, toasting the discarded draft", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     fireEvent.click(card(region, /^Paper/));
     typeHex(region, "Accent", "#7CC4FF");
     fireEvent.click(within(region).getByRole("button", { name: "Use Cyberdeck" }));
@@ -351,8 +376,8 @@ describe("the Theme tab of Settings", () => {
     };
     const node = (globalThis as unknown as { process: { on(e: string, cb: (r: unknown) => void): void; off(e: string, cb: (r: unknown) => void): void } }).process;
     node.on("unhandledRejection", onRejection);
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     fireEvent.click(within(region).getByRole("button", { name: "From an image" }));
     await act(async () => {
       fireEvent.change(within(region).getByLabelText("Choose an image"), { target: { files: [new File(["x"], "a.png")] } });
@@ -366,8 +391,8 @@ describe("the Theme tab of Settings", () => {
   it("deletes a saved light theme while following the system in dark mode", () => {
     const day = { id: "mine-1", name: "Noon", note: "Yours", group: "mine" as const, seeds: { ground: "#FFFFFF", text: "#111418", accent: "#1F5FD1", highlight: "#A35400", danger: "#CC1F3D" } };
     setSystemDark(true);
-    const { getByRole } = mount("panel", false, { ...DEFAULT_STORE, mode: "system", mine: [day] });
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal", false, { ...DEFAULT_STORE, mode: "system", mine: [day] });
+    const region = getByRole("region", { name: "Theme" });
     expect(within(region).queryByRole("button", { name: "Delete" })).toBeNull();
     fireEvent.click(card(region, /^Noon/));
     expect(voidNow()).toBe("#0A0A14");
@@ -382,8 +407,8 @@ describe("the Theme tab of Settings", () => {
   it("says when saving changes moves a theme out of its slot", () => {
     setSystemDark(true);
     const night = { id: "mine-1", name: "Night", note: "Yours", group: "mine" as const, seeds: { ground: "#0B1630", text: "#C9D6EA", accent: "#7CC4FF", highlight: "#FFD166", danger: "#FF6B88" } };
-    const { getByRole } = mount("panel", false, { ...DEFAULT_STORE, mode: "system", dark: "mine-1", mine: [night] });
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal", false, { ...DEFAULT_STORE, mode: "system", dark: "mine-1", mine: [night] });
+    const region = getByRole("region", { name: "Theme" });
     typeHex(region, "Background", "#FFFFFF");
     typeHex(region, "Text", "#111418");
     typeHex(region, "Accent", "#1F5FD1");
@@ -399,10 +424,10 @@ describe("the Theme tab of Settings", () => {
     const store = { ...DEFAULT_STORE, active: "mine-1", mine: [night] };
     const view = render(
       <ThemeProvider storage={window.localStorage} initial={{ store, unreadable: null }}>
-        {settings("panel", false, onClose)}
+        {settings("modal", false, onClose)}
       </ThemeProvider>,
     );
-    typeHex(view.getByRole("tabpanel", { name: "Theme" }), "Accent", "#7CC4EE");
+    typeHex(view.getByRole("region", { name: "Theme" }), "Accent", "#7CC4EE");
     view.rerender(
       <ThemeProvider storage={window.localStorage} initial={{ store, unreadable: null }}>
         <div key="sheet">{settings("sheet", false, onClose)}</div>
@@ -416,15 +441,15 @@ describe("the Theme tab of Settings", () => {
 
   it("marks your own themes in the slot selects", () => {
     const sunset = { id: "mine-1", name: "Sunset", note: "Yours", group: "mine" as const, seeds: { ground: "#0B1630", text: "#C9D6EA", accent: "#7CC4FF", highlight: "#FFD166", danger: "#FF6B88" } };
-    const { getByLabelText } = mount("panel", false, { ...DEFAULT_STORE, mode: "system", mine: [sunset] });
+    const { getByLabelText } = mount("modal", false, { ...DEFAULT_STORE, mode: "system", mine: [sunset] });
     const dark = getByLabelText("When dark");
     if (!(dark instanceof HTMLSelectElement)) throw new Error("not a select");
     expect([...dark.options].filter((o) => o.textContent?.startsWith("Sunset")).map((o) => o.textContent)).toEqual(["Sunset", "Sunset (yours)"]);
   });
 
   it("shows a save validation error as a note", () => {
-    const { getByRole } = mount("panel");
-    const region = getByRole("tabpanel", { name: "Theme" });
+    const { getByRole } = mount("modal");
+    const region = getByRole("region", { name: "Theme" });
     typeHex(region, "Accent", "#7CC4FF");
     saveAs(region, "x".repeat(41));
     expect(notes(region)).toEqual(["Use at most 40 characters."]);

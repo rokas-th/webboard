@@ -9,11 +9,9 @@ export type Zoom = FixedZoom | "F";
 
 export type SyncPane = "setup" | "join" | "pair" | "devices";
 
-export type SettingsTab = "theme" | "sync" | "updates" | "about";
+export type SettingsSection = "general" | "theme" | "sync" | "files" | "overview" | "working-time" | "baselines" | "danger";
 
 export type DialogState =
-  | { t: "sync"; pane: SyncPane | null }
-  | { t: "calendar" }
   | { t: "choice"; id: string; side?: string }
   | { t: "palette" }
   | { t: "revert"; id: string }
@@ -30,7 +28,8 @@ export interface UiState {
   reveal: ItemId | "today" | null;
   follow: ItemId | null;
   naming: ItemId | null;
-  settings: SettingsTab | null;
+  settings: SettingsSection | null;
+  syncPane: SyncPane | null;
   sidebarOpen: boolean;
   sidebarWidth: number | null;
 }
@@ -59,6 +58,7 @@ const DEFAULTS: UiState = {
   follow: null,
   naming: null,
   settings: null,
+  syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,
 };

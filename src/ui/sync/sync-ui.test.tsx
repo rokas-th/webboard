@@ -243,7 +243,7 @@ describe("the sync chip", () => {
     stubState({ kind: "off" });
     await stubShell();
     await openChip();
-    expect(uiNow()[0].dialog).toEqual({ t: "sync", pane: null });
+    expect([uiNow()[0].dialog, uiNow()[0].settings, uiNow()[0].syncPane]).toEqual([null, "sync", null]);
     expect(pane("Set up sync")).toBeTruthy();
     await fresh();
     vi.restoreAllMocks();
@@ -289,7 +289,7 @@ describe("the sync dialog's status", () => {
     if (!(head instanceof HTMLElement)) throw new Error("the Sync dialog has no head");
     expect(within(head).getAllByRole("button", { name: "Close" })).toHaveLength(1);
     await click(within(head).getByRole("button", { name: "Close" }));
-    expect([screen.queryByRole("dialog", { name: "Sync" }), uiNow()[0].dialog, document.activeElement]).toEqual([null, null, opener]);
+    expect([screen.queryByRole("dialog", { name: "Sync" }), uiNow()[0].dialog, uiNow()[0].settings, uiNow()[0].syncPane, document.activeElement]).toEqual([null, null, null, null, opener]);
   });
 
   it("a failed sync_status shows in the dialog", async () => {
@@ -832,7 +832,7 @@ describe("removal and the space", () => {
     };
     await click(within(banner()).getByRole("button", { name: "Join with a code" }));
     expect(within(dialog()).getByRole("tab", { name: "Join with a code" }).getAttribute("aria-selected")).toBe("true");
-    act(() => uiNow()[1]({ dialog: null }));
+    act(() => uiNow()[1]({ settings: null, syncPane: null }));
     await click(within(banner()).getByRole("button", { name: "Set up sync" }));
     expect(within(dialog()).getByRole("tab", { name: "Set up sync" }).getAttribute("aria-selected")).toBe("true");
   });
@@ -1246,12 +1246,12 @@ describe("loading again from the server", () => {
     await click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
     expect(reload.mock.calls).toEqual([[IX]]);
     vi.spyOn(r, "spaceReadOnly").mockReturnValue(true);
-    act(() => uiNow()[1]({ dialog: null }));
+    act(() => uiNow()[1]({ settings: null, syncPane: null }));
     await openChip();
     expect(inDialog().queryByRole("button", { name: RELOAD })).toBeNull();
   });
 
-  it("the index reload confirmation keeps the Sync dialog and its opener", async () => {
+  it("the index reload confirmation stacks over Settings and keeps its opener", async () => {
     const w = await spaceWorld();
     w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
     const { r } = await mounted(w);
@@ -1269,15 +1269,15 @@ describe("loading again from the server", () => {
     const load = within(frame).getByRole("button", { name: RELOAD });
     act(() => load.focus());
     await click(load);
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
     const confirmation = screen.getByRole("dialog", { name: RELOAD });
+    expect(screen.getAllByRole("dialog")).toEqual([frame, confirmation]);
+    expect([frame.getAttribute("aria-label"), frame.matches("[data-settings-modal]")]).toEqual(["Sync", true]);
     expect(confirmation.contains(document.activeElement)).toBe(true);
     await click(within(confirmation).getByRole("button", { name: "Cancel" }));
     expect(document.activeElement).toBe(within(dialog()).getByRole("button", { name: RELOAD }));
     expect(screen.getAllByRole("dialog")).toEqual([frame]);
     await click(within(frame).getByRole("button", { name: RELOAD }));
-    expect(screen.getAllByRole("dialog")).toEqual([frame]);
-    expect(frame.getAttribute("aria-label")).toBe(RELOAD);
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Sync", RELOAD]);
     await escape();
     expect(screen.getAllByRole("dialog")).toEqual([frame]);
     expect(frame.getAttribute("aria-label")).toBe("Sync");
@@ -1968,7 +1968,7 @@ describe("a plan that will not arrive", () => {
     await click(within(mainArea()).getByRole("button", { name: "Open sync" }));
     if (join) expect(within(dialog()).getByRole("tab", { name: "Join with a code" }).getAttribute("aria-selected")).toBe("true");
     else expect(dialog()).toBeTruthy();
-    act(() => uiNow()[1]({ dialog: null }));
+    act(() => uiNow()[1]({ settings: null, syncPane: null }));
     if (buttons.includes("Try again")) {
       const restart = vi.spyOn(SyncManager.prototype, "restart");
       await click(within(mainArea()).getByRole("button", { name: "Try again" }));
@@ -2036,7 +2036,7 @@ describe("sync on the phone", () => {
     return li;
   };
   const planSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Plan" });
-  const syncSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Sync" });
+  const syncSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Settings" });
   const selectedTab = (): string | null => within(syncSheet()).getByRole("tab", { selected: true }).textContent;
   const strip = (): HTMLElement => {
     const el = document.querySelector(".phone-status .status-strip");
@@ -2050,7 +2050,7 @@ describe("sync on the phone", () => {
     return hit;
   };
 
-  it("the phone sheet's Sync row opens the dialog", async () => {
+  it("the phone sheet's Sync row opens Settings on its Sync group", async () => {
     const w = await spaceWorld();
     place("P");
     const { f } = await mounted(w);
@@ -2060,13 +2060,14 @@ describe("sync on the phone", () => {
     const row = within(planSheet()).getByRole("button", { name: "Sync Synced" });
     expect(row.querySelector(".sync-row-state")?.textContent).toBe(chipText({ kind: "synced" }, () => null));
     await click(row);
-    expect(uiNow()[0].dialog).toEqual({ t: "sync", pane: null });
+    expect([uiNow()[0].dialog, uiNow()[0].settings, uiNow()[0].syncPane]).toEqual([null, "sync", null]);
+    expect(screen.queryByRole("dialog", { name: "Plan" })).toBeNull();
     expect(syncSheet().classList.contains("sheet")).toBe(true);
     expect(selectedTab()).toBe("Devices");
     expect(within(syncSheet()).getAllByRole("button", { name: "Close" })).toHaveLength(1);
     await click(within(syncSheet()).getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("dialog", { name: "Sync" })).toBeNull();
-    expect(uiNow()[0].dialog).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    expect([uiNow()[0].dialog, uiNow()[0].settings, uiNow()[0].syncPane]).toEqual([null, null, null]);
   });
 
   it("removed device offers joining on the phone", async () => {
@@ -2145,7 +2146,7 @@ describe("sync on the phone", () => {
     }
   });
 
-  it("the index reload confirmation takes the Sync sheet's place on the phone", async () => {
+  it("the index reload confirmation stacks over the Settings sheet on the phone", async () => {
     const w = await spaceWorld();
     w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
     const { r } = await mounted(w);
@@ -2153,20 +2154,21 @@ describe("sync on the phone", () => {
     const reload = vi.spyOn(r, "reloadFromServer").mockResolvedValue(undefined);
     const dialogs = (): (string | null)[] => screen.queryAllByRole("dialog").map((d) => d.getAttribute("aria-label"));
     await click(within(topBar()).getByRole("button", { name: "The space’s plan list on this device is damaged" }));
-    expect(dialogs()).toEqual(["Sync"]);
+    expect(dialogs()).toEqual(["Settings"]);
     await click(within(syncSheet()).getByRole("button", { name: RELOAD }));
-    expect(dialogs()).toEqual([RELOAD]);
+    expect(dialogs()).toEqual(["Settings", RELOAD]);
+    expect(screen.getByRole("dialog", { name: RELOAD }).classList.contains("sheet")).toBe(true);
     await click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Cancel" }));
-    expect(dialogs()).toEqual(["Sync"]);
+    expect(dialogs()).toEqual(["Settings"]);
     expect(within(syncSheet()).getAllByRole("button", { name: "Close" })).toHaveLength(1);
     expect(reload).not.toHaveBeenCalled();
     await click(within(syncSheet()).getByRole("button", { name: RELOAD }));
-    expect(dialogs()).toEqual([RELOAD]);
+    expect(dialogs()).toEqual(["Settings", RELOAD]);
     await click(within(screen.getByRole("dialog", { name: RELOAD })).getByRole("button", { name: "Load again" }));
     expect(reload.mock.calls).toEqual([[IX]]);
   });
 
-  it("the index reload confirmation keeps the Sync sheet and its opener on the phone", async () => {
+  it("the index reload confirmation keeps the Settings sheet and its opener on the phone", async () => {
     const w = await spaceWorld();
     w.mem.fail("store_load", IX, { code: "store.corrupt", message: "Bad record in seg-0.log." });
     const { r } = await mounted(w);
@@ -2178,8 +2180,8 @@ describe("sync on the phone", () => {
     const load = within(frame).getByRole("button", { name: RELOAD });
     act(() => load.focus());
     await click(load);
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
     const confirmation = screen.getByRole("dialog", { name: RELOAD });
+    expect(screen.getAllByRole("dialog")).toEqual([frame, confirmation]);
     expect(confirmation.contains(document.activeElement)).toBe(true);
     await click(within(confirmation).getByRole("button", { name: "Cancel" }));
     expect(document.activeElement).toBe(within(syncSheet()).getByRole("button", { name: RELOAD }));

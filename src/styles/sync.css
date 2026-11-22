@@ -262,10 +262,6 @@ button.sync-chip.chip-compact {
   padding: 12px 20px;
 }
 
-.sync-sheet {
-  padding: 16px 20px 24px;
-}
-
 .status-line .sync-message {
   overflow-wrap: anywhere;
 }

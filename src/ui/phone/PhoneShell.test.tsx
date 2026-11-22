@@ -1779,16 +1779,16 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     expect(apply.mock.calls.map((c) => c[0])).toEqual([{ t: "restore", items: ["Old"] }]);
   });
 
-  it("shows the calendar summary and opens the calendar in a sheet", async () => {
+  it("shows the calendar summary and opens Settings at Working time, closing the plan sheet", async () => {
     const t = await planSheetMade();
     await shown(t);
     openPlanSheet();
     expect(within(planSheet()).getByText(calendarSummary(t.session.view().plan.calendar))).toBeTruthy();
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Change calendar…" }));
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Calendar"]);
-    expect(screen.getByRole("dialog", { name: "Calendar" }).querySelector(".cal-body")).not.toBeNull();
-    fireEvent.click(onlyClose("Calendar"));
-    expect(planSheet()).toBeTruthy();
+    expect([screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label")), lastUi().settings]).toEqual([["Settings"], "working-time"]);
+    expect(screen.getByRole("dialog", { name: "Settings" }).querySelector('section.settings-group[data-section="working-time"] .cal-body')).not.toBeNull();
+    fireEvent.click(onlyClose("Settings"));
+    expect([screen.queryAllByRole("dialog"), lastUi().settings]).toEqual([[], null]);
   });
 
   it("exports and imports from File", async () => {
@@ -1828,9 +1828,9 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Settings…" }));
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
     const settings = screen.getByRole("dialog", { name: "Settings" });
-    fireEvent.click(within(settings).getByRole("tab", { name: "About" }));
-    expect(lastUi().settings).toBe("about");
-    const about = within(settings).getByRole("tabpanel", { name: "About" });
+    expect(lastUi().settings).toBe("general");
+    const about = settings.querySelector<HTMLElement>('section.settings-group[data-section="general"] [data-settings-row="general.about"]');
+    if (about === null) throw new Error("no About row in the General group");
     expect(about.textContent).toContain(`WebBoard ${version}`);
     expect(about.textContent).toContain(HOLIDAY_ATTRIBUTION);
     expect(HOLIDAY_ATTRIBUTION).toBe("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.");
@@ -1939,13 +1939,17 @@ describe("PhoneShell read-only plan sheet (Task 5.8 Step 3b)", () => {
     expect(within(sheet).queryByRole("button", { name: "Save baseline" })).toBeNull();
     expect(within(sheet).queryByRole("button", { name: "Remove" })).toBeNull();
     fireEvent.click(within(sheet).getByRole("button", { name: "Change calendar…" }));
-    const calendar = screen.getByRole("dialog", { name: "Calendar" });
-    expect(within(calendar).queryByRole("button", { name: "Apply" })).toBeNull();
-    fireEvent.click(onlyClose("Calendar"));
+    const settings = screen.getByRole("dialog", { name: "Settings" });
+    const working = settings.querySelector<HTMLElement>('section.settings-group[data-section="working-time"]');
+    if (working === null) throw new Error("no Working time group");
+    const reviewButton = within(working).getByRole("button", { name: "Review changes…" });
+    expect([within(working).queryByRole("button", { name: "Apply" }), reviewButton instanceof HTMLButtonElement && reviewButton.disabled]).toEqual([null, true]);
+    fireEvent.click(onlyClose("Settings"));
     expect(apply).not.toHaveBeenCalled();
     expect(revert).not.toHaveBeenCalled();
     expect(restorePlan).not.toHaveBeenCalled();
     act(() => t.session.setReadOnly(false));
+    openPlanSheet();
     expect(nameField().value).toBe("MESA 1.0");
   });
 });
@@ -2047,7 +2051,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     return hit;
   };
   const messages = (root: HTMLElement): (string | null)[] => [...root.querySelectorAll(".sync-message.bad")].map((e) => e.textContent);
-  const syncSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Sync" });
+  const syncSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Settings" });
   const compact = (): HTMLElement => {
     const el = topBar().querySelector("button.sync-chip.chip-compact");
     if (!(el instanceof HTMLElement)) throw new Error("no compact chip");
@@ -2479,7 +2483,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
 
 describe("the settings sheet on the phone", () => {
   const themeRow = (sheet: HTMLElement): HTMLElement => {
-    const row = sheet.querySelector("button.settings-row");
+    const row = sheet.querySelector("button.plans-settings-row");
     if (!(row instanceof HTMLElement)) throw new Error("no Settings… row");
     expect(row.textContent).toBe("Settings…");
     expect(sheet.querySelector("button.theme-row, button.about-row")).toBeNull();
@@ -2487,28 +2491,35 @@ describe("the settings sheet on the phone", () => {
   };
   const dialogs = (): (string | null)[] => screen.queryAllByRole("dialog").map((d) => d.getAttribute("aria-label"));
 
-  it("opens Settings at Theme from the Plans sheet, closing it", async () => {
+  const groups = (sheet: HTMLElement): (string | undefined)[] => [...sheet.querySelectorAll<HTMLElement>("section.settings-group")].map((g) => g.dataset["section"]);
+
+  it("opens the Settings sheet at the last section from the Plans sheet, General by default, closing it", async () => {
     await shown(await made());
     fireEvent.click(themeRow(openPlans()));
     expect(dialogs()).toEqual(["Settings"]);
-    expect(lastUi().settings).toBe("theme");
+    expect(lastUi().settings).toBe("general");
     const sheet = screen.getByRole("dialog", { name: "Settings" });
-    expect(within(sheet).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Theme", "Sync", "About"]);
-    expect(within(sheet).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
+    expect([...sheet.querySelectorAll('[role="tab"]')].filter((tab) => tab.closest(".sync-tabs") === null)).toEqual([]);
+    expect(groups(sheet)).toEqual(["general", "theme", "sync", "files", "overview", "working-time", "baselines", "danger"]);
+    expect([...sheet.querySelectorAll("h2.settings-group-title")].map((h) => h.textContent)).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "Working time", "Baselines", "Danger zone"]);
     fireEvent.click(within(sheet).getAllByRole("button", { name: "Close" })[0]);
     expect(dialogs()).toEqual([]);
     expect(lastUi().settings).toBeNull();
   });
 
-  it("swaps the Settings sheet for the sync sheet from the Sync tab", async () => {
+  it("shows the sync panes inside the Settings sheet's Sync group, never a second sheet", async () => {
     await shown(await made());
     fireEvent.click(themeRow(openPlans()));
     const sheet = screen.getByRole("dialog", { name: "Settings" });
-    fireEvent.click(within(sheet).getByRole("tab", { name: "Sync" }));
-    expect(lastUi().settings).toBe("sync");
-    fireEvent.click(within(sheet).getByRole("button", { name: "Set up sync" }));
-    expect([lastUi().settings, lastUi().dialog]).toEqual([null, { t: "sync", pane: "setup" }]);
-    expect(dialogs()).toEqual(["Sync"]);
+    const group = sheet.querySelector<HTMLElement>('section.settings-group[data-section="sync"]');
+    if (group === null) throw new Error("no Sync group");
+    expect(within(group).getByRole("tab", { name: "Set up sync" }).getAttribute("aria-selected")).toBe("true");
+    act(() => {
+      fireEvent.click(within(group).getByRole("tab", { name: "Join with a code" }));
+    });
+    expect([lastUi().settings, lastUi().syncPane, lastUi().dialog]).toEqual(["general", "join", null]);
+    expect(within(group).getByRole("tabpanel", { name: "Join with a code" })).toBeTruthy();
+    expect(dialogs()).toEqual(["Settings"]);
   });
 
   it("opens Settings from the Plans sheet in the empty state", async () => {
@@ -2521,8 +2532,8 @@ describe("the settings sheet on the phone", () => {
     await shown(await planSheetMade());
     fireEvent.click(themeRow(openPlanSheet()));
     expect(dialogs()).toEqual(["Settings"]);
-    expect(lastUi().settings).toBe("theme");
-    expect(within(screen.getByRole("dialog", { name: "Settings" })).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
+    expect(lastUi().settings).toBe("general");
+    expect(groups(screen.getByRole("dialog", { name: "Settings" }))).toEqual(["general", "theme", "sync", "files", "overview", "working-time", "baselines", "danger"]);
   });
 
   it("hides a selected item's sheet while Settings is open, and the item sheet returns after Close", async () => {

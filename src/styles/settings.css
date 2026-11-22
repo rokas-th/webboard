@@ -1,0 +1,389 @@
+.modal.modal-settings {
+  display: flex;
+  flex-direction: column;
+  width: 780px;
+  height: 580px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  padding: 0;
+  overflow: hidden;
+}
+
+html[data-os="ios"] .modal.modal-settings {
+  width: min(780px, 100% - 48px);
+  height: min(580px, 100% - 48px);
+}
+
+.modal.modal-settings > .modal-head {
+  flex: none;
+  margin-block: 0;
+  margin-inline: 0;
+  padding-block: 12px;
+  padding-inline: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 212px minmax(0, 1fr);
+}
+
+.settings-side {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-inline-end: 1px solid var(--line);
+  background: rgba(var(--void-rgb), 0.55);
+}
+
+.settings-search {
+  width: 100%;
+}
+
+.settings-count {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-nav-group,
+.settings-nav-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav-title {
+  margin: 0 8px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.settings-nav-item,
+.settings-nav-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  text-align: start;
+  font-family: var(--prose);
+  font-size: 12.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+
+.settings-nav-item[aria-current="page"] {
+  color: var(--heading);
+  border-color: var(--cyan-dim);
+  background: rgba(var(--cyan-rgb), 0.08);
+  box-shadow: inset 2px 0 0 var(--cyan);
+}
+
+.settings-nav-row {
+  min-height: 26px;
+  padding-inline-start: 20px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+html[data-os="ios"] .settings-nav-item,
+html[data-os="ios"] .settings-nav-row {
+  min-height: 44px;
+}
+
+.settings-empty {
+  margin: 6px 8px;
+  font-family: var(--prose);
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.settings-main {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 24px 28px;
+}
+
+.settings-section > .theme-body,
+.settings-group > .theme-body {
+  padding: 8px 0 0;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 44px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--prose);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.settings-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 1 auto;
+  max-width: 62%;
+  min-width: 0;
+}
+
+.settings-value {
+  font-family: var(--prose);
+  font-size: 12.5px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.settings-value.dim {
+  color: var(--dim);
+}
+
+.settings-control .update-line {
+  margin-top: 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.settings-about {
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: end;
+}
+
+.settings-about p {
+  margin: 0;
+}
+
+.settings-status {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.settings-status.cyan {
+  color: var(--cyan);
+}
+
+.settings-status.amber {
+  color: var(--amber);
+}
+
+.settings-status.magenta {
+  color: var(--magenta);
+}
+
+.settings-sync {
+  padding-top: 14px;
+}
+
+.settings-row.settings-row-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.settings-row-stack > .settings-control {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  max-width: 100%;
+}
+
+.settings-row-stack > .settings-control > .baselines,
+.settings-row-stack > .settings-control > .actions {
+  width: 100%;
+  margin-top: 0;
+}
+
+.settings-control .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-control .baseline-name {
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-os="ios"] .settings-row .settings-control button {
+  position: relative;
+}
+
+html[data-os="ios"] .settings-row .settings-control button::before {
+  content: "";
+  position: absolute;
+  top: min(0px, calc(50% - 22px));
+  right: min(0px, calc(50% - 22px));
+  bottom: min(0px, calc(50% - 22px));
+  left: min(0px, calc(50% - 22px));
+}
+
+.settings-plan-name {
+  width: 280px;
+  max-width: 100%;
+}
+
+.settings-line {
+  margin: 0;
+  font-family: var(--prose);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+@media (max-width: 600px) {
+  .settings-layout {
+    grid-template-columns: 160px minmax(0, 1fr);
+  }
+
+  .settings-main {
+    padding-inline: 16px;
+  }
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 12px 20px 28px;
+}
+
+.settings-list-group {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.settings-list-plan {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--heading);
+}
+
+.settings-group {
+  min-width: 0;
+}
+
+.settings-calendar {
+  padding-top: 12px;
+}
+
+.settings-calendar .cal-anchor {
+  min-width: 0;
+}
+
+.settings-calendar .seg-days {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.settings-calendar .seg-days button {
+  flex: 0 1 40px;
+  min-width: 0;
+  padding-inline: 2px;
+}
+
+.settings-list .settings-calendar .cal-grid {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 6px;
+}
+
+.settings-list .settings-calendar .cal-grid > label {
+  padding-top: 8px;
+}
+
+@media (max-width: 600px) {
+  .settings-calendar .cal-grid {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 6px;
+  }
+
+  .settings-calendar .cal-grid > label {
+    padding-top: 8px;
+  }
+
+  .settings-calendar .seg-days {
+    width: 100%;
+  }
+
+  .settings-calendar .seg-days button {
+    flex: 1 1 0;
+    padding-inline: 0;
+    letter-spacing: 0.04em;
+  }
+}
+
+.review-impact {
+  margin: 0;
+  border-left: 2px solid var(--amber);
+  padding: 2px 0 2px 10px;
+  line-height: 1.5;
+}
+
+.review-sheet {
+  padding: 18px 20px 24px;
+}
+
+.settings-group-title {
+  margin: 0 0 4px;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--amber);
+}

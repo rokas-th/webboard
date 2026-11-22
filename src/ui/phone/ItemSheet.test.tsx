@@ -60,6 +60,7 @@ const UI: UiState = {
   follow: null,
   naming: null,
   settings: null,
+  syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,
 };

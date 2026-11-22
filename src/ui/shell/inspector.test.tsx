@@ -228,17 +228,18 @@ describe("the inspector column", () => {
     expect(stored().desk.inspector).toEqual({ open: true, w: null });
   });
 
-  it("holds the selected item, and Settings while it is open", async () => {
+  const settingsModal = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-settings-modal]");
+
+  it("keeps the selected item in the column while Settings opens as a modal over it", async () => {
     await shown();
     fireEvent.click(screen.getAllByText(PICKED)[0]);
     expect(slot()?.querySelector(".panel .kind")?.textContent).toBe("TASK");
     fireEvent.click(within(bar()).getByRole("button", { name: "Settings" }));
-    expect(slot()?.querySelector(".settings-head")).not.toBeNull();
+    expect([settingsModal() !== null, slot()?.querySelector(".panel .kind")?.textContent, slot()?.querySelector(".settings-section")]).toEqual([true, "TASK", null]);
   });
 
   it.each<readonly [string, () => void]>([
     ["the toolbar button", () => fireEvent.click(toggle())],
-    ["⌥⌘I", () => press(document.body, "ˆ", { meta: true, alt: true, code: "KeyI" })],
     [
       "a snap-close drag",
       () => {
@@ -247,27 +248,26 @@ describe("the inspector column", () => {
         fireEvent.pointerUp(handle(), { pointerId: 1, clientX: 1200 });
       },
     ],
-  ])("closes Settings, dropping its preview, when %s hides the inspector it lives in", async (_, hide) => {
+  ])("leaves Settings open when %s hides the inspector, which no longer holds it", async (_, hide) => {
     await shown();
     const settings = within(bar()).getByRole("button", { name: "Settings" });
     fireEvent.click(settings);
-    expect(slot()?.querySelector(".settings-head")).not.toBeNull();
     hide();
-    expect(slot()).toBeNull();
-    expect(document.querySelector(".settings-head")).toBeNull();
-    expect([settings.getAttribute("aria-pressed"), stored().desk.inspector.open]).toEqual(["false", false]);
-    fireEvent.click(settings);
-    expect(slot()?.querySelector(".settings-head")).not.toBeNull();
-    expect(stored().desk.inspector.open).toBe(true);
+    expect([slot(), settingsModal() !== null, settings.getAttribute("aria-pressed"), stored().desk.inspector.open]).toEqual([null, true, "true", false]);
   });
 
-  it("reveals the column when Settings opens with the inspector collapsed", async () => {
+  it("leaves the inspector alone on ⌥⌘I under the Settings modal", async () => {
+    await shown();
+    fireEvent.click(within(bar()).getByRole("button", { name: "Settings" }));
+    press(document.body, "ˆ", { meta: true, alt: true, code: "KeyI" });
+    expect([slot() !== null, settingsModal() !== null, stored().desk.inspector.open]).toEqual([true, true, true]);
+  });
+
+  it("opens Settings as a modal with the inspector collapsed, and leaves it collapsed", async () => {
     await shown({ closed: ["outline", "inspector"] });
     expect(slot()).toBeNull();
     fireEvent.click(within(bar()).getByRole("button", { name: "Settings" }));
-    expect(slot()?.querySelector(".settings-head")).not.toBeNull();
-    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
-    expect(stored().desk.inspector.open).toBe(true);
+    expect([settingsModal()?.getAttribute("aria-label"), slot(), stored().desk.inspector.open]).toEqual(["General", null, false]);
   });
 });
 

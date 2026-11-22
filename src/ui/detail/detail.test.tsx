@@ -550,7 +550,7 @@ describe("the item modal", () => {
       refused.restore();
     }
     await settle();
-    expect([refused.messages, modal() !== null, nameIn(modalDetail()).value, document.querySelector(".settings-panel")]).toEqual([
+    expect([refused.messages, modal() !== null, nameIn(modalDetail()).value, document.querySelector("[data-settings-modal]")]).toEqual([
       ["the plan refused the name"],
       true,
       "Tracking: refused",
@@ -599,7 +599,13 @@ describe("the item modal", () => {
     });
     fireEvent.click(within(bar()).getByRole("button", { name: "Settings" }));
     await settle();
-    expect([modal(), nameOf(t, "t3"), slot()?.querySelector(".settings-panel") !== null, selectedRow()]).toEqual([null, "Tracking: before settings", true, "t3"]);
+    expect([modal(), nameOf(t, "t3"), document.querySelectorAll("[data-settings-modal]").length, document.querySelectorAll('[aria-modal="true"]').length, selectedRow()]).toEqual([
+      null,
+      "Tracking: before settings",
+      1,
+      1,
+      "t3",
+    ]);
   });
 
   it("clears itself when the selection goes", async () => {

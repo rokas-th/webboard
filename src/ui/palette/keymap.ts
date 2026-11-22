@@ -49,6 +49,7 @@ function modified(e: KeyInput, s: KeyState): string | null {
   const mod = s.command ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
   if (!mod) return null;
   if (e.altKey) return paneKey(e, s);
+  if (e.code === "Comma") return e.shiftKey ? null : "settings";
   const key = e.key.toLowerCase();
   if (s.dialog) return null;
   if (key === "k" && !e.shiftKey) return "palette";

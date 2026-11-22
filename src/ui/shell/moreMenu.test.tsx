@@ -231,7 +231,7 @@ describe("the More menu", () => {
     await at(834);
     choose(await opened(), "Settings");
     gone();
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
+    expect(screen.getAllByRole("dialog").map((d) => [d.getAttribute("aria-label"), d.hasAttribute("data-settings-modal")])).toEqual([["General", true]]);
   });
 
   it("opens the Plan sheet from its row below 700", async () => {
@@ -241,12 +241,12 @@ describe("the More menu", () => {
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Plan"]);
   });
 
-  it("opens from the toolbar while the plan list is open, and its Settings row adds the Settings dialog", async () => {
+  it("opens from the toolbar while the plan list is open, and its Settings row adds the Settings modal", async () => {
     await at(834);
     fireEvent.click(within(bar()).getByRole("button", { name: "Plan list" }));
     expect(screen.getByRole("dialog", { name: "Plans" })).toBeTruthy();
     choose(await opened(), "Settings");
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Plans", "Settings"]);
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Plans", "General"]);
   });
 
   it("keeps the plan list open when a tap reaches its scrim while the native menu is up", async () => {

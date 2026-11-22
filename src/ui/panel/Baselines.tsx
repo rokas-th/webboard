@@ -6,12 +6,12 @@ import { TextField } from "./TextField";
 
 export const baselineDefault = (today: IsoDate): string => `Baseline ${fmtShort(today)} ${today.slice(0, 4)}`;
 
-export function Baselines(p: { view: PlanView; readOnly: boolean; run: Run }) {
+export function Baselines(p: { view: PlanView; readOnly: boolean; run: Run; titled: boolean }) {
   const { ui, setUi } = useUiValue();
   const list = [...p.view.plan.baselines.values()].sort((a, b) => (a.at === b.at ? (a.id < b.id ? -1 : 1) : a.at < b.at ? -1 : 1));
   return (
     <>
-      <h2>Baselines</h2>
+      {p.titled && <h2>Baselines</h2>}
       {list.length > 0 && (
         <div className="baselines">
           {list.map((b) => {

@@ -524,8 +524,9 @@ describe("SyncProvider on the phone", () => {
     within(emptyState())
       .getAllByRole("button")
       .map((b) => b.textContent);
+  const settingsSheet = (): HTMLElement => screen.getByRole("dialog", { name: "Settings" });
   const closeSync = async (): Promise<void> => {
-    await click(within(dialog()).getByRole("button", { name: "Close" }));
+    await click(within(settingsSheet()).getByRole("button", { name: "Close" }));
   };
   const EMPTY = ["New plan", "Show an example plan", "Import plan…", "Join with a code", "Set up sync"];
 
@@ -685,11 +686,11 @@ describe("SyncProvider on the phone", () => {
     await click(within(status).getByRole("button", { name: "Open sync" }));
     expect(screen.queryByRole("dialog", { name: "Status" })).toBeNull();
     expect(pane("Join with a code")).toBeTruthy();
-    expect([...dialog().querySelectorAll(".sync-message.bad")].map((e) => e.textContent)).toEqual([message + RESET_HINT]);
-    expect(within(dialog()).getByRole("button", { name: "Reset sync" })).toBeTruthy();
-    expect(within(dialog()).getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect([...settingsSheet().querySelectorAll(".sync-message.bad")].map((e) => e.textContent)).toEqual([message + RESET_HINT]);
+    expect(within(settingsSheet()).getByRole("button", { name: "Reset sync" })).toBeTruthy();
+    expect(within(settingsSheet()).getByRole("button", { name: "Try again" })).toBeTruthy();
     w.status = () => ({ space: null, revoked: false });
-    await click(within(dialog()).getByRole("button", { name: "Reset sync" }));
+    await click(within(settingsSheet()).getByRole("button", { name: "Reset sync" }));
     expect(calls("sync_reset")).toBe(1);
     expect(compactChip().getAttribute("aria-label")).toBe("Local only");
     expect(pane("Join with a code")).toBeTruthy();

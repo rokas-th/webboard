@@ -15,7 +15,8 @@ import { placeStep } from "../panel/placeStep";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { PlanListMode } from "../shell/planListMode";
 import { stepPatch, tabOrder } from "../detail/order";
-import type { SettingsTab, UiState, ViewKind, Zoom } from "../state";
+import { lastSection } from "../settings/lastSection";
+import type { SettingsSection, SyncPane, UiState, ViewKind, Zoom } from "../state";
 
 export interface Command {
   id: string;
@@ -198,6 +199,11 @@ function editCommands(ctx: CommandCtx, session: PlanSession, run: (i: Intent) =>
   return [...opening, ...nudges, ...resizes, ...order, ...copy, trash];
 }
 
+function settingsAt(ctx: CommandCtx, section: SettingsSection): void {
+  ctx.theme.preview(null);
+  ctx.setUi({ settings: section });
+}
+
 function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
   const run = ctx.run;
   const undo = ctx.undo;
@@ -269,7 +275,7 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
     ...folding,
     ...baselines,
     ...zooms,
-    { id: "calendar", group: "Plan", label: "Change calendar: region, working days, closures", run: () => ctx.setUi({ dialog: { t: "calendar" } }) },
+    { id: "calendar", group: "Plan", label: "Change calendar: region, working days, closures", run: () => ctx.setUi({ settings: "working-time" }) },
     {
       id: "save-baseline",
       group: "Plan",
@@ -329,9 +335,10 @@ export function commands(ctx: CommandCtx): Command[] {
   const exportCommand: Command[] = session === null ? [] : [{ id: "export", group: "File", label: "Export plan…", run: () => void exportFlow(session) }];
   const printCommand: Command[] =
     session === null || platform === "ios" ? [] : [{ id: "print", group: "File", label: "Print…", keys: ctx.command ? "⌘P" : "Ctrl P", run: () => ctx.print() }];
-  const settingsAt = (tab: SettingsTab): void => {
+  const planSettingsCommand: Command[] = session === null ? [] : [{ id: "plan-settings", group: "Plan", label: "Plan settings…", run: () => settingsAt(ctx, "overview") }];
+  const syncAt = (pane: SyncPane): void => {
     ctx.theme.preview(null);
-    ctx.setUi({ settings: tab });
+    ctx.setUi({ settings: "sync", syncPane: pane });
   };
   const paneToggle = (id: string, pane: PaneToggle | null, name: string, letter: string): Command[] =>
     pane === null
@@ -352,17 +359,18 @@ export function commands(ctx: CommandCtx): Command[] {
     ...exportCommand,
     { id: "import", group: "File", label: "Import plan…", run: () => void importFlow(ctx.registry, (id) => ctx.select(id)) },
     ...printCommand,
-    { id: "sync-setup", group: "File", label: "Set up sync", run: () => ctx.setUi({ dialog: { t: "sync", pane: "setup" } }) },
-    { id: "sync-join", group: "File", label: "Join with a code", run: () => ctx.setUi({ dialog: { t: "sync", pane: "join" } }) },
-    { id: "sync-devices", group: "File", label: "Sync devices", run: () => ctx.setUi({ dialog: { t: "sync", pane: "devices" } }) },
+    { id: "sync-setup", group: "File", label: "Set up sync", run: () => syncAt("setup") },
+    { id: "sync-join", group: "File", label: "Join with a code", run: () => syncAt("join") },
+    { id: "sync-devices", group: "File", label: "Sync devices", run: () => syncAt("devices") },
     ...openPlans,
     ...sidebarCommand,
     ...paneCommands,
-    { id: "settings", group: "View", label: "Settings…", run: () => settingsAt("theme") },
-    { id: "theme", group: "View", label: "Theme…", run: () => settingsAt("theme") },
+    { id: "settings", group: "View", label: "Settings…", keys: ctx.command ? "⌘," : "Ctrl ,", run: () => settingsAt(ctx, lastSection(window.localStorage, session !== null)) },
+    ...planSettingsCommand,
+    { id: "theme", group: "View", label: "Theme…", run: () => settingsAt(ctx, "theme") },
     { id: "theme-cyberdeck", group: "View", label: "Use Cyberdeck theme", run: () => ctx.theme.useCyberdeck() },
     { id: "palette", group: "Help", label: "Command palette", keys: ctx.command ? "⌘K" : "Ctrl K", run: () => ctx.setUi({ dialog: { t: "palette" } }) },
-    { id: "about", group: "Help", label: "About WebBoard", run: () => settingsAt("about") },
+    { id: "about", group: "Help", label: "About WebBoard", run: () => settingsAt(ctx, "general") },
     ...updateCommands(ctx.updates),
   ];
   return session === null ? always : [...planCommands(ctx, session), ...always];

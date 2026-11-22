@@ -124,6 +124,20 @@ html[data-os="ios"] .detail-expand svg {
   color: var(--dim);
 }
 
+.summary-row-value {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+.summary-row:has(.summary-row-value) .summary-row-label {
+  flex: 1 0 auto;
+}
+
 .summary-row-go {
   font-size: 14px;
   color: var(--dim);

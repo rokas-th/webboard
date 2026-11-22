@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { fmtShort, toIso } from "../../domain/dates";
 import { goneSet } from "../../domain/derive";
 import type { Item, ItemId } from "../../domain/model";
@@ -7,8 +7,7 @@ import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { useRun } from "../run";
 import { derivedStatus } from "../status";
-import { useUiValue } from "../state";
-import { Baselines } from "./Baselines";
+import { useUiValue, type SettingsSection } from "../state";
 import { calendarSummary } from "./calendarText";
 import { History } from "./History";
 import { Trash } from "./Trash";
@@ -62,6 +61,18 @@ function SummaryRow(p: { page: SubPage; count: number; button: RefObject<HTMLBut
     <button ref={p.button} type="button" className="summary-row" data-summary-row={p.page} disabled={p.page === "trash" && p.count === 0} onClick={p.onOpen}>
       <span className="summary-row-label">{PAGE_LABEL[p.page]}</span>
       <span className="summary-row-count mono">{p.count}</span>
+      <span className="summary-row-go" aria-hidden="true">
+        ›
+      </span>
+    </button>
+  );
+}
+
+function SettingsSummaryRow(p: { section: SettingsSection; label: string; value: ReactNode; onOpen(): void }) {
+  return (
+    <button type="button" className="summary-row" data-summary-row={p.section} onClick={p.onOpen}>
+      <span className="summary-row-label">{p.label}</span>
+      {p.value}
       <span className="summary-row-go" aria-hidden="true">
         ›
       </span>
@@ -123,6 +134,7 @@ export function PlanPanel(p: { session: PlanSession; readOnly: boolean }) {
   const conflicts = view.derived.conflicts.filter((c) => c.kind !== "dayoff").length;
   const span = spanText(view);
   const progress = topProgress(view, gone);
+  const calendarText = calendarSummary(plan.calendar);
   return (
     <div ref={panel} className="panel plan-summary" data-summary-page="summary">
       <h2>Plan</h2>
@@ -148,17 +160,18 @@ export function PlanPanel(p: { session: PlanSession; readOnly: boolean }) {
         <Stat k="Not started" v={todo} />
         <Stat k="In progress" v={doing} />
       </div>
-      <h2>Calendar</h2>
-      <p className="val-line">{calendarSummary(plan.calendar)}</p>
-      {!p.readOnly && (
-        <div className="actions">
-          <button type="button" className="button-small" onClick={() => setUi({ dialog: { t: "calendar" } })}>
-            Change calendar…
-          </button>
-        </div>
-      )}
-      <Baselines view={view} readOnly={p.readOnly} run={run} />
       <div className="summary-rows">
+        <SettingsSummaryRow
+          section="working-time"
+          label="Working time"
+          value={
+            <span className="summary-row-value" title={calendarText}>
+              {calendarText}
+            </span>
+          }
+          onOpen={() => setUi({ settings: "working-time" })}
+        />
+        <SettingsSummaryRow section="baselines" label="Baselines" value={<span className="summary-row-count mono">{plan.baselines.size}</span>} onOpen={() => setUi({ settings: "baselines" })} />
         <SummaryRow page="history" count={p.session.history().length} button={historyRow} onOpen={() => open("history")} />
         <SummaryRow page="trash" count={trashCount} button={trashRow} onOpen={() => open("trash")} />
       </div>

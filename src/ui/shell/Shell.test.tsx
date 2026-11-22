@@ -1622,6 +1622,47 @@ describe("Shell on Registry.open", () => {
     expect(within(nav).getByText("Alpha")).toBeTruthy();
   });
 
+  it("moves the open plan to the Trash from Settings › Danger zone, closing Settings first", async () => {
+    const s = await store(["Alpha", "Beta"]);
+    const registry = await opened();
+    render(withSync(shellOn(registry)));
+    await settle();
+    expect(currentName()).toBe("Alpha");
+    const trashPlan = vi.spyOn(registry, "trashPlan");
+    const bar = document.querySelector("header.toolbar");
+    if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
+    fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
+    const modal = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-settings-modal]");
+    const open = modal();
+    if (open === null) throw new Error("no Settings modal");
+    fireEvent.click(within(within(open).getByRole("navigation", { name: "Settings sections" })).getByRole("button", { name: "Danger zone" }));
+    expect(within(open).getByText("Moves “Alpha” to the Trash. Restore it from the plan list's Trash.")).toBeTruthy();
+    clearToasts();
+    fireEvent.click(within(open).getByRole("button", { name: "Move to Trash" }));
+    expect([modal(), lastUi().settings, trashPlan.mock.calls]).toEqual([null, null, [[s.ids[0]]]]);
+    expect(toastTexts()).toEqual(["Moved “Alpha” to the Trash. Restore it from the Trash."]);
+    await settle();
+    expect([currentName(), modal()]).toEqual(["Beta", null]);
+  });
+
+  it("disables Settings' Move to Trash for a space plan while the space is read-only", async () => {
+    const s = await store(["Alpha", "Beta"]);
+    const registry = await opened();
+    const real = registry.plans.bind(registry);
+    vi.spyOn(registry, "plans").mockImplementation(() => real().map((l) => (l.id === s.ids[0] ? { ...l, space: "sp000000000" } : l)));
+    vi.spyOn(registry, "spaceReadOnly").mockReturnValue(true);
+    render(withSync(shellOn(registry)));
+    await settle();
+    expect(currentName()).toBe("Alpha");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: ",", code: "Comma", metaKey: true });
+    });
+    const open = document.querySelector<HTMLElement>("[data-settings-modal]");
+    if (open === null) throw new Error("no Settings modal");
+    fireEvent.click(within(within(open).getByRole("navigation", { name: "Settings sections" })).getByRole("button", { name: "Danger zone" }));
+    expect(within(open).getByRole("button", { name: "Move to Trash" }).hasAttribute("disabled")).toBe(true);
+  });
+
   it("falls to the empty state when the last plan is trashed", async () => {
     await store(["Alpha"]);
     const registry = await opened();
@@ -2087,58 +2128,61 @@ describe("the panel slot", () => {
   });
 });
 
-describe("calendar dialog in the shell", () => {
-  const calendarDialogs = (): HTMLElement[] => screen.queryAllByRole("dialog", { name: "Calendar · Plan" });
+describe("working time in Settings from the shell", () => {
+  const workingTime = (): HTMLElement[] => screen.queryAllByRole("dialog", { name: "Working time" });
+  const openFromRow = async (): Promise<void> => {
+    const panel = slot("panel");
+    if (!(panel instanceof HTMLElement)) throw new Error("no panel");
+    const row = panel.querySelector('button.summary-row[data-summary-row="working-time"]');
+    if (!(row instanceof HTMLElement)) throw new Error("no Working time row");
+    fireEvent.click(row);
+    await settle();
+  };
 
-  it("opens from PlanPanel's Change calendar… and closes with Esc", async () => {
+  it("opens from PlanPanel's Working time row and closes with Esc", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
-    const panel = slot("panel");
-    if (!(panel instanceof HTMLElement)) throw new Error("no panel");
-    fireEvent.click(within(panel).getByRole("button", { name: "Change calendar…" }));
-    await settle();
-    expect(lastUi().dialog).toEqual({ t: "calendar" });
-    expect(calendarDialogs()).toHaveLength(1);
+    await openFromRow();
+    expect([lastUi().settings, lastUi().dialog]).toEqual(["working-time", null]);
+    expect(workingTime()).toHaveLength(1);
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    fireEvent.keyDown(calendarDialogs()[0], { key: "Escape" });
+    expect(workingTime()[0].querySelector('section.settings-section[data-section="working-time"]:not([hidden]) .cal-body')).not.toBeNull();
+    fireEvent.keyDown(workingTime()[0], { key: "Escape" });
     await settle();
-    expect(lastUi().dialog).toBeNull();
+    expect(lastUi().settings).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("Escape outside the open dialog goes through its guard", async () => {
+  it("Escape outside Settings goes through the calendar guard", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
-    const panel = slot("panel");
-    if (!(panel instanceof HTMLElement)) throw new Error("no panel");
-    fireEvent.click(within(panel).getByRole("button", { name: "Change calendar…" }));
-    await settle();
+    await openFromRow();
     const before = t.session.view().plan.calendar;
-    fireEvent.click(within(within(calendarDialogs()[0]).getByRole("group", { name: "Working days" })).getByRole("button", { name: "Sat" }));
+    fireEvent.click(within(within(workingTime()[0]).getByRole("group", { name: "Working days" })).getByRole("button", { name: "Sat" }));
     act(() => {
       fireEvent.keyDown(document.body, { key: "Escape" });
     });
     await settle();
     const ask = screen.getByRole("alertdialog", { name: "Discard calendar changes?" });
-    expect([lastUi().dialog, calendarDialogs().length, document.activeElement]).toEqual([{ t: "calendar" }, 1, within(ask).getByRole("button", { name: "Keep editing" })]);
+    expect([lastUi().settings, workingTime().length, document.activeElement]).toEqual(["working-time", 1, within(ask).getByRole("button", { name: "Keep editing" })]);
     act(() => {
       fireEvent.keyDown(document.body, { key: "Escape" });
     });
     await settle();
-    expect([screen.queryByRole("alertdialog"), calendarDialogs().length, lastUi().dialog]).toEqual([null, 1, { t: "calendar" }]);
+    expect([screen.queryByRole("alertdialog"), workingTime().length, lastUi().settings]).toEqual([null, 1, "working-time"]);
     act(() => {
       fireEvent.keyDown(document.body, { key: "Escape" });
     });
     await settle();
     fireEvent.click(within(screen.getByRole("alertdialog", { name: "Discard calendar changes?" })).getByRole("button", { name: "Discard" }));
     await settle();
-    expect([screen.queryByRole("dialog"), screen.queryByRole("alertdialog"), lastUi().dialog]).toEqual([null, null, null]);
+    expect([screen.queryByRole("dialog"), screen.queryByRole("alertdialog"), lastUi().settings]).toEqual([null, null, null]);
     expect(t.session.view().plan.calendar).toBe(before);
   });
 
-  it("opens the same dialog from Choose region on a plan with no region", async () => {
+  it("opens Working time from Choose region on a plan with no region", async () => {
     const t = await made(MESA_SEED);
     expect(t.session.view().plan.calendar.region).toBeNull();
     render(withSync(shellFor(t).ui));
@@ -2147,8 +2191,21 @@ describe("calendar dialog in the shell", () => {
     if (!(head instanceof HTMLElement)) throw new Error("no plan head");
     fireEvent.click(within(head).getByRole("button", { name: "Choose region" }));
     await settle();
-    expect(lastUi().dialog).toEqual({ t: "calendar" });
-    expect(calendarDialogs()).toHaveLength(1);
+    expect([lastUi().settings, lastUi().dialog]).toEqual(["working-time", null]);
+    expect(workingTime()).toHaveLength(1);
+  });
+
+  it("the gear keeps a calendar draft behind its ask", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    await openFromRow();
+    fireEvent.click(within(within(workingTime()[0]).getByRole("group", { name: "Working days" })).getByRole("button", { name: "Sat" }));
+    const gear = document.querySelector('.toolbar button[aria-label="Settings"]');
+    if (!(gear instanceof HTMLElement)) throw new Error("no gear");
+    fireEvent.click(gear);
+    await settle();
+    expect([screen.queryByRole("alertdialog", { name: "Discard calendar changes?" }) !== null, lastUi().settings]).toEqual([true, "working-time"]);
   });
 });
 
@@ -2241,8 +2298,13 @@ describe("Shell: print (product-8)", () => {
   });
 });
 
-describe("the settings panel in the wide shell", () => {
-  const settingsIn = (root: Element | null): HTMLElement | null => (root === null ? null : root.querySelector<HTMLElement>('section[aria-label="Settings"]'));
+describe("the Settings modal in the wide shell", () => {
+  const settingsModal = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-settings-modal]");
+  const openModal = (): HTMLElement => {
+    const m = settingsModal();
+    if (m === null) throw new Error("no Settings modal");
+    return m;
+  };
   const gear = (): HTMLElement => {
     const bar = document.querySelector("header.toolbar");
     if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
@@ -2251,175 +2313,179 @@ describe("the settings panel in the wide shell", () => {
   const openSettings = (): void => {
     fireEvent.click(gear());
   };
-  const closeSettings = (): void => {
-    const section = settingsIn(slot("panel"));
-    if (section === null) throw new Error("no settings panel");
-    fireEvent.click(within(section).getAllByRole("button", { name: "Close" })[0]);
+  const commaKey = (target: Element = document.body): void => {
+    act(() => {
+      fireEvent.keyDown(target, { key: ",", code: "Comma", metaKey: true });
+    });
+  };
+  const toSection = (name: string): void => {
+    fireEvent.click(within(within(openModal()).getByRole("navigation", { name: "Settings sections" })).getByRole("button", { name }));
   };
   const editAccent = (): void => {
-    const section = settingsIn(slot("panel"));
-    if (section === null) throw new Error("no settings panel");
-    const field = within(section).getByRole("textbox", { name: "Accent hex" });
+    toSection("Theme");
+    const field = within(openModal()).getByRole("textbox", { name: "Accent hex" });
     fireEvent.change(field, { target: { value: "#335577" } });
     fireEvent.blur(field);
   };
+  const drafted = (): string => document.documentElement.style.getPropertyValue("--cyan");
 
-  it("replaces the plan panel, which has no Theme… button, and the plan panel returns on Close", async () => {
+  it("opens as a modal at General from the gear, leaving the plan panel in the inspector, and the gear closes it", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
-    expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
-    expect(within(slot("panel") as HTMLElement).queryByRole("button", { name: "Theme…" })).toBeNull();
-    openSettings();
-    expect(lastUi().settings).toBe("theme");
-    expect(settingsIn(slot("panel"))).not.toBeNull();
-    expect(slot("panel")?.querySelector(".panel")).toBeNull();
-    closeSettings();
-    expect(lastUi().settings).toBeNull();
-    expect(settingsIn(slot("panel"))).toBeNull();
-    expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
-  });
-
-  it("opens Settings at Theme from the toolbar's gear, and the gear closes it, discarding a draft", async () => {
-    const t = await made(MESA_SEED);
-    render(withSync(shellFor(t).ui));
-    await settle();
-    const bar = document.querySelector("header.toolbar");
-    if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
-    const settings = within(bar).getByRole("button", { name: "Settings" });
-    expect(settings.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(settings);
-    expect(lastUi().settings).toBe("theme");
-    expect(within(settingsIn(slot("panel")) ?? document.body).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
-    expect(settingsIn(slot("panel"))).not.toBeNull();
-    expect(within(bar).getByRole("button", { name: "Settings" }).getAttribute("aria-pressed")).toBe("true");
-    editAccent();
-    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe("#335577");
-    fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
-    expect(lastUi().settings).toBeNull();
-    expect(settingsIn(slot("panel"))).toBeNull();
-    expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
-    expect(toastTexts()).toContain("Unsaved colours discarded.");
-    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe(tokensOf(cyberdeck()).cyan);
-    expect(within(bar).getByRole("button", { name: "Settings" }).getAttribute("aria-pressed")).toBe("false");
-  });
-
-  it("opens a sync pane from the Sync tab, closing Settings first and discarding a draft", async () => {
-    const t = await made(MESA_SEED);
-    render(withSync(shellFor(t).ui));
-    await settle();
-    openSettings();
-    editAccent();
-    const section = settingsIn(slot("panel"));
-    if (section === null) throw new Error("no settings panel");
-    expect(within(section).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Theme", "Sync", "About"]);
-    fireEvent.click(within(section).getByRole("tab", { name: "Sync" }));
-    expect(lastUi().settings).toBe("sync");
-    expect(within(section).getByText("Local only")).toBeTruthy();
-    fireEvent.click(within(section).getByRole("button", { name: "Add a device" }));
-    expect([lastUi().settings, lastUi().dialog]).toEqual([null, { t: "sync", pane: "pair" }]);
-    expect(settingsIn(slot("panel"))).toBeNull();
-    expect(toastTexts()).toContain("Unsaved colours discarded.");
-    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe(tokensOf(cyberdeck()).cyan);
-    const dialog = screen.getByRole("dialog", { name: "Sync" });
-    expect(within(dialog).getByRole("tab", { name: "Add a device" }).getAttribute("aria-selected")).toBe("true");
     expect(gear().getAttribute("aria-pressed")).toBe("false");
-  });
-
-  it("opens Settings from the toolbar's gear with no plan open", async () => {
-    const t = await made(MESA_SEED);
-    render(withSync(shellFor(t, { plans: () => [] }).ui));
-    await settle();
-    expect(document.querySelector(".empty-state")).not.toBeNull();
-    expect(slot("panel")).toBeNull();
-    const bar = document.querySelector("header.toolbar");
-    if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
-    fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
-    expect(settingsIn(slot("panel"))).not.toBeNull();
-  });
-
-  it("keeps Settings in the slot while an item is selected, and shows the item panel after Close", async () => {
-    const t = await made(MESA_SEED);
-    render(withSync(shellFor(t).ui));
-    await settle();
     openSettings();
-    editAccent();
-    setUiNow({ selected: "t3" });
-    expect(lastUi().selected).toBe("t3");
-    expect(settingsIn(slot("panel"))).not.toBeNull();
-    expect(within(settingsIn(slot("panel")) ?? document.body).getByRole("textbox", { name: "Accent hex" })).toHaveProperty("value", "#335577");
-    closeSettings();
-    expect(toastTexts()).toContain("Unsaved colours discarded.");
-    expect(within(slot("panel") as HTMLElement).getByLabelText("Name")).toHaveProperty("value", "Tracking: review results");
-  });
-
-  it("shows Settings in the panel slot with no plan open", async () => {
-    const t = await made(MESA_SEED);
-    render(withSync(shellFor(t, { plans: () => [] }).ui));
-    await settle();
-    expect(document.querySelector(".empty-state")).not.toBeNull();
-    expect(slot("panel")).toBeNull();
-    setUiNow({ settings: "theme" });
-    expect(settingsIn(slot("panel"))).not.toBeNull();
-    closeSettings();
-    expect(slot("panel")).toBeNull();
-  });
-
-  it("closes Settings on Escape at the window, discarding a draft, and leaves the selection", async () => {
-    const t = await made(MESA_SEED);
-    render(withSync(shellFor(t).ui));
-    await settle();
+    expect(lastUi().settings).toBe("general");
+    expect([openModal().getAttribute("aria-label"), openModal().getAttribute("aria-modal"), gear().getAttribute("aria-pressed")]).toEqual(["General", "true", "true"]);
+    expect(slot("panel")?.querySelector(".panel h2")?.textContent).toBe("Plan");
+    expect(slot("panel")?.querySelector(".settings-section")).toBeNull();
     openSettings();
-    setUiNow({ selected: "t3" });
-    editAccent();
-    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe("#335577");
-    act(() => {
-      fireEvent.keyDown(document.body, { key: "Escape" });
-    });
-    expect(lastUi().settings).toBeNull();
-    expect(lastUi().selected).toBe("t3");
-    expect(toastTexts()).toContain("Unsaved colours discarded.");
-    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe(tokensOf(cyberdeck()).cyan);
-  });
-
-  it("leaves Escape to a text field outside the panel, keeping Settings open", async () => {
-    const t = await made(MESA_SEED);
-    render(withSync(shellFor(t).ui));
-    await settle();
-    openSettings();
-    editAccent();
-    const field = document.createElement("input");
-    field.type = "text";
-    document.body.append(field);
-    field.focus();
-    act(() => {
-      fireEvent.keyDown(field, { key: "Escape" });
-    });
-    field.remove();
-    expect(lastUi().settings).toBe("theme");
-    expect(settingsIn(slot("panel"))).not.toBeNull();
+    expect([lastUi().settings, settingsModal(), gear().getAttribute("aria-pressed")]).toEqual([null, null, "false"]);
     expect(toastTexts()).not.toContain("Unsaved colours discarded.");
+  });
+
+  it("opens with no plan open, with no inspector column", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t, { plans: () => [] }).ui));
+    await settle();
+    expect(document.querySelector(".empty-state")).not.toBeNull();
+    openSettings();
+    expect([openModal().getAttribute("aria-label"), slot("panel")]).toEqual(["General", null]);
+    fireEvent.click(within(openModal()).getByRole("button", { name: "Close" }));
+    expect([lastUi().settings, settingsModal()]).toEqual([null, null]);
+  });
+
+  it("reopens on the last section", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    openSettings();
+    toSection("Sync");
+    expect([lastUi().settings, openModal().getAttribute("aria-label")]).toEqual(["sync", "Sync"]);
+    openSettings();
+    expect(settingsModal()).toBeNull();
+    openSettings();
+    expect([lastUi().settings, openModal().getAttribute("aria-label")]).toEqual(["sync", "Sync"]);
+  });
+
+  it.each<[string, () => void]>([
+    ["the ✕", () => fireEvent.click(within(openModal()).getByRole("button", { name: "Close" }))],
+    ["Escape", () => fireEvent.keyDown(openModal(), { key: "Escape" })],
+    [
+      "a scrim press",
+      () => {
+        const scrim = openModal().parentElement;
+        if (scrim === null) throw new Error("no scrim");
+        const under = vi.spyOn(document, "elementFromPoint").mockReturnValue(scrim);
+        fireEvent.pointerDown(scrim, { button: 0, pointerType: "mouse", clientX: 5, clientY: 5 });
+        fireEvent.pointerUp(scrim, { button: 0, pointerType: "mouse", clientX: 5, clientY: 5 });
+        fireEvent.click(scrim, { button: 0, clientX: 5, clientY: 5 });
+        under.mockRestore();
+      },
+    ],
+    ["the gear", () => fireEvent.click(gear())],
+    ["⌘,", () => commaKey(openModal())],
+  ])("discards a theme draft with the toast when closed by %s, and leaves the selection", async (_how, close) => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    setUiNow({ selected: "t3" });
+    openSettings();
+    editAccent();
+    expect(drafted()).toBe("#335577");
+    act(close);
+    expect([lastUi().settings, settingsModal(), lastUi().selected]).toEqual([null, null, "t3"]);
+    expect(toastTexts()).toContain("Unsaved colours discarded.");
+    expect(drafted()).toBe(tokensOf(cyberdeck()).cyan);
+  });
+
+  it("opens and closes on ⌘, even from a field, and Ctrl , on Linux", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    commaKey();
+    expect([lastUi().settings, openModal().getAttribute("aria-label")]).toEqual(["general", "General"]);
+    commaKey(within(openModal()).getByRole("searchbox", { name: "Search settings" }));
+    expect([lastUi().settings, settingsModal()]).toEqual([null, null]);
     act(() => {
-      fireEvent.keyDown(document.body, { key: "Escape" });
+      fireEvent.keyDown(document.body, { key: ",", code: "Comma", ctrlKey: true });
     });
     expect(lastUi().settings).toBeNull();
   });
 
-  it("selects a clicked list row while Settings is open, highlighting it, and Settings stays in the slot", async () => {
+  it("opens on Ctrl , on Linux", async () => {
+    setPlatform(LINUX);
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t, { device: { deviceId: "linux", name: "Linux box", platform: "linux" } }).ui));
+    await settle();
+    act(() => {
+      fireEvent.keyDown(document.body, { key: ",", code: "Comma", ctrlKey: true });
+    });
+    expect([lastUi().settings, openModal().getAttribute("aria-label")]).toEqual(["general", "General"]);
+  });
+
+  it("leaves ⌘, alone under another dialog", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    setUiNow({ dialog: { t: "palette" } });
+    commaKey();
+    expect([lastUi().settings, lastUi().dialog, settingsModal()]).toEqual([null, { t: "palette" }, null]);
+  });
+
+  it("switches sync panes inside the Sync section, keeping Settings and its draft", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    openSettings();
+    editAccent();
+    toSection("Sync");
+    const modal = openModal();
+    const tab = within(modal).getByRole("tab", { name: "Add a device" });
+    act(() => {
+      fireEvent.click(tab);
+    });
+    expect([lastUi().settings, lastUi().syncPane, lastUi().dialog, settingsModal()]).toEqual(["sync", "pair", null, modal]);
+    expect(toastTexts()).not.toContain("Unsaved colours discarded.");
+    expect(drafted()).not.toBe(tokensOf(cyberdeck()).cyan);
+    expect(within(modal).getByRole("tab", { name: "Add a device" }).getAttribute("aria-selected")).toBe("true");
+    expect(within(modal).getByRole("tabpanel", { name: "Add a device" }).closest('section.settings-section[data-section="sync"]')).not.toBeNull();
+    expect(screen.getAllByRole("dialog")).toEqual([modal]);
+    expect(gear().getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("one modal at a time: the item modal closes Settings, discarding its draft, and Settings closes the item modal", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    setUiNow({ selected: "t3" });
+    openSettings();
+    editAccent();
+    const column = document.querySelector<HTMLElement>('#inspector [data-detail="column"]');
+    if (column === null) throw new Error("no column detail");
+    fireEvent.click(within(column).getByRole("button", { name: "Open as modal" }));
+    await settle();
+    expect([settingsModal(), document.querySelectorAll("[data-item-modal]").length, document.querySelectorAll('[aria-modal="true"]').length, lastUi().dialog]).toEqual([
+      null,
+      1,
+      1,
+      { t: "item" },
+    ]);
+    expect(toastTexts()).toContain("Unsaved colours discarded.");
+    commaKey();
+    await settle();
+    expect([document.querySelectorAll("[data-item-modal]").length, settingsModal() !== null, document.querySelectorAll('[aria-modal="true"]').length, lastUi().dialog]).toEqual([0, true, 1, null]);
+  });
+
+  it("the inspector follows a selection made while Settings is open", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));
     await settle();
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
     openSettings();
-    const row = document.querySelector<HTMLElement>('[data-lrow="t3"]');
-    if (row === null) throw new Error("no t3 row");
-    const init = { clientX: 10, clientY: 10, button: 0, pointerId: 1, pointerType: "mouse" };
-    fireEvent.pointerDown(row, init);
-    fireEvent.pointerUp(row, init);
-    expect(lastUi().selected).toBe("t3");
-    expect(document.querySelector('[data-lrow="t3"]')?.classList.contains("selected")).toBe(true);
-    expect(settingsIn(slot("panel"))).not.toBeNull();
-    expect(lastUi().settings).toBe("theme");
+    setUiNow({ selected: "t3" });
+    expect(settingsModal()).not.toBeNull();
+    expect(within(slot("panel") as HTMLElement).getByLabelText("Name")).toHaveProperty("value", "Tracking: review results");
   });
 
   it("does not paint a native background on iOS", async () => {
@@ -2443,18 +2509,6 @@ describe("the settings panel in the wide shell", () => {
     logged.mockRestore();
     expect(vi.mocked(paintNative).mock.calls).toHaveLength(1);
     expect(Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((n) => [n.textContent, n.className])).toEqual([["Window colour could not be set: no window", "toast bad"]]);
-  });
-
-  it("leaves Escape to an open dialog while Settings is open", async () => {
-    const t = await made(MESA_SEED);
-    render(withSync(shellFor(t).ui));
-    await settle();
-    openSettings();
-    setUiNow({ dialog: { t: "calendar" } });
-    act(() => {
-      fireEvent.keyDown(document.body, { key: "Escape" });
-    });
-    expect([lastUi().dialog, lastUi().settings]).toEqual([null, "theme"]);
   });
 
   it("paints the native window background with the shown ground on macOS", async () => {

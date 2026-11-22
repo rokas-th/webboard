@@ -1,10 +1,8 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import type { PlanSession } from "../../store/session";
-import { useTheme } from "../../theme/ThemeContext";
 import { useRun } from "../run";
 import type { UiState, ViewKind, Zoom } from "../state";
 import { NewItemMenu } from "../common/NewItemMenu";
-import { closeSettings } from "../settings/SettingsPanel";
 import { MoreMenu } from "./MoreMenu";
 import type { ToolbarTier } from "./planListMode";
 import { INSPECTOR_ID, PLAN_LIST_ID } from "./Sidebar";
@@ -22,14 +20,6 @@ const TEETH = Array.from({ length: 8 }, (_, i) => {
   const a = (i * Math.PI) / 4;
   return { x1: 8 + 4.6 * Math.cos(a), y1: 8 + 4.6 * Math.sin(a), x2: 8 + 7 * Math.cos(a), y2: 8 + 7 * Math.sin(a) };
 });
-
-function useSettingsToggle(open: boolean, setUi: (patch: Partial<UiState>) => void): () => void {
-  const theme = useTheme();
-  return () => {
-    if (open) closeSettings(theme, () => setUi({ settings: null }));
-    else setUi({ settings: "theme" });
-  };
-}
 
 function SettingsButton(p: { open: boolean; onToggle(): void; button: RefObject<HTMLButtonElement | null> }) {
   return (
@@ -111,6 +101,7 @@ interface ToolbarProps {
   mac: boolean;
   command: boolean;
   onCommand(id: string): void;
+  onSettings(): void;
   tier: ToolbarTier | null;
   compact: { button: RefObject<HTMLButtonElement | null>; onPlans(): void; onPlan(): void } | null;
   sidebar: SidebarToggle | null;
@@ -201,7 +192,7 @@ export function Toolbar(p: ToolbarProps) {
   const tier = p.tier;
   const trimmed = tier !== null;
   const folded = tier === "medium" || tier === "narrow";
-  const toggleSettings = useSettingsToggle(p.ui.settings !== null, p.setUi);
+  const toggleSettings = p.onSettings;
   const compact = p.compact;
   const onPlan = compact !== null && p.session !== null ? compact.onPlan : null;
   const zoom = p.session !== null && p.ui.view === "timeline" ? p.ui.zoom : null;

@@ -1,11 +1,13 @@
 import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixedClock } from "../../services/clock";
 import { setSystemDark } from "../../test/matchMedia";
 import { IPHONE, MAC, setPlatform } from "../../test/platform";
 import { resetTauri, tauri } from "../../test/tauriMock";
 import { DEFAULT_STORE, type ThemeStore } from "../../theme/store";
 import { ThemeProvider, useNativeScheme } from "../../theme/ThemeContext";
-import { SettingsView } from "../settings/SettingsPanel";
+import { SettingsView } from "../settings/Settings";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../common/Toast", () => ({ toast: vi.fn() }));
@@ -29,9 +31,29 @@ const panel = (): HTMLElement =>
   render(
     <ThemeProvider storage={window.localStorage} initial={{ store: STORE, unreadable: null }}>
       <NativeScheme />
-      <SettingsView frame="panel" tab="theme" hover onTab={() => undefined} onClose={() => undefined} onSync={() => undefined} sync={{ kind: "off" }} syncName={() => null} updates={null} />
+      <SettingsView
+        frame="modal"
+        section="theme"
+        session={null}
+        readOnly={false}
+        device="iPhone"
+        clock={fixedClock("2026-11-09")}
+        hover
+        closer={createRef()}
+        files={{ creating: false, importing: false, newPlan: () => undefined, newExample: () => undefined, importPlan: () => undefined }}
+        onSection={() => undefined}
+        onClose={() => undefined}
+        syncPane={null}
+        onSyncPane={() => undefined}
+        onTrashPlan={() => undefined}
+        sync={{ kind: "off" }}
+        syncName={() => null}
+        updates={null}
+        syncPanes={null}
+        planLocked={false}
+      />
     </ThemeProvider>,
-  ).getByRole("tabpanel", { name: "Theme" });
+  ).getByRole("region", { name: "Theme" });
 
 const background = (region: HTMLElement): string => {
   const el = within(region).getByRole("textbox", { name: "Background hex" });

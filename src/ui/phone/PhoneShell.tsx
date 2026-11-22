@@ -19,10 +19,10 @@ import { PurgeConfirm } from "../shell/PurgeConfirm";
 import { usePlanFiles, usePlanSelection, type PlanFiles, type PlanMain } from "../shell/selection";
 import { ExampleButton, NewPlanButton } from "../shell/Sidebar";
 import { RemovedBanner } from "../sync/RemovedBanner";
-import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
+import { SyncActionButtons, syncMessage } from "../sync/SyncPanes";
 import { UiContext, useUi, useUiValue, type DialogState, type SyncPane } from "../state";
 import { useCanHover } from "../theme/ThemePanel";
-import { SettingsPanel } from "../settings/SettingsPanel";
+import { Settings, type SettingsCloser } from "../settings/Settings";
 import { Timeline, usePhoneOutline } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { ChoiceSheet } from "./ChoiceSheet";
@@ -31,7 +31,6 @@ import { ItemSheet } from "./ItemSheet";
 import { PhoneList } from "./PhoneList";
 import { PhoneStatus } from "./PhoneStatus";
 import { PhoneTopBar } from "./PhoneTopBar";
-import { CalendarSheet } from "./PlanSheet";
 import { CreateError, ImportButton, NEW_PLAN, PlansSheet } from "./PlansSheet";
 
 type PhoneView = "list" | "timeline";
@@ -41,7 +40,7 @@ const VIEWS: readonly (readonly [PhoneView, string])[] = [
   ["timeline", "Timeline"],
 ];
 
-function PlanDialog(p: { session: PlanSession; registry: Registry; clock: Clock; dialog: DialogState; local: string; onClose(): void }): ReactElement | null {
+function PlanDialog(p: { session: PlanSession; dialog: DialogState; local: string; onClose(): void }): ReactElement | null {
   const d = p.dialog;
   switch (d.t) {
     case "choice":
@@ -55,12 +54,8 @@ function PlanDialog(p: { session: PlanSession; registry: Registry; clock: Clock;
           onClose={p.onClose}
         />
       );
-    case "calendar":
-      return <CalendarSheet key={p.session.view().plan.id} session={p.session} registry={p.registry} clock={p.clock} onClose={p.onClose} />;
     case "revert":
       return <RevertDialog key={d.id} session={p.session} id={d.id} frame="sheet" onClose={p.onClose} />;
-    case "sync":
-      return null;
     case "palette":
     case "item":
       throw new Error(`PhoneShell cannot show dialog ${d.t}`);
@@ -142,7 +137,7 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
         ))}
       </div>
       {dialog !== null ? (
-        <PlanDialog session={p.session} registry={p.registry} clock={p.clock} dialog={dialog} local={local} onClose={closeDialog} />
+        <PlanDialog session={p.session} dialog={dialog} local={local} onClose={closeDialog} />
       ) : (
         selected !== null && ui.settings === null && (
           <ItemSheet
@@ -287,11 +282,11 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
   const trash = (id: PlanId): void => void trashOwn(id);
   const moveAll = (ids: readonly PlanId[]): void => moveAllToSpace(p.registry, ids);
   const session = main.k === "open" ? main.session : null;
-  const closeDialog = (): void => setUi({ dialog: null });
   const hover = useCanHover();
+  const settingsCloser = useRef<SettingsCloser | null>(null);
   const openSync = (pane: SyncPane | null): void => {
     closePlans();
-    setUi({ dialog: { t: "sync", pane } });
+    setUi({ settings: "sync", syncPane: pane });
   };
   return (
     <OpenChoice.Provider value={openChoice}>
@@ -330,6 +325,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
           <PlansSheet
             registry={p.registry}
             selected={ui.plan}
+            hasPlan={session !== null}
             files={files}
             error={sheetError}
             onNew={newFromSheet}
@@ -342,18 +338,23 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
             onClose={closePlans}
           />
         )}
-        {ui.dialog !== null && ui.dialog.t === "sync" && (
-          <SyncDialog pane={ui.dialog.pane} frame="sheet" onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />
-        )}
         {purging !== null && <PurgeConfirm registry={p.registry} id={purging} frame="sheet" onClose={() => setPurging(null)} />}
         {ui.settings !== null && (
-          <SettingsPanel
+          <Settings
             frame="sheet"
-            tab={ui.settings}
+            section={ui.settings}
+            session={session}
+            readOnly={session === null ? false : session.readOnly}
+            device={p.registry.device.name}
+            clock={p.clock}
             hover={hover}
-            onTab={(t) => setUi({ settings: t })}
-            onClose={() => setUi({ settings: null })}
-            onSync={(pane) => setUi({ settings: null, dialog: { t: "sync", pane } })}
+            closer={settingsCloser}
+            files={files}
+            onSection={(s) => setUi({ settings: s })}
+            syncPane={ui.syncPane}
+            onClose={() => setUi({ settings: null, syncPane: null })}
+            onSyncPane={(pane) => setUi({ syncPane: pane })}
+            onTrashPlan={trash}
           />
         )}
         <ConvertedReport frame="sheet" />

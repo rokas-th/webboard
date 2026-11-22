@@ -74,8 +74,9 @@ export const CHROME = Object.freeze({
   detailHead: [`.detail-head ${CONTROL}`],
   dialogActions: [`.modal-actions ${CONTROL}`],
   panelActions: [`.panel .actions ${CONTROL}`],
-  settingsHead: [`.settings-head ${CONTROL}`],
-  settingsTabs: [`.settings-tabs ${CONTROL}`],
+  summaryRows: [`.panel .summary-rows ${CONTROL}`],
+  settingsNav: [`.settings-nav ${CONTROL}`],
+  settingsRows: [".settings-row .settings-control button"],
   sync: [`.sync-tabs ${CONTROL}`, `.sync-buttons ${CONTROL}`],
   banners: [`.banner ${CONTROL}`],
   choiceBanners: [`.choice-banner ${CONTROL}`],
@@ -120,6 +121,7 @@ const todayShown = () => ({ today: true });
 const edges = () => ({ edges: true });
 const shown = (selector, n) => ({ shown: [selector, n] });
 const width = (selector, min, max) => ({ width: [selector, min, max] });
+const height = (selector, min, max) => ({ height: [selector, min, max] });
 const heightShare = (selector, min, max) => ({ heightShare: [selector, min, max] });
 const chart = (min) => ({ chart: min });
 const aligned = () => ({ aligned: true });
@@ -138,6 +140,7 @@ const edgeAt = (selector, side, at) => ({ edgeAt: [selector, side, at] });
 const oneLine = (selector) => ({ oneLine: selector });
 const spare = (selector, min, below) => ({ spare: [selector, min, below === undefined ? null : below] });
 const focus = (selector) => ({ focus: selector });
+const fill = (selector, text) => ({ fill: [selector, text] });
 const fontMin = (selector, px) => ({ fontMin: [selector, px] });
 const keep = (selector) => ({ keep: selector });
 const kept = (selector) => ({ kept: selector });
@@ -293,22 +296,23 @@ function states() {
       count(".plan-head .choice-list li", 2),
     ],
   });
+  const WORKING_ROW = '.summary-row[data-summary-row="working-time"]';
+  const WORKING_MODAL = ".modal-settings[data-settings-modal]";
+  const workingTimeShown = [
+    expect(`${WORKING_MODAL} .modal-head h3`, "Working time"),
+    expect(`${WORKING_MODAL} .settings-nav-item[aria-current="page"]`, "Working time"),
+    count('[role="dialog"]', 1),
+    count(".modal-wide", 0),
+    expect(`${WORKING_MODAL} section.settings-section[data-section="working-time"]:not([hidden]) .cal-grid select`),
+    expect(`${WORKING_MODAL} .cal-inline-actions button`, "Review changes…"),
+    inWindow(WORKING_MODAL),
+  ];
   add("calendar-dialog", "mesa", {
     sizes: "both",
     dialog: true,
-    actions: [
-      click(".slot-panel button", "Change calendar…"),
-      expect('.modal-wide[role="dialog"] h3', "Calendar · MESA 1.0"),
-      width('.closure-add input[type="text"]', 300, 100000),
-      expect(".cal-grid select"),
-    ],
+    actions: [click(`.slot-panel ${WORKING_ROW}`), ...workingTimeShown, width('.closure-add input[type="text"]', 300, 100000)],
   });
-  const calendarFromSheet = [
-    click(".toolbar button", "Plan"),
-    click('.sheet[role="dialog"] button', "Change calendar…"),
-    expect('.modal-wide[role="dialog"] h3', "Calendar · MESA 1.0"),
-    expect(".cal-grid select"),
-  ];
+  const calendarFromSheet = [click(".toolbar button", "Plan"), click(`.sheet[role="dialog"] ${WORKING_ROW}`), count(".sheet", 0), ...workingTimeShown];
   add("calendar-dialog/compact", "mesa", { sizes: "compact-all", dialog: true, actions: calendarFromSheet });
   add("choice-dialog", "choices", {
     sizes: "dialog",
@@ -320,82 +324,181 @@ function states() {
     dialog: true,
     actions: [key("k", "KeyK", 4), expect('.palette[role="dialog"]'), expect(".palette-item .palette-label")],
   });
-  const SETTINGS_TAB = '.settings-tabs [role="tab"]';
-  const SETTINGS_SHOWN = '[role="tabpanel"]:not([hidden])';
-  const settingsOn = (label) => expect(`${SETTINGS_TAB}[aria-selected="true"]`, label);
-  const aboutShown = [count(`${SETTINGS_SHOWN} img.about-mark`, 1), loaded(`${SETTINGS_SHOWN} img.about-mark`), expect(`${SETTINGS_SHOWN} .settings-about p`, "Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.")];
+  const SETTINGS_MODAL = ".modal-settings[data-settings-modal]";
+  const SETTINGS_SHOWN = `${SETTINGS_MODAL} section.settings-section:not([hidden])`;
+  const SETTINGS_SHEET = '.sheet[role="dialog"][aria-label="Settings"]';
+  const SETTINGS_GEAR = '.toolbar button[aria-label="Settings"]';
+  const APP_LABELS = ["General", "Theme", "Sync", "Import & export"];
+  const PLAN_LABELS = ["Overview", "Working time", "Baselines", "Danger zone"];
+  const SECTION_LABELS = [...APP_LABELS, ...PLAN_LABELS];
+  const SECTION_SLUGS = ["general", "theme", "sync", "files", "overview", "working-time", "baselines", "danger"];
+  const PLAN_NAME = "MESA 1.0";
+  const sectionOn = (label) => [expect(`${SETTINGS_MODAL} .modal-head h3`, label), expect(`${SETTINGS_MODAL} .settings-nav-item[aria-current="page"]`, label), count(`${SETTINGS_MODAL} section.settings-section:not([hidden])`, 1)];
+  const sectionChecks = (scope) => [
+    ["general", "General", [expect(`${scope} [data-settings-row="general.device"] .settings-value`), expect(`${scope} [data-settings-row="general.updates"] .update-line .update-status`, "Up to date · checked 09:00"), count(`${scope} img.about-mark`, 1), loaded(`${scope} img.about-mark`), expect(`${scope} .settings-about p`, "Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.")]],
+    ["theme", "Theme", [expect(`${scope} .theme-body`), expect(`${scope} button`, "Save theme")]],
+    ["sync", "Sync", [expect(`${scope} .settings-status.cyan`, "Local only"), count(`${scope} .settings-sync .sync-tabs [role="tab"]`, 4), expect(`${scope} .settings-sync [role="tab"][aria-selected="true"]`, "Set up sync"), expect(`${scope} .settings-sync .sync-pane[data-settings-row="sync.setup"] button`, "Create or join space"), count(`${scope} .settings-row[data-settings-row^="sync."] button`, 0)]],
+    ["files", "Import & export", [expect(`${scope} [data-settings-row="files.import"] button`, "Import plan…"), expect(`${scope} [data-settings-row="files.export"] button`, "Export plan…")]],
+    ["overview", "Overview", [expect(`${scope} [data-settings-row="overview.name"] .settings-label`, "Name"), count(`${scope} [data-settings-row="overview.name"] input.settings-plan-name[aria-label="Plan name"]`, 1), inWindow(`${scope} input.settings-plan-name`)]],
+    [
+      "working-time",
+      "Working time",
+      [
+        count(`${scope} .cal-body`, 1),
+        none(`${scope} .cal-inline-actions button`, "Apply"),
+        expect(`${scope} [data-settings-row="working-time.days"] .seg-days button`, "Mon"),
+        expect(`${scope} [data-settings-row="working-time.region"] select`),
+        expect(`${scope} .impact`, "Applying changes no dates in this plan."),
+        expect(`${scope} .cal-inline-actions button:disabled`, "Discard changes"),
+        expect(`${scope} .cal-inline-actions button:disabled`, "Review changes…"),
+      ],
+    ],
+    ["baselines", "Baselines", [expect(`${scope} [data-settings-row="baselines.baselines"] .actions button`, "Save baseline"), count(`${scope} [data-settings-row="baselines.baselines"] h2`, 0)]],
+    [
+      "danger",
+      "Danger zone",
+      [
+        expect(`${scope} [data-settings-row="danger.trash"] button.button-danger`, "Move to Trash"),
+        expect(`${scope} [data-settings-row="danger.trash"] .settings-line`, `Moves “${PLAN_NAME}” to the Trash. Restore it from the plan list's Trash.`),
+        expect(`${scope} [data-settings-row="danger.delete"] .settings-line`, "To delete this plan forever, move it to the Trash, then choose Delete forever there."),
+        count(`${scope} button`, 1),
+      ],
+    ],
+  ];
+  const modalFrame = (lo, hi) => [width(SETTINGS_MODAL, lo, 780), height(SETTINGS_MODAL, hi, 580), width(`${SETTINGS_MODAL} .settings-side`, 212, 212), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL)];
   add("about", "mesa", {
-    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "About WebBoard"), expect(".settings-panel h2", "Settings"), settingsOn("About"), ...aboutShown],
+    dialog: true,
+    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "About WebBoard"), ...sectionOn("General"), ...sectionChecks(SETTINGS_SHOWN)[0][2]],
   });
   add("theme", "mesa", {
-    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), expect(".settings-panel h2", "Settings"), settingsOn("Theme"), expect(`${SETTINGS_SHOWN} .theme-body`)],
+    dialog: true,
+    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), ...sectionOn("Theme"), expect(`${SETTINGS_SHOWN} .theme-body`)],
   });
   add("theme-compact", "mesa", {
     sizes: "compact-all",
     dialog: true,
-    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme")],
+    actions: [key("k", "KeyK", 4), tap(".palette-item .palette-label", "Theme…"), ...sectionOn("Theme"), inWindow(SETTINGS_MODAL), count(".sheet", 0)],
   });
   add("settings-button", "mesa", {
-    actions: [
-      viewExpect("timeline"),
-      count('.toolbar button[aria-label="Settings"][aria-pressed="false"]', 1),
-      click('.toolbar button[aria-label="Settings"]'),
-      expect(".settings-panel h2", "Settings"),
-      settingsOn("Theme"),
-      count('.toolbar button[aria-label="Settings"][aria-pressed="true"]', 1),
-    ],
+    dialog: true,
+    actions: [viewExpect("timeline"), count(`${SETTINGS_GEAR}[aria-pressed="false"]`, 1), click(SETTINGS_GEAR), ...sectionOn("General"), count(`${SETTINGS_GEAR}[aria-pressed="true"]`, 1), expect(".slot-panel .panel h2", "Plan")],
   });
   add("settings-button-compact", "mesa", {
     sizes: "compact-all",
     dialog: true,
-    actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme")],
+    actions: [viewExpect("timeline"), click(SETTINGS_GEAR), ...sectionOn("General"), inWindow(SETTINGS_MODAL), count(".sheet", 0)],
   });
-  const settingsTabs = (labels) => [
-    ["theme", "Theme", [expect(`${SETTINGS_SHOWN} .theme-body`), expect(`${SETTINGS_SHOWN} button`, "Save theme")]],
-    ["sync", "Sync", [expect(`${SETTINGS_SHOWN} .settings-status.cyan`, "Local only"), count(`${SETTINGS_SHOWN} .settings-buttons button`, 4), expect(`${SETTINGS_SHOWN} .settings-buttons button`, "Join with a code")]],
-    ["updates", "Updates", [expect(`${SETTINGS_SHOWN} .update-line .update-status`, "Up to date · checked 09:00")]],
-    ["about", "About", aboutShown],
-  ].filter(([, label]) => labels.includes(label));
-  const DESK_TABS = ["Theme", "Sync", "Updates", "About"];
-  settingsTabs(DESK_TABS).forEach(([slug, label, shownTab]) => {
+  add("settings-modal/desk", "mesa", {
+    sizes: "desktop-and-compact",
+    dialog: true,
+    actions: [viewExpect("timeline"), key(",", "Comma", 4), ...sectionOn("General"), ...modalFrame(780, 580), expect(`${SETTINGS_MODAL} .settings-nav-title`, "App"), expect(`${SETTINGS_MODAL} .settings-nav-group[data-group="plan"] .settings-nav-title`, PLAN_NAME), count(`${SETTINGS_MODAL} .settings-nav-item`, SECTION_LABELS.length)],
+  });
+  add("settings-modal/linux", "mesa-linux", {
+    sizes: "smallest",
+    dialog: true,
+    actions: [viewExpect("timeline"), key(",", "Comma", 2), ...sectionOn("General"), ...modalFrame(780, 580), expect(`${SETTINGS_MODAL} .settings-nav-title`, "App")],
+  });
+  add("settings-modal/search", "mesa", {
+    sizes: "smallest",
+    dialog: true,
+    actions: [
+      viewExpect("timeline"),
+      click(SETTINGS_GEAR),
+      fill(`${SETTINGS_MODAL} input.settings-search`, "join"),
+      count(`${SETTINGS_MODAL} .settings-nav-item`, 1),
+      expect(`${SETTINGS_MODAL} .settings-nav-item`, "Sync"),
+      click(`${SETTINGS_MODAL} .settings-nav-row[data-row="sync.join"]`, "Join with a code"),
+      ...sectionOn("Sync"),
+      expect(`${SETTINGS_SHOWN} .sync-tabs [role="tab"][aria-selected="true"]`, "Join with a code"),
+      count(`${SETTINGS_SHOWN} .sync-pane[data-settings-row="sync.join"]`, 1),
+      fill(`${SETTINGS_MODAL} input.settings-search`, "zzzz"),
+      count(`${SETTINGS_MODAL} .settings-nav-item`, 0),
+      expect(`${SETTINGS_MODAL} .settings-empty`, "No setting matches “zzzz”."),
+      ...modalFrame(780, 580),
+    ],
+  });
+  add("settings-modal/pad-landscape", "mesa-ios-pad", {
+    sizes: "ipad-11-landscape",
+    dialog: true,
+    actions: [
+      viewExpect("timeline"),
+      click(SETTINGS_GEAR),
+      ...sectionOn("General"),
+      ...modalFrame(780, 580),
+      hitChrome("dialogHead", "settingsNav"),
+      click(`${SETTINGS_MODAL} .settings-nav-item`, "Import & export"),
+      ...sectionOn("Import & export"),
+      expect(`${SETTINGS_SHOWN} [data-settings-row="files.import"] button`, "Import plan…"),
+      expect(`${SETTINGS_SHOWN} [data-settings-row="files.export"] button`, "Export plan…"),
+      hitChrome("dialogHead", "settingsNav", "settingsRows"),
+    ],
+  });
+  add("settings-sheet/phone", "mesa", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-head button", "Plans"),
+      style(".plans-sheet button.plans-settings-row", "padding-left", "12px"),
+      style(".plans-sheet button.plans-settings-row", "border-bottom-width", "0px"),
+      click(".plans-sheet button.plans-settings-row", "Settings…"),
+      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+      count(".modal-settings", 0),
+      ...APP_LABELS.map((label, i) => expect(`${SETTINGS_SHEET} .settings-list-group:nth-of-type(1) > section.settings-group:nth-of-type(${i + 1}) > h2.settings-group-title`, label)),
+      expect(`${SETTINGS_SHEET} .settings-list-group:nth-of-type(2) > p.settings-list-plan:first-child`, PLAN_NAME),
+      ...PLAN_LABELS.map((label, i) => expect(`${SETTINGS_SHEET} .settings-list-group:nth-of-type(2) > section.settings-group:nth-of-type(${i + 1}) > h2.settings-group-title`, label)),
+      count(`${SETTINGS_SHEET} section.settings-group`, SECTION_LABELS.length),
+      inWindow(SETTINGS_SHEET),
+    ],
+  });
+  sectionChecks(SETTINGS_SHOWN).forEach(([slug, label, shownSection]) => {
     add(`settings/${slug}`, "mesa", {
       sizes: "smallest",
-      actions: [
-        viewExpect("timeline"),
-        click('.toolbar button[aria-label="Settings"]'),
-        width(".slot-panel", 360, 360),
-        click(SETTINGS_TAB, label),
-        settingsOn(label),
-        oneRow(SETTINGS_TAB, DESK_TABS.length),
-        ...shownTab,
-      ],
+      dialog: true,
+      actions: [viewExpect("timeline"), click(SETTINGS_GEAR), click(`${SETTINGS_MODAL} .settings-nav-item`, label), ...sectionOn(label), ...shownSection],
     });
     add(`settings-compact/${slug}`, "mesa", {
       sizes: "compact-all",
       dialog: true,
-      actions: [
-        viewExpect("timeline"),
-        click('.toolbar button[aria-label="Settings"]'),
-        expect('.sheet[role="dialog"] .sheet-title', "Settings"),
-        click(SETTINGS_TAB, label),
-        settingsOn(label),
-        oneRow(SETTINGS_TAB, DESK_TABS.length),
-        ...shownTab,
-      ],
+      actions: [viewExpect("timeline"), click(SETTINGS_GEAR), click(`${SETTINGS_MODAL} .settings-nav-item`, label), ...sectionOn(label), ...shownSection, inWindow(SETTINGS_MODAL)],
     });
   });
-  settingsTabs(DESK_TABS).forEach(([slug, label, shownTab]) => {
+  const REVIEW = '[role="dialog"][aria-label="Review changes"]';
+  add("settings/review", "mesa", {
+    sizes: "smallest",
+    dialog: false,
+    actions: [
+      viewExpect("timeline"),
+      click(SETTINGS_GEAR),
+      click(`${SETTINGS_MODAL} .settings-nav-item`, "Working time"),
+      ...sectionOn("Working time"),
+      click(`${SETTINGS_SHOWN} [data-settings-row="working-time.days"] .seg-days button`, "Fri"),
+      expect(`${SETTINGS_SHOWN} .cal-inline-actions button:not(:disabled)`, "Discard changes"),
+      click(`${SETTINGS_SHOWN} .cal-inline-actions button:not(:disabled)`, "Review changes…"),
+      count('[role="dialog"]', 2),
+      expect(`${REVIEW} .modal-head h3`, "Review changes"),
+      expect(`${REVIEW} .modal-head .modal-close`),
+      expect(`${REVIEW} .review-impact`),
+      expect(`${REVIEW} .modal-actions button`, "Cancel"),
+      expect(`${REVIEW} .modal-actions button.button-primary`, "Apply"),
+      within_(`${REVIEW} .review-impact`, REVIEW, 1),
+      within_(`${REVIEW} .modal-actions`, REVIEW, 1),
+      inWindow(REVIEW),
+      centredIn(REVIEW),
+      ...modalFrame(780, 580),
+    ],
+  });
+  SECTION_LABELS.forEach((label, i) => {
+    const slug = SECTION_SLUGS[i];
+    const group = `${SETTINGS_SHEET} section.settings-group[data-section="${slug}"]`;
     add(`phone-settings/${slug}`, "mesa", {
       sizes: "phone",
       dialog: true,
       actions: [
         click(".phone-head button", "Plans"),
-        click(".plans-sheet button.settings-row", "Settings…"),
-        expect('.sheet[role="dialog"] .sheet-title', "Settings"),
-        click(SETTINGS_TAB, label),
-        settingsOn(label),
-        oneRow(SETTINGS_TAB, DESK_TABS.length),
-        ...shownTab,
+        click(".plans-sheet button.plans-settings-row", "Settings…"),
+        expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+        reveal(`${group} > h2.settings-group-title`, label),
+        ...sectionChecks(group)[i][2],
       ],
     });
   });
@@ -441,11 +544,15 @@ function states() {
       count(".removed-banner button", 2),
     ],
   });
-  add("sync-dialog", "sync-dialog", {
-    sizes: "dialog",
-    dialog: true,
-    actions: [click(".toolbar .sync-chip", "Local only"), expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"), expect('[role="dialog"] button', "Create or join space")],
-  });
+  const syncInSettings = [
+    click(".toolbar .sync-chip", "Local only"),
+    ...sectionOn("Sync"),
+    count('[role="dialog"]', 1),
+    expect(`${SETTINGS_SHOWN} .sync-tabs [role="tab"][aria-selected="true"]`, "Set up sync"),
+    expect(`${SETTINGS_SHOWN} .sync-pane button`, "Create or join space"),
+    inWindow(SETTINGS_MODAL),
+  ];
+  add("sync-dialog", "sync-dialog", { sizes: "dialog", dialog: true, actions: syncInSettings });
   const UPDATE_AVAILABLE = `WebBoard ${UPDATE_VERSION} is available`;
   const UPDATE_FAILED = `Could not check for updates: ${UPDATE_CHECK_FAILED}`;
   const UPDATE_DOWNLOADING = `Downloading ${UPDATE_VERSION}… 50%`;
@@ -558,7 +665,9 @@ function states() {
       expect('.sheet[role="dialog"] .sheet-title', "Plan"),
       expect(".plan-sheet h2", "History"),
       expect(".plan-sheet button", "Export plan…"),
-      expect(".plan-sheet button.settings-row", "Settings…"),
+      expect(".plan-sheet button.plans-settings-row", "Settings…"),
+      style(".plan-sheet button.plans-settings-row", "padding-left", "12px"),
+      style(".plan-sheet button.plans-settings-row", "border-bottom-width", "0px"),
     ],
   });
   add("phone-theme", "mesa", {
@@ -566,9 +675,10 @@ function states() {
     dialog: true,
     actions: [
       click(".phone-head button", "Plans"),
-      click(".plans-sheet button.settings-row", "Settings…"),
-      expect('.sheet[role="dialog"] .sheet-title', "Settings"),
-      settingsOn("Theme"),
+      click(".plans-sheet button.plans-settings-row", "Settings…"),
+      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+      reveal(`${SETTINGS_SHEET} section.settings-group[data-section="theme"] > h2.settings-group-title`, "Theme"),
+      expect(`${SETTINGS_SHEET} section.settings-group[data-section="theme"] .theme-body`),
     ],
   });
   add("phone-about", "mesa", {
@@ -576,11 +686,12 @@ function states() {
     dialog: true,
     actions: [
       click(".phone-head button.phone-more", "⋯"),
-      click(".plan-sheet button.settings-row", "Settings…"),
-      expect('.sheet[role="dialog"] .sheet-title', "Settings"),
-      click(SETTINGS_TAB, "About"),
-      settingsOn("About"),
-      ...aboutShown,
+      click(".plan-sheet button.plans-settings-row", "Settings…"),
+      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+      reveal(`${SETTINGS_SHEET} section.settings-group[data-section="general"] [data-settings-row="general.about"]`),
+      count(`${SETTINGS_SHEET} img.about-mark`, 1),
+      loaded(`${SETTINGS_SHEET} img.about-mark`),
+      expect(`${SETTINGS_SHEET} .settings-about p`, "Holiday data: OpenHolidays API (openholidaysapi.org), ODbL."),
     ],
   });
   add("phone-status/strip", "phone-status", {
@@ -646,9 +757,8 @@ function states() {
   add("narrow-shell", "mesa", { sizes: "narrow", actions: [viewExpect("timeline"), expect(".toolbar button", "Plans"), expect(".toolbar button", "Plan")] });
   add("narrow-sheet", "mesa", { sizes: "narrow", dialog: true, actions: planSheet });
   add("narrow-dialog", "mesa", { sizes: "narrow", dialog: true, actions: calendarFromSheet });
-  const syncDialog = [click(".toolbar .sync-chip", "Local only"), expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"), expect('[role="dialog"] button', "Create or join space")];
-  add("narrow-sync-dialog", "sync-dialog", { sizes: "narrow", dialog: true, actions: syncDialog });
-  add("compact-desk/sync-dialog", "sync-dialog", { sizes: "sheet-desk", dialog: true, actions: syncDialog });
+  add("narrow-sync-dialog", "sync-dialog", { sizes: "narrow", dialog: true, actions: syncInSettings });
+  add("compact-desk/sync-dialog", "sync-dialog", { sizes: "sheet-desk", dialog: true, actions: syncInSettings });
   add("long-names/compact/list", "long-names", {
     sizes: "compact-all",
     place: { view: "list", zoom: "W" },
@@ -694,9 +804,11 @@ function states() {
     actions: [
       click(".phone-head button", "Plans"),
       click(".plans-sync button", "Set up sync"),
-      expect('.sheet[role="dialog"] .sheet-title', "Sync"),
-      expect('[role="dialog"] [role="tab"][aria-selected="true"]', "Set up sync"),
-      expect('[role="dialog"] button', "Create or join space"),
+      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+      count('[role="dialog"]', 1),
+      expect(`${SETTINGS_SHEET} section.settings-group[data-section="sync"] [role="tab"][aria-selected="true"]`, "Set up sync"),
+      expect(`${SETTINGS_SHEET} section.settings-group[data-section="sync"] .sync-pane button`, "Create or join space"),
+      inWindow(SETTINGS_SHEET),
     ],
   });
   add("phone-removed-banner", "phone-removed-banner", {
@@ -713,16 +825,28 @@ function states() {
     actions: [
       viewExpect("timeline"),
       expect(".slot-panel .plan-summary h2", "Plan"),
-      count(".slot-panel .summary-row", 2),
+      count(".slot-panel .summary-row", 4),
+      expect('.slot-panel .summary-row[data-summary-row="working-time"]:first-child .summary-row-label', "Working time"),
+      expect('.slot-panel .summary-row[data-summary-row="working-time"] .summary-row-value', "CH-ZH · Mon–Fri · no closures"),
+      width('.slot-panel .summary-row[data-summary-row="working-time"] .summary-row-label', 70, 100000),
+      within_('.slot-panel .summary-row[data-summary-row="working-time"] .summary-row-value', '.slot-panel .summary-row[data-summary-row="working-time"]', 1),
+      expect('.slot-panel .summary-row[data-summary-row="baselines"] .summary-row-label', "Baselines"),
+      count(".slot-panel .plan-summary .val-line", 0),
       expect(".slot-panel .summary-row .summary-row-label", "History"),
       expect(".slot-panel .summary-row .summary-row-label", "Trash"),
+      count(".slot-panel .baselines", 0),
       expect(".slot-panel .summary-bar span"),
       click(HISTORY_ROW),
       expect(".slot-panel .summary-back", "‹ Plan"),
       expect(".slot-panel .panel h2", "History"),
       click(".slot-panel .summary-back"),
-      count(".slot-panel .summary-row", 2),
+      count(".slot-panel .summary-row", 4),
     ],
+  });
+  add("detail/summary-baselines", "mesa", {
+    sizes: "smallest",
+    dialog: true,
+    actions: [viewExpect("timeline"), click('.slot-panel .summary-row[data-summary-row="baselines"]'), ...sectionOn("Baselines"), ...sectionChecks(SETTINGS_SHOWN)[6][2]],
   });
   add("history", "mesa", {
     actions: [click(HISTORY_ROW), reveal(".slot-panel .panel h2", "History"), width(".slot-panel .history li button", 1, 90), count(".slot-panel .history li", 40)],
@@ -818,7 +942,7 @@ function states() {
   add("platform/iphone-landscape", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), ...stamped("ios", "phone")] });
   const FIELDS = '.sheet input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), .sheet select, .sheet textarea';
   const phoneItemSheet = [click(".phone-list .prow"), expect('.sheet[role="dialog"] [data-detail="sheet"] .detail-body')];
-  const phoneSettings = [click(".phone-head button", "Plans"), click(".plans-sheet button.settings-row", "Settings…"), expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme")];
+  const phoneSettings = [click(".phone-head button", "Plans"), click(".plans-sheet button.plans-settings-row", "Settings…"), expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"), expect(`${SETTINGS_SHEET} section.settings-group[data-section="theme"] .theme-body`)];
   add("ios-fields/phone-item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, fontMin(FIELDS, 16)] });
   add("ios-fields/phone-settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, fontMin(FIELDS, 16)] });
   const settingsFromMore = [click('.toolbar button[aria-label="More"]'), chooseNative("Settings")];
@@ -840,11 +964,18 @@ function states() {
     dialog: true,
     actions: [...phoneItemSheet, still(), swipe(".sheet .sheet-title", 0, -120), still(), count('.sheet[data-detent="large"]', 1), heightShare(".sheet", 95, 100), inWindow(".sheet")],
   });
-  add("ios44/phone/settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, hitChrome("sheetHead", "settingsTabs")] });
+  const filesRows = [reveal(`${SETTINGS_SHEET} section.settings-group[data-section="files"] > h2.settings-group-title`, "Import & export"), expect(`${SETTINGS_SHEET} [data-settings-row="files.import"] button`, "Import plan…"), expect(`${SETTINGS_SHEET} [data-settings-row="files.export"] button`, "Export plan…")];
+  add("ios44/phone/settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, ...filesRows, hitChrome("sheetHead", "settingsRows")] });
   add("ios44/phone/sync", "mesa-ios-phone", {
     sizes: "phone",
     dialog: true,
-    actions: [click(".phone-head button", "Plans"), click(".plans-sync button", "Set up sync"), expect('.sheet[role="dialog"] .sheet-title', "Sync"), hitChrome("sheetHead", "sync")],
+    actions: [
+      click(".phone-head button", "Plans"),
+      click(".plans-sync button", "Set up sync"),
+      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+      expect(`${SETTINGS_SHEET} section.settings-group[data-section="sync"] [role="tab"][aria-selected="true"]`, "Set up sync"),
+      hitChrome("sheetHead", "sync"),
+    ],
   });
   add("ios44/phone/new-menu", "mesa-ios-phone", {
     sizes: "phone",
@@ -936,12 +1067,12 @@ function states() {
   add("ios44/pad-portrait/settings", "mesa-ios-pad", {
     sizes: "ipad-11-portrait",
     dialog: true,
-    actions: [viewExpect("timeline"), ...settingsFromMore, expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), hitChrome("sheetHead", "settingsTabs")],
+    actions: [viewExpect("timeline"), ...settingsFromMore, ...sectionOn("General"), count(".sheet", 0), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL), hitChrome("dialogHead", "settingsNav")],
   });
-  add("ios44/pad-landscape/plan", "mesa-ios-pad", { sizes: "ipad-landscapes", panes: OUTLINE_CLOSED, actions: [...fullShell, hitChrome("toolbar", "planList", "panelActions")] });
+  add("ios44/pad-landscape/plan", "mesa-ios-pad", { sizes: "ipad-landscapes", panes: OUTLINE_CLOSED, actions: [...fullShell, hitChrome("toolbar", "planList", "summaryRows")] });
   add("ios44/pad-landscape/settings", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
-    actions: [viewExpect("timeline"), click('.toolbar button[aria-label="Settings"]'), expect(".settings-panel h2", "Settings"), settingsOn("Theme"), hitChrome("toolbar", "settingsHead", "settingsTabs")],
+    actions: [viewExpect("timeline"), click(SETTINGS_GEAR), ...sectionOn("General"), inWindow(SETTINGS_MODAL), hitChrome("dialogHead", "settingsNav")],
   });
   const OVERLAY = '.plan-overlay[role="dialog"][aria-label="Plans"]';
   add("ipad-mode/overlay", "mesa-ios-pad", {
@@ -1001,7 +1132,12 @@ function states() {
   add("ipad-form-sheet/settings", "mesa-ios-pad", {
     sizes: "ipad-overlay-open",
     dialog: true,
-    actions: [viewExpect("timeline"), ...settingsFromMore, expect('.sheet[role="dialog"] .sheet-title', "Settings"), settingsOn("Theme"), style(".sheet", "border-bottom-width", "1px"), style(".sheet", "border-bottom-left-radius", "12px"), style(".sheet", "padding-bottom", "0px"), centredIn(".sheet")],
+    actions: [viewExpect("timeline"), ...settingsFromMore, ...sectionOn("General"), count(".sheet", 0), width(SETTINGS_MODAL, 600, 780), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL)],
+  });
+  add("ipad-form-sheet/settings-below-700", "mesa-ios-pad", {
+    sizes: "ipad-699",
+    dialog: true,
+    actions: [viewExpect("timeline"), ...settingsFromMore, expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"), count(".modal-settings", 0), count(`${SETTINGS_SHEET} section.settings-group`, SECTION_LABELS.length), style(".sheet", "border-bottom-width", "0px"), edgeAt(".sheet", "bottom", 1000), hitChrome("sheetHead"), ...filesRows, hitChrome("sheetHead", "settingsRows")],
   });
   add("ipad-form-sheet/item", "mesa-ios-pad", {
     sizes: "ipad-portraits",
@@ -1065,8 +1201,10 @@ function states() {
     sizes: "ipad-overlay-open",
     actions: [viewExpect("timeline"), click(MORE), askedExactly(MORE_ROWS)],
   });
-  const fromMoreOverOverlay = (row) => [...overlayOpened, click(MORE), chooseNative(row), expect('.sheet[role="dialog"] .sheet-title', row), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), uncovered(`.sheet-head ${CONTROL}`)];
-  add("ipad-toolbar/settings-over-overlay", "mesa-ios-pad", { sizes: "ipad-overlay-open", actions: fromMoreOverOverlay("Settings") });
+  add("ipad-toolbar/settings-over-overlay", "mesa-ios-pad", {
+    sizes: "ipad-overlay-open",
+    actions: [...overlayOpened, click(MORE), chooseNative("Settings"), ...sectionOn("General"), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), uncovered(`${SETTINGS_MODAL} .modal-head ${CONTROL}`)],
+  });
   add("ipad-toolbar/inspector-over-overlay", "mesa-ios-pad", {
     sizes: "ipad-overlay-open",
     dialog: true,
@@ -1352,7 +1490,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.aligned === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.aligned === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -2522,11 +2660,29 @@ window.__probeAct = function (a) {
     if (ww < a.width[1] - 0.5 || ww > a.width[2] + 0.5) return { fail: a.width[0] + " is " + Math.round(ww * 10) / 10 + " px wide, not " + a.width[1] + ".." + a.width[2] };
     return { ok: true };
   }
+  if (a.height !== undefined) {
+    var high = Array.prototype.slice.call(document.querySelectorAll(a.height[0])).filter(onScreen)[0];
+    if (high === undefined) return { fail: "no " + a.height[0] + " on screen to measure" };
+    var hh = high.getBoundingClientRect().height;
+    if (hh < a.height[1] - 0.5 || hh > a.height[2] + 0.5) return { fail: a.height[0] + " is " + Math.round(hh * 10) / 10 + " px high, not " + a.height[1] + ".." + a.height[2] };
+    return { ok: true };
+  }
   if (a.heightShare !== undefined) {
     var tall = Array.prototype.slice.call(document.querySelectorAll(a.heightShare[0])).filter(onScreen)[0];
     if (tall === undefined) return { fail: "no " + a.heightShare[0] + " on screen to measure" };
     var share = (tall.getBoundingClientRect().height / window.innerHeight) * 100;
     if (share < a.heightShare[1] || share > a.heightShare[2]) return { fail: a.heightShare[0] + " is " + Math.round(share * 10) / 10 + " % of the window's height, not " + a.heightShare[1] + ".." + a.heightShare[2] + " %" };
+    return { ok: true };
+  }
+  if (a.fill !== undefined) {
+    var field = document.querySelector(a.fill[0]);
+    if (!(field instanceof HTMLInputElement)) return { fail: "no " + a.fill[0] + " input to fill" };
+    var setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    if (setValue === undefined || setValue.set === undefined) throw new Error("fill: HTMLInputElement has no value setter");
+    field.focus();
+    setValue.set.call(field, a.fill[1]);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    if (field.value !== a.fill[1]) return { fail: a.fill[0] + " holds " + JSON.stringify(field.value) + " after filling " + JSON.stringify(a.fill[1]) };
     return { ok: true };
   }
   if (a.focus !== undefined) {

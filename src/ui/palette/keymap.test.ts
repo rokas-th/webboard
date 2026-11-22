@@ -17,6 +17,16 @@ describe("keyToCommand on macOS", () => {
     expect(keyToCommand(k("k", { ctrlKey: true }), MAC)).toBeNull();
   });
 
+  it("opens Settings on ⌘, by its code, while typing and under a dialog, not with Shift or Alt", () => {
+    const comma = (o: Partial<KeyInput> = {}): KeyInput => ({ ...k(",", { metaKey: true }), code: "Comma", ...o });
+    expect(keyToCommand(comma(), MAC)).toBe("settings");
+    expect(keyToCommand(comma({ key: "<" }), { ...MAC, typing: true })).toBe("settings");
+    expect(keyToCommand(comma(), { ...MAC, dialog: true })).toBe("settings");
+    expect([keyToCommand(comma({ shiftKey: true }), MAC), keyToCommand(comma({ altKey: true }), MAC), keyToCommand(comma({ metaKey: false, ctrlKey: true }), MAC)]).toEqual([null, null, null]);
+    expect(keyToCommand(comma({ metaKey: false, ctrlKey: true }), PC)).toBe("settings");
+    expect(keyToCommand(comma({ code: "Period" }), MAC)).toBeNull();
+  });
+
   it("undoes on ⌘Z and redoes on ⇧⌘Z, not while typing", () => {
     expect(keyToCommand(k("z", { metaKey: true }), MAC)).toBe("undo");
     expect(keyToCommand(k("Z", { metaKey: true, shiftKey: true }), MAC)).toBe("redo");

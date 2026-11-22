@@ -15,7 +15,7 @@ export function SyncChip(p: { compact?: boolean }) {
   const registry = useSyncRegistry();
   const { setUi } = useUiValue();
   const text = chipText(state, docName(registry));
-  const open = (): void => setUi({ dialog: { t: "sync", pane: null } });
+  const open = (): void => setUi({ settings: "sync", syncPane: null });
   if (p.compact === true) {
     return (
       <button type="button" className={`sync-chip chip-compact chip-${syncTone(state)}`} aria-label={text} title={text} onClick={open}>

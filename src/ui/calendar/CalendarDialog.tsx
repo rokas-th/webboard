@@ -1,6 +1,8 @@
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Refused, type Built, type Intent } from "../../actions/intents";
 import { CLOSURE_TOO_LONG, closureTooLong, MAX_CLOSURE_DAYS, regionKey, type Calendar, type HolidayYear, type RegionRef, type Tuning } from "../../domain/calendar";
+import type { PlanId } from "../../domain/model";
 import { FIRST_PLAN_DATE, isCalendarDate, LAST_PLAN_DATE, toDay, toIso, yearOf, type Day, type IsoDate, type Weekday } from "../../domain/dates";
 import { planRules } from "../../plan/rules";
 import { key } from "../../plan/units";
@@ -13,6 +15,7 @@ import { usePlanView, type PlanSession } from "../../store/session";
 import { HOLIDAY_ATTRIBUTION } from "../common/About";
 import { Dialog } from "../common/Dialog";
 import { useCloseGuard, type DraftGuard } from "../common/dismiss";
+import { Sheet } from "../common/Sheet";
 import { toast } from "../common/Toast";
 import { DATE_UNREADABLE } from "../copy";
 import { historyTime } from "../panel/historyText";
@@ -28,18 +31,45 @@ export interface CalendarReview {
   intent: { t: "calendar"; next: Calendar; base: Calendar };
 }
 
-export interface CalendarProps {
+interface CalendarBase {
   session: PlanSession;
   registry: Registry;
   clock: Clock;
-  review?: CalendarReview;
-  frame?: "dialog" | "sheet";
-  onClose(): void;
 }
+
+export interface CalendarStash {
+  plan: PlanId;
+  base: Calendar;
+  draft: Calendar;
+  taken: Calendar;
+  seen: Calendar["holidays"];
+  dayName: string;
+  dayFrom: string;
+  dayTo: string;
+}
+
+export type FramedCalendarProps = CalendarBase & {
+  frame?: "dialog" | "sheet";
+  review?: CalendarReview;
+  onClose(): void;
+};
+
+export type InlineCalendarProps = CalendarBase & {
+  frame: "inline";
+  reviewIn: "dialog" | "sheet";
+  stash: RefObject<CalendarStash | null>;
+  onApplied(region: RegionRef | null): void;
+};
+
+export type CalendarProps = FramedCalendarProps | InlineCalendarProps;
 
 const NOTHING = "Nothing to change.";
 
 export const CALENDAR_DRAFT: DraftGuard = { title: "Discard calendar changes?", message: "Your calendar changes are not applied yet." };
+
+const REVIEW_TITLE = "Review changes";
+
+const SECTION = "working-time";
 
 const WEEK: readonly { d: Weekday; label: string }[] = [
   { d: 1, label: "Mon" },
@@ -125,6 +155,13 @@ export function CalendarBody(p: CalendarProps) {
   const session = p.session;
   const holidays = p.registry.holidays;
   const sheet = p.frame === "sheet";
+  const inline = p.frame === "inline";
+  const review = p.frame === "inline" ? undefined : p.review;
+  const stash = p.frame === "inline" ? p.stash : null;
+  const [restored] = useState<CalendarStash | null>(() => {
+    const kept = stash === null ? null : stash.current;
+    return kept !== null && kept.plan === session.view().plan.id ? kept : null;
+  });
   const view = usePlanView(session);
   const run = useRun(session);
   const exec = useExec(session);
@@ -136,17 +173,18 @@ export function CalendarBody(p: CalendarProps) {
     useCallback((cb: () => void) => holidays.subscribe(cb), [holidays]),
     () => holidays.notices(view.plan.id),
   );
-  const [base, setBase] = useState<Calendar>(() => p.review?.intent.base ?? session.view().plan.calendar);
-  const [draft, setDraft] = useState<Calendar>(() => p.review?.intent.next ?? base);
-  const [taken, setTaken] = useState<Calendar>(base);
-  const [seen, setSeen] = useState<Calendar["holidays"]>(() => view.plan.calendar.holidays);
+  const [base, setBase] = useState<Calendar>(() => restored?.base ?? review?.intent.base ?? session.view().plan.calendar);
+  const [draft, setDraft] = useState<Calendar>(() => restored?.draft ?? review?.intent.next ?? base);
+  const [taken, setTaken] = useState<Calendar>(() => restored?.taken ?? base);
+  const [seen, setSeen] = useState<Calendar["holidays"]>(() => restored?.seen ?? view.plan.calendar.holidays);
   const [seenNotices, setSeenNotices] = useState<readonly HolidayNotice[] | null>(null);
   const [drafted, setDrafted] = useState<ReadonlyMap<string, ReadonlyMap<number, DraftYear>>>(new Map());
   const [regionError, setRegionError] = useState<{ region: RegionRef; message: string } | null>(null);
   const [applied, setApplied] = useState(false);
-  const [dayName, setDayName] = useState("");
-  const [dayFrom, setDayFrom] = useState("");
-  const [dayTo, setDayTo] = useState("");
+  const [reviewing, setReviewing] = useState(false);
+  const [dayName, setDayName] = useState(restored?.dayName ?? "");
+  const [dayFrom, setDayFrom] = useState(restored?.dayFrom ?? "");
+  const [dayTo, setDayTo] = useState(restored?.dayTo ?? "");
   const firstDayRef = useRef<HTMLInputElement>(null);
   const lastDayRef = useRef<HTMLInputElement>(null);
   const clock = p.clock;
@@ -161,7 +199,7 @@ export function CalendarBody(p: CalendarProps) {
       setTaken((c) => (c.region !== null && regionKey(c.region) === ownKey ? withArrived(c, arrived) : c));
     }
   }
-  if (p.review === undefined && seenNotices !== notices) {
+  if (review === undefined && seenNotices !== notices) {
     const ready = readyYears(notices);
     setSeenNotices(notices);
     if (ready.length > 0) {
@@ -255,16 +293,28 @@ export function CalendarBody(p: CalendarProps) {
   };
 
   const unchanged = sameCalendar(draft, base);
-  useCloseGuard(!applied && (!sameCalendar(draft, taken) || dayName !== "" || dayFrom !== "" || dayTo !== "") ? CALENDAR_DRAFT : null);
+  const asks = !applied && (!sameCalendar(draft, taken) || dayName !== "" || dayFrom !== "" || dayTo !== "");
+  useCloseGuard(asks ? CALENDAR_DRAFT : null);
   const impact = useMemo(
     () => (unchanged ? impactText({ endsChanged: 0, movedLater: 0 }) : previewText(session, view, { t: "calendar", next: draft, base })),
     [unchanged, session, draft, base, view],
   );
 
+  const planId = view.plan.id;
+  useLayoutEffect(() => {
+    if (stash === null) return;
+    stash.current = applied ? null : { plan: planId, base, draft, taken, seen, dayName, dayFrom, dayTo };
+  });
+
+  const close = (): void => {
+    if (p.frame === "inline") throw new Error("CalendarBody: the inline frame has no close; an apply ends it");
+    p.onClose();
+  };
+
   const saveRegion = (region: RegionRef): void => {
     setRegionError(null);
     p.registry.setLastRegion(region).then(
-      () => p.onClose(),
+      () => close(),
       (e: unknown) => {
         setRegionError({ region, message: messageOf(e) });
         if (!(e instanceof AppError)) throw e;
@@ -272,8 +322,6 @@ export function CalendarBody(p: CalendarProps) {
     );
   };
 
-  const review = p.review;
-  const planId = view.plan.id;
   const apply = (): void => {
     let built: Built | null;
     if (review === undefined) {
@@ -287,7 +335,7 @@ export function CalendarBody(p: CalendarProps) {
         } catch (e) {
           if (!(e instanceof Refused) || e.message !== NOTHING) throw e;
           holidays.dismiss(planId, review.year);
-          p.onClose();
+          close();
           return null;
         }
       });
@@ -295,12 +343,35 @@ export function CalendarBody(p: CalendarProps) {
     if (built === null) return;
     setApplied(true);
     if (review !== undefined) holidays.dismiss(planId, review.year);
-    if (draft.region !== null && !sameRegion(draft.region, base.region)) {
-      saveRegion(draft.region);
+    const region = draft.region !== null && !sameRegion(draft.region, base.region) ? draft.region : null;
+    if (p.frame === "inline") {
+      p.onApplied(region);
       return;
     }
-    p.onClose();
+    if (region !== null) {
+      saveRegion(region);
+      return;
+    }
+    close();
   };
+
+  const discard = (): void => {
+    setDraft(taken);
+    setDrafted(new Map());
+    setRegionError(null);
+    setDayName("");
+    setDayFrom("");
+    setDayTo("");
+  };
+
+  const anchored = (row: string, node: ReactNode): ReactNode =>
+    inline ? (
+      <div className="cal-anchor" data-settings-row={`${SECTION}.${row}`}>
+        {node}
+      </div>
+    ) : (
+      node
+    );
 
   const draftRegion = draft.region;
   const own = draftRegion !== null && view.plan.calendar.region !== null && regionKey(draftRegion) === regionKey(view.plan.calendar.region);
@@ -311,20 +382,23 @@ export function CalendarBody(p: CalendarProps) {
     <div className="cal-body">
       <div className="cal-grid">
         <label>Region</label>
-        <RegionPicker region={draft.region} tuning={draft.tuning} onPick={pick} onTune={onTune} />
+        {anchored("region", <RegionPicker region={draft.region} tuning={draft.tuning} onPick={pick} onTune={onTune} />)}
         <label>Working days</label>
-        <div className="seg seg-days" role="group" aria-label="Working days">
-          {WEEK.map((w) => {
-            const on = draft.workdays.includes(w.d);
-            return (
-              <button key={w.d} type="button" className={on ? "active" : ""} aria-pressed={on} onClick={() => change((c) => setWorkday(c, w.d, !on))}>
-                {w.label}
-              </button>
-            );
-          })}
-        </div>
+        {anchored(
+          "days",
+          <div className="seg seg-days" role="group" aria-label="Working days">
+            {WEEK.map((w) => {
+              const on = draft.workdays.includes(w.d);
+              return (
+                <button key={w.d} type="button" className={on ? "active" : ""} aria-pressed={on} onClick={() => change((c) => setWorkday(c, w.d, !on))}>
+                  {w.label}
+                </button>
+              );
+            })}
+          </div>,
+        )}
         <label>Closures</label>
-        <div>
+        <div data-settings-row={inline ? `${SECTION}.closures` : undefined}>
           <div className="closure-list">
             {closures.map((c) => (
               <div key={c.id} className="closure-row">
@@ -347,19 +421,22 @@ export function CalendarBody(p: CalendarProps) {
           </div>
         </div>
       </div>
-      <DayList
-        draft={draft}
-        from={span.from}
-        to={span.to}
-        own={own}
-        notices={notices}
-        draftYears={regionYears}
-        onTune={onTune}
-        onRetryDraft={(y) => {
-          if (draftRegion !== null) fetchYears(draftRegion, [y]);
-        }}
-        onLoad={(y) => void holidays.load(planId, session, y)}
-      />
+      {anchored(
+        "days-off",
+        <DayList
+          draft={draft}
+          from={span.from}
+          to={span.to}
+          own={own}
+          notices={notices}
+          draftYears={regionYears}
+          onTune={onTune}
+          onRetryDraft={(y) => {
+            if (draftRegion !== null) fetchYears(draftRegion, [y]);
+          }}
+          onLoad={(y) => void holidays.load(planId, session, y)}
+        />,
+      )}
       <p className="impact">{impact}</p>
       {draftRegion !== null && draftRegion.src === "openholidays" && <p className="dimp">{HOLIDAY_ATTRIBUTION}</p>}
       {regionError !== null && (
@@ -370,7 +447,16 @@ export function CalendarBody(p: CalendarProps) {
           </button>
         </div>
       )}
-      {sheet ? (
+      {inline ? (
+        <div className="modal-actions cal-inline-actions">
+          <button type="button" disabled={!asks} onClick={discard}>
+            Discard changes
+          </button>
+          <button type="button" className="button-primary" disabled={readOnly || applied || unchanged} onClick={() => setReviewing(true)}>
+            Review changes…
+          </button>
+        </div>
+      ) : sheet ? (
         !readOnly && (
           <div className="modal-actions">
             <button type="button" className="button-primary" disabled={applied || unchanged} onClick={apply}>
@@ -380,7 +466,7 @@ export function CalendarBody(p: CalendarProps) {
         )
       ) : (
         <div className="modal-actions">
-          <button type="button" onClick={p.onClose}>
+          <button type="button" onClick={close}>
             Cancel
           </button>
           <button type="button" className="button-primary" disabled={readOnly || applied || unchanged} onClick={apply}>
@@ -388,11 +474,42 @@ export function CalendarBody(p: CalendarProps) {
           </button>
         </div>
       )}
+      {p.frame === "inline" && reviewing && !applied && (
+        <ReviewChanges frame={p.reviewIn} impact={impact} disabled={readOnly || unchanged} onApply={apply} onClose={() => setReviewing(false)} />
+      )}
     </div>
   );
 }
 
-export function CalendarDialog(p: CalendarProps) {
+function ReviewChanges(p: { frame: "dialog" | "sheet"; impact: string; disabled: boolean; onApply(): void; onClose(): void }) {
+  const body = (
+    <>
+      <p className="review-impact">{p.impact}</p>
+      <div className="modal-actions">
+        <button type="button" onClick={p.onClose}>
+          Cancel
+        </button>
+        <button type="button" className="button-primary" disabled={p.disabled} onClick={p.onApply}>
+          Apply
+        </button>
+      </div>
+    </>
+  );
+  return createPortal(
+    p.frame === "sheet" ? (
+      <Sheet open title={REVIEW_TITLE} onClose={p.onClose}>
+        <div className="review-sheet">{body}</div>
+      </Sheet>
+    ) : (
+      <Dialog label={REVIEW_TITLE} onClose={p.onClose}>
+        {body}
+      </Dialog>
+    ),
+    document.body,
+  );
+}
+
+export function CalendarDialog(p: FramedCalendarProps) {
   const view = usePlanView(p.session);
   return (
     <Dialog label={"Calendar · " + view.plan.name} wide onClose={p.onClose}>

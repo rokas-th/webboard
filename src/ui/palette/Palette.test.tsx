@@ -124,6 +124,12 @@ const pickNew = (name: string): void => {
   fireEvent.click(within(within(bar()).getByRole("menu")).getByRole("menuitem", { name }));
 };
 
+const settingsModal = (name: string): HTMLElement => {
+  const el = screen.getByRole("dialog", { name });
+  if (!el.hasAttribute("data-settings-modal")) throw new Error("the " + name + " dialog is not the Settings modal");
+  return el;
+};
+
 const button = (root: HTMLElement, name: string): HTMLButtonElement => {
   const el = within(root).getByRole("button", { name });
   if (!(el instanceof HTMLButtonElement)) throw new Error("no button " + name);
@@ -234,7 +240,7 @@ describe("opening the palette", () => {
     press("k", { metaKey: true });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(document.activeElement).toBe(query());
-    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileCreate the example plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "ViewHide the plan list⌘B", "ViewSettings…", "ViewTheme…", "ViewUse Cyberdeck theme", "HelpCommand palette", "HelpAbout WebBoard"]);
+    expect(rows().map((r) => r.replace(/⌘K$/, ""))).toEqual(["FileNew plan", "FileCreate the example plan", "FileImport plan…", "FileSet up sync", "FileJoin with a code", "FileSync devices", "ViewHide the plan list⌘B", "ViewSettings…⌘,", "ViewTheme…", "ViewUse Cyberdeck theme", "HelpCommand palette", "HelpAbout WebBoard"]);
     press("Escape", {}, query());
     fireEvent.click(button(bar(), "⌘K"));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
@@ -244,7 +250,8 @@ describe("opening the palette", () => {
   it("returns focus, when a dialog a palette command opened closes, to what had focus before the palette", async () => {
     const t = await made(MESA_SEED);
     await shown(t);
-    const opener = button(panel(), "Change calendar…");
+    const opener = panel().querySelector<HTMLElement>('button.summary-row[data-summary-row="working-time"]');
+    if (opener === null) throw new Error("no Working time row");
     opener.focus();
     press("k", { metaKey: true }, opener);
     expect(document.activeElement).toBe(query());
@@ -260,9 +267,11 @@ describe("opening the palette", () => {
   it("does nothing on ⌘K while another dialog is open, and the dialog keeps its draft", async () => {
     const t = await made(MESA_SEED);
     await shown(t);
-    fireEvent.click(button(panel(), "Change calendar…"));
+    const row = panel().querySelector<HTMLElement>('button.summary-row[data-summary-row="working-time"]');
+    if (row === null) throw new Error("no Working time row");
+    fireEvent.click(row);
     await settle();
-    const calendar = screen.getByRole("dialog", { name: "Calendar · Plan" });
+    const calendar = screen.getByRole("dialog", { name: "Working time" });
     const days = within(calendar).getByRole("group", { name: "Working days" });
     const dayOff = within(days).getAllByRole("button").find((b) => b.getAttribute("aria-pressed") === "false");
     if (dayOff === undefined) throw new Error("no day off to switch on");
@@ -270,7 +279,7 @@ describe("opening the palette", () => {
     expect(dayOff.getAttribute("aria-pressed")).toBe("true");
     press("k", { metaKey: true }, dayOff);
     press("k", { metaKey: true });
-    expect(uiNow()[0].dialog).toEqual({ t: "calendar" });
+    expect([uiNow()[0].settings, uiNow()[0].dialog]).toEqual(["working-time", null]);
     expect(screen.getAllByRole("dialog")).toEqual([calendar]);
     expect(dayOff.isConnected).toBe(true);
     expect(dayOff.getAttribute("aria-pressed")).toBe("true");
@@ -318,10 +327,10 @@ describe("opening the palette", () => {
     setPlatform(LINUX);
     const t = await made(MESA_SEED);
     await shown(t, { device: { deviceId: "mac", name: "Linux", platform: "linux" } });
-    setUi({ dialog: { t: "sync", pane: "setup" } });
+    setUi({ settings: "sync", syncPane: "setup" });
     const sync = screen.getByRole("dialog");
     press("k", { ctrlKey: true }, sync);
-    expect(uiNow()[0].dialog).toEqual({ t: "sync", pane: "setup" });
+    expect([uiNow()[0].dialog, uiNow()[0].settings, uiNow()[0].syncPane]).toEqual([null, "sync", "setup"]);
     expect(screen.getAllByRole("dialog")).toEqual([sync]);
   });
 
@@ -353,7 +362,7 @@ describe("the palette list", () => {
     await shown(t);
     press("k", { metaKey: true });
     type("view");
-    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewHide the plan list⌘B", "ViewHide the inspector⌥⌘I", "ViewHide the outline⌥⌘L", "ViewSettings…", "ViewTheme…", "ViewUse Cyberdeck theme"]);
+    expect(rows()).toEqual(["ViewTimeline1", "ViewNow · Next · Later2", "ViewList3", "ViewJump to todayT", "ViewCollapse all groups", "ViewExpand all groups", "Go toTracking: review results", "ViewHide the plan list⌘B", "ViewHide the inspector⌥⌘I", "ViewHide the outline⌥⌘L", "ViewSettings…⌘,", "ViewTheme…", "ViewUse Cyberdeck theme"]);
     expect(highlighted()).toBe("ViewTimeline1");
     press("ArrowUp", {}, query());
     expect(highlighted()).toBe("ViewTimeline1");
@@ -439,14 +448,38 @@ describe("the palette list", () => {
     expect(createPlan.mock.calls).toEqual([["New plan"]]);
   });
 
-  it.each(["Settings…", "Theme…"])("opens Settings at Theme in the panel slot from %s", async (label) => {
+  it("opens the Settings modal at Theme from Theme…", async () => {
     const t = await made(MESA_SEED);
     await shown(t);
-    runFromPalette(label);
+    runFromPalette("Theme…");
     expect(uiNow()[0].settings).toBe("theme");
-    const region = panel().querySelector<HTMLElement>('section[aria-label="Settings"]');
-    if (region === null) throw new Error("no Settings panel");
-    expect(within(region).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
+    const modal = settingsModal("Theme");
+    expect(modal.querySelector('.settings-nav-item[aria-current="page"]')?.textContent).toBe("Theme");
+  });
+
+  it("opens the Settings modal from Settings… at General, then at the section it was last on", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    runFromPalette("Settings…");
+    expect(uiNow()[0].settings).toBe("general");
+    fireEvent.click(within(settingsModal("General")).getByRole("button", { name: "Sync" }));
+    fireEvent.click(button(settingsModal("Sync"), "Close"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    runFromPalette("Settings…");
+    expect(uiNow()[0].settings).toBe("sync");
+    expect(settingsModal("Sync").querySelector('.settings-nav-item[aria-current="page"]')?.textContent).toBe("Sync");
+  });
+
+  it("opens the Settings modal at the plan's Overview from Plan settings…", async () => {
+    const t = await made(MESA_SEED);
+    await shown(t);
+    runFromPalette("Plan settings");
+    expect(uiNow()[0].settings).toBe("overview");
+    const modal = settingsModal("Overview");
+    expect([modal.querySelector('.settings-nav-group[data-group="plan"] .settings-nav-title')?.textContent, within(modal).getByRole("textbox", { name: "Plan name" }) instanceof HTMLInputElement]).toEqual([
+      t.session.view().plan.name,
+      true,
+    ]);
   });
 
   it("goes back to Cyberdeck from Use Cyberdeck theme", async () => {
@@ -460,27 +493,25 @@ describe("the palette list", () => {
     expect(JSON.parse(window.localStorage.getItem("webboard.theme") ?? "null")).toMatchObject({ mode: "fixed", active: "cyberdeck" });
   });
 
-  it("Use Cyberdeck theme drops an open draft with the discard toast and leaves Theme open", async () => {
+  it("does not open over the Settings modal, which keeps its Theme draft", async () => {
     const t = await made(MESA_SEED);
     await shown(t);
     runFromPalette("Theme…");
-    const region = panel().querySelector<HTMLElement>('section[aria-label="Settings"]');
-    if (region === null) throw new Error("no Settings panel");
-    const field = within(region).getByRole("textbox", { name: "Accent hex" });
+    const modal = settingsModal("Theme");
+    const field = within(modal).getByRole("textbox", { name: "Accent hex" });
     fireEvent.change(field, { target: { value: "#7CC4FF" } });
-    expect(within(region).getByText("Unsaved")).toBeTruthy();
-    runFromPalette("Use Cyberdeck theme");
-    expect(within(region).queryByText("Unsaved")).toBeNull();
-    expect(document.documentElement.style.getPropertyValue("--cyan")).toBe("#24E0FF");
-    expect([...document.querySelectorAll(".toasts .toast")].map((n) => n.textContent)).toContain("Unsaved colours discarded.");
+    expect(within(modal).getByText("Unsaved")).toBeTruthy();
+    press("k", { metaKey: true });
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Theme"]);
+    expect(within(modal).getByText("Unsaved")).toBeTruthy();
     expect(uiNow()[0].settings).toBe("theme");
   });
 
-  it("opens the calendar dialog", async () => {
+  it("opens Settings at Working time for Change calendar", async () => {
     const t = await made(MESA_SEED);
     await shown(t);
     runFromPalette("Change calendar");
-    expect(uiNow()[0].dialog).toEqual({ t: "calendar" });
+    expect([uiNow()[0].settings, uiNow()[0].dialog]).toEqual(["working-time", null]);
   });
 
   it("goes to the first conflict the way the head's button does", async () => {
@@ -496,27 +527,26 @@ describe("the palette list", () => {
 });
 
 describe("About", () => {
-  it("opens Settings at About, naming the version and the holiday data", async () => {
+  it("opens Settings at General, whose About row names the version and the holiday data", async () => {
     const t = await made(MESA_SEED);
     await shown(t);
     runFromPalette("About");
-    expect(uiNow()[0].settings).toBe("about");
-    expect(screen.queryByRole("dialog")).toBeNull();
-    const region = panel().querySelector<HTMLElement>('section[aria-label="Settings"]');
-    if (region === null) throw new Error("no Settings panel");
-    expect(within(region).getByRole("tab", { name: "About" }).getAttribute("aria-selected")).toBe("true");
-    const box = within(region).getByRole("tabpanel", { name: "About" });
+    expect(uiNow()[0].settings).toBe("general");
+    const modal = settingsModal("General");
+    const box = modal.querySelector<HTMLElement>('section.settings-section:not([hidden]) [data-settings-row="general.about"]');
+    if (box === null) throw new Error("no About row in General");
     expect(within(box).getByText(`WebBoard ${version}`)).toBeTruthy();
     expect(within(box).getByText("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.").textContent).toBe("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.");
-    fireEvent.click(button(region, "Close"));
+    fireEvent.click(button(modal, "Close"));
     expect(uiNow()[0].settings).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 
-describe("switching the Settings tab from the palette", () => {
+describe("switching the Settings section after the palette opened it", () => {
   afterEach(() => installMatchMedia());
 
-  it.each(["About WebBoard", "Settings…", "Theme…"])("clears a live hover preview when %s runs", async (label) => {
+  it.each(["General", "Sync", "Import & export"])("clears a live hover preview when %s is picked", async (label) => {
     const plain = window.matchMedia;
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
@@ -528,12 +558,12 @@ describe("switching the Settings tab from the palette", () => {
     const voidNow = (): string => document.documentElement.style.getPropertyValue("--void");
     const ground = (id: string): string => tokensOf(PRESETS.find((p) => p.id === id) ?? PRESETS[0]).void;
     runFromPalette("Theme…");
-    const region = panel().querySelector<HTMLElement>('section[aria-label="Settings"]');
-    if (region === null) throw new Error("no Settings panel");
-    fireEvent.pointerEnter(within(region).getByRole("button", { name: /^Phosphor/ }));
+    const modal = settingsModal("Theme");
+    fireEvent.pointerEnter(within(modal).getByRole("button", { name: /^Phosphor/ }));
     expect(voidNow()).toBe(ground("phosphor"));
-    runFromPalette(label);
+    fireEvent.click(within(modal).getByRole("button", { name: label }));
     expect(voidNow()).toBe(ground("cyberdeck"));
+    expect(settingsModal(label).getAttribute("aria-label")).toBe(label);
   });
 });
 
@@ -790,6 +820,8 @@ describe("read-only", () => {
           .map((e) => e.closest("label")?.textContent ?? e.getAttribute("aria-label") ?? e.textContent ?? "");
       expect(enabled(panel())).toEqual([]);
       expect([...panel().querySelectorAll<HTMLButtonElement>(".summary-row")].map((b) => [b.dataset.summaryRow, b.disabled])).toEqual([
+        ["working-time", false],
+        ["baselines", false],
         ["history", false],
         ["trash", true],
       ]);

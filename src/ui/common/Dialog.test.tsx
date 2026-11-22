@@ -73,6 +73,20 @@ describe("the dialog's close control", () => {
     expect([dialog().className, dialog().hasAttribute("data-item-modal")]).toEqual(["modal modal-wide", false]);
   });
 
+  it("sizes the Settings dialog with its own class and marker, and keeps the ✕", () => {
+    render(
+      <Dialog label="General" size="settings" onClose={vi.fn()}>
+        <p>body</p>
+      </Dialog>,
+    );
+    expect([dialog().className, dialog().hasAttribute("data-settings-modal"), dialog().hasAttribute("data-item-modal"), head().querySelectorAll(".modal-close").length]).toEqual([
+      "modal modal-settings",
+      true,
+      false,
+      1,
+    ]);
+  });
+
   it("the ✕ commits a focused field first", () => {
     setPlatform(MAC);
     const onCommit = vi.fn(() => true);

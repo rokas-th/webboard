@@ -215,7 +215,7 @@ describe("ItemPanel fields", () => {
       <OpenChoice.Provider value={vi.fn()}>
         <UiContext.Provider
           value={{
-            ui: { plan: null, view: "timeline", zoom: "W", selected: "Late", collapsed: new Set(), baseline: null, dialog: null, reveal: null, follow: null, naming: null, settings: null, sidebarOpen: true, sidebarWidth: null },
+            ui: { plan: null, view: "timeline", zoom: "W", selected: "Late", collapsed: new Set(), baseline: null, dialog: null, reveal: null, follow: null, naming: null, settings: null, syncPane: null, sidebarOpen: true, sidebarWidth: null },
             setUi: vi.fn(),
           }}
         >
@@ -652,19 +652,13 @@ describe("the note", () => {
 });
 
 describe("no-op edits (refinement 36)", () => {
-  it("fires nothing for an unchanged name, plan name, baseline name or start, and one rename for a new name", async () => {
+  it("fires nothing for an unchanged name, plan name or start, and one rename for a new name", async () => {
     const t = await made([{ name: "A", start: "2026-11-10", dur: 3 }]);
-    act(() => {
-      t.session.apply({ t: "baseline", op: "save", name: "Before" });
-    });
     await shown(t);
     const apply = vi.spyOn(t.session, "apply");
     act(() => headName().focus());
     act(() => headName().blur());
     edit(headName(), "  Plan  ", "Enter");
-    act(() => input("Baseline name").focus());
-    act(() => input("Baseline name").blur());
-    edit(input("Baseline name"), " Before ", "Enter");
     select("A");
     act(() => input("Name").focus());
     act(() => input("Name").blur());
@@ -916,11 +910,13 @@ describe("PlanPanel", () => {
       ["In progress", "2"],
     ]);
     const rows = all("button.summary-row", summary);
-    expect(rows.map((r) => [r.dataset.summaryRow, one(".summary-row-label", r).textContent, one(".summary-row-count", r).textContent, r instanceof HTMLButtonElement && r.disabled])).toEqual([
+    expect(rows.map((r) => [r.dataset.summaryRow, one(".summary-row-label", r).textContent, one(".summary-row-count, .summary-row-value", r).textContent, r instanceof HTMLButtonElement && r.disabled])).toEqual([
+      ["working-time", "Working time", "No holiday region · Mon–Fri · no closures", false],
+      ["baselines", "Baselines", "0", false],
       ["history", "History", String(t.session.history().length), false],
       ["trash", "Trash", "1", false],
     ]);
-    click(rows[0]);
+    click(rows[2]);
     expect([panel().querySelector(".plan-summary .summary-row"), one(".summary-back", panel()).textContent, one(".panel h2", panel()).textContent, all(".history li", panel()).length]).toEqual([
       null,
       "‹ Plan",
@@ -928,7 +924,7 @@ describe("PlanPanel", () => {
       t.session.history().length,
     ]);
     click(one(".summary-back", panel()));
-    expect(all("button.summary-row", panel())).toHaveLength(2);
+    expect(all("button.summary-row", panel())).toHaveLength(4);
     click(one('button.summary-row[data-summary-row="trash"]', panel()));
     expect([one(".panel h2", panel()).textContent, all("[data-trashed]", panel()).map((r) => r.dataset.trashed)]).toEqual(["Trash", ["K"]]);
     click(within(one('[data-trashed="K"]', panel())).getByRole("button", { name: "Restore" }));
@@ -1001,44 +997,44 @@ describe("PlanPanel", () => {
     expect([stat("Late").textContent, stat("Late").classList.contains("amber")]).toEqual(["1", true]);
   });
 
-  it("summarises the plan's calendar", async () => {
+  it("summarises the plan's calendar in a Working time row that opens Settings at Working time, read-only too", async () => {
     const t = await made([{ name: "A", start: "2026-11-10", dur: 3 }]);
     await shown(t);
-    expect(panel().textContent).toContain("No holiday region · Mon–Fri · no closures");
-    click(button("Change calendar…"));
-    expect(uiNow()[0].dialog).toEqual({ t: "calendar" });
+    const row = (): HTMLElement => one('button.summary-row[data-summary-row="working-time"]', panel());
+    const value = one(".summary-row-value", row());
+    expect([one(".summary-row-label", row()).textContent, value.textContent, value.title]).toEqual([
+      "Working time",
+      "No holiday region · Mon–Fri · no closures",
+      "No holiday region · Mon–Fri · no closures",
+    ]);
+    expect([panel().querySelector(".plan-summary > h2 + .val-line"), all(".plan-summary h2", panel()).map((h) => h.textContent)]).toEqual([null, ["Plan"]]);
+    noButton("Change calendar…");
+    click(row());
+    expect([uiNow()[0].settings, uiNow()[0].dialog, panel().querySelector(".summary-back")]).toEqual(["working-time", null, null]);
+    act(() => uiNow()[1]({ settings: null }));
+    act(() => t.session.setReadOnly(true));
+    expect(row().hasAttribute("disabled")).toBe(false);
+    click(row());
+    expect(uiNow()[0].settings).toBe("working-time");
   });
 
-  it("saves, shows one baseline at a time, renames and removes baselines", async () => {
+  it("counts baselines in a summary row that opens Settings at Baselines, read-only too", async () => {
     const t = await made([{ name: "A", start: "2026-11-10", dur: 3 }]);
     act(() => {
       t.session.apply({ t: "baseline", op: "save", name: "Before" });
+      t.session.apply({ t: "baseline", op: "save", name: "After" });
     });
     await shown(t);
-    const apply = vi.spyOn(t.session, "apply");
-    click(button("Save baseline"));
-    expect(apply.mock.calls).toEqual([[{ t: "baseline", op: "save", name: "Baseline 9 Nov 2026" }]]);
-    const ids = [...t.session.view().plan.baselines.values()].map((b) => [b.name, b.id]);
-    const idOf = (name: string): string => {
-      const found = ids.find(([n]) => n === name);
-      if (found === undefined) throw new Error("no baseline " + name);
-      return found[1];
-    };
-    const rowOf = (name: string): HTMLElement => one(`[data-baseline="${idOf(name)}"]`, panel());
-    click(within(rowOf("Before")).getByRole("button", { name: "Show" }));
-    expect(uiNow()[0].baseline).toBe(idOf("Before"));
-    click(within(rowOf("Baseline 9 Nov 2026")).getByRole("button", { name: "Show" }));
-    expect(uiNow()[0].baseline).toBe(idOf("Baseline 9 Nov 2026"));
-    expect(within(rowOf("Before")).queryByRole("button", { name: "Hide" })).toBeNull();
-    click(within(rowOf("Baseline 9 Nov 2026")).getByRole("button", { name: "Hide" }));
-    expect(uiNow()[0].baseline).toBeNull();
-    const nameInput = within(rowOf("Before")).getByLabelText("Baseline name");
-    if (!(nameInput instanceof HTMLInputElement)) throw new Error("no baseline name");
-    edit(nameInput, "Kickoff", "Enter");
-    expect(apply.mock.calls[1]).toEqual([{ t: "baseline", op: "rename", id: idOf("Before"), name: "Kickoff" }]);
-    click(within(rowOf("Before")).getByRole("button", { name: "Remove" }));
-    expect(apply.mock.calls[2]).toEqual([{ t: "baseline", op: "remove", id: idOf("Before") }]);
-    expect(panel().querySelector(`[data-baseline="${idOf("Before")}"]`)).toBeNull();
+    const row = (): HTMLElement => one('button.summary-row[data-summary-row="baselines"]', panel());
+    expect([panel().querySelector("[data-baseline]"), panel().querySelector(".baselines"), one(".summary-row-count", row()).textContent]).toEqual([null, null, "2"]);
+    ["Save baseline", "Show", "Remove"].forEach(noButton);
+    click(row());
+    expect([uiNow()[0].settings, panel().querySelector(".summary-back")]).toEqual(["baselines", null]);
+    act(() => uiNow()[1]({ settings: null }));
+    act(() => t.session.setReadOnly(true));
+    expect(row().hasAttribute("disabled")).toBe(false);
+    click(row());
+    expect(uiNow()[0].settings).toBe("baselines");
   });
 
   it("lists what was trashed by its own unit and restores it", async () => {
@@ -1233,7 +1229,7 @@ describe("History", () => {
 });
 
 describe("PlanPanel read-only", () => {
-  it("keeps Show and Hide and drops every writing control", async () => {
+  it("drops every writing control and keeps the Baselines count", async () => {
     const t = await made([
       { name: "A", start: "2026-11-10", dur: 3 },
       { name: "T", start: "2026-11-10" },
@@ -1246,9 +1242,6 @@ describe("PlanPanel read-only", () => {
     await shown(t);
     const page = (row: "history" | "trash"): void => click(one(`button.summary-row[data-summary-row="${row}"]`, panel()));
     const back = (): void => click(one(".summary-back", panel()));
-    expect(button("Save baseline")).not.toBeNull();
-    expect(button("Remove")).not.toBeNull();
-    expect(button("Change calendar…")).not.toBeNull();
     page("trash");
     expect(button("Restore")).not.toBeNull();
     back();
@@ -1260,11 +1253,7 @@ describe("PlanPanel read-only", () => {
     act(() => t.session.setReadOnly(true));
     expect(panel().querySelectorAll("input, select")).toHaveLength(0);
     expect(panel().textContent).toContain("Plan");
-    expect(panel().textContent).toContain("Before");
-    ["Save baseline", "Remove", "Change calendar…"].forEach(noButton);
-    expect(button("Show")).not.toBeNull();
-    click(button("Show"));
-    expect(button("Hide")).not.toBeNull();
+    expect(one('button.summary-row[data-summary-row="baselines"] .summary-row-count', panel()).textContent).toBe("1");
     page("trash");
     noButton("Restore");
     expect(all("[data-trashed]", panel())).toHaveLength(1);

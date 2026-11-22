@@ -32,10 +32,10 @@ export function RemovedBanner(p: { session: PlanSession | null }) {
           Export…
         </button>
       )}
-      <button type="button" className="button-small" onClick={() => setUi({ dialog: { t: "sync", pane: "join" } })}>
+      <button type="button" className="button-small" onClick={() => setUi({ settings: "sync", syncPane: "join" })}>
         Join with a code
       </button>
-      <button type="button" className="button-small" onClick={() => setUi({ dialog: { t: "sync", pane: "setup" } })}>
+      <button type="button" className="button-small" onClick={() => setUi({ settings: "sync", syncPane: "setup" })}>
         Set up sync
       </button>
     </div>

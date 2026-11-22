@@ -151,7 +151,7 @@ const styled = new Set(sheet.rules.flatMap((r) => (r.selector.match(/\.[A-Za-z][
 
 describe("every class the stylesheets style", () => {
   it("reads the sources and sheets it is asserting against", () => {
-    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./detail.css", "./list.css", "./palette.css", "./panel.css", "./phone.css", "./print.css", "./sheet.css", "./shell.css", "./sync.css", "./theme.css", "./timeline.css", "./tokens.css"]);
+    expect(Object.keys(SHEETS).sort()).toEqual(["./base.css", "./board.css", "./calendar.css", "./choices.css", "./detail.css", "./list.css", "./palette.css", "./panel.css", "./phone.css", "./print.css", "./settings.css", "./sheet.css", "./shell.css", "./sync.css", "./theme.css", "./timeline.css", "./tokens.css"]);
     expect(Object.keys(SOURCES).length).toBeGreaterThan(40);
     expect(CODE.length).toBeGreaterThan(100000);
     expect(styled.size).toBeGreaterThan(60);
@@ -264,12 +264,12 @@ describe("the Cyberdeck look", () => {
       'html[data-os="ios"] .popover-close::before': 'html[data-os="ios"] .popover-close',
       'html[data-os="ios"] .palette-close::before': 'html[data-os="ios"] .palette-close',
       'html[data-os="ios"] .panel .actions button::before': 'html[data-os="ios"] .panel .actions button',
-      'html[data-os="ios"] .settings-head button::before': 'html[data-os="ios"] .settings-head button',
-      'html[data-os="ios"] .settings-tabs button::before': 'html[data-os="ios"] .settings-tabs button',
       'html[data-os="ios"] .sync-tabs button::before': 'html[data-os="ios"] .sync-tabs button',
       'html[data-os="ios"] .sync-buttons button::before': 'html[data-os="ios"] .sync-buttons button',
       'html[data-os="ios"] .banner button::before': 'html[data-os="ios"] .banner button',
       'html[data-os="ios"] .choice-banner button::before': 'html[data-os="ios"] .choice-banner button',
+      'html[data-os="ios"] .settings-row .settings-control button::before': 'html[data-os="ios"] .settings-row .settings-control button',
+      ".settings-count": ".settings-side",
       ".list-edge": ".app-body",
       ".plan-overlay-layer": ".app-body",
       ".plan-overlay-scrim": ".plan-overlay-layer",
@@ -307,6 +307,31 @@ describe("the Cyberdeck look", () => {
     expect(decls(`${IOS} .modal.modal-item`)["width"]).toBe("min(720px, 100% - 48px)");
     const body = decls(".modal-item-body");
     expect([body["flex"], body["min-height"], body["overflow-y"]]).toEqual(["1 1 auto", "0", "auto"]);
+  });
+
+  it("sizes the Settings modal 780 by 580 px inside the window, a sidebar of 212 px beside a main column, each scrolling on its own", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    const m = decls(".modal.modal-settings");
+    expect([m["display"], m["flex-direction"], m["width"], m["height"], m["max-width"], m["max-height"], m["padding"], m["overflow"]]).toEqual([
+      "flex",
+      "column",
+      "780px",
+      "580px",
+      "calc(100% - 32px)",
+      "calc(100% - 32px)",
+      "0",
+      "hidden",
+    ]);
+    const ios = decls(`${IOS} .modal.modal-settings`);
+    expect([ios["width"], ios["height"]]).toEqual(["min(780px, 100% - 48px)", "min(580px, 100% - 48px)"]);
+    const layout = decls(".settings-layout");
+    expect([layout["display"], layout["grid-template-columns"], layout["min-height"]]).toEqual(["grid", "212px minmax(0, 1fr)", "0"]);
+    expect([decls(".settings-side")["overflow-y"], decls(".settings-main")["overflow-y"], decls(".settings-side")["border-inline-end"]]).toEqual(["auto", "auto", "1px solid var(--line)"]);
+    const title = decls(".settings-nav-title");
+    expect([title["font-family"], title["font-size"], title["text-transform"], title["color"]]).toEqual(["var(--display)", "10px", "uppercase", "var(--amber)"]);
+    const active = decls('.settings-nav-item[aria-current="page"]');
+    expect([active["border-color"], active["box-shadow"], active["color"]]).toEqual(["var(--cyan-dim)", "inset 2px 0 0 var(--cyan)", "var(--heading)"]);
+    expect([decls(".settings-nav-item")["min-height"], decls(`${IOS} .settings-nav-item`)["min-height"]]).toEqual(["30px", "44px"]);
   });
 
   it("holds a phone sheet at 52 % on the medium detent and full height on the large one", () => {

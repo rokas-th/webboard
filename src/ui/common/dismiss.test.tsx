@@ -3,7 +3,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IPAD, IPHONE, LINUX, MAC, setPlatform } from "../../test/platform";
 import { resetTauri, tauri } from "../../test/tauriMock";
-import { ASK_WAIT_MS, closeTopOverlay, commitFocus, useCloseGuard, useOverlayEntry, useRequestClose, useScrimPress, type CloseReason, type DraftGuard } from "./dismiss";
+import { ASK_WAIT_MS, closeTopOverlay, commitFocus, requestCloseOf, useCloseGuard, useOverlayEntry, useRequestClose, useScrimPress, type CloseReason, type DraftGuard } from "./dismiss";
 import { clearToasts, Toasts } from "./Toast";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -148,7 +148,10 @@ describe("commitFocus", () => {
 
 function Layer(p: { onClose(reason: CloseReason): void; children?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  useOverlayEntry(ref, p.onClose);
+  useOverlayEntry(ref, (reason) => {
+    p.onClose(reason);
+    return true;
+  });
   return <div ref={ref}>{p.children}</div>;
 }
 
@@ -294,6 +297,92 @@ describe("useCloseGuard", () => {
   });
 });
 
+describe("a close request", () => {
+  function Reporting(p: { guard: DraftGuard | null; onClose(): void; said(closed: boolean): void; body?: ReactNode }) {
+    const ref = useRef<HTMLDivElement>(null);
+    const request = useRequestClose(ref, p.onClose, "Reporting");
+    useOverlayEntry(ref, request.close);
+    return (
+      <div ref={ref} data-testid="reporting" tabIndex={-1}>
+        {request.scope(
+          <>
+            {p.body ?? <Guard guard={p.guard} />}
+            <button type="button" onClick={() => p.said(request.close("x"))}>
+              Shut
+            </button>
+          </>,
+        )}
+      </div>
+    );
+  }
+
+  function Refusing() {
+    return (
+      <input
+        aria-label="Refused"
+        onBlur={() => {
+          throw new Error("the plan refused the name");
+        }}
+      />
+    );
+  }
+
+  it("close reports whether it closed", async () => {
+    setPlatform(MAC);
+    const said: boolean[] = [];
+    const onClose = vi.fn();
+    const report = (c: boolean): void => {
+      said.push(c);
+    };
+    const first = render(<Reporting guard={null} onClose={onClose} said={report} />);
+    shut();
+    first.unmount();
+    const second = render(<Reporting guard={GUARD} onClose={onClose} said={report} />);
+    shut();
+    shut();
+    second.unmount();
+    const third = render(<Reporting guard={null} onClose={onClose} said={report} body={<Refusing />} />);
+    act(() => screen.getByRole("textbox", { name: "Refused" }).focus());
+    const onError = (e: ErrorEvent): void => e.preventDefault();
+    window.addEventListener("error", onError);
+    try {
+      shut();
+    } finally {
+      window.removeEventListener("error", onError);
+    }
+    third.unmount();
+    setPlatform(IPHONE);
+    resetTauri({ alert_ask: () => new Promise(() => undefined) });
+    render(<Reporting guard={GUARD} onClose={onClose} said={report} />);
+    shut();
+    shut();
+    await settle();
+    expect([said, onClose.mock.calls.length]).toEqual([[true, false, false, false, false, false], 1]);
+  });
+
+  it("requestCloseOf closes an open overlay by its element, and reports it", () => {
+    const onClose = vi.fn();
+    render(<Reporting guard={null} onClose={onClose} said={() => undefined} />);
+    expect([requestCloseOf(screen.getByTestId("reporting"), "x"), onClose.mock.calls.length]).toEqual([true, 1]);
+  });
+
+  it("requestCloseOf reports false while the close asks first", () => {
+    setPlatform(MAC);
+    const onClose = vi.fn();
+    render(<Reporting guard={GUARD} onClose={onClose} said={() => undefined} />);
+    let closed: boolean | null = null;
+    act(() => {
+      closed = requestCloseOf(screen.getByTestId("reporting"), "x");
+    });
+    expect([closed, onClose.mock.calls.length, ask() !== null]).toEqual([false, 0, true]);
+  });
+
+  it("requestCloseOf throws for an element that is no open overlay", () => {
+    render(<div data-testid="plain" />);
+    expect(() => requestCloseOf(screen.getByTestId("plain"), "x")).toThrow("requestCloseOf: the element is no open overlay");
+  });
+});
+
 describe("the inline discard ask", () => {
   it.each([MAC, LINUX])("on %o asks with Keep editing focused, and Keep editing keeps the draft", (platform) => {
     setPlatform(platform);
@@ -344,7 +433,7 @@ describe("the inline discard ask", () => {
     const onClose = vi.fn();
     function Stacked() {
       const ref = useRef<HTMLDivElement>(null);
-      useOverlayEntry(ref, () => undefined);
+      useOverlayEntry(ref, () => false);
       return (
         <div ref={ref}>
           <Host guard={GUARD} onClose={onClose} />

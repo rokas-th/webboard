@@ -10,6 +10,7 @@ import { restorePlan, type PlanFiles } from "../shell/selection";
 import { EntryTag, LocalLine } from "../shell/LocalLine";
 import { canMoveToSpace } from "../shell/moving";
 import { NewPlanButton } from "../shell/Sidebar";
+import { lastSection } from "../settings/lastSection";
 import { useUiValue, type SyncPane } from "../state";
 
 export const NEW_PLAN = "New plan";
@@ -22,14 +23,14 @@ export function ImportButton(p: { files: PlanFiles }) {
   );
 }
 
-export function SettingsRow(p: { onClose(): void }) {
+export function SettingsRow(p: { hasPlan: boolean; onClose(): void }) {
   const { setUi } = useUiValue();
   return (
     <button
       type="button"
-      className="choice-row settings-row"
+      className="choice-row plans-settings-row"
       onClick={() => {
-        setUi({ settings: "theme" });
+        setUi({ settings: lastSection(window.localStorage, p.hasPlan) });
         p.onClose();
       }}
     >
@@ -103,6 +104,7 @@ function SyncRows(p: { state: SyncState; onSync(pane: SyncPane): void }) {
 export function PlansSheet(p: {
   registry: Registry;
   selected: PlanId | null;
+  hasPlan: boolean;
   files: PlanFiles;
   error: string | null;
   onNew(name: string): void;
@@ -170,7 +172,7 @@ export function PlansSheet(p: {
             </ul>
           </section>
         )}
-        <SettingsRow onClose={p.onClose} />
+        <SettingsRow hasPlan={p.hasPlan} onClose={p.onClose} />
       </nav>
     </Sheet>
   );

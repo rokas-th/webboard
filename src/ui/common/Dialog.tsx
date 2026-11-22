@@ -55,7 +55,7 @@ export function modalKeyDown(e: KeyboardEvent<HTMLElement>, onClose: () => void)
   }
 }
 
-export function Dialog(p: { label: string; wide?: boolean; size?: "item"; onClose(): void; onKeyDown?(e: KeyboardEvent<HTMLDivElement>): void; children?: ReactNode }) {
+export function Dialog(p: { label: string; wide?: boolean; size?: "item" | "settings"; onClose(): void; onKeyDown?(e: KeyboardEvent<HTMLDivElement>): void; children?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useModalFocus(ref, "Dialog", readPlatform(window).os === "ios");
   const { close, scope } = useRequestClose(ref, p.onClose, "Dialog");
@@ -65,8 +65,9 @@ export function Dialog(p: { label: string; wide?: boolean; size?: "item"; onClos
     <div className="overlay center" {...scrim}>
       <div
         ref={ref}
-        className={p.size === "item" ? "modal modal-item" : p.wide === true ? "modal modal-wide" : "modal"}
+        className={p.size === "item" ? "modal modal-item" : p.size === "settings" ? "modal modal-settings" : p.wide === true ? "modal modal-wide" : "modal"}
         data-item-modal={p.size === "item" ? "" : undefined}
+        data-settings-modal={p.size === "settings" ? "" : undefined}
         role="dialog"
         aria-modal="true"
         aria-label={p.label}

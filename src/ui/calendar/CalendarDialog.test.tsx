@@ -107,6 +107,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  opened = null;
   cleanup();
   clearToasts();
   vi.restoreAllMocks();
@@ -156,12 +157,35 @@ const head = (): HTMLElement => {
   return el;
 };
 
-const dialog = (): HTMLElement => screen.getByRole("dialog", { name: "Calendar · Plan" });
+const WORKING_TIME = "Working time";
+
+let opened: "settings" | "notice" | null = null;
+
+const settingsWorkingTime = (): HTMLElement => screen.getByRole("dialog", { name: WORKING_TIME });
+
+const noticeDialog = (): HTMLElement => screen.getByRole("dialog", { name: "Calendar · Plan" });
+
+const dialog = (): HTMLElement => {
+  if (opened === "settings") return settingsWorkingTime();
+  if (opened === "notice") return noticeDialog();
+  throw new Error("the test opened neither Settings › Working time nor a review notice's dialog");
+};
+
+const reviewDialog = (): HTMLElement | null => screen.queryByRole("dialog", { name: "Review changes" });
 
 const openDialog = async (): Promise<HTMLElement> => {
-  fireEvent.click(within(panelSlot()).getByRole("button", { name: "Change calendar…" }));
+  const row = panelSlot().querySelector('button.summary-row[data-summary-row="working-time"]');
+  if (!(row instanceof HTMLElement)) throw new Error("no Working time row");
+  fireEvent.click(row);
   await settle();
+  opened = "settings";
   return dialog();
+};
+
+const openNotice = async (): Promise<void> => {
+  fireEvent.click(within(head()).getByRole("button", { name: "Review" }));
+  await settle();
+  opened = "notice";
 };
 
 const inDialog = () => within(dialog());
@@ -190,14 +214,37 @@ const type = (label: string, value: string): void => {
 };
 
 const applyButton = (): HTMLButtonElement => {
-  const b = inDialog().getByRole("button", { name: "Apply" });
+  const b = inDialog().getByRole("button", { name: opened === "settings" ? "Review changes…" : "Apply" });
   if (!(b instanceof HTMLButtonElement)) throw new Error("Apply is not a button");
   return b;
 };
 
-const clickApply = async (): Promise<void> => {
+const clickReviewApply = async (): Promise<void> => {
   fireEvent.click(applyButton());
   await settle();
+  const review = reviewDialog();
+  if (review === null) throw new Error("Review changes… opened no Review changes dialog");
+  fireEvent.click(within(review).getByRole("button", { name: "Apply" }));
+  await settle();
+};
+
+const clickApply = async (): Promise<void> => {
+  if (opened === "settings") {
+    await clickReviewApply();
+    return;
+  }
+  fireEvent.click(applyButton());
+  await settle();
+  expect(reviewDialog()).toBeNull();
+};
+
+const expectFresh = (): void => {
+  expect([reviewDialog(), screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label")), lastUi().settings, applyButton().disabled]).toEqual([
+    null,
+    [WORKING_TIME],
+    "working-time",
+    true,
+  ]);
 };
 
 const toastTexts = (): (string | null)[] => Array.from(document.querySelectorAll<HTMLElement>(".toasts .toast")).map((e) => e.textContent);
@@ -259,7 +306,7 @@ describe("region sources", () => {
     const t = await made([]);
     await shown(t);
     await openDialog();
-    expect(dialog().className).toBe("modal modal-wide");
+    expect(dialog().className).toBe("modal modal-settings");
     expect(options("Holiday source")).toEqual(["No holiday region", "OpenHolidays", "GOV.UK", "US federal (OPM)", "Calendar link (ICS)"]);
     expect(dialog().querySelector(".region-now")?.textContent).toBe("No holiday region");
     await choose("Holiday source", "openholidays");
@@ -502,7 +549,7 @@ describe("failures that are not AppErrors", () => {
     fireEvent.click(inDialog().getByRole("button", { name: "Try again" }));
     await settle();
     expect(save.mock.calls).toEqual([[{ src: "opm" }], [{ src: "opm" }]]);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expectFresh();
   });
 
   it("lists the requested years as failed when draftYears rejects, with Try again, and still reports it", async () => {
@@ -777,7 +824,7 @@ describe("impact and Apply", () => {
     expect(impact()).toBe(NONE);
   });
 
-  it("applies once with the draft and the calendar read at open, toasts the built toast and closes", async () => {
+  it("applies once with the draft and the calendar read at open through Review, toasts the built toast and starts afresh", async () => {
     const t = await made(IMPACT_SEED);
     await shown(t);
     const atOpen = t.session.view().plan.calendar;
@@ -794,7 +841,7 @@ describe("impact and Apply", () => {
     if (result.type !== "return") throw new Error("apply threw");
     const built: Built = result.value;
     expect(toastTexts()).toEqual([built.toast]);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expectFresh();
     expect(lastUi().dialog).toBeNull();
   });
 
@@ -851,7 +898,7 @@ describe("last region", () => {
     expect(apply).toHaveBeenCalledTimes(1);
     expect(save.mock.calls).toEqual([[ZH]]);
     expect(apply.mock.invocationCallOrder[0]).toBeLessThan(save.mock.invocationCallOrder[0]);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expectFresh();
     let id = "";
     await act(async () => {
       id = await registry.createPlan("Next");
@@ -874,7 +921,42 @@ describe("last region", () => {
     expect(save.mock.calls).toEqual([[ZH], [ZH]]);
     expect(apply).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("Could not save settings: disk full.")).toBeNull();
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expectFresh();
+  });
+
+  it("starts the body afresh right after an apply whose region save fails, so the next edit is guarded and can be reviewed", async () => {
+    const { registry } = await realShell();
+    await openDialog();
+    await pickZurich();
+    vi.spyOn(registry, "setLastRegion").mockRejectedValueOnce(new AppError("settings.io", "Could not save settings: disk full."));
+    await clickApply();
+    const discard = (): HTMLButtonElement => {
+      const b = inDialog().getByRole("button", { name: "Discard changes" });
+      if (!(b instanceof HTMLButtonElement)) throw new Error("Discard changes is not a button");
+      return b;
+    };
+    expect([inDialog().getAllByText("Could not save settings: disk full.").length, applyButton().disabled, discard().disabled]).toEqual([1, true, true]);
+    fireEvent.click(weekday("Sat"));
+    expect([applyButton().disabled, discard().disabled]).toEqual([false, false]);
+    const bar = dialog().querySelector(".modal-head");
+    if (!(bar instanceof HTMLElement)) throw new Error("no dialog head");
+    fireEvent.click(within(bar).getByRole("button", { name: "Close" }));
+    await settle();
+    expect([screen.queryByRole("alertdialog", { name: "Discard calendar changes?" }) !== null, lastUi().settings]).toEqual([true, "working-time"]);
+  });
+
+  it("Discard changes drops the draft years that failed to load with the draft", async () => {
+    const t = await made(LATE_2027, { calendar: zhPlan({ holidays: new Map() }), answers: { holidays_year: pending } });
+    vi.spyOn(t.holidays, "draftYears").mockRejectedValue(new AppError("holidays.offline", "No network connection."));
+    await shown(t);
+    await openDialog();
+    await choose("Holiday source", "opm");
+    await pickZurich();
+    fireEvent.click(weekday("Sat"));
+    expect(inDialog().getAllByText(/No network connection\./).length).toBeGreaterThan(0);
+    fireEvent.click(inDialog().getByRole("button", { name: "Discard changes" }));
+    await settle();
+    expect([inDialog().queryAllByText(/No network connection\./), weekday("Sat").getAttribute("aria-pressed")]).toEqual([[], "false"]);
   });
 
   it("does not save a region when the draft region is null", async () => {
@@ -884,7 +966,7 @@ describe("last region", () => {
     fireEvent.click(within(inDialog().getByRole("group", { name: "Working days" })).getByRole("button", { name: "Fri" }));
     await clickApply();
     expect(save).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expectFresh();
   });
 
   it("does not save an unchanged region", async () => {
@@ -895,7 +977,7 @@ describe("last region", () => {
     fireEvent.click(within(inDialog().getByRole("group", { name: "Working days" })).getByRole("button", { name: "Fri" }));
     await clickApply();
     expect(save).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expectFresh();
   });
 
   it("does not save the region of a refused apply and stays open", async () => {
@@ -923,8 +1005,8 @@ describe("holiday state in the plan head", () => {
     expect(line?.textContent).toBe("No holiday region — dates use weekdays and closures · Choose region");
     fireEvent.click(within(head()).getByRole("button", { name: "Choose region" }));
     await settle();
-    expect(lastUi().dialog).toEqual({ t: "calendar" });
-    expect(dialog()).toBeTruthy();
+    expect(lastUi().settings).toBe("working-time");
+    expect(settingsWorkingTime()).toBeTruthy();
     cleanup();
     const zh = await made([], { calendar: zhPlan(), answers: { holidays_year: pending } });
     await shown(zh);
@@ -984,7 +1066,8 @@ describe("holiday state in the plan head", () => {
     expect(within(line).getAllByRole("button").map((b) => b.textContent)).toEqual(["Change calendar…"]);
     fireEvent.click(within(line).getByRole("button", { name: "Change calendar…" }));
     await settle();
-    expect(lastUi().dialog).toEqual({ t: "calendar" });
+    opened = "settings";
+    expect([lastUi().settings, settingsWorkingTime().contains(missingRow(2031))]).toEqual(["working-time", true]);
     expect(within(missingRow(2031)).queryByRole("button", { name: "Try again" })).toBeNull();
     expect(within(missingRow(2031)).getByText(detail)).toBeTruthy();
     expect(load).not.toHaveBeenCalled();
@@ -1022,8 +1105,7 @@ describe("review notices", () => {
     const save = vi.fn(async () => undefined);
     await shown(t, { setLastRegion: save });
     if (o.readOnly === true) act(() => t.session.setReadOnly(true));
-    fireEvent.click(within(head()).getByRole("button", { name: "Review" }));
-    await settle();
+    await openNotice();
     return { t, n, intent, dismiss, save };
   };
 
@@ -1221,7 +1303,7 @@ describe("failed years in the day list", () => {
     expect(sent.next).toEqual(next);
     expect(t.session.view().plan.calendar.holidays.get(2027)?.days).toEqual(NINE_2027.days);
     expect(t.holidays.notices(plan).filter((n) => n.k === "ready" && n.year === 2027)).toEqual([]);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expectFresh();
   });
 
   it("counts a loaded year in the impact preview of a plan with items in it", async () => {
@@ -1263,7 +1345,7 @@ describe("failed years in the day list", () => {
     expect(() => dayRow("Holiday 1")).toThrow("no day row Holiday 1");
   });
 
-  it("leaves the plan and the ready notice for the plan head when the dialog is cancelled", async () => {
+  it("leaves the plan and the ready notice for the plan head when Settings closes", async () => {
     const y = year2027();
     const t = await made([], { calendar: zhPlan({ holidays: new Map([[2026, CH_ZH_2026]]) }), answers: { holidays_year: y.holidaysYear } });
     await shown(t);
@@ -1274,9 +1356,9 @@ describe("failed years in the day list", () => {
     await settle();
     await y.resolve();
     expect(dayRow("Holiday 1")).toBeTruthy();
-    fireEvent.click(inDialog().getByRole("button", { name: "Cancel" }));
+    fireEvent.click(within(dialog()).getAllByRole("button", { name: "Close" })[0]);
     await settle();
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect([screen.queryByRole("dialog"), screen.queryByRole("alertdialog"), lastUi().settings]).toEqual([null, null, null]);
     expect(apply).not.toHaveBeenCalled();
     expect(t.session.view().plan.calendar).toBe(before);
     expect(readyYear(t, 2027).days).toEqual(NINE_2027.days);
@@ -1373,8 +1455,7 @@ describe("read-only", () => {
     const dismiss = vi.spyOn(t.holidays, "dismiss");
     await shown(t);
     act(() => t.session.setReadOnly(true));
-    fireEvent.click(within(head()).getByRole("button", { name: "Review" }));
-    await settle();
+    await openNotice();
     const apply = vi.spyOn(t.session, "apply");
     expect(applyButton().disabled).toBe(true);
     const before = impact();
@@ -1415,7 +1496,7 @@ describe("closing with a draft", () => {
     expect(document.activeElement).toBe(within(box).getByRole("button", { name: "Keep editing" }));
     fireEvent.click(within(box).getByRole("button", { name: "Keep editing" }));
     await settle();
-    expect([discardAsk(), screen.queryAllByRole("dialog", { name: "Calendar · Plan" }).length, lastUi().dialog]).toEqual([null, 1, { t: "calendar" }]);
+    expect([discardAsk(), screen.queryAllByRole("dialog", { name: WORKING_TIME }).length, lastUi().settings]).toEqual([null, 1, "working-time"]);
   };
 
   it("asks before dropping a changed draft on ✕, Esc and scrim", async () => {
@@ -1440,7 +1521,7 @@ describe("closing with a draft", () => {
     if (box === null) throw new Error("no discard ask");
     fireEvent.click(within(box).getByRole("button", { name: "Discard" }));
     await settle();
-    expect([screen.queryByRole("dialog"), discardAsk(), lastUi().dialog]).toEqual([null, null, null]);
+    expect([screen.queryByRole("dialog"), discardAsk(), lastUi().settings]).toEqual([null, null, null]);
     expect(t.session.view().plan.calendar).toBe(before);
   });
 
@@ -1459,16 +1540,19 @@ describe("closing with a draft", () => {
     expect(discardAsk()).not.toBeNull();
   });
 
-  it("Cancel drops without asking", async () => {
+  it("Discard changes drops the draft without asking and keeps Settings open", async () => {
     const t = await made([]);
     await shown(t);
     await openDialog();
     const before = t.session.view().plan.calendar;
     fireEvent.click(weekday("Sat"));
-    fireEvent.click(inDialog().getByRole("button", { name: "Cancel" }));
+    fireEvent.click(inDialog().getByRole("button", { name: "Discard changes" }));
     await settle();
-    expect([screen.queryByRole("dialog"), discardAsk(), lastUi().dialog]).toEqual([null, null, null]);
+    expect([discardAsk(), weekday("Sat").getAttribute("aria-pressed"), lastUi().settings]).toEqual([null, "false", "working-time"]);
     expect(t.session.view().plan.calendar).toBe(before);
+    fireEvent.click(closeX());
+    await settle();
+    expect([screen.queryByRole("dialog"), discardAsk(), lastUi().settings]).toEqual([null, null, null]);
   });
 
   it("an unchanged calendar closes at once", async () => {
@@ -1479,7 +1563,7 @@ describe("closing with a draft", () => {
     fireEvent.click(weekday("Sat"));
     fireEvent.click(closeX());
     await settle();
-    expect([screen.queryByRole("dialog"), discardAsk(), lastUi().dialog]).toEqual([null, null, null]);
+    expect([screen.queryByRole("dialog"), discardAsk(), lastUi().settings]).toEqual([null, null, null]);
   });
 
   it("an applied calendar closes without asking", async () => {
@@ -1488,6 +1572,9 @@ describe("closing with a draft", () => {
     await openDialog();
     fireEvent.click(weekday("Sat"));
     await clickApply();
+    expectFresh();
+    fireEvent.click(closeX());
+    await settle();
     expect([screen.queryByRole("dialog"), discardAsk(), t.session.view().plan.calendar.workdays]).toEqual([null, null, [1, 2, 3, 4, 5, 6]]);
   });
 });

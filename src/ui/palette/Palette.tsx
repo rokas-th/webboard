@@ -20,7 +20,10 @@ export function Palette(p: { commands: readonly Command[]; onClose(): void }) {
   const at = Math.min(on, Math.max(0, shown.length - 1));
 
   useModalFocus(box, "Palette");
-  useOverlayEntry(box, () => p.onClose());
+  useOverlayEntry(box, () => {
+    p.onClose();
+    return true;
+  });
   const scrim = useScrimPress(() => p.onClose());
 
   useEffect(() => {

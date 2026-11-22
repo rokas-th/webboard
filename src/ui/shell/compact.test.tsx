@@ -7,6 +7,7 @@ import type { UpdateState, Updates } from "../../store/updates";
 import { NEWER_PLAN, type PlanSession } from "../../store/session";
 import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
+import { IPAD, setPlatform } from "../../test/platform";
 import { seededStore, shellFor } from "../../test/shell";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
@@ -270,9 +271,10 @@ describe('compact shell, data-form="compact"', () => {
     expect(within(toolbar()).getByRole("button", { name: "Plan" })).toBeTruthy();
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Plan" }));
     const sheet = planSheet();
-    expect(within(sheet).getAllByRole("heading").map((h) => h.textContent)).toEqual(expect.arrayContaining(["Plan", "Baselines"]));
-    expect(Array.from(sheet.querySelectorAll(".summary-row-label")).map((l) => l.textContent)).toEqual(["History", "Trash"]);
-    expect(within(sheet).getByRole("button", { name: "Change calendar…" })).toBeTruthy();
+    expect(within(sheet).getAllByRole("heading").map((h) => h.textContent)).toEqual(expect.arrayContaining(["Plan"]));
+    expect(within(sheet).queryByRole("heading", { name: "Baselines" })).toBeNull();
+    expect(Array.from(sheet.querySelectorAll(".summary-row-label")).map((l) => l.textContent)).toEqual(["Working time", "Baselines", "History", "Trash"]);
+    expect(within(sheet).queryByRole("button", { name: "Change calendar…" })).toBeNull();
     summaryRow(sheet, "history");
 
     const entry = sheet.querySelector(`.history li[data-action="${moved.action.id}"]`);
@@ -298,7 +300,13 @@ describe('compact shell, data-form="compact"', () => {
 
     expect(planSheet().querySelector("[data-summary-page]")?.getAttribute("data-summary-page")).toBe("summary");
     const id = [...t.session.view().plan.baselines.keys()][0];
-    const name = within(planSheet()).getByRole("textbox", { name: "Baseline name" });
+    const baselinesRow = planSheet().querySelector('button.summary-row[data-summary-row="baselines"]');
+    if (!(baselinesRow instanceof HTMLButtonElement)) throw new Error("no Baselines row in the plan sheet");
+    expect(baselinesRow.querySelector(".summary-row-count")?.textContent).toBe("1");
+    fireEvent.click(baselinesRow);
+    expect([lastUi()[0].settings, screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))]).toEqual(["baselines", ["Baselines"]]);
+    const settings = screen.getByRole("dialog", { name: "Baselines" });
+    const name = within(settings).getByRole("textbox", { name: "Baseline name" });
     fireEvent.change(name, { target: { value: "Kickoff" } });
     fireEvent.keyDown(name, { key: "Enter" });
     expect(apply.mock.calls[1]).toEqual([{ t: "baseline", op: "rename", id, name: "Kickoff" }]);
@@ -307,12 +315,15 @@ describe('compact shell, data-form="compact"', () => {
     if (renameBuilt === undefined || renameBuilt.type !== "return") throw new Error("rename did not return");
     expect(toastTexts()).toEqual([renameBuilt.value.toast]);
 
-    fireEvent.keyDown(planSheet(), { key: "Escape" });
+    fireEvent.keyDown(settings, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     act(() => lastUi()[1]({ selected: "t3" }));
     expect(screen.getByRole("dialog", { name: "Tracking: review results" })).toBeTruthy();
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Plan" }));
-    expect(within(planSheet()).getByRole("button", { name: "Change calendar…" })).toBeTruthy();
+    const workingRow = planSheet().querySelector('button.summary-row[data-summary-row="working-time"]');
+    if (!(workingRow instanceof HTMLButtonElement)) throw new Error("no Working time row in the plan sheet");
+    fireEvent.click(workingRow);
+    expect([lastUi()[0].settings, screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))]).toEqual(["working-time", ["Working time"]]);
   });
 
   it("plan sheet read-only", async () => {
@@ -335,7 +346,11 @@ describe('compact shell, data-form="compact"', () => {
     expect([heading.querySelector("input"), within(heading).getByLabelText("Plan name").textContent]).toEqual([null, "Plan"]);
     noWritesOnAnyPage();
     summaryBack(planSheet());
-    expect(within(planSheet()).getByRole("button", { name: "Show" })).toBeTruthy();
+    const baselinesRow = planSheet().querySelector('button.summary-row[data-summary-row="baselines"]');
+    if (!(baselinesRow instanceof HTMLButtonElement)) throw new Error("no Baselines row in the plan sheet");
+    expect(baselinesRow.disabled).toBe(false);
+    fireEvent.click(baselinesRow);
+    expect(within(screen.getByRole("dialog", { name: "Baselines" })).getByRole("button", { name: "Show" })).toBeTruthy();
     expect([apply.mock.calls.length, revert.mock.calls.length]).toEqual([0, 0]);
   });
 
@@ -462,40 +477,39 @@ describe('compact shell, data-form="compact"', () => {
   });
 });
 
-describe("the settings sheet on compact", () => {
-  it("opens Settings as a sheet over the Plan sheet, closing the Plan sheet, and Close discards a draft", async () => {
+describe("Settings on a compact window", () => {
+  const dialogs = (): (string | null)[] => screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"));
+
+  it("opens Settings as the modal over the Plan sheet, closing the Plan sheet, and Close discards a draft", async () => {
     const t = await made();
     await shown(t);
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Plan" }));
     expect(within(planSheet()).queryByRole("button", { name: "Theme…" })).toBeNull();
     act(() => lastUi()[1]({ settings: "theme" }));
-    const sheets = screen.getAllByRole("dialog");
-    expect(sheets.map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
-    expect(sheets[0].getAttribute("aria-modal")).toBe("true");
+    expect(dialogs()).toEqual(["Theme"]);
+    const modal = screen.getByRole("dialog", { name: "Theme" });
+    expect([modal.getAttribute("aria-modal"), modal.hasAttribute("data-settings-modal")]).toEqual(["true", true]);
     expect(document.querySelector('[data-slot="panel"]')).toBeNull();
-    const field = within(sheets[0]).getByRole("textbox", { name: "Accent hex" });
+    const field = within(modal).getByRole("textbox", { name: "Accent hex" });
     fireEvent.change(field, { target: { value: "#335577" } });
     fireEvent.blur(field);
-    fireEvent.click(within(sheets[0]).getAllByRole("button", { name: "Close" })[0]);
+    fireEvent.click(within(modal).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(lastUi()[0].settings).toBeNull();
     expect(toastTexts()).toContain("Unsaved colours discarded.");
   });
 
-  it("opens Settings at Theme as a sheet from the toolbar's gear", async () => {
+  it("opens Settings at General as the modal from the toolbar's gear", async () => {
     const t = await made();
     await shown(t);
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Settings" }));
-    expect(lastUi()[0].settings).toBe("theme");
-    const sheets = screen.getAllByRole("dialog");
-    expect(sheets.map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
-    expect(within(sheets[0]).getByRole("tab", { name: "Theme" }).getAttribute("aria-selected")).toBe("true");
-    expect(sheets[0].getAttribute("aria-modal")).toBe("true");
+    expect(lastUi()[0].settings).toBe("general");
+    expect(dialogs()).toEqual(["General"]);
     expect(document.querySelector('[data-slot="panel"]')).toBeNull();
   });
 
-  it("shows an Updates tab only with an update store, holding the same update line", async () => {
+  it("shows the Updates row in General only with an update store, holding the same update line", async () => {
     const t = await made();
     const state: UpdateState = { k: "current", at: 0 };
     const updates: Updates = {
@@ -509,37 +523,53 @@ describe("the settings sheet on compact", () => {
     render(<UpdatesContext.Provider value={updates}>{withSync(shellFor(t).ui)}</UpdatesContext.Provider>);
     await settle();
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Settings" }));
-    const sheet = screen.getByRole("dialog", { name: "Settings" });
-    expect(within(sheet).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Theme", "Sync", "Updates", "About"]);
-    fireEvent.click(within(sheet).getByRole("tab", { name: "Updates" }));
-    expect(lastUi()[0].settings).toBe("updates");
-    expect(within(sheet).getByRole("tabpanel", { name: "Updates" }).querySelector(".update-line .update-status")?.textContent).toMatch(/^Up to date · checked /);
+    const modal = screen.getByRole("dialog", { name: "General" });
+    expect(modal.querySelector('[data-settings-row="general.updates"] .update-line .update-status')?.textContent).toMatch(/^Up to date · checked /);
     cleanup();
     render(<UpdatesContext.Provider value={null}>{withSync(shellFor(t).ui)}</UpdatesContext.Provider>);
     await settle();
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Settings" }));
-    expect(within(screen.getByRole("dialog", { name: "Settings" })).queryByRole("tab", { name: "Updates" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "General" }).querySelector('[data-settings-row="general.updates"]')).toBeNull();
   });
 
-  it("swaps the Settings sheet for the sync dialog from the Sync tab, never stacking them", async () => {
+  it("shows the sync panes inside Settings' Sync section, never a second dialog", async () => {
     const t = await made();
     await shown(t);
     act(() => lastUi()[1]({ settings: "sync" }));
-    const sheet = screen.getByRole("dialog", { name: "Settings" });
-    fireEvent.click(within(sheet).getByRole("button", { name: "Join with a code" }));
-    expect([lastUi()[0].settings, lastUi()[0].dialog]).toEqual([null, { t: "sync", pane: "join" }]);
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Sync"]);
+    const modal = screen.getByRole("dialog", { name: "Sync" });
+    act(() => {
+      fireEvent.click(within(modal).getByRole("tab", { name: "Join with a code" }));
+    });
+    expect([lastUi()[0].settings, lastUi()[0].syncPane, lastUi()[0].dialog]).toEqual(["sync", "join", null]);
+    expect(dialogs()).toEqual(["Sync"]);
+    expect(modal.matches("[data-settings-modal]")).toBe(true);
+    expect(within(modal).getByRole("tabpanel", { name: "Join with a code" }).getAttribute("data-settings-row")).toBe("sync.join");
   });
 
-  it("shows the Settings sheet over a selected item's sheet and returns to it on Escape", async () => {
+  it("shows Settings in place of a selected item's sheet and returns to it on Escape", async () => {
     const t = await made();
     await shown(t);
     act(() => lastUi()[1]({ selected: "t3" }));
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Tracking: review results"]);
+    expect(dialogs()).toEqual(["Tracking: review results"]);
     act(() => lastUi()[1]({ settings: "theme" }));
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
-    fireEvent.keyDown(screen.getByRole("dialog", { name: "Settings" }), { key: "Escape" });
+    expect(dialogs()).toEqual(["Theme"]);
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Theme" }), { key: "Escape" });
     expect(lastUi()[0].settings).toBeNull();
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Tracking: review results"]);
+    expect(dialogs()).toEqual(["Tracking: review results"]);
+  });
+
+  it("is the Settings sheet on an iPad window below 700 pt", async () => {
+    setPlatform(IPAD);
+    setScreen(834, 1194);
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 650 });
+    window.dispatchEvent(new Event("resize"));
+    const t = await made();
+    render(withSync(shellFor(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } }).ui));
+    await settle();
+    act(() => lastUi()[1]({ settings: "sync" }));
+    const sheet = screen.getByRole("dialog", { name: "Settings" });
+    expect([sheet.classList.contains("sheet"), sheet.hasAttribute("data-settings-modal")]).toEqual([true, false]);
+    expect([...sheet.querySelectorAll<HTMLElement>("section.settings-group")].map((s) => s.dataset["section"])).toEqual(["general", "theme", "sync", "files", "overview", "working-time", "baselines", "danger"]);
   });
 });
+

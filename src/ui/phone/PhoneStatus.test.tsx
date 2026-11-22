@@ -584,14 +584,15 @@ describe("PhoneStatus lines (Step 1)", () => {
     expect(within(lineOf(NEWER_PLAN)).queryAllByRole("button")).toEqual([]);
   });
 
-  it("no holiday region offers Choose region, which opens the calendar", async () => {
+  it("no holiday region offers Choose region, which opens Settings at Working time", async () => {
     const t = await made(SEED, { calendar: { region: null } });
     await shown(t);
     expect(strip().textContent).toBe(NO_REGION);
     openStatus();
     fireEvent.click(within(lineOf(NO_REGION)).getByRole("button", { name: "Choose region" }));
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Calendar"]);
-    expect(lastUi().dialog).toEqual({ t: "calendar" });
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
+    expect([lastUi().settings, lastUi().dialog]).toEqual(["working-time", null]);
+    expect(screen.getByRole("dialog", { name: "Settings" }).querySelector('section.settings-group[data-section="working-time"] .cal-body')).not.toBeNull();
   });
 
   const withNotices = async (notices: HolidayNotice[]) => {
@@ -620,7 +621,7 @@ describe("PhoneStatus lines (Step 1)", () => {
     expect(within(lineOf("Holidays for 2028 not loaded — retry")).getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 
-  it("out of range offers the calendar", async () => {
+  it("out of range offers Settings at Working time", async () => {
     const n: HolidayNotice = {
       k: "failed",
       year: 2031,
@@ -635,7 +636,8 @@ describe("PhoneStatus lines (Step 1)", () => {
     expect(line.querySelector(".status-detail")?.textContent).toBe(t.detail);
     expect(within(line).queryByRole("button", { name: "Try again" })).toBeNull();
     fireEvent.click(within(line).getByRole("button", { name: "Change calendar…" }));
-    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Calendar"]);
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
+    expect(lastUi().settings).toBe("working-time");
     expect(load).not.toHaveBeenCalled();
   });
 
@@ -864,12 +866,12 @@ describe("chained sheets give focus back to what opened the first (m25)", () => 
     return el;
   };
 
-  it("Status → Choose region → Calendar → Close focuses the strip", async () => {
+  it("Status → Choose region → Settings → Close focuses the strip", async () => {
     const t = await made(SEED, { calendar: { region: null } });
     await shown(t);
     press(strip());
     press(within(lineOf(NO_REGION)).getByRole("button", { name: "Choose region" }));
-    press(closeOf(screen.getByRole("dialog", { name: "Calendar" })));
+    press(closeOf(screen.getByRole("dialog", { name: "Settings" })));
     expect(screen.queryAllByRole("dialog")).toEqual([]);
     expect(document.activeElement).toBe(strip());
   });
@@ -918,16 +920,14 @@ describe("chained sheets give focus back to what opened the first (m25)", () => 
     expect(document.activeElement).toBe(strip());
   });
 
-  it("⋯ → Change calendar… → Calendar → Close shows the Plan sheet again, whose Close focuses ⋯", async () => {
+  it("⋯ → Change calendar… → Settings, which closes the Plan sheet → Close focuses ⋯", async () => {
     const t = await made(SEED);
     await shown(t);
     const more = screen.getByRole("button", { name: "Plan" });
     press(more);
     press(within(screen.getByRole("dialog", { name: "Plan" })).getByRole("button", { name: "Change calendar…" }));
-    press(closeOf(screen.getByRole("dialog", { name: "Calendar" })));
-    const plan = screen.getByRole("dialog", { name: "Plan" });
-    expect(plan.contains(document.activeElement)).toBe(true);
-    press(closeOf(plan));
+    expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
+    press(closeOf(screen.getByRole("dialog", { name: "Settings" })));
     expect(screen.queryAllByRole("dialog")).toEqual([]);
     expect(document.activeElement).toBe(more);
   });

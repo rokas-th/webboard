@@ -33,7 +33,7 @@ export function HolidayState(p: { session: PlanSession; registry: Registry; cloc
     () => holidays.notices(planId),
   );
   const [review, setReview] = useState<CalendarReview | null>(null);
-  const openCalendar = (): void => setUi({ dialog: { t: "calendar" } });
+  const openCalendar = (): void => setUi({ settings: "working-time" });
 
   const act = (n: HolidayNotice): void => {
     const a = noticeText(n).action;

@@ -21,9 +21,8 @@ import { isControl, isTyping, keyToCommand } from "../palette/keymap";
 import { Palette } from "../palette/Palette";
 import { PhoneShell } from "../phone/PhoneShell";
 import { OpenChoice, runWith } from "../run";
-import { UiContext, useUi, useUiValue, type SettingsTab } from "../state";
+import { UiContext, useUi, useUiValue, type SyncPane } from "../state";
 import { Board } from "../board/Board";
-import { CalendarDialog } from "../calendar/CalendarDialog";
 import { ChoiceDialog } from "../choices/ChoiceDialog";
 import { ghostIds } from "../ghosts";
 import { List } from "../list/List";
@@ -37,7 +36,9 @@ import { stepPatch, tabOrder } from "../detail/order";
 import { PrintSheet } from "../print/PrintSheet";
 import { startPrint } from "../print/start";
 import { useCanHover } from "../theme/ThemePanel";
-import { closeSettings, SettingsPanel } from "../settings/SettingsPanel";
+import { settingsFrame } from "../settings/frame";
+import { lastSection } from "../settings/lastSection";
+import { Settings, type SettingsCloser } from "../settings/Settings";
 import { Timeline, type OutlineControl } from "../timeline/Timeline";
 import { toastRemoteTrash } from "../trashed";
 import { HolidayState } from "./HolidayState";
@@ -45,7 +46,7 @@ import { ListEdge } from "./ListEdge";
 import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
 import { RemovedBanner } from "../sync/RemovedBanner";
-import { SyncActionButtons, SyncDialog, syncMessage } from "../sync/SyncDialog";
+import { SyncActionButtons, syncMessage } from "../sync/SyncPanes";
 import { FILES_STAY, PlanFailed, ReloadButton } from "./PlanFailed";
 import { PlanHead } from "./PlanHead";
 import { PlanMenu } from "./PlanMenu";
@@ -77,7 +78,9 @@ type WideMode = Exclude<PlanListMode, "phone">;
 
 type Drawer = Exclude<PaneKey, "outline">;
 
-const DRAWER_PASS: ReadonlySet<string> = new Set(["sidebar", "inspector", "outline", "palette"]);
+const DRAWER_PASS: ReadonlySet<string> = new Set(["sidebar", "inspector", "outline", "palette", "settings"]);
+
+const SETTINGS_PASSES = "[data-item-modal], [data-settings-modal]";
 
 const INSPECTOR_DRAWER_PASS: ReadonlySet<string> = new Set(["select-next", "select-prev", "detail-modal", "detail-open", "rename"]);
 
@@ -214,10 +217,11 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   const session = main.k === "open" && main.id === ui.plan ? main.session : null;
   const selectedItemShown = session !== null && ui.selected !== null && session.view().plan.items.has(ui.selected) ? ui.selected : null;
   const itemModal = session !== null && selectedItemShown !== null && ui.dialog !== null && ui.dialog.t === "item";
-  const modalHidesInspector = itemModal && ui.settings === null;
+  const modalHidesInspector = itemModal;
+  const settingsCloser = useRef<SettingsCloser | null>(null);
 
   const timeline = session !== null && ui.view === "timeline";
-  const inspectorHolds = session !== null || ui.settings !== null;
+  const inspectorHolds = session !== null;
   const layoutOf = (set: PaneSet, hidden: boolean = modalHidesInspector) =>
     paneLayout({ window: size.w, base: listMode, timeline, panes: inspectorHolds && !hidden ? set : { ...set, inspector: { ...set.inspector, open: false } }, listDefault });
   const layout = layoutOf(panes);
@@ -230,7 +234,6 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   }, [drawerAsked, listDrawer, inspectorDrawer]);
 
   const commitPane = (key: PaneKey, next: PaneState): void => {
-    if (key === "inspector" && !next.open && ui.settings !== null) closeSettings(theme, () => setUi({ settings: null }));
     setPane(key, next);
     if (device === "desk" && key === "list") setUi({ sidebarOpen: next.open, sidebarWidth: next.w });
   };
@@ -272,7 +275,6 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   const seenSelection = useRef<ItemId | null>(ui.selected);
   const inspectorMode = layout.inspector.mode;
   const seenSettings = useRef(ui.settings);
-  const revealInspector = useRef<() => void>(() => undefined);
   const revealForSelection = useRef<() => void>(() => undefined);
   const modalUp = useRef(itemModal);
   const revealDetail = (): void => {
@@ -288,9 +290,6 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   };
   useLayoutEffect(() => {
     modalUp.current = itemModal;
-    revealInspector.current = () => {
-      if (listMode === "column" && !panes.inspector.open) commitPane("inspector", { open: true, w: panes.inspector.w });
-    };
     revealForSelection.current = revealDetail;
   });
   useEffect(() => {
@@ -303,16 +302,15 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
     const was = seenSettings.current;
     seenSettings.current = ui.settings;
     if (was !== null || ui.settings === null) return;
-    if (modalUp.current) {
-      const modal = document.querySelector<HTMLElement>("[data-item-modal]");
-      if (modal === null) throw new Error("Shell: Settings opened over the item modal, but the modal is not in the page");
-      if (!commitFocus(modal, "The item modal")) {
-        setUi({ settings: null });
-        return;
-      }
-      setUi({ dialog: null });
+    setSheet(null);
+    if (!modalUp.current) return;
+    const modal = document.querySelector<HTMLElement>("[data-item-modal]");
+    if (modal === null) throw new Error("Shell: Settings opened over the item modal, but the modal is not in the page");
+    if (!commitFocus(modal, "The item modal")) {
+      setUi({ settings: null });
+      return;
     }
-    revealInspector.current();
+    setUi({ dialog: null });
   }, [ui.settings, setUi]);
 
   useEffect(() => {
@@ -349,6 +347,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   );
 
   const closeDialog = useCallback(() => setUi({ dialog: null }), [setUi]);
+  const openSync = (pane: SyncPane | null): void => setUi({ settings: "sync", syncPane: pane });
 
   const clearNaming = useCallback(() => setUi({ naming: null }), [setUi]);
 
@@ -402,8 +401,22 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
     if (scroller === null) throw new Error("Shell: the inspector's detail is outside #inspector and .sheet-body");
     return scroller;
   };
+  const closeSettingsFirst = (): boolean => {
+    if (ui.settings === null) return true;
+    const close = settingsCloser.current;
+    if (close === null) throw new Error("Shell: Settings is open but has no close to call");
+    return close("x");
+  };
+  const toggleSettings = (): void => {
+    if (ui.settings !== null) {
+      closeSettingsFirst();
+      return;
+    }
+    setUi({ settings: lastSection(window.localStorage, session !== null) });
+  };
   const promote = (id: ItemId): void => {
     if (session === null || !session.view().plan.items.has(id)) throw new Error(`Shell: no item ${id} to open as a modal`);
+    if (!closeSettingsFirst()) return;
     const detail = liveDetail();
     const memo = detail === null ? null : rememberFocus(detail, scrollerOf(detail));
     if (detail !== null && !flushSync(() => commitFocus(detail, "The inspector"))) return;
@@ -494,9 +507,11 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   const ctxRef = useRef(ctx);
   const openDrawer: Drawer | null = listDrawer ? "list" : inspectorDrawer ? "inspector" : null;
   const drawerRef = useRef(openDrawer);
+  const toggleRef = useRef(toggleSettings);
   useLayoutEffect(() => {
     ctxRef.current = ctx;
     drawerRef.current = openDrawer;
+    toggleRef.current = toggleSettings;
   });
 
   const runCommand = useCallback((id: string): void => {
@@ -512,14 +527,18 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
       const target = e.target instanceof Element ? e.target : null;
       if (target !== null && target.closest('[role="menu"]') !== null && e.key !== "Escape") return;
       const typing = isTyping(e.target, e.key);
-      const dialog = c.ui.dialog !== null || document.querySelector(`[aria-modal="true"]${NOT_A_PANE_OVERLAY}`) !== null;
-      if (e.key === "Escape" && c.ui.settings !== null && !dialog && !typing) {
-        e.preventDefault();
-        closeSettings(c.theme, () => c.setUi({ settings: null }));
-        return;
-      }
+      const modals = [...document.querySelectorAll(`[aria-modal="true"]${NOT_A_PANE_OVERLAY}`)];
+      const dialog = c.ui.dialog !== null || modals.length > 0;
       const id = keyToCommand(e, { command: c.command, typing, dialog, selected: c.ui.selected !== null, control: isControl(e.target), listMode: c.listMode });
       if (id === null || !drawerPasses(drawerRef.current, dialog, id)) return;
+      if (id === "settings") {
+        const quiet = c.ui.dialog === null || c.ui.dialog.t === "item";
+        const passes = modals.length === 0 || (modals.length === 1 && (c.ui.settings !== null || modals.every((m) => m.matches(SETTINGS_PASSES))));
+        if (!quiet || !passes) return;
+        e.preventDefault();
+        toggleRef.current();
+        return;
+      }
       if (id === "detail-modal" && e.repeat) {
         e.preventDefault();
         return;
@@ -551,10 +570,10 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
             <button type="button" disabled={importing} onClick={importPlan}>
               {importing ? <span className="dim">Importing…</span> : "Import plan…"}
             </button>
-            <button type="button" onClick={() => setUi({ dialog: { t: "sync", pane: "join" } })}>
+            <button type="button" onClick={() => openSync("join")}>
               Join with a code
             </button>
-            <button type="button" onClick={() => setUi({ dialog: { t: "sync", pane: "setup" } })}>
+            <button type="button" onClick={() => openSync("setup")}>
               Set up sync
             </button>
           </div>
@@ -570,7 +589,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
         <div className="plan-stopped">
           <p className="sync-message bad">{syncMessage(syncState, docName(registry))}</p>
           <SyncActionButtons holds={false}>
-            <button type="button" onClick={() => setUi({ dialog: { t: "sync", pane: null } })}>
+            <button type="button" onClick={() => openSync(null)}>
               Open sync
             </button>
           </SyncActionButtons>
@@ -684,22 +703,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   useEffect(() => {
     if (!sheetBase) setSheet(null);
   }, [sheetBase]);
-  const settingsInColumn = ui.settings !== null && listMode === "column" && layout.inspector.mode === "column";
-  const settingsSheet = ui.settings !== null && (listMode !== "column" || layout.inspector.mode === "overlay");
-  useEffect(() => {
-    if (settingsSheet) setSheet(null);
-  }, [settingsSheet]);
   const hover = useCanHover();
-  const settingsPanel = (frame: "panel" | "sheet", tab: SettingsTab) => (
-    <SettingsPanel
-      frame={frame}
-      tab={tab}
-      hover={hover}
-      onTab={(t) => setUi({ settings: t })}
-      onClose={() => setUi({ settings: null })}
-      onSync={(pane) => setUi({ settings: null, dialog: { t: "sync", pane } })}
-    />
-  );
   const sheets = sheetBase && ui.dialog === null && (
     <>
       <Sheet open={sheet === "plans"} title="Plans" onClose={closeSheet}>
@@ -719,7 +723,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   );
 
   const listColumn = layout.list.mode === "column" ? layout.list.w : null;
-  const inspectorColumn = layout.inspector.mode === "column" && (session !== null || settingsInColumn) ? layout.inspector.w : null;
+  const inspectorColumn = layout.inspector.mode === "column" && session !== null ? layout.inspector.w : null;
   const listDrawerW = layout.list.mode === "overlay" ? layout.list.w : null;
   const inspectorDrawerW = layout.inspector.mode === "overlay" ? layout.inspector.w : null;
   const listEdge = device !== "desk" && layout.list.mode === "overlay" && !drawerOpen;
@@ -776,6 +780,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
           mac={mac}
           command={command}
           onCommand={runCommand}
+          onSettings={toggleSettings}
           tier={p.tier}
           compact={sheetBase ? { button: sidebarButton, onPlans: () => setSheet("plans"), onPlan: () => setSheet("plan") } : null}
           sidebar={sidebarToggle}
@@ -825,7 +830,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
             )}
             {content}
           </main>
-          {inspectorColumn !== null && (
+          {inspectorColumn !== null && session !== null && (
             <>
               <PaneDivider
                 pane="inspector"
@@ -844,7 +849,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
                 onCommit={(next) => commitPane("inspector", next)}
               />
               <div id={INSPECTOR_ID} className="slot slot-panel" data-slot="panel">
-                {ui.settings !== null ? settingsPanel("panel", ui.settings) : session === null ? null : inspectorBody(session, "column")}
+                {inspectorBody(session, "column")}
               </div>
             </>
           )}
@@ -883,7 +888,24 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
           )}
         </div>
         {sheets}
-        {settingsSheet && ui.settings !== null && settingsPanel("sheet", ui.settings)}
+        {ui.settings !== null && (
+          <Settings
+            frame={settingsFrame(readPlatform(window).os, listMode)}
+            section={ui.settings}
+            session={session}
+            readOnly={readOnly}
+            device={registry.device.name}
+            clock={p.clock}
+            hover={hover}
+            closer={settingsCloser}
+            files={files}
+            onSection={(s) => setUi({ settings: s })}
+            syncPane={ui.syncPane}
+            onClose={() => setUi({ settings: null, syncPane: null })}
+            onSyncPane={(pane) => setUi({ syncPane: pane })}
+            onTrashPlan={(id) => void trashOwn(id)}
+          />
+        )}
         {session !== null && itemModal && selectedItemShown !== null && (
           <ItemModal
             session={session}
@@ -897,9 +919,6 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
             onRename={() => rename(selectedItemShown)}
             onClose={closeItemModal}
           />
-        )}
-        {session !== null && ui.dialog !== null && ui.dialog.t === "calendar" && (
-          <CalendarDialog key={session.view().plan.id} session={session} registry={registry} clock={p.clock} onClose={() => setUi({ dialog: null })} />
         )}
         {session !== null && ui.dialog !== null && ui.dialog.t === "choice" && (
           <ChoiceDialog
@@ -915,7 +934,6 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
           <RevertDialog key={ui.dialog.id} session={session} id={ui.dialog.id} onClose={() => setUi({ dialog: null })} />
         )}
         {ui.dialog !== null && ui.dialog.t === "palette" && <Palette commands={commands(ctx)} onClose={closeDialog} />}
-        {ui.dialog !== null && ui.dialog.t === "sync" && <SyncDialog pane={ui.dialog.pane} onPane={(pane) => setUi({ dialog: { t: "sync", pane } })} onClose={closeDialog} />}
         <ConvertedReport />
         {purging !== null && <PurgeConfirm registry={registry} id={purging} onClose={() => setPurging(null)} />}
         {printing && session !== null && <PrintSheet view={session.view()} onDone={() => setPrinting(false)} />}

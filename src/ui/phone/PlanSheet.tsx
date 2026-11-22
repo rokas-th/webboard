@@ -1,5 +1,4 @@
 import { useEffect, useReducer } from "react";
-import { normalizeName } from "../../actions/build";
 import { Refused } from "../../actions/intents";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
@@ -12,6 +11,7 @@ import { toast } from "../common/Toast";
 import { Baselines } from "../panel/Baselines";
 import { calendarSummary } from "../panel/calendarText";
 import { History } from "../panel/History";
+import { commitPlanName } from "../panel/planName";
 import { TextField } from "../panel/TextField";
 import { Trash } from "../panel/Trash";
 import { useRun } from "../run";
@@ -32,7 +32,7 @@ export function CalendarSheet(p: { session: PlanSession; registry: Registry; clo
   );
 }
 
-function SyncSection(p: { session: PlanSession }) {
+function SyncSection(p: { session: PlanSession; onClose(): void }) {
   const { state } = useSyncState();
   const registry = useSyncRegistry();
   const { setUi } = useUiValue();
@@ -54,7 +54,14 @@ function SyncSection(p: { session: PlanSession }) {
   return (
     <>
       <h2>Sync</h2>
-      <button type="button" className="choice-row sync-row" onClick={() => setUi({ dialog: { t: "sync", pane: null } })}>
+      <button
+        type="button"
+        className="choice-row sync-row"
+        onClick={() => {
+          setUi({ settings: "sync", syncPane: null });
+          p.onClose();
+        }}
+      >
         <span className="sync-row-label">Sync</span> <span className="sync-row-state">{chipText(state, docName(registry))}</span>
       </button>
       {movable && (
@@ -74,33 +81,29 @@ export function PlanSheet(p: { session: PlanSession; files: PlanFiles; onClose()
   const run = useRun(p.session);
   const { setUi } = useUiValue();
   const plan = view.plan;
-  const rename = (next: string): boolean => {
-    let name: string;
-    try {
-      name = normalizeName(next);
-    } catch (e) {
-      if (!(e instanceof Refused)) throw e;
-      toast(e.message, "bad");
-      return false;
-    }
-    if (name === plan.name) return false;
-    return run.run({ t: "planName", name }) !== null;
-  };
+  const rename = (next: string): boolean => commitPlanName(run, plan.name, next);
   return (
     <Sheet open title="Plan" onClose={p.onClose}>
       <div className="panel plan-sheet">
         <TextField className="title-input" label="Plan name" value={plan.name} readOnly={readOnly} onCommit={rename} />
         <History session={p.session} readOnly={readOnly} />
         <Trash view={view} readOnly={readOnly} run={run} />
-        <Baselines view={view} readOnly={readOnly} run={run} />
+        <Baselines view={view} readOnly={readOnly} run={run} titled />
         <h2>Calendar</h2>
         <p className="val-line">{calendarSummary(plan.calendar)}</p>
         <div className="actions">
-          <button type="button" className="button-small" onClick={() => setUi({ dialog: { t: "calendar" } })}>
+          <button
+            type="button"
+            className="button-small"
+            onClick={() => {
+              setUi({ settings: "working-time" });
+              p.onClose();
+            }}
+          >
             Change calendar…
           </button>
         </div>
-        <SyncSection session={p.session} />
+        <SyncSection session={p.session} onClose={p.onClose} />
         <h2>File</h2>
         <div className="actions">
           <button type="button" className="button-small" onClick={() => void exportFlow(p.session)}>
@@ -108,7 +111,7 @@ export function PlanSheet(p: { session: PlanSession; files: PlanFiles; onClose()
           </button>
           <ImportButton files={p.files} />
         </div>
-        <SettingsRow onClose={p.onClose} />
+        <SettingsRow hasPlan onClose={p.onClose} />
       </div>
     </Sheet>
   );

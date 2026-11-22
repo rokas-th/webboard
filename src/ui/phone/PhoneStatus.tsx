@@ -21,7 +21,7 @@ import { NOTICE_LABELS, reviewOf } from "../shell/HolidayState";
 import { FILES_STAY, ReloadButton } from "../shell/PlanFailed";
 import { ReloadConfirm } from "../shell/ReloadConfirm";
 import { useUiValue } from "../state";
-import { SyncActionButtons } from "../sync/SyncDialog";
+import { SyncActionButtons } from "../sync/SyncPanes";
 import { CalendarSheet } from "./PlanSheet";
 
 type Tone = "bad" | "cyan" | "amber" | "magenta" | "warn" | "note";
@@ -87,7 +87,7 @@ export function PhoneStatus(p: { session: PlanSession | null; registry: Registry
     setChoicesOpen(false);
     then();
   };
-  const openCalendar = (): void => leave(() => setUi({ dialog: { t: "calendar" } }));
+  const openCalendar = (): void => leave(() => setUi({ settings: "working-time" }));
 
   const reloadable = p.sync === undefined || canReload(p.sync.state);
 
