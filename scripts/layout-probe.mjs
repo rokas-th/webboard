@@ -3375,6 +3375,8 @@ async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffi
   for (const size of sizes) {
     const [w, h] = size.size;
     const [sw, sh] = size.screen;
+    const blank = await cdp.send("Page.navigate", { url: "about:blank" }, sessionId);
+    if (typeof blank.errorText === "string" && blank.errorText !== "") throw new Error(`layout-probe: could not clear the page before ${nameOf(size)}: ${blank.errorText}`);
     await cdp.send(
       "Emulation.setDeviceMetricsOverride",
       { width: w, height: h, deviceScaleFactor: 1, mobile: size.touch, screenWidth: sw, screenHeight: sh },
