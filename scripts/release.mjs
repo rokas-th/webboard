@@ -20,7 +20,7 @@ const VERSION_TOOL = fileURLToPath(new URL("./version.mjs", import.meta.url));
 const USAGE = 'usage: node scripts/release.mjs tarball | manifest <major.minor.patch> --notes "<text>" | check [<major.minor.patch>]';
 const CHECK_USAGE = "usage: node scripts/release.mjs check [<major.minor.patch>]: the version this deploy publishes, or none for a deploy that publishes no release";
 const PUBLISH_HINT = "a deploy that publishes a release passes its version instead: node scripts/release.mjs check <major.minor.patch>";
-const SIGN = (file) => `run owner step R2: npx tauri signer sign -f ~/.tauri/webboard.key ${file}`;
+const SIGN = (file) => `run npx tauri signer sign -f ~/.tauri/webboard.key ${file}`;
 
 class ReleaseError extends Error {}
 
@@ -116,7 +116,7 @@ async function pubkeyOf(root) {
   const conf = JSON.parse(await readFile(join(root, CONF), "utf8"));
   const pubkey = conf?.plugins?.updater?.pubkey;
   if (typeof pubkey !== "string" || pubkey.trim() === "") {
-    fail(`plugins.updater.pubkey in ${join(root, CONF)} is empty: run owner step R1 (npx tauri signer generate -w ~/.tauri/webboard.key), put the content of ~/.tauri/webboard.key.pub there, commit, and build again.`);
+    fail(`plugins.updater.pubkey in ${join(root, CONF)} is empty: generate a key pair with npx tauri signer generate -w ~/.tauri/webboard.key, put the content of ~/.tauri/webboard.key.pub there, commit, and build again.`);
   }
   const what = `plugins.updater.pubkey in ${CONF}`;
   const raw = Buffer.from(minisignLines(pubkey, what)[1].trim(), "base64");
@@ -248,7 +248,7 @@ async function manifest(root, version, notes) {
   checkRepoVersion(root, version);
   const pubkey = await pubkeyOf(root);
   const tarball = await onlyFile(join(root, MAC_DIR), (n) => n.endsWith("_aarch64.app.tar.gz"), "macOS update tarball (*_aarch64.app.tar.gz)", "run node scripts/release.mjs tarball after the Mac build");
-  const deb = await onlyFile(join(root, DEB_DIR), (n) => n.endsWith(".deb"), ".deb", "copy the pop-os .deb there with scp (release.md section 6)");
+  const deb = await onlyFile(join(root, DEB_DIR), (n) => n.endsWith(".deb"), ".deb", "build it on a Linux machine with npm run tauri build and copy the .deb into this folder");
   versionInName(tarball, version);
   versionInName(deb, version);
   await underLimit(tarball);

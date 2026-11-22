@@ -1570,6 +1570,14 @@ async fn live_ics() {
 #[ignore = "live network"]
 async fn burst_openholidays() {
     use std::io::Write;
+    let probes = std::path::PathBuf::from(std::env::var_os("WEBBOARD_PROBES_OUT").expect(
+        "set WEBBOARD_PROBES_OUT to the absolute path of the file the burst report is appended to",
+    ));
+    assert!(
+        probes.is_absolute(),
+        "WEBBOARD_PROBES_OUT must be an absolute path, got {}",
+        probes.display()
+    );
     let year = this_year();
     let client = reqwest::Client::builder()
         .user_agent(WEBBOARD_UA)
@@ -1604,13 +1612,13 @@ async fn burst_openholidays() {
             resp.status().as_u16()
         ));
     }
-    let probes = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.claude/docs/probes.md");
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(probes)
-        .expect("open probes.md");
-    writeln!(file, "{}", lines.join("\n")).expect("append to probes.md");
+        .open(&probes)
+        .unwrap_or_else(|e| panic!("open WEBBOARD_PROBES_OUT {}: {e}", probes.display()));
+    writeln!(file, "{}", lines.join("\n"))
+        .unwrap_or_else(|e| panic!("append to WEBBOARD_PROBES_OUT {}: {e}", probes.display()));
 }
 
 #[tokio::test]

@@ -837,7 +837,8 @@ mod tests {
             conf["bundle"]["createUpdaterArtifacts"].as_bool(),
             Some(true),
             "bundle.createUpdaterArtifacts is true, so every build (and every gate) needs the \
-             private signing key; signing is the owner's step R2 on the finished artifacts"
+             private signing key; turn it off and sign the finished artifacts afterwards with \
+             npx tauri signer sign -f ~/.tauri/webboard.key <file>"
         );
     }
 

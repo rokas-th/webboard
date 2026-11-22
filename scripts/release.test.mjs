@@ -172,15 +172,15 @@ test("manifest refuses when releases already holds a newer version", async () =>
   failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `already holds ${NEXT}, newer than ${CURRENT}`);
 });
 
-test("a missing .sig names the file and owner step R2", async () => {
+test("a missing .sig names the file and the signing command", async () => {
   const p = await project();
   await rm(`${p.deb}.sig`);
-  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.deb}.sig is missing`, `run owner step R2: npx tauri signer sign -f ~/.tauri/webboard.key ${p.deb}`);
+  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.deb}.sig is missing`, `run npx tauri signer sign -f ~/.tauri/webboard.key ${p.deb}`);
 });
 
 test("a .sig made with another key than tauri.conf.json's pubkey is refused by key id", async () => {
   const p = await project({ debKey: OTHER });
-  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.deb}.sig was signed with key`, "but the pubkey in src-tauri/tauri.conf.json is key", "owner step R2");
+  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.deb}.sig was signed with key`, "but the pubkey in src-tauri/tauri.conf.json is key", `run npx tauri signer sign -f ~/.tauri/webboard.key ${p.deb}`);
 });
 
 function rewriteSig(file, edit) {
@@ -190,20 +190,27 @@ function rewriteSig(file, edit) {
   });
 }
 
-test("a .sig of another file made with the right key is refused, naming both files and owner step R2", async () => {
+test("a .sig of another file made with the right key is refused, naming both files and the signing command", async () => {
   const p = await project();
   const other = join(p.root, "other.deb");
   await writeFile(other, "!<arch>\nanother build\n");
   sign(KEY, other);
   await cp(`${other}.sig`, `${p.deb}.sig`);
-  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.deb}.sig is not a signature of ${p.deb}`, `run owner step R2: npx tauri signer sign -f ~/.tauri/webboard.key ${p.deb}`);
+  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.deb}.sig is not a signature of ${p.deb}`, `run npx tauri signer sign -f ~/.tauri/webboard.key ${p.deb}`);
   assert.equal(await readdir(p.releases).catch((e) => e.code), "ENOENT");
+});
+
+test("a missing .deb names the folder and how to build it", async () => {
+  const p = await project();
+  await rm(p.deb);
+  await rm(`${p.deb}.sig`);
+  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `no .deb in ${dirname(p.deb)}`, "npm run tauri build", "copy the .deb into this folder");
 });
 
 test("a .sig whose trusted comment was edited is refused", async () => {
   const p = await project();
   await rewriteSig(`${p.tarball}.sig`, (lines) => lines.map((l) => (l.startsWith("trusted comment: ") ? `${l}x` : l)));
-  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.tarball}.sig`, "trusted comment", "owner step R2");
+  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `${p.tarball}.sig`, "trusted comment", `run npx tauri signer sign -f ~/.tauri/webboard.key ${p.tarball}`);
 });
 
 test("a .sig in another minisign algorithm than the prehashed ED is refused, naming it", async () => {
@@ -225,9 +232,9 @@ test("manifest clears an earlier attempt's files from releases/<v>/", async () =
   assert.deepEqual((await readdir(join(p.releases, CURRENT))).sort(), [DEB_NAME, TARBALL].sort());
 });
 
-test("an empty pubkey is refused and names owner step R1", async () => {
+test("an empty pubkey is refused and names the key generation command", async () => {
   const p = await project({ pubkey: "" });
-  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), "plugins.updater.pubkey", "is empty: run owner step R1");
+  failsWith(release(p.root, "manifest", CURRENT, "--notes", "n"), `plugins.updater.pubkey in ${join(p.root, "src-tauri", "tauri.conf.json")} is empty: generate a key pair with npx tauri signer generate -w ~/.tauri/webboard.key`, "~/.tauri/webboard.key.pub");
 });
 
 test("a version other than version:check's is refused", async () => {
