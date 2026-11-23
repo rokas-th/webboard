@@ -195,7 +195,7 @@ export function buildExample(a: { id: PlanId; dev: DeviceId; ses: SessionId; now
       }),
     ),
   };
-  const plan: PlanState = { id: a.id, name: EXAMPLE_NAME, items, links, calendar, baselines: new Map([[baseline.id, baseline]]), workflow: EMPTY_WORKFLOW, people: EMPTY_PEOPLE };
+  const plan: PlanState = { id: a.id, name: EXAMPLE_NAME, items, links, calendar, baselines: new Map([[baseline.id, baseline]]), workflow: EMPTY_WORKFLOW, people: EMPTY_PEOPLE, defaults: null };
   const action: Action = { id: newId(), dev: a.dev, ses: a.ses, at: a.now, par: [], lbl: EXAMPLE_LABEL, w: stateWrites(plan, "own", () => false) };
   const notes = new Map(ROWS.flatMap((r): [ItemId, string][] => (r.note === undefined ? [] : [[idOf(r.name), r.note]])));
   return { action, newNotes: [...items.keys()], notes };

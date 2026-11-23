@@ -1,5 +1,6 @@
 import * as Y from "yjs";
 import type { IsoDate } from "../domain/dates";
+import type { DefaultsProjection } from "../domain/defaults";
 import type { Derived } from "../domain/derive";
 import type { ItemId, PlanState } from "../domain/model";
 import type { PeopleProjection } from "../domain/people";
@@ -8,7 +9,7 @@ import type { Choice } from "../plan/choices";
 
 export const LOCAL: unique symbol = Symbol("LOCAL");
 
-export interface PlanView { plan: PlanState; derived: Derived; people: PeopleProjection; choices: readonly Choice[]; held: ReadonlySet<ItemId>; pending: number; today: IsoDate; unreadable: readonly { id: ActionId; message: string }[]; newer: boolean }
+export interface PlanView { plan: PlanState; derived: Derived; people: PeopleProjection; defaults: DefaultsProjection; choices: readonly Choice[]; held: ReadonlySet<ItemId>; pending: number; today: IsoDate; unreadable: readonly { id: ActionId; message: string }[]; newer: boolean }
 
 const LETTER: Readonly<Record<Cause, string>> = {
   own: "o",

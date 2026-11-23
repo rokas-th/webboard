@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { newItemIntent } from "../../actions/newItem";
 import { fmtShort, toIso, type Day } from "../../domain/dates";
 import { STEP_COLOURS, type Item, type ItemId, type PersonId, type StepColour, type StepId } from "../../domain/model";
 import { peopleOf } from "../../domain/people";
@@ -707,7 +708,8 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
 
   const commitDraft = (step: Step, name: string): boolean => {
     if (liveStep(step.id) === null) return true;
-    const built = run({ t: "create", kind: "task", name, parent: null, after: null, start: null, step: step.id });
+    const now = p.session.view();
+    const built = run(newItemIntent(now, now.today, "task", name, { column: step.id }));
     if (built === null) return false;
     setDraft(null);
     setUi({ selected: createdItem(built) });

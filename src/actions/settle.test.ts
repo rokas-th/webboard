@@ -35,6 +35,12 @@ describe("settle subjects", () => {
     expect(subjectOf(log, [plan], [], ["pp:zz"])).toBe("a removed person");
   });
 
+  it("names the plan's defaults", () => {
+    const { log, plan } = planOf(act("d1", ["a0"], [w("pd", { dur: 5, dated: false, who: null, group: null, step: null })]));
+    expect(subjectOf(log, [plan], [], ["pd"])).toBe("the plan’s defaults");
+    expect(itemOfUnit("pd")).toBeNull();
+  });
+
   it("reads an assignees unit as its item's unit", () => {
     expect(itemOfUnit("pa:A")).toBe("A");
     expect(itemOfUnit("pp:mira")).toBeNull();

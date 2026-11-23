@@ -75,7 +75,8 @@ export const CHROME = Object.freeze({
   dialogActions: [`.modal-actions ${CONTROL}`],
   panelActions: [`.panel .actions ${CONTROL}`],
   summaryRows: [`.panel .summary-rows ${CONTROL}`],
-  settingsNav: [`.settings-nav ${CONTROL}`],
+  settingsNavApp: [`.settings-nav-group[data-group="app"] ${CONTROL}`],
+  settingsNavPlan: [`.settings-nav-group[data-group="plan"] ${CONTROL}`],
   settingsRows: [".settings-row .settings-control button"],
   sync: [`.sync-tabs ${CONTROL}`, `.sync-buttons ${CONTROL}`],
   banners: [`.banner ${CONTROL}`],
@@ -83,6 +84,7 @@ export const CHROME = Object.freeze({
   boardHead: [".col-head .col-btn", ".col-strip"],
   workflowRows: [".workflow-row button", ".workflow-add"],
   peopleRows: [".people-row button", ".people-add"],
+  defaultsRows: [".defaults-row button", ".defaults-row input"],
   assignees: [".assignees .chip-x", ".assignees .chip-add"],
   listBar: [".scope-bar button", ".list-status button", ".chip-x", ".th-sort", ".th-edge", ".cols-btn"],
   columnsPop: [".cols-pop .popover-close", ".cols-pop .cols-handle", ".cols-pop .cols-check", ".cols-pop .cols-reset"],
@@ -571,9 +573,9 @@ function states() {
   const SETTINGS_SHEET = '.sheet[role="dialog"][aria-label="Settings"]';
   const SETTINGS_GEAR = '.toolbar button[aria-label="Settings"]';
   const APP_LABELS = ["General", "Theme", "Sync", "Import & export"];
-  const PLAN_LABELS = ["Overview", "People", "Workflow", "Working time", "Baselines", "Danger zone"];
+  const PLAN_LABELS = ["Overview", "People", "Workflow", "Working time", "Defaults", "Baselines", "Danger zone"];
   const SECTION_LABELS = [...APP_LABELS, ...PLAN_LABELS];
-  const SECTION_SLUGS = ["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "baselines", "danger"];
+  const SECTION_SLUGS = ["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "defaults", "baselines", "danger"];
   const PLAN_NAME = "MESA 1.0";
   const sectionOn = (label) => [expect(`${SETTINGS_MODAL} .modal-head h3`, label), expect(`${SETTINGS_MODAL} .settings-nav-item[aria-current="page"]`, label), count(`${SETTINGS_MODAL} section.settings-section:not([hidden])`, 1)];
   const sectionChecks = (scope) => [
@@ -629,6 +631,26 @@ function states() {
         expect(`${scope} .cal-inline-actions button:disabled`, "Review changes…"),
       ],
     ],
+    [
+      "defaults",
+      "Defaults",
+      [
+        count(`${scope} .defaults-row`, 5),
+        expect(`${scope} [data-settings-row="defaults.duration"] .settings-label`, "New task duration"),
+        expect(`${scope} [data-settings-row="defaults.duration"] .settings-hint`, "A new task lasts this long once it has dates."),
+        count(`${scope} p.defaults-line[role="status"]:empty`, 1),
+        style(`${scope} p.defaults-line`, "display", "none"),
+        valued(`${scope} [data-settings-row="defaults.duration"] .stepper input.defaults-dur`, "3"),
+        count(`${scope} .stepper button.step-btn`, 2),
+        expect(`${scope} .stepper .defaults-unit`, "working days"),
+        expect(`${scope} [data-settings-row="defaults.dated"] .seg[role="radiogroup"] [role="radio"][aria-checked="true"]`, "Dated"),
+        expect(`${scope} [data-settings-row="defaults.dated"] .seg[role="radiogroup"] [role="radio"][aria-checked="false"]`, "Undated"),
+        expect(`${scope} button.defaults-pick[data-pick="who"]`, "Nobody"),
+        expect(`${scope} button.defaults-pick[data-pick="group"]`, "Plan root"),
+        count(`${scope} button.defaults-pick[data-pick="step"]`, 0),
+        expect(`${scope} [data-settings-row="defaults.step"] .workflow-new`, "New undated items go to “Later” until this plan uses steps."),
+      ],
+    ],
     ["baselines", "Baselines", [expect(`${scope} [data-settings-row="baselines.baselines"] .actions button`, "Save baseline"), count(`${scope} [data-settings-row="baselines.baselines"] h2`, 0)]],
     [
       "danger",
@@ -642,6 +664,8 @@ function states() {
     ],
   ];
   const revealLastNav = reveal(`${SETTINGS_MODAL} .settings-nav-item`, "Danger zone");
+  const revealFirstNav = reveal(`${SETTINGS_MODAL} input.settings-search`);
+  const navHit = (...more) => [revealFirstNav, hitChrome("dialogHead", "settingsNavApp", ...more), revealLastNav, hitChrome("dialogHead", "settingsNavPlan", ...more)];
   const modalFrame = (lo, hi) => [width(SETTINGS_MODAL, lo, 780), height(SETTINGS_MODAL, hi, 580), width(`${SETTINGS_MODAL} .settings-side`, 212, 212), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL)];
   add("about", "mesa", {
     dialog: true,
@@ -702,14 +726,12 @@ function states() {
       click(SETTINGS_GEAR),
       ...sectionOn("General"),
       ...modalFrame(780, 580),
-      revealLastNav,
-      hitChrome("dialogHead", "settingsNav"),
+      ...navHit(),
       click(`${SETTINGS_MODAL} .settings-nav-item`, "Import & export"),
       ...sectionOn("Import & export"),
       expect(`${SETTINGS_SHOWN} [data-settings-row="files.import"] button`, "Import plan…"),
       expect(`${SETTINGS_SHOWN} [data-settings-row="files.export"] button`, "Export plan…"),
-      revealLastNav,
-      hitChrome("dialogHead", "settingsNav", "settingsRows"),
+      ...navHit("settingsRows"),
     ],
   });
   add("settings-workflow/pad-landscape", "mesa-steps-ios-pad", {
@@ -782,6 +804,56 @@ function states() {
       height(PEOPLE_ROW("ole"), 52, 54),
       width(`${PEOPLE_ROW("ole")} button.people-grip`, 44, 44),
       hitChrome("dialogHead", "peopleRows"),
+    ],
+  });
+  const DANA_GONE = "The default assignee “Dana Lee” was removed from people. New items are unassigned until you choose another.";
+  const defaultsOpened = [click(SETTINGS_GEAR), click(`${SETTINGS_MODAL} .settings-nav-item`, "Defaults"), ...sectionOn("Defaults"), ...modalFrame(780, 580)];
+  const defaultsRows = (scope) => [
+    count(`${scope} .defaults-row`, 5),
+    count(`${scope} p.defaults-line[role="status"] span.board-problem`, 1),
+    expect(`${scope} p.defaults-line[role="status"] span.board-problem`, DANA_GONE),
+    valued(`${scope} input.defaults-dur`, "5"),
+    expect(`${scope} [data-settings-row="defaults.dated"] [role="radio"][aria-checked="true"]`, "Undated"),
+    expect(`${scope} button.defaults-pick[data-pick="who"]`, "Nobody"),
+    expect(`${scope} button.defaults-pick[data-pick="group"]`, "Commission"),
+    expect(`${scope} [data-settings-row="defaults.step"] .workflow-new`, "New undated items go to “Later” until this plan uses steps."),
+  ];
+  add("settings-defaults/desk", "mesa-defaults", {
+    sizes: "desktop-and-compact",
+    dialog: true,
+    actions: [
+      ...defaultsOpened,
+      ...defaultsRows(SETTINGS_SHOWN),
+      inWindow(`${SETTINGS_SHOWN} button.defaults-pick[data-pick="group"]`),
+      unclipped(`${SETTINGS_SHOWN} button.defaults-pick[data-pick="group"]`),
+      click(`${SETTINGS_SHOWN} button.defaults-pick[data-pick="who"]`),
+      count('.context-menu[aria-label="Default assignee"] [role="menuitemcheckbox"]', 4),
+      expect('.context-menu [role="menuitemcheckbox"][aria-checked="true"]', "Nobody"),
+      expect('.context-menu [role="menuitemcheckbox"][aria-checked="false"]', "Mira Okafor"),
+      inWindow(".context-menu"),
+      meets(".context-menu", "right", `${SETTINGS_SHOWN} button.defaults-pick[data-pick="who"]`, "right"),
+      uncovered('.context-menu [role="menuitemcheckbox"]'),
+      key("Escape", "Escape"),
+      count(".context-menu", 0),
+      click(`${SETTINGS_SHOWN} button.defaults-pick[data-pick="group"]`),
+      expect('.context-menu[aria-label="Board + puts items in"] [role="menuitemcheckbox"][aria-checked="true"]', "Commission"),
+      inWindow(".context-menu"),
+      meets(".context-menu", "right", `${SETTINGS_SHOWN} button.defaults-pick[data-pick="group"]`, "right"),
+    ],
+  });
+  add("settings-defaults/pad-landscape", "mesa-defaults-ios-pad", {
+    sizes: "ipad-11-landscape",
+    dialog: true,
+    actions: [
+      ...defaultsOpened,
+      ...defaultsRows(SETTINGS_SHOWN),
+      width(`${SETTINGS_SHOWN} .stepper button.step-btn`, 44, 44),
+      height(`${SETTINGS_SHOWN} button.defaults-pick[data-pick="who"]`, 44, 60),
+      revealLastNav,
+      hitChrome("dialogHead", "defaultsRows"),
+      click(`${SETTINGS_SHOWN} button.defaults-pick[data-pick="who"]`),
+      count(".context-menu", 0),
+      askedExactly([[0, ["Nobody ✓", "Mira Okafor", "Ole Berg", "Ana Ruiz"]]]),
     ],
   });
   add("settings-sheet/phone", "mesa", {
@@ -868,6 +940,21 @@ function states() {
       width(`${PHONE_PEOPLE} li.people-row[data-person="ole"] button.people-grip`, 44, 44),
       height(`${PHONE_PEOPLE} li.people-row[data-person="ole"] button.people-avatar`, 44, 44),
       hitChrome("peopleRows"),
+    ],
+  });
+  const PHONE_DEFAULTS = `${SETTINGS_SHEET} section.settings-group[data-section="defaults"]`;
+  add("phone-settings/defaults-rows", "mesa-defaults-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      click(".phone-head button", "Plans"),
+      click(".plans-sheet button.plans-settings-row", "Settings…"),
+      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+      reveal(`${PHONE_DEFAULTS} > h2.settings-group-title`, "Defaults"),
+      ...defaultsRows(PHONE_DEFAULTS),
+      reveal(`${PHONE_DEFAULTS} [data-settings-row="defaults.group"]`),
+      width(`${PHONE_DEFAULTS} .stepper button.step-btn`, 44, 44),
+      hitChrome("defaultsRows"),
     ],
   });
   add("light-timeline", "mesa", {
@@ -1733,12 +1820,12 @@ function states() {
   add("ios44/pad-portrait/settings", "mesa-ios-pad", {
     sizes: "ipad-11-portrait",
     dialog: true,
-    actions: [viewExpect("timeline"), ...settingsFromMore, ...sectionOn("General"), count(".sheet", 0), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL), revealLastNav, hitChrome("dialogHead", "settingsNav")],
+    actions: [viewExpect("timeline"), ...settingsFromMore, ...sectionOn("General"), count(".sheet", 0), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL), ...navHit()],
   });
   add("ios44/pad-landscape/plan", "mesa-ios-pad", { sizes: "ipad-landscapes", panes: OUTLINE_CLOSED, actions: [...fullShell, hitChrome("toolbar", "planList", "summaryRows")] });
   add("ios44/pad-landscape/settings", "mesa-ios-pad", {
     sizes: "ipad-11-landscape",
-    actions: [viewExpect("timeline"), click(SETTINGS_GEAR), ...sectionOn("General"), inWindow(SETTINGS_MODAL), revealLastNav, hitChrome("dialogHead", "settingsNav")],
+    actions: [viewExpect("timeline"), click(SETTINGS_GEAR), ...sectionOn("General"), inWindow(SETTINGS_MODAL), ...navHit()],
   });
   const OVERLAY = '.plan-overlay[role="dialog"][aria-label="Plans"]';
   add("ipad-mode/overlay", "mesa-ios-pad", {

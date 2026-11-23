@@ -285,6 +285,38 @@ describe("resolving a step choice", () => {
   });
 });
 
+describe("resolving a defaults choice", () => {
+  it("concurrent pd edits raise one choice on pd and resolve", () => {
+    const ctx = ctxFrom([...item("A", "task", "Alpha", null, "a0", sched("2026-11-16", 2))]);
+    const PD = { dur: 3, dated: true, who: null, group: null, step: null };
+    const mine = buildAction(ctx, { t: "defaults", field: "dur", value: 5 }).action;
+    const theirs = act("p1", ["a0"], [w("pd", { ...PD, dated: false })], iph);
+    const both = add(ctx, mine, theirs);
+    const c = only(both);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["pd"]);
+    expect(c.items).toEqual([]);
+    const b = buildResolve(both, c, { side: sideKey(c, "iPhone") }, ON);
+    expect(b.action.w).toEqual([w("pd", { ...PD, dated: false }, "resolution")]);
+    expect(b.action.lbl).toBe("Kept the iPhone version of the plan’s defaults");
+    const after = applied(both, b);
+    expect(after.view.choices).toEqual([]);
+    expect(after.view.plan.defaults).toEqual({ ...PD, dated: false });
+    const settled = buildAction(both, { t: "defaults", field: "dur", value: 8 });
+    expect(settled.toast).toBe("New tasks now last 8 working days. The plan’s defaults are settled.");
+  });
+
+  it("a singular subject still reads is settled", () => {
+    const ctx = ctxFrom([]);
+    const mine = buildAction(ctx, { t: "planName", name: "Mine" }).action;
+    const theirs = act("p1", ["a0"], [w("pn", "Theirs")], iph);
+    const both = add(ctx, mine, theirs);
+    expect(only(both).units).toEqual(["pn"]);
+    const settled = buildAction(both, { t: "planName", name: "Final" });
+    expect(settleText(both, settled.action.w)).toBe("The plan name is settled.");
+  });
+});
+
 describe("resolving a person choice", () => {
   const MIRA = { n: "Mira Okafor", i: "MO", c: "cyan", o: "a0" };
   const ONE: Write[] = [...item("A", "task", "Alpha", null, "a0", sched("2026-11-16", 2)), w("pp:mira", MIRA)];

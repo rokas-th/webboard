@@ -160,6 +160,23 @@ describe("describeUnit", () => {
     expect(describeUnit("pa:a", ["gone", "mira", "nobody", "ole"], plan, NONE)).toBe("assigned to “Ole Berg”, “Mira Okafor” and 2 former people");
     expect(describeUnit("pa:a", ["gone"], plan, NONE)).toBe("assigned to a former person");
   });
+
+  it("reads the plan's defaults", async () => {
+    const base = await groupsPlan();
+    const plan: PlanState = {
+      ...base,
+      people: { persons: new Map([["mira", { n: "Mira Okafor", i: "MO", c: "cyan", o: "a1" }], ["gone", null]]), assignees: new Map() },
+      workflow: { steps: new Map([["review", { n: "Review", c: "amber", o: "a15" }], ["later", null]]), items: new Map() },
+    };
+    const pd = { dur: 5, dated: false, who: "mira", group: "S", step: "review" };
+    expect(describeUnit("pd", pd, plan, NONE)).toBe("5 days · undated · “Mira Okafor” · into “Sprint 4” · to “Review”");
+    expect(describeUnit("pd", { dur: 1, dated: true, who: null, group: null, step: null }, plan, NONE)).toBe("1 day · dated · nobody · plan root · first open step");
+    expect(describeUnit("pd", { ...pd, who: "gone", group: "a", step: "later" }, plan, NONE)).toBe("5 days · undated · a removed person · into “Review”, not a group · to a removed step");
+    expect(describeUnit("pd", { ...pd, who: "nobody", group: "zz", step: "zz" }, plan, NONE)).toBe("5 days · undated · a removed person · into a missing group · to a removed step");
+    const trashed: PlanState = { ...plan, items: new Map([...plan.items].map(([id, i]) => [id, id === "S" ? { ...i, trashed: true } : i])) };
+    expect(describeUnit("pd", { ...pd, step: "done" }, trashed, NONE)).toBe("5 days · undated · “Mira Okafor” · into “Sprint 4” (in the Trash) · to “Done”, which completes items");
+    expect(() => describeUnit("pd", { ...pd, dur: 0 }, plan, NONE)).toThrow("pd: dur is not a whole number from 1 to 3650: 0");
+  });
 });
 
 describe("unitSubject", () => {
@@ -203,6 +220,11 @@ describe("unitSubject", () => {
     expect(unitSubject("pp:nobody", plan)).toBe("A removed person");
     expect(unitSubject("pa:a", plan)).toBe("“Review”");
     expect(() => unitSubject("pa:zz", plan)).toThrow(new Error("No item zz"));
+  });
+
+  it("names the plan's defaults", async () => {
+    const plan = (await made(SEED)).session.view().plan;
+    expect(unitSubject("pd", plan)).toBe("The plan’s defaults");
   });
 });
 

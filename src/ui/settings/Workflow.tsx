@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { items, refusal } from "../../actions/copy";
+import { items } from "../../actions/copy";
 import { STEP_COLOURS, type StepColour, type StepId } from "../../domain/model";
 import { projectBoard, stepsOf, type Step } from "../../domain/steps";
 import { usePlanView, type PlanSession } from "../../store/session";
@@ -16,8 +16,6 @@ import {
   completesLabel,
   DELETE_ROW,
   LIMIT_NONE,
-  newItemsByDates,
-  newItemsText,
   newStepName,
   overLimit,
   renameLabel,
@@ -32,11 +30,10 @@ import { pointBelow } from "../common/pickMenu";
 import { toast } from "../common/Toast";
 import { TextField } from "../panel/TextField";
 import { useRun } from "../run";
+import { NewStepPick } from "./NewStepPick";
 import { Row, rowKey } from "./Row";
 
 const SECTION = "workflow";
-
-const LATER: StepId = "later";
 
 const stepStyle = (c: StepColour): CSSProperties => ({ "--step": `var(--s-${c})` });
 
@@ -49,17 +46,6 @@ const rowOf = (el: Element | null): StepId | null => {
   const id = found === null ? undefined : found.dataset.step;
   return id === undefined ? null : id;
 };
-
-function NewItemsLine(p: { mode: "dates" | "steps"; steps: readonly Step[] }) {
-  if (p.mode === "dates") {
-    const later = p.steps.find((s) => s.id === LATER);
-    if (later === undefined) throw new Error("Workflow: a by-dates plan has no Later step");
-    return <p className="settings-line workflow-new">{newItemsByDates(later.name)}</p>;
-  }
-  const first = p.steps.find((s) => !s.completes);
-  if (first === undefined) return <p className="settings-line workflow-new board-problem">{refusal.noOpenStep}</p>;
-  return <p className="settings-line workflow-new">{newItemsText(first.name)}</p>;
-}
 
 export function Workflow(p: { session: PlanSession; readOnly: boolean }) {
   const view = usePlanView(p.session);
@@ -326,7 +312,7 @@ export function Workflow(p: { session: PlanSession; readOnly: boolean }) {
         </button>
       </div>
       <Row section={SECTION} row="new-items" label="New items" stack>
-        <NewItemsLine mode={layout.mode} steps={steps} />
+        <NewStepPick session={p.session} readOnly={ro} align="start" />
       </Row>
       {pop !== null && popStep !== null && (
         <div

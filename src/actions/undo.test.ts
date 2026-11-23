@@ -309,6 +309,15 @@ describe("buildUndo", () => {
     expect(keptAfterOverride([], "wi:PR", "now", "next")).toEqual(["“Plan review” was changed since on the iPhone — kept"]);
   });
 
+  it("kept lines name the plan's defaults", () => {
+    const pd = (dur: number): unknown => ({ dur, dated: true, who: null, group: null, step: null });
+    expect(keptAfterOverride([], "pd", pd(4), pd(5))).toEqual(["The plan’s defaults were changed since on the iPhone — kept"]);
+  });
+
+  it("kept lines keep was changed since for a singular subject", () => {
+    expect(keptAfterOverride([], "pn", "Plan 2", "Plan 3")).toEqual(["The plan name was changed since on the iPhone — kept"]);
+  });
+
   it("kept lines name a person, a removed person and an item's assignees", () => {
     const person = (n: string): unknown => ({ n, i: "MO", c: "cyan", o: "a0" });
     expect(keptAfterOverride([], "pp:mira", person("Mira"), person("Mira Okafor"))).toEqual(["The person “Mira Okafor” was changed since on the iPhone — kept"]);

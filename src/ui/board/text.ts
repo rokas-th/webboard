@@ -119,3 +119,5 @@ export const completesLabel = (name: string): string => `${name} completes items
 export const newItemsText = (name: string): string => `New undated items go to ${q(name)}, the first step that does not complete items.`;
 
 export const newItemsByDates = (name: string): string => `New undated items go to ${q(name)} until this plan uses steps.`;
+
+export const newItemsDefault = (name: string): string => `New undated items go to ${q(name)}.`;

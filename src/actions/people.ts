@@ -177,6 +177,12 @@ export function personDraft(ctx: Ctx, intent: PersonIntent | AssignIntent): Pers
   return intent.t === "person" ? editDraft(ctx, intent) : assignDraft(ctx, intent);
 }
 
+export function createPeopleWrites(plan: PlanState, id: ItemId, kind: Item["kind"], who: PersonId | undefined): readonly Write[] {
+  if (who === undefined) return [];
+  if (kind === "group") throw new Error("A group has no assignees");
+  return [listWrite(id, [livePerson(plan, who).id])];
+}
+
 export function duplicatePeopleWrites(plan: PlanState, copies: readonly (readonly [from: ItemId, to: ItemId])[]): readonly Write[] {
   const isLive = new Set(peopleOf(plan).map((p) => p.id));
   return copies.flatMap(([from, to]) => {

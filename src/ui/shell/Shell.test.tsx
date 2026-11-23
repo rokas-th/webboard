@@ -403,6 +403,30 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect(screen.getByRole("menu", { name: menuName })).toBeTruthy();
   });
 
+  it("+ New › Task creates with the plan defaults", async () => {
+    const t = await made(MESA_SEED);
+    t.session.apply({ t: "person", op: "add", name: "Mira Okafor", initials: "MO", colour: "cyan", after: null });
+    const mira = [...t.session.view().plan.people.persons.keys()][0];
+    t.session.apply({ t: "defaults", field: "dur", value: 5 });
+    t.session.apply({ t: "defaults", field: "dated", value: false });
+    t.session.apply({ t: "defaults", field: "who", value: mira });
+    t.session.apply({ t: "defaults", field: "group", value: "g1" });
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const apply = vi.spyOn(t.session, "apply");
+    fireEvent.click(screen.getByRole("button", { name: "+ New" }));
+    const [task] = within(screen.getByRole("menu", { name: "New item" })).getAllByRole("menuitem");
+    act(() => {
+      fireEvent.click(task);
+    });
+    await settle();
+    expect(apply.mock.calls).toEqual([[{ t: "create", kind: "task", name: "New task", parent: null, after: null, start: null, dur: 5, who: mira }]]);
+    const id = lastUi().selected;
+    if (id === null) throw new Error("nothing selected");
+    expect(t.session.view().plan.items.get(id)?.schedule).toMatchObject({ start: null, dur: 5 });
+    expect(t.session.view().plan.people.assignees.get(id)).toEqual([mira]);
+  });
+
   it("moves focus through the + New menu with the arrow keys, Home and End, wrapping, and the selection stays", async () => {
     const t = await made(MESA_SEED);
     render(withSync(shellFor(t).ui));

@@ -411,6 +411,21 @@ describe("choices", () => {
     expect(resolved.plan.workflow.steps.get("qa")).toEqual(step("Check"));
   });
 
+  it("concurrent pd edits raise one choice on pd and resolve", () => {
+    const pd = (o: Record<string, unknown>): unknown => ({ dur: 3, dated: true, who: null, group: null, step: null, ...o });
+    const sides = [act("s0", ["a0"], [w("pd", pd({}))], mac), act("m1", ["s0"], [w("pd", pd({ dur: 5 }))], mac), act("p1", ["s0"], [w("pd", pd({ dated: false }))], iph)];
+    const { cs, held } = run(...sides);
+    const c = only(cs);
+    expect(c.kind).toBe("items");
+    expect(c.units).toEqual(["pd"]);
+    expect(c.items).toEqual([]);
+    expect(labels(c)).toEqual(["Mac", "iPhone"]);
+    expect([...held]).toEqual([]);
+    const resolved = run(...sides, act("r1", ["m1", "p1"], [w("pd", pd({ dated: false }), "resolution")], { dev: "d1", meta: { resolves: c.id } }));
+    expect(resolved.cs).toEqual([]);
+    expect(resolved.plan.defaults).toEqual(pd({ dated: false }));
+  });
+
   it("concurrent step moves of one item raise an items choice naming the item", () => {
     const { cs, held } = run(act("m1", ["a0"], [w("wi:A", "now")], mac), act("p1", ["a0"], [w("wi:A", "next")], iph));
     const c = only(cs);

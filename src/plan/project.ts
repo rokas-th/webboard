@@ -229,6 +229,7 @@ const build = (id: PlanId, t: Table): PlanState => {
     baselines: new Map(baselines),
     workflow,
     people,
+    defaults: t.live.has("pd") ? decodeAs("defaults", "pd", t.live.get("pd")) : null,
   };
   tables.set(plan, t);
   return plan;

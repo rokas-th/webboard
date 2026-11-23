@@ -588,6 +588,27 @@ describe("new items", () => {
     expect(h.setUi.mock.calls).toEqual([[{ selected: id, naming: id }]]);
   });
 
+  it("creates with the plan defaults", async () => {
+    const t = await made(SMALL);
+    t.session.apply({ t: "person", op: "add", name: "Mira Okafor", initials: "MO", colour: "cyan", after: null });
+    const mira = [...t.session.view().plan.people.persons.keys()][0];
+    t.session.apply({ t: "defaults", field: "dur", value: 5 });
+    t.session.apply({ t: "defaults", field: "dated", value: false });
+    t.session.apply({ t: "defaults", field: "who", value: mira });
+    t.session.apply({ t: "defaults", field: "group", value: "g1" });
+    const apply = vi.spyOn(t.session, "apply");
+    find(harness(t, { selected: "one" }).ctx, "new-task").run();
+    find(harness(t).ctx, "new-milestone").run();
+    expect(created(apply)).toEqual([
+      { t: "create", kind: "task", name: "New task", parent: null, after: "one", start: null, dur: 5, who: mira },
+      { t: "create", kind: "milestone", name: "New milestone", parent: null, after: null, start: null, who: mira },
+    ]);
+    const task = [...t.session.view().plan.items.values()].find((i) => i.name === "New task");
+    if (task === undefined) throw new Error("no new task");
+    expect(task.schedule).toMatchObject({ start: null, dur: 5 });
+    expect(t.session.view().plan.people.assignees.get(task.id)).toEqual([mira]);
+  });
+
   it("starts on the next working day after the clock's today", async () => {
     const t = await made(MESA_SEED);
     t.clock.set("2026-11-13");

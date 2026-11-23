@@ -89,6 +89,14 @@ export const MAX_PERSON_NAME = 64;
 export const MAX_INITIALS = 3;
 export const MAX_ASSIGNEES = 8;
 
+export interface DefaultsValue {
+  dur: number;
+  dated: boolean;
+  who: PersonId | null;
+  group: ItemId | null;
+  step: StepId | null;
+}
+
 export interface PlanState {
   id: PlanId;
   name: string;
@@ -98,6 +106,7 @@ export interface PlanState {
   baselines: ReadonlyMap<BaselineId, Baseline>;
   workflow: Workflow;
   people: People;
+  defaults: DefaultsValue | null;
 }
 
 export const scheduleOf = (it: Item): Schedule => {

@@ -1,13 +1,14 @@
 import * as Y from "yjs";
 import { buildAction, initialAction } from "../actions/build";
 import { Refused, type Intent } from "../actions/intents";
+import { newItemIntent } from "../actions/newItem";
 import { buildResolve, canPick, type Pick, type ResolveOptions } from "../actions/resolve";
 import { buildRevert, buildUndo, undoOffer } from "../actions/undo";
 import type { Calendar, Closure, Tuning } from "../domain/calendar";
 import { toDay, toIso, type IsoDate, type Weekday } from "../domain/dates";
 import type { Item, ItemId, ItemKind, LinkType, PersonId, Status, Horizon, StepId } from "../domain/model";
 import { initialsOf, peopleOf, storedAssigneesOf } from "../domain/people";
-import { STEP_COLOURS, stepsOf } from "../domain/steps";
+import { STEP_COLOURS, stepModeOf, stepsOf } from "../domain/steps";
 import { newId } from "../log/ids";
 import { LogState } from "../log/state";
 import type { Action, ActionId, DeviceId, SessionId } from "../log/types";
@@ -117,9 +118,15 @@ const PERSON_NAMES = ["Mira Okafor", "Ole Berg", "Ana Ruiz", "mira okafor"];
 const PERSON_OPS = ["add", "rename", "initials", "colour", "reorder", "remove"] as const;
 const PERSON_INITIALS = ["MO", "Mo", "OB", "AR", "X"];
 
+const DEFAULTS_INTENTS = [["defaults", 8]] as const;
+
+const DEFAULT_FIELDS = ["dur", "dated", "who", "group", "step"] as const;
+const DEFAULT_DURS = [1, 2, 3, 5, 8];
+
 export interface SimOptions {
   steps: boolean;
   people?: boolean;
+  defaults?: boolean;
 }
 
 const weighted = <K extends string>(table: readonly (readonly [K, number])[], roll: number): K => {
@@ -164,7 +171,7 @@ const actionIds = (doc: PlanDoc): Set<ActionId> => new Set(doc.ydoc.getMap("acti
 
 export function simulate(seed: number, opts: SimOptions = { steps: false }): SimResult {
   const r = rngOf(seed);
-  const intents: readonly (readonly [Intent["t"], number])[] = [...INTENTS, ...(opts.steps ? STEP_INTENTS : []), ...(opts.people === true ? PEOPLE_INTENTS : [])];
+  const intents: readonly (readonly [Intent["t"], number])[] = [...INTENTS, ...(opts.steps ? STEP_INTENTS : []), ...(opts.people === true ? PEOPLE_INTENTS : []), ...(opts.defaults === true ? DEFAULTS_INTENTS : [])];
   const int = (lo: number, hi: number): number => lo + Math.floor(r() * (hi - lo + 1));
   const pick = <T>(xs: readonly T[]): T => {
     if (xs.length === 0) throw new Error("pick from an empty list");
@@ -268,6 +275,7 @@ export function simulate(seed: number, opts: SimOptions = { steps: false }): Sim
         const parent = parentPick();
         const sibs = childrenOf(plan, parent);
         const after = sibs.length === 0 || chance(0.5) ? null : pick(sibs).id;
+        if (opts.defaults === true) return createWithDefaults(view, kind, parent, after);
         if (kind === "group") return { t: "create", kind, name: pick(NAMES), parent, after, start: null };
         const start = chance(0.85) ? pick(DATES) : null;
         const dur = chance(0.3) ? undefined : kind === "milestone" ? 0 : int(1, 5);
@@ -298,8 +306,10 @@ export function simulate(seed: number, opts: SimOptions = { steps: false }): Sim
         const sibs = childrenOf(plan, parent).filter((s) => s.id !== it.id);
         return { t: "place", item: it.id, parent, after: sibs.length === 0 || chance(0.4) ? null : pick(sibs).id };
       }
-      case "trash":
-        return { t: "trash", items: [pick(items).id] };
+      case "trash": {
+        const followed = view.defaults.group;
+        return { t: "trash", items: [opts.defaults === true && followed !== null && chance(0.3) ? followed : pick(items).id] };
+      }
       case "restore": {
         const trashed = items.filter((i) => i.trashed);
         return { t: "restore", items: [pick(trashed.length > 0 && chance(0.8) ? trashed : items).id] };
@@ -338,6 +348,8 @@ export function simulate(seed: number, opts: SimOptions = { steps: false }): Sim
       }
       case "person":
         return personIntentFor(view);
+      case "defaults":
+        return defaultsIntentFor(view);
       case "assign":
       case "unassign":
       case "assignees":
@@ -347,10 +359,36 @@ export function simulate(seed: number, opts: SimOptions = { steps: false }): Sim
     }
   };
 
+  const createWithDefaults = (view: PlanView, kind: ItemKind, parent: ItemId | null, after: ItemId | null): Intent => {
+    const name = pick(NAMES);
+    if (kind === "task" && stepModeOf(view.plan) === "steps" && chance(0.5)) return newItemIntent(view, SIM_TODAY, kind, name, { column: pick(stepsOf(view.plan)).id });
+    return newItemIntent(view, SIM_TODAY, kind, name, { parent, after });
+  };
+
+  const defaultsIntentFor = (view: PlanView): Intent => {
+    const plan = view.plan;
+    const anyOrNull = <T,>(xs: readonly T[]): T | null => (xs.length === 0 || chance(0.3) ? null : pick(xs));
+    const field = pick(DEFAULT_FIELDS);
+    switch (field) {
+      case "dur":
+        return { t: "defaults", field, value: pick(DEFAULT_DURS) };
+      case "dated":
+        return { t: "defaults", field, value: chance(0.5) };
+      case "who":
+        return { t: "defaults", field, value: anyOrNull(peopleOf(plan).map((p) => p.id)) };
+      case "group":
+        return { t: "defaults", field, value: anyOrNull([...plan.items.values()].filter((i) => i.kind === "group" && !i.trashed).map((i) => i.id)) };
+      case "step":
+        return { t: "defaults", field, value: anyOrNull(stepsOf(plan).filter((x) => !x.completes).map((x) => x.id)) };
+    }
+  };
+
   const stepIntentFor = (view: PlanView): Intent => {
     const live = stepsOf(view.plan);
-    const op = pick(STEP_OPS);
     const anyOrNull = (ids: readonly StepId[]): StepId | null => (ids.length === 0 || chance(0.3) ? null : pick(ids));
+    const followed = view.defaults.step;
+    if (opts.defaults === true && followed !== null && chance(0.3)) return { t: "step", op: "delete", step: followed, to: anyOrNull(live.map((x) => x.id).filter((id) => id !== followed)) };
+    const op = pick(STEP_OPS);
     if (live.length === 0 || op === "add") return { t: "step", op: "add", name: pick(STEP_NAMES), colour: pick(STEP_COLOURS), after: anyOrNull(live.map((x) => x.id)) };
     const step = pick(live).id;
     const others = live.filter((x) => x.id !== step).map((x) => x.id);
@@ -578,6 +616,26 @@ export function simulate(seed: number, opts: SimOptions = { steps: false }): Sim
       record(opening, { action: b.action, kind: "person", view: ctx.view }, b.newNotes);
     }),
   );
+  const openWith = (intentOf: (view: PlanView) => Intent): void =>
+    stepAt(-1, () => {
+      const ctx = ctxFor(opening);
+      const intent = intentOf(ctx.view);
+      const b = buildAction(ctx, intent);
+      record(opening, { action: b.action, kind: intent.t, view: ctx.view }, b.newNotes);
+    });
+  const openingDefaults = (): readonly ((view: PlanView) => Intent)[] => [
+    () => ({ t: "create", kind: "group", name: pick(NAMES), parent: null, after: null, start: null }),
+    (view) => ({ t: "defaults", field: "group", value: pick([...view.plan.items.values()].filter((i) => i.kind === "group")).id }),
+    ...(opts.people === true ? [(view: PlanView): Intent => ({ t: "defaults", field: "who", value: pick(peopleOf(view.plan)).id })] : []),
+    ...(chance(0.5) ? [(): Intent => ({ t: "defaults", field: "dated", value: false })] : []),
+    ...(opts.steps && chance(0.5)
+      ? [
+          (): Intent => ({ t: "step", op: "add", name: pick(["Review", "QA", "Ship"]), colour: pick(STEP_COLOURS), after: null }),
+          (view: PlanView): Intent => ({ t: "defaults", field: "step", value: pick(stepsOf(view.plan).filter((x) => !x.completes)).id }),
+        ]
+      : []),
+  ];
+  (opts.defaults === true ? openingDefaults() : []).forEach(openWith);
   devices.slice(1).forEach((d) => send(opening, d));
   Array.from({ length: count }).forEach((_, n) => stepAt(n, () => {
     if (partition !== null) {

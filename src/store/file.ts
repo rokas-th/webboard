@@ -227,7 +227,9 @@ function remap(plan: PlanState, planId: PlanId): { plan: PlanState; idMap: Reado
     persons: plan.people.persons,
     assignees: new Map([...plan.people.assignees].map(([item, ids]): [ItemId, readonly PersonId[] | null] => [fresh(item), ids])),
   };
-  return { plan: { id: planId, name: plan.name, items, links, calendar: { ...plan.calendar, closures }, baselines, workflow, people }, idMap };
+  const group = plan.defaults?.group ?? null;
+  const defaults = plan.defaults === null ? null : { ...plan.defaults, group: group !== null && plan.items.has(group) ? fresh(group) : null };
+  return { plan: { id: planId, name: plan.name, items, links, calendar: { ...plan.calendar, closures }, baselines, workflow, people, defaults }, idMap };
 }
 
 export function buildImport(bytes: Uint8Array, fileName: string, dev: DeviceId, ses: SessionId, now: number): ImportResult {

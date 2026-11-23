@@ -9,7 +9,7 @@ export type Zoom = FixedZoom | "F";
 
 export type SyncPane = "setup" | "join" | "pair" | "devices";
 
-export type SettingsSection = "general" | "theme" | "sync" | "files" | "overview" | "people" | "workflow" | "working-time" | "baselines" | "danger";
+export type SettingsSection = "general" | "theme" | "sync" | "files" | "overview" | "people" | "workflow" | "working-time" | "defaults" | "baselines" | "danger";
 
 export type DialogState =
   | { t: "choice"; id: string; side?: string }

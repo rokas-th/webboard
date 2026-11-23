@@ -120,8 +120,20 @@ describe("projectPlan", () => {
       baselines: new Map([["B1", { id: "B1", name: "Before", at: "2026-11-08", dates: { T: { start: "2026-11-16", dur: 3 } } }]]),
       workflow: EMPTY_WORKFLOW,
       people: EMPTY_PEOPLE,
+      defaults: null,
     };
     expect(projectPlan("P", log)).toEqual(expected);
+  });
+
+  it("reads pd into defaults, absent is null", () => {
+    const value = { dur: 5, dated: false, who: "mira", group: "G", step: null };
+    const base = act("a0", [], [...plan0, ...item("T", "task", "Spec", null, "a0", sched("2026-11-16"))]);
+    expect(projectPlan("P", logOf(base)).defaults).toBeNull();
+    const plan = projectPlan("P", logOf(base, act("d", ["a0"], [w("pd", value)])));
+    expect(plan.defaults).toEqual(value);
+    const changed = applyWrites(plan, [w("pd", { ...value, dur: 2 })]);
+    expect(changed.defaults).toEqual({ ...value, dur: 2 });
+    expect(applySchedules(plan, [w("s:T", sched("2026-11-18"))]).defaults).toEqual(value);
   });
 
   it("projects a 400-day closure that an older build wrote to the log", () => {

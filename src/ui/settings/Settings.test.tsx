@@ -567,7 +567,7 @@ describe("the plan group: Overview, Baselines, Danger zone", () => {
       ["app", "App"],
       ["plan", name],
     ]);
-    expect(navItems(m.root())).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "People", "Workflow", "Working time", "Baselines", "Danger zone"]);
+    expect(navItems(m.root())).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "People", "Workflow", "Working time", "Defaults", "Baselines", "Danger zone"]);
     fireEvent.click(within(nav(m.root())).getByRole("button", { name: "Danger zone" }));
     expect([m.onSection.mock.calls, m.root().getAttribute("aria-label"), shownSection(m.root())]).toEqual([[["danger"]], "Danger zone", ["danger"]]);
     await t.session.close();
@@ -771,6 +771,61 @@ describe("the plan group: Overview, Baselines, Danger zone", () => {
     expect([...nav(m.root()).querySelectorAll<HTMLElement>("button.settings-nav-row")].map((b) => b.dataset["row"])).toEqual(["danger.trash"]);
     fireEvent.click(within(nav(m.root())).getByRole("button", { name: "Move to Trash" }));
     expect([shownSection(m.root()), document.activeElement?.textContent]).toEqual([["danger"], "Move to Trash"]);
+    await t.session.close();
+  });
+
+  it("a search for assignee, duration, undated, dated or group finds the Defaults rows", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ session: t.session });
+    const found = (q: string): (string[] | (string | undefined)[])[] => {
+      typeSearch(m.root(), q);
+      return [navItems(m.root()), [...nav(m.root()).querySelectorAll<HTMLElement>("button.settings-nav-row")].map((b) => b.dataset["row"])];
+    };
+    expect([found("assignee"), found("duration"), found("undated"), found("dated"), found("group")]).toEqual([
+      [["Defaults"], ["defaults.assignee"]],
+      [["Defaults"], ["defaults.duration"]],
+      [["Defaults"], ["defaults.dated", "defaults.step"]],
+      [["Defaults"], ["defaults.dated", "defaults.step"]],
+      [["Defaults"], ["defaults.group"]],
+    ]);
+    typeSearch(m.root(), "assignee");
+    fireEvent.click(within(nav(m.root())).getByRole("button", { name: "Default assignee" }));
+    expect([shownSection(m.root()), m.root().getAttribute("aria-label"), document.activeElement?.getAttribute("data-pick")]).toEqual([["defaults"], "Defaults", "who"]);
+    expect(rowsOf(m.root(), "defaults")).toEqual([
+      ["defaults.duration", "New task duration"],
+      ["defaults.dated", "New items are"],
+      ["defaults.assignee", "Default assignee"],
+      ["defaults.group", "Board + puts items in"],
+      ["defaults.step", "Step for new undated items"],
+    ]);
+    await t.session.close();
+  });
+
+  it("Add people in Settings… in Defaults opens People on Add person", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ session: t.session, section: "defaults" });
+    fireEvent.click(within(sectionEl(m.root(), "defaults")).getByRole("button", { name: "Default assignee: Nobody" }));
+    fireEvent.click(within(m.root()).getByRole("menuitem", { name: "Add people in Settings…" }));
+    expect([m.onSection.mock.calls, shownSection(m.root()), document.activeElement?.textContent]).toEqual([[["people"]], ["people"], "+ Add person"]);
+    await t.session.close();
+  });
+
+  it("Defaults renders its rows and status line in the phone sheet, where Add people in Settings… scrolls to People", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ frame: "sheet", t });
+    const sheet = m.view.getByRole("dialog", { name: "Settings" });
+    const group = sheet.querySelector<HTMLElement>('section.settings-group[data-section="defaults"]');
+    if (group === null) throw new Error("no Defaults group");
+    expect([group.querySelector("h2")?.textContent, [...group.querySelectorAll<HTMLElement>(".defaults-row")].map((r) => r.dataset["settingsRow"]), group.querySelectorAll('p.defaults-line[role="status"]').length]).toEqual([
+      "Defaults",
+      ["defaults.duration", "defaults.dated", "defaults.assignee", "defaults.group", "defaults.step"],
+      1,
+    ]);
+    const scrolled = vi.mocked(Element.prototype.scrollIntoView);
+    scrolled.mockClear();
+    fireEvent.click(within(group).getByRole("button", { name: "Default assignee: Nobody" }));
+    fireEvent.click(within(sheet).getByRole("menuitem", { name: "Add people in Settings…" }));
+    expect(scrolled.mock.contexts).toEqual([sheet.querySelector('section.settings-group[data-section="people"] h2')]);
     await t.session.close();
   });
 
@@ -1034,7 +1089,7 @@ describe("Settings in the sheet frame", () => {
     const list = sheet.querySelector(".settings-list");
     if (list === null) throw new Error("no list");
     const order = [...list.querySelectorAll<HTMLElement>("p.settings-list-plan, section.settings-group > h2")].map((el) => el.textContent);
-    expect(order).toEqual(["General", "Theme", "Sync", "Import & export", t.session.view().plan.name, "Overview", "People", "Workflow", "Working time", "Baselines", "Danger zone"]);
+    expect(order).toEqual(["General", "Theme", "Sync", "Import & export", t.session.view().plan.name, "Overview", "People", "Workflow", "Working time", "Defaults", "Baselines", "Danger zone"]);
     await t.session.close();
   });
 

@@ -23,6 +23,11 @@ export const pointBelow = (el: HTMLElement): Point => {
   return { x: r.left, y: r.bottom + 4 };
 };
 
+export const pointBelowEnd = (el: HTMLElement): Point => {
+  const r = el.getBoundingClientRect();
+  return { x: r.right, y: r.bottom + 4, edge: "end" };
+};
+
 export function usePickMenu(name: string): PickMenu {
   const native = useNativeMenu(name);
   const { show, dismiss } = native;

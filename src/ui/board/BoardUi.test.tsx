@@ -443,6 +443,47 @@ describe("Board +", () => {
     expect(apply.mock.calls).toEqual([[{ t: "create", kind: "task", name: "Blurred", parent: null, after: null, start: null, step: "now" }]]);
     expect(document.querySelector(".card-draft")).toBeNull();
   });
+
+  const addInNext = (name: string): void => {
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Add a task to Next" }));
+    });
+    const input = screen.getByRole("textbox", { name: "Name of the new task in Next" });
+    fireEvent.change(input, { target: { value: name } });
+    act(() => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+  };
+
+  it("creates with the plan defaults: the group, the assignee and the duration, and at the root once the group is trashed", async () => {
+    const t = await made([{ id: "g", name: "Commission", kind: "group" }, ...SEED]);
+    const { MO } = addPeople(t, CREW);
+    act(() => {
+      t.session.apply({ t: "defaults", field: "dur", value: 5 });
+      t.session.apply({ t: "defaults", field: "who", value: MO });
+      t.session.apply({ t: "defaults", field: "group", value: "g" });
+    });
+    await board(t);
+    const apply = vi.spyOn(t.session, "apply");
+    addInNext("Polish mirror");
+    expect(apply.mock.calls).toEqual([[{ t: "create", kind: "task", name: "Polish mirror", parent: "g", after: null, start: null, step: "next", who: MO }]]);
+    const added = [...t.session.view().plan.items.values()].find((i) => i.name === "Polish mirror");
+    if (added === undefined) throw new Error("no new task");
+    expect(added.place.parent).toBe("g");
+    expect(added.schedule).toMatchObject({ start: null, dur: 5 });
+    expect(t.session.view().plan.people.assignees.get(added.id)).toEqual([MO]);
+    expect(cardsIn("next")).toContain(added.id);
+    act(() => {
+      t.session.apply({ t: "trash", items: ["g"] });
+    });
+    apply.mockClear();
+    addInNext("Coat mirror");
+    expect(apply.mock.calls).toEqual([[{ t: "create", kind: "task", name: "Coat mirror", parent: null, after: null, start: null, step: "next", who: MO }]]);
+    const rooted = [...t.session.view().plan.items.values()].find((i) => i.name === "Coat mirror");
+    if (rooted === undefined) throw new Error("no second task");
+    expect(rooted.place.parent).toBeNull();
+    expect(cardsIn("next")).toContain(rooted.id);
+  });
 });
 
 describe("Board header menu", () => {

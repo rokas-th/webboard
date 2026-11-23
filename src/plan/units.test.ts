@@ -7,6 +7,7 @@ import {
   closure,
   codecOf,
   decodeHolidayYear,
+  defaults,
   existence,
   holidayYear,
   key,
@@ -27,7 +28,7 @@ import {
   validateWrite,
   weekdays,
 } from "./units";
-import type { PersonValue, PlanState } from "../domain/model";
+import type { DefaultsValue, PersonValue, PlanState } from "../domain/model";
 import { LogState } from "../log/state";
 import type { Write } from "../log/types";
 import { act } from "../test/act";
@@ -451,6 +452,63 @@ describe("people", () => {
       { u: "pa:T1", v: ["mira", "ole"], c: "own" },
       { u: "pa:T2", v: null, c: "own" },
     ]);
+  });
+});
+
+describe("defaults", () => {
+  const value: DefaultsValue = { dur: 5, dated: false, who: "mira", group: "g2", step: null };
+  const encoded = { dur: 5, dated: false, who: "mira", group: "g2", step: null };
+
+  it("pd round-trips every field and its null ids", () => {
+    expect(defaults.enc(value)).toEqual(encoded);
+    expect(defaults.dec(encoded)).toEqual(value);
+    const full: DefaultsValue = { dur: 1, dated: true, who: null, group: null, step: "review" };
+    expect(defaults.dec(defaults.enc(full))).toEqual(full);
+    expect(defaults.dec({ ...encoded, dur: 3650 })).toEqual({ ...value, dur: 3650 });
+    expect(codecOf("pd")).toBe(defaults);
+    expect(() => validateWrite({ u: "pd", v: encoded, c: "own" })).not.toThrow();
+    expect(() => validateWrite({ u: "pd", v: encoded, c: "push" })).toThrow(new Error("pd: push cannot write this unit"));
+  });
+
+  it("pd rejects", () => {
+    expect(() => defaults.dec({ ...encoded, x: 1 })).toThrow("pd: value has unknown fields x");
+    expect(() => defaults.dec({ dur: 5, dated: false, who: null, group: null })).toThrow("pd: value lacks step");
+    expect(() => defaults.dec({ ...encoded, dur: 0 })).toThrow("pd: dur is not a whole number from 1 to 3650: 0");
+    expect(() => defaults.dec({ ...encoded, dur: 3651 })).toThrow("pd: dur is not a whole number from 1 to 3650: 3651");
+    expect(() => defaults.dec({ ...encoded, dur: 2.5 })).toThrow("pd: dur is not a whole number from 1 to 3650: 2.5");
+    expect(() => defaults.dec({ ...encoded, dated: "yes" })).toThrow('pd: dated is not true or false: "yes"');
+    expect(() => defaults.dec({ ...encoded, who: "a b" })).toThrow('pd: who is not an id: "a b"');
+    expect(() => defaults.dec({ ...encoded, group: 7 })).toThrow("pd: group is not a string: 7");
+    expect(() => defaults.dec({ ...encoded, step: "" })).toThrow('pd: step is not an id: ""');
+    expect(() => defaults.dec(null)).toThrow("pd: value is not an object: null");
+    expect(() => defaults.enc({ ...value, dur: 0 })).toThrow("pd: dur is not a whole number from 1 to 3650: 0");
+    expect(() => validateWrite({ u: "pd", v: null, c: "own" })).toThrow("pd: value is not an object: null");
+  });
+
+  it("parseKey reads pd and refuses pd:x", () => {
+    expect(key.pd).toBe("pd");
+    expect(parseKey("pd")).toEqual({ kind: "pd", arg: "" });
+    expect(() => parseKey("pd:x")).toThrow("Malformed unit key “pd:x”");
+  });
+
+  it("stateWrites writes pd only when the plan stores defaults", () => {
+    const log = new LogState(planRules);
+    log.add([
+      act("a0", [], [
+        { u: "pn", v: "Plan", c: "own" },
+        { u: "cr", v: null, c: "own" },
+        { u: "cw", v: [1, 2, 3, 4, 5], c: "own" },
+        { u: "e:T1", v: { k: "task", t: false }, c: "own" },
+        { u: "n:T1", v: "Survey", c: "own" },
+        { u: "s:T1", v: ["2026-11-09", 3, "todo", 0, "now"], c: "own" },
+        { u: "p:T1", v: [null, "a0"], c: "own" },
+      ]),
+    ]);
+    const plan = projectPlan("P", log);
+    expect(plan.defaults).toBeNull();
+    expect(stateWrites(plan, "own", () => false).map((w) => w.u)).not.toContain("pd");
+    const stored: PlanState = { ...plan, defaults: value };
+    expect(stateWrites(stored, "own", () => false).filter((w) => w.u === "pd")).toEqual([{ u: "pd", v: encoded, c: "own" }]);
   });
 });
 

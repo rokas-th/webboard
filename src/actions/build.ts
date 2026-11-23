@@ -18,7 +18,9 @@ import { hasPredecessor, itemOf, live, notInsideTrash } from "./lookup";
 import { normalizeName } from "./names";
 import { isCalendarWrite, settleText, unique } from "./settle";
 import { slotAfter } from "./slot";
-import { duplicatePeopleWrites, personDraft } from "./people";
+import { createPeopleWrites, duplicatePeopleWrites, personDraft } from "./people";
+import { defaultsDraft } from "./defaults";
+import { defaultsOf } from "../domain/defaults";
 import { createStepWrites, duplicateStepWrites, stepDraft, switched } from "./steps";
 
 export { normalizeName };
@@ -360,18 +362,19 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
       const base = [own(key.e(id), codec.existence.enc({ k: intent.kind, t: false })), own(key.n(id), codec.name.enc(name)), placed, ...ordered.rekeyed];
       const text = label.added(intent.kind, name);
       const stepped = createStepWrites(ctx, id, intent.kind, intent.step);
+      const assigned = createPeopleWrites(plan, id, intent.kind, intent.who);
       if (intent.kind === "group") {
         if (intent.start !== null || intent.dur !== undefined) throw new Error("A group has no start or duration");
         return { own: base, roots: [], newNotes: [id], ...plain(text) };
       }
-      const dur = intent.kind === "milestone" ? (intent.dur ?? 0) : (intent.dur ?? 3);
+      const dur = intent.kind === "milestone" ? (intent.dur ?? 0) : (intent.dur ?? defaultsOf(plan).dur);
       if (intent.kind === "milestone" && dur !== 0) throw new Refused(refusal.milestoneDur);
       if (intent.kind === "task" && !validTaskDur(dur)) throw new Refused(refusal.taskDur);
       checkStart(intent.start);
       const cal = workCalendar(plan.calendar);
       const start = intent.start === null ? null : toIso(cal.snapF(toDay(intent.start)));
       const made = {
-        own: [...base, schedWrite(id, { start, dur, status: stepped.done ? "done" : "todo", progress: stepped.done ? 100 : 0, horizon: "later" }), ...stepped.own],
+        own: [...base, schedWrite(id, { start, dur, status: stepped.done ? "done" : "todo", progress: stepped.done ? 100 : 0, horizon: "later" }), ...stepped.own, ...assigned],
         label: text,
         sentences: [],
       };
@@ -525,6 +528,10 @@ const draftOf = (ctx: Ctx, intent: Intent): Draft => {
     case "unassign":
     case "assignees": {
       const d = personDraft(ctx, intent);
+      return { own: d.own, ...none, ...plain(d.label, d.sentences) };
+    }
+    case "defaults": {
+      const d = defaultsDraft(ctx, intent);
       return { own: d.own, ...none, ...plain(d.label, d.sentences) };
     }
     case "baseline": {

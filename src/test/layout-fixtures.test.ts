@@ -3,10 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, OUT_OF_RANGE, STEP_GONE, STEP_QA, UNREADABLE_ID, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "../../scripts/layout-fixtures.mjs";
 import { normalizeName } from "../actions/build";
+import { projectDefaults } from "../domain/defaults";
 import { derive } from "../domain/derive";
 import { projectPeople } from "../domain/people";
 import { projectBoard } from "../domain/steps";
-import { formerPeople } from "../plan/former";
+import { defaultNames, formerPeople } from "../plan/former";
 import { LogState } from "../log/state";
 import type { Action, Cause, DeviceId } from "../log/types";
 import { choices, heldItems } from "../plan/choices";
@@ -144,7 +145,7 @@ function decoded(f: Fixture, doc: string) {
   return { ydoc, actions, log, plan, cs, held: heldItems(cs, plan) };
 }
 
-const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "mesa-people-ios-pad": "iPad", "mesa-people-ios-phone": "iPhone", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
+const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "mesa-people-ios-pad": "iPad", "mesa-people-ios-phone": "iPhone", "mesa-defaults-ios-pad": "iPad", "mesa-defaults-ios-phone": "iPhone", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
 
 const openRegistries: Registry[] = [];
 
@@ -214,6 +215,9 @@ describe("layout fixtures", () => {
       "example",
       "long-names",
       "mesa",
+      "mesa-defaults",
+      "mesa-defaults-ios-pad",
+      "mesa-defaults-ios-phone",
       "mesa-ios-pad",
       "mesa-ios-phone",
       "mesa-linux",
@@ -392,7 +396,7 @@ describe("layout fixtures", () => {
       const answered = Object.keys(f.ipc).filter((cmd) => cmd in UIKIT);
       expect([name, answered]).toEqual([name, f.platform.os === "ios" ? Object.keys(UIKIT) : []]);
     });
-    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(11);
+    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(13);
   });
 
   it("every fixture carries a platform global its device_info agrees with", () => {
@@ -556,6 +560,32 @@ describe("layout fixtures", () => {
     expect(fixture("mesa-people-ios-phone").docs).toEqual(f.docs);
     expect(fixture("mesa-people-ios-phone").ipc).toEqual({ ...f.ipc, device_info: { deviceId: "iphone", platform: "ios" }, ...UIKIT });
     expect(fixture("mesa-people-ios-phone").platform).toEqual({ os: "ios", idiom: "phone" });
+  });
+
+  it("mesa-defaults is mesa-people plus one action that stores defaults of 5 days, undated, the removed Dana Lee, Commission and the first open step", () => {
+    const f = fixture("mesa-defaults");
+    const doc = only(planDocs(f));
+    const d = decoded(f, doc);
+    const base = decoded(fixture("mesa-people"), only(planDocs(fixture("mesa-people"))));
+    expect(d.actions).toHaveLength(base.actions.length + 1);
+    expect(shapeOf(d.plan)).toEqual(shapeOf(base.plan));
+    expect(d.cs).toEqual([]);
+    expect(d.plan.defaults).toEqual({ dur: 5, dated: false, who: "dana", group: "g2", step: null });
+    expect(projectDefaults(d.plan, defaultNames(d.log, d.plan))).toEqual({
+      dur: 5,
+      dated: false,
+      who: null,
+      group: "g2",
+      step: null,
+      stored: { dur: 5, dated: false, who: "dana", group: "g2", step: null },
+      gone: [{ field: "who", id: "dana", name: "Dana Lee", why: "removed" }],
+    });
+    expect(fixture("mesa-defaults-ios-pad").docs).toEqual(f.docs);
+    expect(fixture("mesa-defaults-ios-pad").ipc).toEqual({ ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" }, ...UIKIT });
+    expect(fixture("mesa-defaults-ios-pad").platform).toEqual({ os: "ios", idiom: "pad" });
+    expect(fixture("mesa-defaults-ios-phone").docs).toEqual(f.docs);
+    expect(fixture("mesa-defaults-ios-phone").ipc).toEqual({ ...f.ipc, device_info: { deviceId: "iphone", platform: "ios" }, ...UIKIT });
+    expect(fixture("mesa-defaults-ios-phone").platform).toEqual({ os: "ios", idiom: "phone" });
   });
 
   it("scale holds 1,000 items and 2,000 links with nothing pending", () => {
@@ -727,8 +757,8 @@ describe("layout fixtures", () => {
     for (const [name, f] of Object.entries(FIXTURES).filter(([n]) => n !== "example")) {
       resetTauri(answersOf(f));
       setPlatform(f.platform);
-      if (name === "mesa-ios-phone" || name === "mesa-people-ios-phone") setScreen(390, 844);
-      if (name === "mesa-ios-pad" || name === "mesa-steps-ios-pad" || name === "mesa-people-ios-pad") setScreen(834, 1194);
+      if (name === "mesa-ios-phone" || name === "mesa-people-ios-phone" || name === "mesa-defaults-ios-phone") setScreen(390, 844);
+      if (name === "mesa-ios-pad" || name === "mesa-steps-ios-pad" || name === "mesa-people-ios-pad" || name === "mesa-defaults-ios-pad") setScreen(834, 1194);
       const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
       try {
         expect(registry.device.name).toBe(DEVICE_NAMES[name] ?? "Mac");

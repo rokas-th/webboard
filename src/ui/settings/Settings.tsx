@@ -29,10 +29,11 @@ import type { SettingsSection, SyncPane } from "../state";
 import { isSyncPane, SyncPanes } from "../sync/SyncPanes";
 import { ThemeBody } from "../theme/ThemePanel";
 import type { SettingsFrame } from "./frame";
+import { Defaults } from "./Defaults";
 import { saveSection } from "./lastSection";
 import { People } from "./People";
 import { Row, rowKey } from "./Row";
-import { filterSections, isPlanSection, sectionTitle, shownSections, type RowSpec, type SectionMatch, type SectionSpec } from "./sections";
+import { filterSections, isPlanSection, sectionTitle, SETTINGS_SECTIONS, shownSections, type RowSpec, type SectionMatch, type SectionSpec } from "./sections";
 import { Workflow } from "./Workflow";
 
 export const SETTINGS_TITLE = "Settings";
@@ -325,6 +326,19 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
     if (s === "sync" && row !== null && isSyncPane(row.id)) p.onSyncPane(row.id);
     p.onSection(s);
   };
+  const toPeople = (): void => {
+    if (frame === "sheet") {
+      const list = body.current;
+      if (list === null) throw new Error("Settings: the sheet has no list to scroll to People");
+      const heading = list.querySelector<HTMLElement>('section.settings-group[data-section="people"] h2');
+      if (heading === null) throw new Error("Settings: the sheet has no People heading to scroll to");
+      heading.scrollIntoView({ block: "start" });
+      return;
+    }
+    const add = SETTINGS_SECTIONS.flatMap((s) => (s.id === "people" ? s.rows : [])).find((r) => r.id === "add");
+    if (add === undefined) throw new Error("Settings: People has no Add person row");
+    go("people", add);
+  };
   const close = (): void => closeSettings(api, p.onClose);
   const planSession = (id: SettingsSection): PlanSession => {
     if (p.session === null) throw new Error(`Settings: the ${id} section rendered without a plan`);
@@ -405,6 +419,8 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
         return <BaselinesSection session={planSession(s.id)} readOnly={p.readOnly} />;
       case "danger":
         return <DangerSection session={planSession(s.id)} locked={p.planLocked} onTrash={trash} />;
+      case "defaults":
+        return <Defaults session={planSession(s.id)} readOnly={p.readOnly} onPeople={toPeople} />;
       case "working-time":
         return <WorkingTimeSection session={planSession(s.id)} clock={p.clock} frame={p.frame} stash={calendarStash} />;
     }

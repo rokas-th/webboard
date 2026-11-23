@@ -1,4 +1,6 @@
+import type { DefaultNames } from "../domain/defaults";
 import type { PersonId, PersonValue, PlanState } from "../domain/model";
+import { VIRTUAL_STEPS } from "../domain/steps";
 import type { LogState } from "../log/state";
 import type { UnitKey } from "../log/types";
 import { cmp } from "./project";
@@ -36,4 +38,15 @@ export function formerPeople(log: LogState, plan: PlanState): ReadonlyMap<Person
         return value === null ? [] : [[id, value]];
       }),
   );
+}
+
+export function defaultNames(log: LogState, plan: PlanState): DefaultNames {
+  const stored = plan.defaults;
+  if (stored === null) return { who: null, group: null, step: null };
+  const { who, group, step } = stored;
+  return {
+    who: who === null ? null : (lastPersonValue(log, who)?.n ?? null),
+    group: group === null ? null : (lastNonNull(log, key.n(group), "name")),
+    step: step === null ? null : (lastNonNull(log, key.ws(step), "step")?.n ?? VIRTUAL_STEPS.get(step)?.n ?? null),
+  };
 }

@@ -10,6 +10,7 @@ import {
   MAX_TASK_DUR,
   STEP_COLOURS,
   type BaselineId,
+  type DefaultsValue,
   type Horizon,
   type ItemId,
   type ItemKind,
@@ -25,7 +26,7 @@ import {
 } from "../domain/model";
 import type { ActionId, Cause, UnitKey, Write } from "../log/types";
 
-export type UnitKind = "pn" | "cr" | "cw" | "e" | "n" | "s" | "p" | "r" | "l" | "cc" | "ct" | "ch" | "b" | "a" | "ws" | "wi" | "pp" | "pa";
+export type UnitKind = "pn" | "cr" | "cw" | "e" | "n" | "s" | "p" | "r" | "l" | "cc" | "ct" | "ch" | "b" | "a" | "ws" | "wi" | "pp" | "pa" | "pd";
 
 export interface Codec<T> {
   enc(x: T): unknown;
@@ -72,6 +73,7 @@ export interface Codecs {
   stepRef: Codec<StepId | null>;
   person: Codec<PersonValue | null>;
   assignees: Codec<readonly PersonId[] | null>;
+  defaults: Codec<DefaultsValue>;
 }
 
 const ID = /^[A-Za-z0-9_-]+$/;
@@ -84,7 +86,7 @@ const LINK_TYPES: readonly LinkType[] = ["FS", "SS", "FF", "SF"];
 const HOLIDAY_KINDS: readonly HolidayKind[] = ["public", "optional", "half"];
 const DIVISIONS = ["england-and-wales", "scotland", "northern-ireland"] as const;
 const CAUSES: readonly Cause[] = ["own", "push", "recalendar", "undo", "revert", "resolution"];
-const BARE: readonly UnitKind[] = ["pn", "cr", "cw"];
+const BARE: readonly UnitKind[] = ["pn", "cr", "cw", "pd"];
 const BY_ID: readonly UnitKind[] = ["e", "n", "s", "p", "r", "cc", "b", "a", "ws", "wi", "pp", "pa"];
 
 const fail = (unit: string, message: string): Error => new Error(`${unit}: ${message}`);
@@ -438,6 +440,21 @@ const assigneesSpec: Spec<readonly PersonId[]> = {
   },
 };
 
+const defaultsSpec: Spec<DefaultsValue> = {
+  enc: (x) => ({ dur: x.dur, dated: x.dated, who: x.who, group: x.group, step: x.step }),
+  dec: (v, unit) => {
+    const r = record(unit, "value", v, ["dur", "dated", "who", "group", "step"]);
+    const ref = (field: string, x: unknown): string | null => nullable((y) => id(unit, field, y))(x);
+    return {
+      dur: int(unit, "dur", r.dur, 1, MAX_TASK_DUR),
+      dated: bool(unit, "dated", r.dated),
+      who: ref("who", r.who),
+      group: ref("group", r.group),
+      step: ref("step", r.step),
+    };
+  },
+};
+
 export type Value<K extends keyof Codecs> =Codecs[K] extends Codec<infer T> ? T : never;
 
 const SPECS: { [K in keyof Codecs]: Spec<Value<K>> } = {
@@ -458,6 +475,7 @@ const SPECS: { [K in keyof Codecs]: Spec<Value<K>> } = {
   stepRef: orNull(stepRefSpec),
   person: orNull(personSpec),
   assignees: orNull(assigneesSpec),
+  defaults: defaultsSpec,
 };
 
 export function decodeAs<K extends keyof Codecs>(codec: K, unit: UnitKey, v: unknown): Value<K> {
@@ -483,6 +501,7 @@ const CODEC_OF: Readonly<Record<UnitKind, keyof Codecs>> = {
   wi: "stepRef",
   pp: "person",
   pa: "assignees",
+  pd: "defaults",
 };
 
 export const name: Codec<string> = codec(SPECS.name, "name");
@@ -502,6 +521,7 @@ export const step: Codec<StepValue | null> = codec(SPECS.step, "ws");
 export const stepRef: Codec<StepId | null> = codec(SPECS.stepRef, "wi");
 export const person: Codec<PersonValue | null> = codec(SPECS.person, "pp");
 export const assignees: Codec<readonly PersonId[] | null> = codec(SPECS.assignees, "pa");
+export const defaults: Codec<DefaultsValue> = codec(SPECS.defaults, "pd");
 export const personNameProblem = (n: string): string | null => {
   const why = personNameWhy(n);
   return why === null ? null : `pp: ${why}`;
@@ -525,6 +545,7 @@ const NAMED: Readonly<Record<keyof Codecs, Codec<unknown>>> = {
   stepRef,
   person,
   assignees,
+  defaults,
 };
 
 export function codecOf(kind: UnitKind): Codec<unknown> {
@@ -572,6 +593,7 @@ export const key: {
   pn: UnitKey;
   cr: UnitKey;
   cw: UnitKey;
+  pd: UnitKey;
   e(i: ItemId): UnitKey;
   n(i: ItemId): UnitKey;
   s(i: ItemId): UnitKey;
@@ -591,6 +613,7 @@ export const key: {
   pn: "pn",
   cr: "cr",
   cw: "cw",
+  pd: "pd",
   e: (i) => checked(`e:${i}`),
   n: (i) => checked(`n:${i}`),
   s: (i) => checked(`s:${i}`),
@@ -658,6 +681,7 @@ export function stateWrites(plan: PlanState, cause: Cause, ownTrashed: (id: Item
     ...[...plan.workflow.items].map(([item, s]) => w(key.wi(item), stepRef.enc(s))),
     ...[...plan.people.persons].map(([id, p]) => w(key.pp(id), person.enc(p))),
     ...[...plan.people.assignees].map(([item, a]) => w(key.pa(item), assignees.enc(a))),
+    ...(plan.defaults === null ? [] : [w(key.pd, defaults.enc(plan.defaults))]),
   ];
   writes.forEach(validateWrite);
   return writes;

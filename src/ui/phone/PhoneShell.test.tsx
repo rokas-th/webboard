@@ -1338,6 +1338,25 @@ describe("PhoneShell new items (Step 3)", () => {
     expect(document.activeElement).toBe(field);
     expect([field.selectionStart, field.selectionEnd]).toEqual([0, label.length]);
   });
+
+  it("+ → New task creates with the plan defaults", async () => {
+    const t = await testSession([{ id: "g", name: "Commission", kind: "group" }, { name: "Review", start: "2026-11-10", dur: 2 }]);
+    sessions.push(t.session);
+    t.session.apply({ t: "person", op: "add", name: "Mira Okafor", initials: "MO", colour: "cyan", after: null });
+    const mira = [...t.session.view().plan.people.persons.keys()][0];
+    t.session.apply({ t: "defaults", field: "dur", value: 5 });
+    t.session.apply({ t: "defaults", field: "dated", value: false });
+    t.session.apply({ t: "defaults", field: "who", value: mira });
+    t.session.apply({ t: "defaults", field: "group", value: "g" });
+    const apply = vi.spyOn(t.session, "apply");
+    await shown(t);
+    chooseNew(await openPlus(), "New task");
+    expect(apply.mock.calls).toEqual([[{ t: "create", kind: "task", name: "New task", parent: null, after: null, start: null, dur: 5, who: mira }]]);
+    const id = lastUi().selected;
+    if (id === null) throw new Error("nothing selected");
+    expect(t.session.view().plan.items.get(id)?.schedule).toMatchObject({ start: null, dur: 5 });
+    expect(t.session.view().plan.people.assignees.get(id)).toEqual([mira]);
+  });
 });
 
 describe("PhoneShell + as a native menu", () => {
@@ -2557,8 +2576,8 @@ describe("the settings sheet on the phone", () => {
     expect(lastUi().settings).toBe("general");
     const sheet = screen.getByRole("dialog", { name: "Settings" });
     expect([...sheet.querySelectorAll('[role="tab"]')].filter((tab) => tab.closest(".sync-tabs") === null)).toEqual([]);
-    expect(groups(sheet)).toEqual(["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "baselines", "danger"]);
-    expect([...sheet.querySelectorAll("h2.settings-group-title")].map((h) => h.textContent)).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "People", "Workflow", "Working time", "Baselines", "Danger zone"]);
+    expect(groups(sheet)).toEqual(["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "defaults", "baselines", "danger"]);
+    expect([...sheet.querySelectorAll("h2.settings-group-title")].map((h) => h.textContent)).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "People", "Workflow", "Working time", "Defaults", "Baselines", "Danger zone"]);
     fireEvent.click(within(sheet).getAllByRole("button", { name: "Close" })[0]);
     expect(dialogs()).toEqual([]);
     expect(lastUi().settings).toBeNull();
@@ -2590,7 +2609,7 @@ describe("the settings sheet on the phone", () => {
     fireEvent.click(themeRow(openPlanSheet()));
     expect(dialogs()).toEqual(["Settings"]);
     expect(lastUi().settings).toBe("general");
-    expect(groups(screen.getByRole("dialog", { name: "Settings" }))).toEqual(["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "baselines", "danger"]);
+    expect(groups(screen.getByRole("dialog", { name: "Settings" }))).toEqual(["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "defaults", "baselines", "danger"]);
   });
 
   it("hides a selected item's sheet while Settings is open, and the item sheet returns after Close", async () => {

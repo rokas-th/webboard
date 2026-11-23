@@ -1,6 +1,5 @@
 import type { Built, Intent } from "../../actions/intents";
-import { workCalendar } from "../../domain/calendar";
-import { toDay, toIso, type IsoDate } from "../../domain/dates";
+import { newItemIntent } from "../../actions/newItem";
 import type { Item, ItemId, ItemKind, PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
@@ -120,14 +119,8 @@ function placeOf(session: PlanSession, selected: ItemId | null): { parent: ItemI
   return sel.kind === "group" ? { parent: sel.id, after: null } : { parent: sel.place.parent, after: sel.id };
 }
 
-export function createIntent(session: PlanSession, today: IsoDate, kind: ItemKind, place: { parent: ItemId | null; after: ItemId | null }): Intent {
-  const name = NEW_NAME[kind];
-  const start = kind === "group" ? null : toIso(workCalendar(session.view().plan.calendar).after(toDay(today)));
-  return kind === "task" ? { t: "create", kind, name, ...place, start, dur: 3 } : { t: "create", kind, name, ...place, start };
-}
-
 function newItem(ctx: CommandCtx, session: PlanSession, run: (i: Intent) => Built | null, kind: ItemKind): void {
-  const built = run(createIntent(session, ctx.clock.today(), kind, placeOf(session, ctx.ui.selected)));
+  const built = run(newItemIntent(session.view(), ctx.clock.today(), kind, NEW_NAME[kind], placeOf(session, ctx.ui.selected)));
   if (built === null) return;
   const id = createdItem(built);
   ctx.setUi({ selected: id, naming: id });

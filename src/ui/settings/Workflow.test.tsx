@@ -142,6 +142,38 @@ describe("Settings > Workflow", () => {
     ]);
   });
 
+  it("picks the step for new undated items in the New items row once the plan uses steps, and only names Later by dates", async () => {
+    const t = await made();
+    const root = mount(t.session);
+    const newItems = (): HTMLElement => one('[data-settings-row="workflow.new-items"]', root);
+    expect([newItems().querySelector("button.defaults-pick"), one(".workflow-new", newItems()).textContent]).toEqual([null, "New undated items go to “Later” until this plan uses steps."]);
+    act(() => {
+      t.session.apply({ t: "step", op: "rename", step: "next", name: "Review" });
+    });
+    const picker = one('button.defaults-pick[data-pick="step"]', newItems());
+    expect([picker.textContent, one(".workflow-new", newItems()).textContent]).toEqual(["First open step", "New undated items go to “Now”, the first step that does not complete items."]);
+    act(() => {
+      fireEvent.click(picker);
+    });
+    expect([...document.querySelectorAll('.context-menu [role^="menuitem"]')].map((e) => [e.textContent, e.getAttribute("aria-checked")])).toEqual([
+      ["First open step", "true"],
+      ["Now", "false"],
+      ["Review", "false"],
+      ["Later", "false"],
+    ]);
+    const apply = vi.spyOn(t.session, "apply");
+    const review = [...document.querySelectorAll<HTMLElement>('.context-menu [role^="menuitem"]')].find((e) => e.textContent === "Review");
+    if (review === undefined) throw new Error("no Review row");
+    act(() => {
+      fireEvent.click(review);
+    });
+    expect([apply.mock.calls, one('button.defaults-pick[data-pick="step"]', newItems()).textContent, one(".workflow-new", newItems()).textContent]).toEqual([
+      [[{ t: "defaults", field: "step", value: "next" }]],
+      "Review",
+      "New undated items go to “Review”.",
+    ]);
+  });
+
   it("sets and clears a limit, shows the count over it in amber, and refuses a bad one", async () => {
     const t = await made();
     mount(t.session);

@@ -1,13 +1,13 @@
 import type { Calendar, HolidayYear } from "../domain/calendar";
 import type { IsoDate } from "../domain/dates";
-import type { BaselineId, ItemId, ItemKind, LinkKey, LinkType, PersonId, Schedule, StepColour, StepId } from "../domain/model";
+import type { BaselineId, DefaultsValue, ItemId, ItemKind, LinkKey, LinkType, PersonId, Schedule, StepColour, StepId } from "../domain/model";
 import type { Conflict, Stop } from "../domain/schedule";
 import type { LogState } from "../log/state";
 import type { Action, DeviceId, SessionId } from "../log/types";
 import type { PlanView } from "../store/doc";
 
 export type Intent =
-  | { t: "create"; kind: ItemKind; name: string; parent: ItemId | null; after: ItemId | null; start: IsoDate | null; dur?: number; step?: StepId }
+  | { t: "create"; kind: ItemKind; name: string; parent: ItemId | null; after: ItemId | null; start: IsoDate | null; dur?: number; step?: StepId; who?: PersonId }
   | { t: "rename"; item: ItemId; name: string }
   | { t: "schedule"; item: ItemId; set: Partial<Schedule> }
   | { t: "move"; items: readonly ItemId[]; days: number }
@@ -28,7 +28,10 @@ export type Intent =
   | StepIntent
   | ToStepIntent
   | PersonIntent
-  | AssignIntent;
+  | AssignIntent
+  | DefaultsIntent;
+
+export type DefaultsIntent = { [F in keyof DefaultsValue]: { t: "defaults"; field: F; value: DefaultsValue[F] } }[keyof DefaultsValue];
 
 export type PersonIntent =
   | { t: "person"; op: "add"; name: string; initials: string; colour: StepColour; after: PersonId | null }

@@ -114,6 +114,7 @@ function renamed(plan: PlanState, back: (id: string) => string, id: string): Pla
       persons: plan.people.persons,
       assignees: new Map([...plan.people.assignees].map(([item, ids]): [ItemId, readonly PersonId[] | null] => [back(item), ids])),
     },
+    defaults: plan.defaults === null ? null : { ...plan.defaults, group: plan.defaults.group === null ? null : back(plan.defaults.group) },
   };
 }
 
@@ -487,6 +488,37 @@ describe("fresh ids", () => {
     const r = importOf(freshFile());
     expect(importedPlan(r).people).toEqual({ persons: new Map(), assignees: new Map() });
     expect(r.action.w.some((w) => w.u.startsWith("pp:") || w.u.startsWith("pa:"))).toBe(false);
+  });
+
+  it("a .webboard with pd round-trips it (group remapped, person and step ids kept), format version 1", () => {
+    const pd = { dur: 5, dated: false, who: "mira", group: "G", step: "review" };
+    const defaulted: readonly Action[] = [...FRESH_SOURCE, act("a1", ["a0"], [own("pd", pd)], { dev: "dev-A" })];
+    const bytes = fileOf(defaulted, FRESH_NOTES);
+    expect(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(4, true)).toBe(1);
+    const source = projectPlan(SOURCE_ID, logOf(defaulted));
+    const r = importOf(bytes);
+    const plan = importedPlan(r);
+    const g = r.idMap.get("G");
+    if (g === undefined) throw new Error("G has no new id");
+    expect(g).not.toBe("G");
+    expect(plan.defaults).toEqual({ ...pd, group: g });
+    expect(renamed(plan, inverse(r.idMap), SOURCE_ID)).toEqual(source);
+    expect(r.action.w.filter((w) => w.u === "pd")).toEqual([own("pd", { ...pd, group: g })]);
+  });
+
+  it("a .webboard whose pd names a group no longer in the plan imports with the plan root, not a dangling id", () => {
+    const pd = { dur: 5, dated: false, who: "mira", group: "Z9", step: "review" };
+    const defaulted: readonly Action[] = [...FRESH_SOURCE, act("a1", ["a0"], [own("pd", pd)], { dev: "dev-A" })];
+    const r = importOf(fileOf(defaulted, FRESH_NOTES));
+    expect(r.idMap.has("Z9")).toBe(false);
+    expect(importedPlan(r).defaults).toEqual({ ...pd, group: null });
+    expect(r.action.w.filter((w) => w.u === "pd")).toEqual([own("pd", { ...pd, group: null })]);
+  });
+
+  it("a plan without pd imports with null defaults", () => {
+    const r = importOf(freshFile());
+    expect(importedPlan(r).defaults).toBeNull();
+    expect(r.action.w.some((w) => w.u === "pd")).toBe(false);
   });
 
   it("a second import shares no id with the first", () => {

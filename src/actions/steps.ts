@@ -265,6 +265,12 @@ export function createStepWrites(ctx: Ctx, id: ItemId, kind: ItemKind, step: Ste
     return { own: [refWrite(id, s.id)], done: completing !== null && completing.id === s.id };
   }
   if (stepModeOf(plan) === "dates") return { own: [], done: false };
+  const fallback = ctx.view.defaults.step;
+  if (fallback !== null) {
+    const s = liveStep(plan, fallback);
+    if (s.completes) throw new Error(`Default step ${s.id} completes items`);
+    return { own: [refWrite(id, s.id)], done: false };
+  }
   const first = stepsOf(plan).find((s) => !s.completes);
   if (first === undefined) throw new Refused(refusal.noOpenStep);
   return { own: [refWrite(id, first.id)], done: false };

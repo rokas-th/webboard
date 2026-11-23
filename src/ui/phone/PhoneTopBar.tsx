@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { newItemIntent } from "../../actions/newItem";
 import type { IsoDate } from "../../domain/dates";
 import type { ItemId, ItemKind } from "../../domain/model";
 import { usePlanView, type PlanSession } from "../../store/session";
 import { HeldChip } from "../choices/HeldChip";
 import { NewItemMenu } from "../common/NewItemMenu";
-import { createdItem, createIntent } from "../palette/commands";
+import { createdItem, NEW_NAME } from "../palette/commands";
 import { useRun } from "../run";
 import type { PlanFiles } from "../shell/selection";
 import { SyncChip } from "../shell/SyncChip";
@@ -19,7 +20,7 @@ function PlanTools(p: { session: PlanSession; files: PlanFiles; today(): IsoDate
   const { ui } = useUiValue();
   const [sheet, setSheet] = useState(false);
   const create = (kind: ItemKind): void => {
-    const built = run.run(createIntent(p.session, p.today(), kind, { parent: null, after: null }));
+    const built = run.run(newItemIntent(p.session.view(), p.today(), kind, NEW_NAME[kind], { parent: null, after: null }));
     if (built !== null) p.onCreated(createdItem(built));
   };
   return (

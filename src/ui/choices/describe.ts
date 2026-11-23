@@ -1,7 +1,8 @@
 import { q, workingDays } from "../../actions/copy";
 import { regionKey } from "../../domain/calendar";
 import { fmtShort } from "../../domain/dates";
-import type { ItemId, PlanState, StepId } from "../../domain/model";
+import { followGroup, NO_NAMES } from "../../domain/defaults";
+import type { DefaultsValue, ItemId, PlanState, StepId } from "../../domain/model";
 import { peopleOf } from "../../domain/people";
 import { stepsOf, type Step } from "../../domain/steps";
 import type { ActionId, UnitKey } from "../../log/types";
@@ -128,7 +129,39 @@ export function describeUnit(u: UnitKey, v: unknown, plan: PlanState, labels: Re
       const formerPart = former === 0 ? [] : [former === 1 ? "a former person" : `${former} former people`];
       return `assigned to ${andList([...live.map((p) => q(p.name)), ...formerPart])}`;
     }
+    case "pd":
+      return defaultsText(decodeAs("defaults", u, v), plan);
   }
+}
+
+function defaultGroupText(plan: PlanState, id: ItemId | null): string {
+  if (id === null) return "plan root";
+  const gone = followGroup(plan, id, NO_NAMES).gone;
+  if (gone === null) {
+    const group = plan.items.get(id);
+    if (group === undefined) throw new Error(`pd: the followed group ${id} is not in the plan`);
+    return `into ${q(group.name)}`;
+  }
+  if (gone.why === "missing" || gone.name === null) return "into a missing group";
+  return gone.why === "trashed" ? `into ${q(gone.name)} (in the Trash)` : `into ${q(gone.name)}, not a group`;
+}
+
+function defaultStepText(plan: PlanState, id: StepId | null): string {
+  if (id === null) return "first open step";
+  const step = liveStep(plan, id);
+  if (step === undefined) return "to a removed step";
+  return step.completes ? `to ${q(step.name)}, which completes items` : `to ${q(step.name)}`;
+}
+
+function defaultsText(d: DefaultsValue, plan: PlanState): string {
+  const person = d.who === null ? undefined : peopleOf(plan).find((p) => p.id === d.who);
+  return [
+    count(d.dur, "day", "days"),
+    d.dated ? "dated" : "undated",
+    d.who === null ? "nobody" : person === undefined ? "a removed person" : q(person.name),
+    defaultGroupText(plan, d.group),
+    defaultStepText(plan, d.step),
+  ].join(" · ");
 }
 
 const liveStep = (plan: PlanState, id: StepId): Step | undefined => stepsOf(plan).find((s) => s.id === id);
@@ -170,6 +203,8 @@ export function unitSubject(u: UnitKey, plan: PlanState): string {
       const p = peopleOf(plan).find((x) => x.id === k.arg);
       return p === undefined ? "A removed person" : `The person ${q(p.name)}`;
     }
+    case "pd":
+      return "The plan’s defaults";
   }
 }
 

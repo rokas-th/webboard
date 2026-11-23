@@ -109,6 +109,11 @@ export const label = {
   assigned: (name: string, what: string): string => `Assigned ${q(name)} to ${what}`,
   unassigned: (name: string, what: string): string => `Unassigned ${q(name)} from ${what}`,
   assigneesSet: (name: string): string => `Changed the assignees of ${q(name)}`,
+  defaultDur: (dur: number): string => `New tasks now last ${workingDays(dur)}`,
+  defaultDated: (dated: boolean): string => `New items are now ${dated ? "dated" : "undated"}`,
+  defaultWho: (name: string | null): string => (name === null ? "New items are now unassigned" : `New items are now assigned to ${q(name)}`),
+  defaultGroup: (name: string | null): string => `Board + now adds to ${name === null ? "the plan root" : q(name)}`,
+  defaultStep: (name: string | null): string => `New undated items now go to ${name === null ? "the first open step" : q(name)}`,
 };
 
 export const sentence = {
@@ -163,4 +168,6 @@ export const refusal = {
   initials: "Initials are 1 to 3 characters without spaces.",
   assigneesFull: (name: string): string => `${q(name)} already has 8 assignees.`,
   assigneesMax: "An item has at most 8 assignees.",
+  defaultDur: "A new task lasts 1 to 3650 working days.",
+  defaultStepByDates: "This plan follows dates, so new undated items go to “Later”. Use steps first.",
 };

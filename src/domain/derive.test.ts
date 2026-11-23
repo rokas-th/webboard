@@ -58,6 +58,7 @@ const plan = (
   baselines: new Map((o.baselines ?? []).map((b) => [b.id, b] as const)),
   workflow: EMPTY_WORKFLOW,
   people: EMPTY_PEOPLE,
+  defaults: null,
 });
 
 const NONE: ReadonlySet<ItemId> = new Set();

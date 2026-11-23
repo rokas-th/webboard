@@ -5,6 +5,7 @@ import { moved } from "./menu";
 export interface Point {
   x: number;
   y: number;
+  edge?: "end";
 }
 
 export interface PickRow extends NativeMenuRow {
@@ -30,7 +31,7 @@ export function clampedAt(at: Point, size: { width: number; height: number }, vi
 
 export function ContextMenu(p: { label: string; at: Point; anchor: HTMLElement; sections: readonly PickSection[]; onChosen(id: string): void; onClose(): void }) {
   const box = useRef<HTMLDivElement>(null);
-  const [placed, setPlaced] = useState<Point>(p.at);
+  const [placed, setPlaced] = useState<Point>(() => (p.at.edge === "end" ? { x: 0, y: p.at.y } : p.at));
   const [opener] = useState(() => document.activeElement);
   const onClose = useRef(p.onClose);
   const anchor = useRef(p.anchor);
@@ -43,7 +44,8 @@ export function ContextMenu(p: { label: string; at: Point; anchor: HTMLElement; 
     const root = box.current;
     if (root === null) throw new Error(`${p.label}: the menu rendered without its element`);
     const r = root.getBoundingClientRect();
-    setPlaced(clampedAt(p.at, { width: r.width, height: r.height }, { width: window.innerWidth, height: window.innerHeight }));
+    const start = { x: p.at.edge === "end" ? p.at.x - r.width : p.at.x, y: p.at.y };
+    setPlaced(clampedAt(start, { width: r.width, height: r.height }, { width: window.innerWidth, height: window.innerHeight }));
   }, [p.at, p.label]);
 
   useLayoutEffect(() => {

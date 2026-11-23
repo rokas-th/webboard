@@ -3,7 +3,7 @@ import type { PersonValue } from "../domain/model";
 import { LogState } from "../log/state";
 import type { Action, Cause, Write } from "../log/types";
 import { act } from "../test/act";
-import { formerPeople, lastNonNull, lastPersonValue } from "./former";
+import { defaultNames, formerPeople, lastNonNull, lastPersonValue } from "./former";
 import { projectPlan } from "./project";
 import { planRules } from "./rules";
 
@@ -67,6 +67,33 @@ describe("lastNonNull", () => {
   it("throws when a writer's value does not decode with the codec named", () => {
     const log = logOf(act("a0", [], [...HEAD, w("pp:mira", MIRA)]));
     expect(() => lastNonNull(log, "pp:mira", "step")).toThrow("pp:mira: value has unknown fields i");
+  });
+});
+
+describe("defaultNames", () => {
+  const pd = (who: string | null, group: string | null, step: string | null): Write => w("pd", { dur: 3, dated: true, who, group, step });
+
+  it("is all null without pd or with null ids", () => {
+    const log = logOf(act("a0", [], HEAD));
+    expect(defaultNames(log, projectPlan("P", log))).toEqual({ who: null, group: null, step: null });
+    const nulls = logOf(act("a0", [], [...HEAD, pd(null, null, null)]));
+    expect(defaultNames(nulls, projectPlan("P", nulls))).toEqual({ who: null, group: null, step: null });
+  });
+
+  it("names the stored ids from their last non-null writes, virtual steps by their built-in name", () => {
+    const QA = { n: "Checks", c: "amber", o: "a1V" };
+    const log = logOf(
+      act("a0", [], [...HEAD, ...task("A", "a0"), w("pp:mira", MIRA), w("ws:qa", QA), pd("mira", "A", "qa")]),
+      act("x", ["a0"], [w("pp:mira", null), w("ws:qa", null)]),
+    );
+    expect(defaultNames(log, projectPlan("P", log))).toEqual({ who: "Mira Okafor", group: "Task A", step: "Checks" });
+    const virtual = logOf(act("a0", [], [...HEAD, w("ws:now", null), pd(null, null, "now")]));
+    expect(defaultNames(virtual, projectPlan("P", virtual))).toEqual({ who: null, group: null, step: "Now" });
+  });
+
+  it("is null for ids never named", () => {
+    const log = logOf(act("a0", [], [...HEAD, pd("zed", "G9", "zz")]));
+    expect(defaultNames(log, projectPlan("P", log))).toEqual({ who: null, group: null, step: null });
   });
 });
 

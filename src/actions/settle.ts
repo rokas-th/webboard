@@ -41,30 +41,44 @@ const nameIn = (plans: readonly PlanState[], id: ItemId): string => {
   return it.name;
 };
 
-const unitSubject = (log: LogState, plans: readonly PlanState[], u: UnitKey): string => {
+interface Phrase {
+  text: string;
+  plural: boolean;
+}
+
+const one = (text: string): Phrase => ({ text, plural: false });
+
+const unitSubject = (log: LogState, plans: readonly PlanState[], u: UnitKey): Phrase => {
   const k = parseKey(u);
-  if (CALENDAR_UNITS.has(k.kind)) return "the calendar";
-  if (k.kind === "pn") return "the plan name";
-  if (k.kind === "a") return "the change";
-  if (k.kind === "b") return `baseline ${q(baselineName(log, plans, u, k.arg))}`;
+  if (CALENDAR_UNITS.has(k.kind)) return one("the calendar");
+  if (k.kind === "pn") return one("the plan name");
+  if (k.kind === "pd") return { text: "the plan’s defaults", plural: true };
+  if (k.kind === "a") return one("the change");
+  if (k.kind === "b") return one(`baseline ${q(baselineName(log, plans, u, k.arg))}`);
   if (k.kind === "ws") {
     const step = stepNameIn(log, plans, u, k.arg);
-    if (step === null) return "a removed step";
-    return step.removed ? `the removed step ${q(step.name)}` : `the step ${q(step.name)}`;
+    if (step === null) return one("a removed step");
+    return one(step.removed ? `the removed step ${q(step.name)}` : `the step ${q(step.name)}`);
   }
   if (k.kind === "pp") {
     const person = personNameIn(log, plans, k.arg);
-    if (person === null) return "a removed person";
-    return person.removed ? `the removed person ${q(person.name)}` : `the person ${q(person.name)}`;
+    if (person === null) return one("a removed person");
+    return one(person.removed ? `the removed person ${q(person.name)}` : `the person ${q(person.name)}`);
   }
   throw new Error(`No subject for ${u}`);
 };
 
-export const subjectOf = (log: LogState, plans: readonly PlanState[], ids: readonly ItemId[], units: readonly UnitKey[]): string => {
-  if (ids.length === 1) return q(nameIn(plans, ids[0]));
-  if (ids.length > 1) return items(ids.length);
-  return unique(units.map((u) => unitSubject(log, plans, u))).join(" and ");
+const subjectPhrase = (log: LogState, plans: readonly PlanState[], ids: readonly ItemId[], units: readonly UnitKey[]): Phrase => {
+  if (ids.length === 1) return one(q(nameIn(plans, ids[0])));
+  if (ids.length > 1) return { text: items(ids.length), plural: true };
+  const parts = units.map((u) => unitSubject(log, plans, u));
+  return { text: unique(parts.map((x) => x.text)).join(" and "), plural: parts.some((x) => x.plural) };
 };
+
+export const subjectOf = (log: LogState, plans: readonly PlanState[], ids: readonly ItemId[], units: readonly UnitKey[]): string =>
+  subjectPhrase(log, plans, ids, units).text;
+
+const settledLead = (s: Phrase): string => `${s.text} ${s.plural ? "are" : "is"} settled`;
 
 const capital = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}`;
 
@@ -88,7 +102,7 @@ export function settleText(ctx: Ctx, w: readonly Write[]): string | null {
   const named = [applyWrites(ctx.view.plan, w.filter((x) => parseKey(x.u).kind !== "a")), ctx.view.plan];
   const sentences = hit.flatMap((c): string[] => {
     if (itemLess(c)) {
-      return c.units.some((u) => openUnits.has(u)) ? [] : [`${capital(subjectOf(fork, named, [], c.units))} is settled.`];
+      return c.units.some((u) => openUnits.has(u)) ? [] : [`${capital(settledLead(subjectPhrase(fork, named, [], c.units)))}.`];
     }
     const settled = unique(
       c.units
@@ -101,9 +115,7 @@ export function settleText(ctx: Ctx, w: readonly Write[]): string | null {
     if (settled.length === 0) return [];
     const parts = new Set(c.sides.flatMap((s) => s.actions));
     const remain = c.items.filter((id) => open.some((o) => o.items.includes(id) && o.sides.some((s) => s.actions.some((a) => parts.has(a)))));
-    const subject = subjectOf(fork, named, settled, []);
-    const lead = settled.length > 1 ? `${subject} are settled` : `${subject} is settled`;
-    return [`${lead}; ${remainText(remain.length)}`];
+    return [`${settledLead(subjectPhrase(fork, named, settled, []))}; ${remainText(remain.length)}`];
   });
   return sentences.length === 0 ? null : sentences.join(" ");
 }

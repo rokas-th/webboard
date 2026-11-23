@@ -1099,3 +1099,46 @@ describe("buildAction: duplicate (product-7)", () => {
     refusedWith(ctx, { t: "duplicate", item: "Y" }, "“Grout” is inside “Inner”, which is in the Trash. Restore “Inner” first.");
   });
 });
+
+describe("buildAction: create with the plan defaults", () => {
+  const MIRA = { n: "Mira Okafor", i: "MO", c: "cyan", o: "a0" };
+  const PEOPLE: Write[] = [...GROUPS, w("pp:mira", MIRA)];
+  const BY_STEPS: Write[] = [...GROUPS, w("ws:review", { n: "Review", c: "amber", o: "a15" }), w("wi:U", "review")];
+  const pd = (o: Record<string, unknown>): Action => act("a1", ["a0"], [w("pd", { dur: 3, dated: true, who: null, group: null, step: null, ...o })]);
+
+  it("writes who as pa in the create action, undone in one step", () => {
+    const ctx = ctxFrom(PEOPLE);
+    const b = buildAction(ctx, { t: "create", kind: "task", name: "Coat", parent: null, after: null, start: null, who: "mira" });
+    const id = b.newNotes[0];
+    expect(units(b)).toEqual([`e:${id}`, `n:${id}`, `p:${id}`, `s:${id}`, `pa:${id}`]);
+    expect(writeOf(b, `pa:${id}`).v).toEqual(["mira"]);
+    expect(b.action.lbl).toBe("Added task “Coat”");
+    const after = applied(ctx, b);
+    expect(after.view.plan.people.assignees.get(id)).toEqual(["mira"]);
+    const undone = applied(after, buildUndo(after, b.action.id));
+    expect(undone.view.plan.items.has(id)).toBe(false);
+  });
+
+  it("throws for who on a group and for a person not in the plan", () => {
+    const ctx = ctxFrom(PEOPLE);
+    expect(() => buildAction(ctx, { t: "create", kind: "group", name: "Phase 2", parent: null, after: null, start: null, who: "mira" })).toThrow("A group has no assignees");
+    expect(() => buildAction(ctx, { t: "create", kind: "task", name: "Coat", parent: null, after: null, start: null, who: "zed" })).toThrow("Person zed is not in this plan");
+  });
+
+  it("reads an absent duration from the plan's defaults", () => {
+    const b = buildAction(ctxFrom(GROUPS, pd({ dur: 5 })), { t: "create", kind: "task", name: "Coat", parent: null, after: null, start: null });
+    expect(writeOf(b, `s:${b.newNotes[0]}`).v).toEqual(sched(null, 5));
+    const given = buildAction(ctxFrom(GROUPS, pd({ dur: 5 })), { t: "create", kind: "task", name: "Coat", parent: null, after: null, start: null, dur: 2 });
+    expect(writeOf(given, `s:${given.newNotes[0]}`).v).toEqual(sched(null, 2));
+  });
+
+  it("by steps puts an item without a step into the default step, and into the first open step once that is deleted", () => {
+    const ctx = ctxFrom(BY_STEPS, pd({ step: "review" }));
+    const b = buildAction(ctx, { t: "create", kind: "task", name: "Coat", parent: null, after: null, start: null });
+    expect(writeOf(b, `wi:${b.newNotes[0]}`).v).toBe("review");
+    const deleted = ctxFrom(BY_STEPS, pd({ step: "review" }), act("a2", ["a1"], [w("ws:review", null)]));
+    expect(deleted.view.defaults.step).toBeNull();
+    const d = buildAction(deleted, { t: "create", kind: "task", name: "Coat", parent: null, after: null, start: null });
+    expect(writeOf(d, `wi:${d.newNotes[0]}`).v).toBe("now");
+  });
+});

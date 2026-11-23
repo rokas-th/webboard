@@ -307,6 +307,12 @@ function mesaPeopleLog() {
   return log;
 }
 
+function mesaDefaultsLog() {
+  const log = mesaPeopleLog();
+  log.act({ lbl: "Changed the plan’s defaults", w: [own("pd", { dur: 5, dated: false, who: "dana", group: "g2", step: null })] });
+  return log;
+}
+
 function choicesLog() {
   const log = mesaLog("mesaC");
   const head = log.head();
@@ -727,6 +733,7 @@ export function buildFixtures() {
   const choices = fixtureOf([mesa(choicesLog())]);
   const mesaSteps = fixtureOf([mesa(mesaStepsLog())]);
   const mesaPeople = fixtureOf([mesa(mesaPeopleLog())]);
+  const mesaDefaults = fixtureOf([mesa(mesaDefaultsLog())]);
   const removed = inSpace(mesaOnMac, true);
   const phoneRemoved = inSpace(mesaOnMac, true, [PLAN_IDS.mesa]);
   const status = withStatusYears(fixtureOf([{ id: PLAN_IDS.status, name: LONG.plan, log: statusLog() }]));
@@ -744,6 +751,9 @@ export function buildFixtures() {
     "mesa-people": mesaPeople,
     "mesa-people-ios-phone": onIosPhone(mesaPeople),
     "mesa-people-ios-pad": onIosPad(mesaPeople),
+    "mesa-defaults": mesaDefaults,
+    "mesa-defaults-ios-phone": onIosPhone(mesaDefaults),
+    "mesa-defaults-ios-pad": onIosPad(mesaDefaults),
     scale,
     "scale-print": { ...scale, ipc: { ...scale.ipc, print_window: null } },
     choices,

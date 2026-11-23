@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clampedAt, ContextMenu, nativeSections, type PickSection } from "./ContextMenu";
+import { clampedAt, ContextMenu, nativeSections, type PickSection, type Point } from "./ContextMenu";
+import { pointBelowEnd } from "./pickMenu";
 
 afterEach(() => {
   cleanup();
@@ -22,7 +23,7 @@ const SECTIONS: readonly PickSection[] = [
 
 const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('.context-menu [role^="menuitem"]')];
 
-function shown(at = { x: 40, y: 50 }, sections: readonly PickSection[] = SECTIONS) {
+function shown(at: Point = { x: 40, y: 50 }, sections: readonly PickSection[] = SECTIONS) {
   const chosen = vi.fn<(id: string) => void>();
   const closed = vi.fn<() => void>();
   const anchor = document.createElement("button");
@@ -139,6 +140,33 @@ describe("ContextMenu", () => {
     const menu = screen.getByRole("menu");
     expect(menu.style.left).toBe("816px");
     expect(menu.style.top).toBe("572px");
+  });
+
+  it("ends at a point marked as its end edge, measured at its own width, so a wide menu does not overhang the opener", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 260, 120));
+    act(() => {
+      window.innerWidth = 1024;
+      window.innerHeight = 700;
+    });
+    shown({ x: 500, y: 50, edge: "end" });
+    const menu = screen.getByRole("menu");
+    expect([menu.style.left, menu.style.top]).toEqual(["240px", "50px"]);
+  });
+
+  it("pointBelowEnd marks the opener's right edge as the menu's end, below the opener", () => {
+    const anchor = document.createElement("button");
+    vi.spyOn(anchor, "getBoundingClientRect").mockReturnValue(new DOMRect(420, 100, 180, 28));
+    expect(pointBelowEnd(anchor)).toEqual({ x: 600, y: 132, edge: "end" });
+  });
+
+  it("an end-edge point that would leave the window is clamped back in", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 260, 120));
+    act(() => {
+      window.innerWidth = 1024;
+      window.innerHeight = 700;
+    });
+    shown({ x: 100, y: 50, edge: "end" });
+    expect(screen.getByRole("menu").style.left).toBe("8px");
   });
 
   it("clampedAt keeps a point that fits and pulls one that does not back by the margin", () => {

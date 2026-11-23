@@ -56,27 +56,29 @@ interface Subject {
   id: string;
   item: ItemId | null;
   text: string;
+  plural: boolean;
 }
 
 const subjectOf = (log: LogState, plans: readonly PlanState[], w: Write): Subject => {
   const k = parseKey(w.u);
-  if (ITEM_KINDS.has(k.kind)) return { id: "i:" + k.arg, item: k.arg, text: q(nameOf(log, plans, k.arg)) };
-  if (CALENDAR_KINDS.has(k.kind)) return { id: "calendar", item: null, text: "The calendar" };
-  if (k.kind === "pn") return { id: "pn", item: null, text: "The plan name" };
+  if (ITEM_KINDS.has(k.kind)) return { id: "i:" + k.arg, item: k.arg, text: q(nameOf(log, plans, k.arg)), plural: false };
+  if (CALENDAR_KINDS.has(k.kind)) return { id: "calendar", item: null, text: "The calendar", plural: false };
+  if (k.kind === "pn") return { id: "pn", item: null, text: "The plan name", plural: false };
+  if (k.kind === "pd") return { id: "pd", item: null, text: "The plan’s defaults", plural: true };
   if (k.kind === "l") {
     if (k.to === undefined) throw new Error(`Link ${w.u} has no successor`);
-    return { id: w.u, item: null, text: `The link ${linkText(nameOf(log, plans, k.arg), nameOf(log, plans, k.to))}` };
+    return { id: w.u, item: null, text: `The link ${linkText(nameOf(log, plans, k.arg), nameOf(log, plans, k.to))}`, plural: false };
   }
-  if (k.kind === "b") return { id: w.u, item: null, text: `Baseline ${q(baselineName(log, plans, w.u, k.arg))}` };
+  if (k.kind === "b") return { id: w.u, item: null, text: `Baseline ${q(baselineName(log, plans, w.u, k.arg))}`, plural: false };
   if (k.kind === "ws") {
     const step = stepNameIn(log, plans, w.u, k.arg);
-    if (step === null) return { id: w.u, item: null, text: "A removed step" };
-    return { id: w.u, item: null, text: step.removed ? `The removed step ${q(step.name)}` : `The step ${q(step.name)}` };
+    if (step === null) return { id: w.u, item: null, text: "A removed step", plural: false };
+    return { id: w.u, item: null, text: step.removed ? `The removed step ${q(step.name)}` : `The step ${q(step.name)}`, plural: false };
   }
   if (k.kind === "pp") {
     const person = personNameIn(log, plans, k.arg);
-    if (person === null) return { id: w.u, item: null, text: "A removed person" };
-    return { id: w.u, item: null, text: person.removed ? `The removed person ${q(person.name)}` : `The person ${q(person.name)}` };
+    if (person === null) return { id: w.u, item: null, text: "A removed person", plural: false };
+    return { id: w.u, item: null, text: person.removed ? `The removed person ${q(person.name)}` : `The person ${q(person.name)}`, plural: false };
   }
   throw new Error(`No subject for ${w.u}`);
 };
@@ -122,8 +124,8 @@ const keptLines = (ctx: Ctx, fork: LogState, after: PlanState, flipped: readonly
         lines.set(
           s.id,
           orphan === undefined
-            ? `${s.text} was changed since on the ${fromDevice(ctx, fork, w.u)} — kept`
-            : `${s.text} was changed since on the ${fromDevice(ctx, fork, orphan)} — moved to the Trash`,
+            ? `${s.text} ${s.plural ? "were" : "was"} changed since on the ${fromDevice(ctx, fork, w.u)} — kept`
+            : `${s.text} ${s.plural ? "were" : "was"} changed since on the ${fromDevice(ctx, fork, orphan)} — moved to the Trash`,
         );
       });
   });
