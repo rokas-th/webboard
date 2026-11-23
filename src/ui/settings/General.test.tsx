@@ -326,7 +326,7 @@ describe("the iPhone settings sheet", () => {
       ),
     );
     const section = one('section.settings-group[data-section="general"]');
-    expect(all(".settings-row", section).map((r) => r.dataset["settingsRow"])).toEqual(["general.week", "general.dates", "general.me", "general.device", "general.about"]);
+    expect(all(".settings-row", section).map((r) => r.dataset["settingsRow"])).toEqual(["general.tab", "general.week", "general.dates", "general.me", "general.device", "general.about"]);
     expect(one('[data-settings-row="general.me"] .settings-value.dim', section).textContent).toBe(NO_PLAN_ME);
     expect(deviceField().value).toBe("Rokas’s iPhone");
     expect(all('[role="radiogroup"]', section)).toEqual([]);

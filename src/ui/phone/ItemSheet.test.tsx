@@ -4,7 +4,7 @@ import type { ItemId } from "../../domain/model";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { IPHONE, setPlatform } from "../../test/platform";
-import { phoneRegistry } from "../../test/phone";
+import { phoneRegistry, startOnList } from "../../test/phone";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
 import { themed } from "../../test/theme";
 import { setScreen } from "../../test/setup";
@@ -189,6 +189,7 @@ describe("ItemSheet in the phone shell", () => {
   it("a tap on a row opens the shared detail at medium height, and Delete closes it", async () => {
     const t = await made(ABC);
     setScreen(390, 844);
+    startOnList();
     const registry = await phoneRegistry(t);
     registries.push(registry);
     render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
@@ -208,6 +209,7 @@ describe("ItemSheet in the phone shell", () => {
   it("keeps one sheet at full height across Next, with focus staying on Next", async () => {
     const t = await made(ABC);
     setScreen(390, 844);
+    startOnList();
     const registry = await phoneRegistry(t);
     registries.push(registry);
     render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
@@ -287,6 +289,7 @@ describe("ItemSheet in the phone shell", () => {
     expect(view.held.size).toBe(0);
     expect(view.plan.items.get("Review")?.place.parent).toBeNull();
     setScreen(390, 844);
+    startOnList();
     const registry = await phoneRegistry(t);
     registries.push(registry);
     render(withSync(<PhoneShell registry={registry} clock={t.clock} />));

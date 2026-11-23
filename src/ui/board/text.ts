@@ -1,6 +1,21 @@
 import { items, q } from "../../actions/copy";
 
 export const BY_DATES = "Columns follow dates. Edit a step or drag a card to use your own steps.";
+export const BY_DATES_PHONE = "Pages follow dates. Move a card or add one to use your own steps.";
+export const STEPS_BAR = "Steps";
+export const NO_STEP_TAB = "No step";
+export const EXPAND = "Expand";
+export const SHOW = "Show";
+
+export const foldedText = (n: number): string => `Collapsed on this device: ${items(n)}.`;
+
+export const hiddenPageText = (n: number): string => `Hidden on this device: ${items(n)}.`;
+
+export const stepTabLabel = (name: string, n: number, kind: "noStep" | "step" | "folded" | "hidden", limit: number | null): string => {
+  if (kind === "hidden") return `${name}, hidden on this device, ${items(n)}`;
+  if (kind === "folded") return `${name}, ${items(n)}, collapsed`;
+  return limit !== null && n > limit ? `${name}, ${items(n)}, over the limit of ${limit}` : `${name}, ${items(n)}`;
+};
 export const NOTHING_HERE = "Nothing here.";
 export const CLEAR_SEARCH = "Clear search";
 

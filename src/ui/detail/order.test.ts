@@ -6,7 +6,7 @@ import { EMPTY_BOARD_PREFS } from "../board/prefs";
 import type { NoteText } from "../list/columns";
 import { DEFAULT_LIST_PREFS, type ListPrefs } from "../list/prefs";
 import { planMatcher } from "../search/match";
-import { phoneOrder, stepFrom, tabOrder } from "./order";
+import { stepFrom, tabOrder } from "./order";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
@@ -73,14 +73,14 @@ describe("tabOrder", () => {
   });
 });
 
-describe("phoneOrder", () => {
+describe("tabOrder on the phone", () => {
   it("is the list's rows on the list tab, in its scope, sort and search, and the rows on the timeline tab", async () => {
     const { v, notes } = await made();
-    expect(phoneOrder(v, "list", new Set(["g"]), DEFAULT_LIST_PREFS, notes, null, null)).toEqual(["a", "b", "n", "u"]);
+    expect(tabOrder(v, { view: "list", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null, null)).toEqual(["a", "b", "n", "u"]);
     const prefs: ListPrefs = { ...DEFAULT_LIST_PREFS, scope: "all", group: "none", sort: [{ id: "start", dir: "desc" }] };
-    expect(phoneOrder(v, "list", new Set(), prefs, notes, null, null)).toEqual(["b", "n", "a", "d", "u"]);
-    expect(phoneOrder(v, "list", new Set(), DEFAULT_LIST_PREFS, notes, null, planMatcher(v, notes, "g"))).toEqual(["a", "b"]);
-    expect(phoneOrder(v, "timeline", new Set(["g"]), prefs, notes, null, null)).toEqual(["g", "n", "d"]);
+    expect(tabOrder(v, { view: "list", collapsed: new Set() }, EMPTY_BOARD_PREFS, prefs, notes, null, null)).toEqual(["b", "n", "a", "d", "u"]);
+    expect(tabOrder(v, { view: "list", collapsed: new Set() }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null, planMatcher(v, notes, "g"))).toEqual(["a", "b"]);
+    expect(tabOrder(v, { view: "timeline", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, prefs, notes, null, null)).toEqual(["g", "n", "d"]);
   });
 });
 

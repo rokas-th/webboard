@@ -8,7 +8,7 @@ import type { UnitKey } from "../../log/types";
 import { sideText, type Choice, type ChoiceSide } from "../../plan/choices";
 import type { Registry } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
-import { phoneRegistry } from "../../test/phone";
+import { phoneRegistry, startOnList } from "../../test/phone";
 import { IPHONE, MAC, setPlatform } from "../../test/platform";
 import { tauri } from "../../test/tauriMock";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
@@ -39,6 +39,7 @@ const registries: Registry[] = [];
 
 beforeEach(() => {
   window.localStorage.clear();
+  startOnList();
   setScreen(390, 844);
 });
 

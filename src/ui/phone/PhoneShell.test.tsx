@@ -10,7 +10,7 @@ import { importPlan } from "../../store/file";
 import { Registry, type PlanListing } from "../../store/registry";
 import type { PlanSession } from "../../store/session";
 import { memoryStore } from "../../test/fixtures/store";
-import { phoneRegistry } from "../../test/phone";
+import { phoneRegistry, startOnList } from "../../test/phone";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { seededStore, shellFor, type SeededStore } from "../../test/shell";
@@ -21,7 +21,8 @@ import { OpenChoice } from "../run";
 import { closeConverted, CONVERTED_TITLE, OPEN_PLAN, shownConverted } from "../shell/ConvertedReport";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import { DEFAULT_LIST_PREFS, writeListPrefs } from "../list/prefs";
-import { PLACE_KEY, useUi, type UiState } from "../state";
+import { PLACE_KEY, useUi, type UiState, type ViewKind } from "../state";
+import { DEFAULT_DEVICE, saveDevice } from "../device";
 import { PhoneShell } from "./PhoneShell";
 import { orderedSides } from "../choices/order";
 import { sideText } from "../../plan/choices";
@@ -90,6 +91,7 @@ let unstub = (): void => undefined;
 
 beforeEach(() => {
   window.localStorage.clear();
+  startOnList();
   setScreen(390, 844);
   unstub = stubVisualViewport();
 });
@@ -129,7 +131,8 @@ const made = async (): Promise<TestSession> => {
   return t;
 };
 
-const shown = async (t: TestSession): Promise<void> => {
+const shown = async (t: TestSession, tab: ViewKind = "list"): Promise<void> => {
+  saveDevice(window.localStorage, { ...DEFAULT_DEVICE, tab });
   const registry = await phoneRegistry(t);
   registries.push(registry);
   render(withSync(<PhoneShell registry={registry} clock={t.clock} />));
@@ -160,10 +163,11 @@ const rowOf = (name: string): HTMLElement => {
 const views = (): HTMLElement => screen.getByRole("tablist", { name: "Views" });
 
 describe('PhoneShell, data-form="phone"', () => {
-  it("opens on the List and switches to a read-only Timeline", async () => {
+  it("opens on the stored view, the List here, and switches to a read-only Timeline", async () => {
     const t = await made();
     const apply = vi.spyOn(t.session, "apply");
-    await shown(t);
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, view: "list", zoom: "W", collapsed: [], sidebarOpen: true, sidebarWidth: null }));
+    await shown(t, "timeline");
     const list = within(views()).getByRole("tab", { name: "List" });
     expect(list.getAttribute("aria-selected")).toBe("true");
     expect(document.querySelector(".phone-list")).not.toBeNull();
@@ -212,6 +216,98 @@ describe('PhoneShell, data-form="phone"', () => {
     fireEvent.click(within(views()).getByRole("tab", { name: "List" }));
     expect([field().getAttribute("value"), lastUi().query]).toEqual(["", ""]);
     expect(document.querySelectorAll(".phone-list .prow")).toHaveLength(2);
+  });
+
+  it("reads Timeline, Board, List in its view tabs", async () => {
+    const t = await made();
+    await shown(t);
+    expect(within(views()).getAllByRole("tab").map((tb) => tb.textContent)).toEqual(["Timeline", "Board", "List"]);
+  });
+
+  it("with no stored view opens the Default tab", async () => {
+    const t = await made();
+    await shown(t, "board");
+    expect(within(views()).getByRole("tab", { selected: true }).textContent).toBe("Board");
+    expect(document.querySelector(".phone-board")).not.toBeNull();
+    cleanup();
+    window.localStorage.clear();
+    await shown(t, "timeline");
+    expect(within(views()).getByRole("tab", { selected: true }).textContent).toBe("Timeline");
+    expect(document.querySelector(".tl-scroll")).not.toBeNull();
+  });
+
+  it("a stored board opens the Board over the Default tab", async () => {
+    const t = await made();
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, view: "board", zoom: "W", collapsed: [], sidebarOpen: true, sidebarWidth: null }));
+    await shown(t, "list");
+    expect(within(views()).getByRole("tab", { selected: true }).textContent).toBe("Board");
+    expect(document.querySelector(".phone-board")).not.toBeNull();
+    expect(document.querySelector(".phone-list")).toBeNull();
+  });
+
+  it("a view tap is written to the stored place", async () => {
+    const t = await made();
+    await shown(t);
+    const stored = (): unknown => {
+      const raw = window.localStorage.getItem(PLACE_KEY);
+      if (raw === null) throw new Error("no stored place");
+      const place: unknown = JSON.parse(raw);
+      if (typeof place !== "object" || place === null || !("view" in place)) throw new Error("the stored place has no view");
+      return place.view;
+    };
+    fireEvent.click(within(views()).getByRole("tab", { name: "Board" }));
+    expect([lastUi().view, stored()]).toEqual(["board", "board"]);
+    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    expect([lastUi().view, stored()]).toEqual(["timeline", "timeline"]);
+  });
+
+  it("a List search shows on the Board as its chip, and the Timeline clears it", async () => {
+    const t = await made();
+    await shown(t);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search this plan" }), { target: { value: "rev" } });
+    fireEvent.click(within(views()).getByRole("tab", { name: "Board" }));
+    expect(lastUi().query).toBe("rev");
+    const chip = document.querySelector(".phone-board .filter-chip .chip-text");
+    expect(chip?.textContent).toBe("Filtered: rev");
+    expect([...document.querySelectorAll(".board-page .card")].map((c) => c.getAttribute("data-card"))).toEqual(["Review"]);
+    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    expect(lastUi().query).toBe("");
+    fireEvent.click(within(views()).getByRole("tab", { name: "Board" }));
+    expect(document.querySelector(".phone-board .filter-chip")).toBeNull();
+  });
+
+  it("the item sheet's Next follows the Board's order and carries the pager", async () => {
+    const t = await testSession([
+      { name: "Soon", start: "2026-11-10", dur: 2 },
+      { name: "Far", start: "2027-03-01", dur: 2 },
+      { name: "Undated", horizon: "next" },
+    ]);
+    sessions.push(t.session);
+    await shown(t, "board");
+    const card = document.querySelector('.board-page .card[data-card="Soon"]');
+    if (card === null) throw new Error("no Soon card");
+    fireEvent.keyDown(card, { key: "Enter" });
+    const sheet = screen.getByRole("dialog", { name: "Soon" });
+    expect(sheet.dataset.detent).toBe("medium");
+    const next = sheet.querySelector(".detail-next");
+    if (!(next instanceof HTMLButtonElement)) throw new Error("no Next button");
+    fireEvent.click(next);
+    expect(lastUi().selected).toBe("Undated");
+    const bar = screen.getByRole("tablist", { name: "Steps" });
+    expect(within(bar).getByRole("tab", { selected: true }).querySelector(".step-tab-name")?.textContent).toBe("Next");
+  });
+
+  it("a page's + opens the new task's sheet at medium height with its name selected", async () => {
+    const t = await made();
+    await shown(t, "board");
+    fireEvent.click(screen.getByRole("button", { name: "Add a task to Now" }));
+    const id = lastUi().selected;
+    if (id === null) throw new Error("nothing selected");
+    const sheets = [...document.querySelectorAll(".sheet")].filter((e): e is HTMLElement => e instanceof HTMLElement);
+    expect(sheets.map((s) => [s.dataset.detent, s.getAttribute("aria-label")])).toEqual([["medium", "New task"]]);
+    const field = sheets[0].querySelector(".title-input");
+    if (!(field instanceof HTMLInputElement)) throw new Error("no name field");
+    expect([document.activeElement, field.value, field.selectionStart, field.selectionEnd, lastUi().naming]).toEqual([field, "New task", 0, "New task".length, null]);
   });
 
   it("opens an item's sheet from the List and closes it", async () => {
@@ -2084,6 +2180,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     vi.mocked(exportFlow).mockReset();
     await Promise.all(registries.splice(0).map((r) => r.close()));
     window.localStorage.clear();
+    startOnList();
   };
   const prov = (f: FakeFactory, doc: string): FakeProvider => {
     const p = f.providers.get(doc);

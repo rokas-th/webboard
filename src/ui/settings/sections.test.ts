@@ -62,7 +62,7 @@ describe("the settings sections", () => {
     ]);
   });
 
-  it("drops Default tab on the iPhone only, which always opens on its List", () => {
+  it("lists Default tab on every platform, the iPhone included", () => {
     const generalRows = (platform: typeof MAC): string[] => {
       const general = shownSections(false, true, platform).find((s) => s.id === "general");
       if (general === undefined) throw new Error("no general section");
@@ -72,9 +72,9 @@ describe("the settings sections", () => {
       ["tab", "week", "dates", "me", "device", "updates", "about"],
       ["tab", "week", "dates", "me", "device", "updates", "about"],
       ["tab", "week", "dates", "me", "device", "updates", "about"],
-      ["week", "dates", "me", "device", "updates", "about"],
+      ["tab", "week", "dates", "me", "device", "updates", "about"],
     ]);
-    expect(filterSections(shownSections(false, true, IPHONE), "launch")).toEqual([]);
+    expect(filterSections(shownSections(false, true, IPHONE), "launch").map((m) => [m.section.id, ...m.rows.map((r) => r.id)])).toEqual([["general", "tab"]]);
   });
 
   it("finds the Look rows by label on every platform that shows them", () => {

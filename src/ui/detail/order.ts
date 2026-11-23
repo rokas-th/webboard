@@ -11,8 +11,6 @@ import { planMatcher, searchMatcher, type Matcher } from "../search/match";
 import type { UiState } from "../state";
 import { timelineRows } from "../timeline/rows";
 
-export type PhoneTab = "list" | "timeline";
-
 const rowOrder = (view: PlanView, collapsed: ReadonlySet<ItemId>): ItemId[] => timelineRows(view, collapsed).map((r) => r.id);
 
 export function tabOrder(view: PlanView, ui: Pick<UiState, "view" | "collapsed">, boardPrefs: BoardPrefs, listPrefs: ListPrefs, notes: NoteText, me: PersonId | null, match: Matcher | null): readonly ItemId[] {
@@ -41,10 +39,6 @@ export function tabSearch(view: PlanView, ui: Pick<UiState, "view" | "collapsed"
 export function firstMatch(found: TabSearch): ItemId | null {
   const { match } = found;
   return (match === null ? found.order[0] : found.order.find(match)) ?? null;
-}
-
-export function phoneOrder(view: PlanView, tab: PhoneTab, collapsed: ReadonlySet<ItemId>, listPrefs: ListPrefs, notes: NoteText, me: PersonId | null, match: Matcher | null): readonly ItemId[] {
-  return tab === "list" ? listModel(rowContext(view, notes, me, null), listPrefs, match).order : rowOrder(view, collapsed);
 }
 
 export function stepFrom(order: readonly ItemId[], selected: ItemId | null, by: 1 | -1): ItemId | null {

@@ -1,87 +1,59 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { newItemIntent } from "../../actions/newItem";
-import { fmtShort, toIso, type DateStyle, type Day } from "../../domain/dates";
-import { STEP_COLOURS, type Item, type ItemId, type PersonId, type StepColour, type StepId } from "../../domain/model";
-import { peopleOf } from "../../domain/people";
+import { STEP_COLOURS, type Item, type ItemId, type StepColour, type StepId } from "../../domain/model";
 import { projectBoard, stepsOf, type Step } from "../../domain/steps";
 import { readPlatform } from "../../platform";
 import { haptic } from "../../services/haptics";
-import type { PlanView } from "../../store/doc";
 import { useNotes, usePlanView, type PlanSession } from "../../store/session";
 import type { PickSection, Point } from "../common/ContextMenu";
-import { CloseGlyph } from "../common/dismiss";
 import { STALE_CONFIRM } from "../common/NativeConfirm";
 import { pointBelow, usePickMenu } from "../common/pickMenu";
 import { toast } from "../common/Toast";
-import { groupPath, statusLabel, type StatusLabel } from "../list/groups";
 import { createdItem } from "../palette/commands";
 import { useRun } from "../run";
-import { useDateStyle } from "../DeviceProvider";
 import { useUiValue } from "../state";
 import { useDetail } from "../detail/DetailContext";
-import { duplicateRow } from "../duplicate";
-import { assigneeName, assignSection, cardPeople, heldOf, personOfRow } from "../people/assign";
-import { Avatar } from "../people/Avatar";
-import { assigneesLabel, moreText } from "../people/text";
 import { planMatcher } from "../search/match";
 import { isClick } from "../timeline/gesture";
+import { BoardLine } from "./BoardLine";
+import { CardBody } from "./Card";
+import { actionRow, liveStep, useCardMenu } from "./cardMenu";
 import { useDeleteStep } from "./DeleteStep";
 import { HoldGesture, type HoldEvent } from "./hold";
-import { boardLayout, filterLayout, nearnessOf, statusOf, type BoardColumn, type BoardLayout } from "./layout";
+import { boardLayout, filterLayout, NO_STEP_KEY, statusOf, type BoardColumn } from "./layout";
 import { MoveAll } from "./MoveAll";
 import { useBoardPrefs, writeBoardPrefs, type BoardPrefs } from "./prefs";
 import { ColourPop, LimitPop, limitOfText } from "./StepPopovers";
 import {
   addLabel,
   BY_DATES,
-  CARD_MENU,
-  CLEAR_SEARCH,
   collapseLabel,
   COLOUR_ROW,
   COMPLETES_ROW,
   countText,
-  DELETE,
   DELETE_ROW,
   doneStripLabel,
   DRAFT_PLACEHOLDER,
   draftLabel,
   DROP_TO_FINISH,
-  DUPLICATE_ROW,
-  filteredText,
   HIDE_ROW,
-  hiddenDoneText,
   hiddenStripLabel,
   INSERT_LEFT,
   INSERT_RIGHT,
-  LATE,
   LIMIT_ROW,
   moreLabel,
-  MOVE_TO,
   newStepName,
   NO_STEP,
   NO_STEP_LINE,
   NOTHING_HERE,
   nothingMatchesText,
-  OPEN_ROW,
   overLimit,
   RENAME,
   renameLabel,
-  soonText,
   STEP_MENU,
 } from "./text";
 
-const NO_STEP_KEY = "no-step";
-
 export const STEP_DRAG = "application/x-webboard-step";
-
-const DOT: Readonly<Record<StatusLabel, string>> = {
-  conflict: "dot conflict",
-  held: "dot held",
-  late: "dot late",
-  "in progress": "dot doing",
-  done: "dot",
-  "not started": "dot",
-};
 
 type HeadRow = "rename" | "colour" | "limit" | "completes" | "insert-left" | "insert-right" | "hide" | "delete";
 
@@ -99,78 +71,7 @@ type HoldTarget = { k: "step"; step: StepId } | { k: "card"; item: ItemId; x: nu
 
 type Holding = { target: HoldTarget; anchor: HTMLElement; pointer: number; held: boolean };
 
-const STEP_ROW = "step:";
-
 const stepStyle = (c: StepColour): CSSProperties => ({ "--step": `var(--s-${c})` });
-
-const dayOf = (m: ReadonlyMap<ItemId, Day>, id: ItemId, what: string, style: DateStyle): string => {
-  const d = m.get(id);
-  if (d === undefined) throw new Error(`Board: scheduled item ${id} has no ${what}`);
-  return fmtShort(toIso(d), style);
-};
-
-function When(p: { view: PlanView; item: Item }) {
-  const style = useDateStyle();
-  const sc = p.item.schedule;
-  if (sc === null) throw new Error(`Board: item ${p.item.id} has no schedule`);
-  if (sc.start === null) return <span className="unsched">unscheduled</span>;
-  const start = dayOf(p.view.derived.start, p.item.id, "start", style);
-  if (p.item.kind === "milestone") return <span className="when">◆ {start}</span>;
-  return <span className="when">{`${start} – ${dayOf(p.view.derived.end, p.item.id, "end", style)}`}</span>;
-}
-
-function Near(p: { view: PlanView; layout: BoardLayout; item: Item }) {
-  const near = nearnessOf(p.view, p.layout.mode, p.item);
-  if (near === null) return null;
-  if (near.kind === "late") return <span className="badge late">{LATE}</span>;
-  return <span className="badge soon">{soonText(near.days)}</span>;
-}
-
-const groupName = (view: PlanView, item: Item): string | null => (item.place.parent === null ? null : groupPath(view, item.place.parent));
-
-function CardPeople(p: { view: PlanView; item: Item }) {
-  const list = p.view.people.assignees.get(p.item.id) ?? [];
-  const shown = cardPeople(list);
-  if (shown === null) return null;
-  const label = assigneesLabel(list.map(assigneeName));
-  return (
-    <span className="card-people" role="img" aria-label={label} title={label}>
-      <Avatar assignee={shown.first} />
-      {shown.more > 0 && <span className="avatar-more">{moreText(shown.more)}</span>}
-    </span>
-  );
-}
-
-function BoardLine(p: { layout: BoardLayout; completing: boolean; query: string; onClear(): void }) {
-  const l = p.layout;
-  return (
-    <p className="board-line" role="status">
-      {p.query !== "" && (
-        <span className="filter-chip" data-filter-chip="">
-          <span className="chip-text">{filteredText(p.query)}</span>
-          <button type="button" className="chip-x" aria-label={CLEAR_SEARCH} title={CLEAR_SEARCH} onClick={p.onClear}>
-            <CloseGlyph />
-          </button>
-        </span>
-      )}
-      {l.mode === "dates" && (
-        <span className="quiet-line" data-by-dates="">
-          {BY_DATES}
-        </span>
-      )}
-      {!p.completing && l.hiddenDone > 0 && (
-        <span className="quiet-line" data-done-hidden="">
-          {hiddenDoneText(l.hiddenDone)}
-        </span>
-      )}
-      {l.problems.map((text) => (
-        <span key={text} className="board-problem">
-          {text}
-        </span>
-      ))}
-    </p>
-  );
-}
 
 function RenameInput(p: { step: Step; onCommit(name: string): void; onCancel(): void }) {
   const [text, setText] = useState(p.step.name);
@@ -247,18 +148,16 @@ function DraftCard(p: { step: Step; onCommit(name: string): boolean; onDiscard()
   );
 }
 
-const action = (id: string, title: string) => ({ id, title, checked: false, checkable: false });
-
 const headSections = (step: Step, hidden: boolean, readOnly: boolean): readonly PickSection[] => {
   const hide = { id: "hide", title: HIDE_ROW, checked: hidden, checkable: true };
   if (readOnly) return [{ title: null, rows: [hide] }];
   return [
     {
       title: null,
-      rows: [action("rename", RENAME), action("colour", COLOUR_ROW), action("limit", LIMIT_ROW), { id: "completes", title: COMPLETES_ROW, checked: step.completes, checkable: true }],
+      rows: [actionRow("rename", RENAME), actionRow("colour", COLOUR_ROW), actionRow("limit", LIMIT_ROW), { id: "completes", title: COMPLETES_ROW, checked: step.completes, checkable: true }],
     },
-    { title: null, rows: [action("insert-left", INSERT_LEFT), action("insert-right", INSERT_RIGHT), hide] },
-    { title: null, rows: [action("delete", DELETE_ROW)] },
+    { title: null, rows: [actionRow("insert-left", INSERT_LEFT), actionRow("insert-right", INSERT_RIGHT), hide] },
+    { title: null, rows: [actionRow("delete", DELETE_ROW)] },
   ];
 };
 
@@ -276,7 +175,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   const { run } = useRun(p.session);
   const prefs = useBoardPrefs(view.plan.id);
   const menu = usePickMenu(STEP_MENU);
-  const cardMenu = usePickMenu(CARD_MENU);
+  const cards = useCardMenu(p.session, p.readOnly, detail.promote);
   const deleting = useDeleteStep(p.session);
   const down = useRef<{ id: ItemId; x: number; y: number } | null>(null);
   const dragged = useRef<ItemId | null>(null);
@@ -322,20 +221,6 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
 
   const setPrefs = (next: BoardPrefs): void => writeBoardPrefs(window.localStorage, view.plan.id, next, live);
 
-  const liveStep = (id: StepId): Step | null => stepsOf(p.session.view().plan).find((s) => s.id === id) ?? null;
-
-  const moveTo = (id: ItemId, to: StepId): void => {
-    if (!view.plan.items.has(id)) throw new Error(`Board: dragged item ${id} is not in the plan`);
-    const now = p.session.view();
-    const current = projectBoard(now.plan, now.derived).columnOf.get(id);
-    if (current === undefined) {
-      toast(STALE_CONFIRM, "bad");
-      return;
-    }
-    if (current === to) return;
-    run({ t: "toStep", items: [id], step: to });
-  };
-
   const reorderTo = (source: StepId, target: StepId): void => {
     const all = stepsOf(p.session.view().plan);
     const from = all.findIndex((s) => s.id === source);
@@ -369,7 +254,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   };
 
   const onHeadChosen = (id: StepId, row: HeadRow, below: Point, back: HTMLElement): void => {
-    const step = liveStep(id);
+    const step = liveStep(p.session, id);
     if (step === null) {
       toast(STALE_CONFIRM, "bad");
       return;
@@ -415,66 +300,10 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
     openHead(step, e.currentTarget, { x: e.clientX, y: e.clientY });
   };
 
-  const cardSections = (item: ItemId): readonly PickSection[] => {
-    const open = { title: null, rows: [action("open", OPEN_ROW)] };
-    if (p.readOnly) return [open];
-    const current = projection.columnOf.get(item);
-    const assign = assignSection(view.people.people, heldOf(view, item));
-    return [
-      open,
-      { title: MOVE_TO, rows: steps.map((s) => ({ id: `${STEP_ROW}${s.id}`, title: s.name, checked: s.id === current, checkable: true })) },
-      ...(assign === null ? [] : [assign]),
-      { title: null, rows: [action("duplicate", DUPLICATE_ROW), action("delete", DELETE)] },
-    ];
-  };
-
-  const toggleAssignee = (item: ItemId, person: PersonId, held: boolean): void => {
-    const now = p.session.view().plan;
-    const it = now.items.get(item);
-    if (it === undefined) throw new Error(`Board: the card menu assigned item ${item}, which is not in the plan`);
-    if (it.trashed || !peopleOf(now).some((x) => x.id === person)) {
-      toast(STALE_CONFIRM, "bad");
-      return;
-    }
-    run({ t: held ? "unassign" : "assign", items: [item], person });
-  };
-
-  const onCardChosen = (item: ItemId, row: string, held: readonly PersonId[]): void => {
-    if (row === "open") {
-      detail.promote(item);
-      return;
-    }
-    if (row === "duplicate") {
-      duplicateRow(run, () => p.session.view(), ui, setUi, item);
-      return;
-    }
-    if (row === "delete") {
-      run({ t: "trash", items: [item] });
-      return;
-    }
-    const person = personOfRow(row);
-    if (person !== null) {
-      toggleAssignee(item, person, held.includes(person));
-      return;
-    }
-    if (!row.startsWith(STEP_ROW)) throw new Error(`Board: the card menu chose ${JSON.stringify(row)}, which is no row of it`);
-    const step = liveStep(row.slice(STEP_ROW.length));
-    if (step === null) {
-      toast(STALE_CONFIRM, "bad");
-      return;
-    }
-    moveTo(item, step.id);
-  };
-
-  const openCard = (item: ItemId, anchor: HTMLElement, at: Point): void => {
-    const held = heldOf(view, item);
-    cardMenu.open(item, anchor, at, cardSections(item), (row) => onCardChosen(item, row, held));
-  };
-
   const onCardContext = (e: ReactMouseEvent<HTMLElement>, item: ItemId): void => {
     e.preventDefault();
     if (ios && holding.current !== null) return;
-    openCard(item, e.currentTarget, { x: e.clientX, y: e.clientY });
+    cards.open(item, e.currentTarget, { x: e.clientX, y: e.clientY });
   };
 
   const dropTargetAt = (x: number, y: number): StepId | null => {
@@ -502,10 +331,10 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
 
   const onMenuHold = (target: HoldTarget, anchor: HTMLElement): void => {
     if (target.k === "card") {
-      openCard(target.item, anchor, pointBelow(anchor));
+      cards.open(target.item, anchor, pointBelow(anchor));
       return;
     }
-    const step = liveStep(target.step);
+    const step = liveStep(p.session, target.step);
     if (step === null) {
       toast(STALE_CONFIRM, "bad");
       return;
@@ -536,7 +365,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
           endLift();
           if (to === null) return;
           if (target.k === "step") reorderTo(target.step, to);
-          else moveTo(target.item, to);
+          else cards.moveTo(target.item, to);
           return;
         }
         case "menu":
@@ -686,7 +515,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
     draggedStep.current = null;
     setOver(null);
     if (step !== null) reorderTo(step, to);
-    else if (id !== null) moveTo(id, to);
+    else if (id !== null) cards.moveTo(id, to);
   };
 
   const dropProps = (to: StepId) =>
@@ -700,7 +529,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
         };
 
   const commitRename = (step: Step, name: string): void => {
-    if (liveStep(step.id) === null) return;
+    if (liveStep(p.session, step.id) === null) return;
     if (name.trim() === step.name) {
       setRenaming(null);
       return;
@@ -709,7 +538,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   };
 
   const commitDraft = (step: Step, name: string): boolean => {
-    if (liveStep(step.id) === null) return true;
+    if (liveStep(p.session, step.id) === null) return true;
     const now = p.session.view();
     const built = run(newItemIntent(now, now.today, "task", name, { column: step.id }));
     if (built === null) return false;
@@ -719,7 +548,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   };
 
   const pickColour = (id: StepId, c: StepColour): void => {
-    const step = liveStep(id);
+    const step = liveStep(p.session, id);
     setPop(null);
     if (step === null) {
       toast(STALE_CONFIRM, "bad");
@@ -729,7 +558,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   };
 
   const applyLimit = (id: StepId, text: string): void => {
-    const step = liveStep(id);
+    const step = liveStep(p.session, id);
     if (step === null) {
       setPop(null);
       toast(STALE_CONFIRM, "bad");
@@ -744,7 +573,6 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   };
 
   const card = (item: Item) => {
-    const group = groupName(view, item);
     const drags = !p.readOnly && !ios;
     return (
       <div
@@ -773,16 +601,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
         onDragStart={drags ? (e) => onDragStart(e, item.id) : undefined}
         onDragEnd={drags ? onDragEnd : undefined}
       >
-        <div className="card-top">
-          <span className={DOT[statusLabel(view, item.id)]} />
-          <span className="card-name">{item.name}</span>
-        </div>
-        <div className="card-meta">
-          <When view={view} item={item} />
-          {group !== null && <span className="card-group">{group}</span>}
-          <Near view={view} layout={layout} item={item} />
-          <CardPeople view={view} item={item} />
-        </div>
+        <CardBody view={view} layout={layout} item={item} />
       </div>
     );
   };
@@ -924,7 +743,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
 
   return (
     <div className="board">
-      <BoardLine layout={layout} completing={projection.completing !== null} query={query} onClear={() => setUi({ query: "" })} />
+      <BoardLine layout={layout} completing={projection.completing !== null} query={query} byDates={BY_DATES} onClear={() => setUi({ query: "" })} />
       <div className="nnl">
         {layout.empty !== null && (
           <p className="note" data-empty-board="">
@@ -934,7 +753,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
         {layout.columns.map(column)}
       </div>
       {menu.node}
-      {cardMenu.node}
+      {cards.node}
       {pop !== null && popStep !== undefined && pop.kind === "colour" && <ColourPop name={popStep.name} colour={popStep.colour} at={pop.at} back={pop.back} onPick={(c) => pickColour(popStep.id, c)} onClose={() => setPop(null)} />}
       {pop !== null && popStep !== undefined && pop.kind === "limit" && (
         <LimitPop step={popStep} at={pop.at} back={pop.back} onApply={(text) => applyLimit(popStep.id, text)} onClear={() => applyLimit(popStep.id, "")} onClose={() => setPop(null)} />

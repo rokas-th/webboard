@@ -48,6 +48,8 @@ if (Element.prototype.setPointerCapture === undefined) {
 }
 const scrollIntoView = vi.fn<(this: Element, arg?: boolean | ScrollIntoViewOptions) => void>();
 Element.prototype.scrollIntoView = scrollIntoView;
+const scrollTo = vi.fn<(this: Element, arg?: ScrollToOptions | number, y?: number) => void>();
+Element.prototype.scrollTo = scrollTo;
 
 export function setScreen(w: number, h: number): void {
   Object.defineProperty(window.screen, "width", { configurable: true, value: w });
@@ -65,6 +67,7 @@ beforeEach(async () => {
   (await import("../services/nativeMenu")).resetNativeMenus();
   setPlatform({ os: "macos", idiom: null });
   scrollIntoView.mockClear();
+  scrollTo.mockClear();
   document.documentElement.style.setProperty("--sidebar-w", "284px");
   setScreen(1440, 900);
   resetMediaQueries();

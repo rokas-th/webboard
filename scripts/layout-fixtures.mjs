@@ -748,6 +748,7 @@ export function buildFixtures() {
     "mesa-ios-pad": onIosPad(mesaOnMac),
     "mesa-steps": mesaSteps,
     "mesa-steps-ios-pad": onIosPad(mesaSteps),
+    "mesa-steps-ios-phone": onIosPhone(mesaSteps),
     "mesa-people": mesaPeople,
     "mesa-people-ios-phone": onIosPhone(mesaPeople),
     "mesa-people-ios-pad": onIosPad(mesaPeople),

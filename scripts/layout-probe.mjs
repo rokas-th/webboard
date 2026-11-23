@@ -115,7 +115,9 @@ export const CHROME = Object.freeze({
   listBar: [".scope-bar button", ".list-status button", ".chip-x", ".th-sort", ".th-edge", ".cols-btn"],
   columnsPop: [".cols-pop .popover-close", ".cols-pop .cols-handle", ".cols-pop .cols-check", ".cols-pop .cols-reset"],
   phoneList: [`.plist-top ${CONTROL}`, ".plist-top input", ".phone-list .scope-bar button", ".phone-list .psec:first-of-type .prow", ".phone-list .psec:first-of-type button.psec-title"],
+  phoneBoard: [".step-bar .step-tab", ".page-head .col-btn", ".page-show", ".board-line .chip-x", ".board-page .move-all", ".board-page .card"],
 });
+const [PB_TABS, PB_HEAD, PB_SHOW, PB_CHIP_X, PB_MOVE_ALL, PB_CARDS] = CHROME.phoneBoard;
 const hitChrome = (...groups) => ({ hit44: groups.flatMap((g) => CHROME[g]) });
 const READY_MS = 5000;
 const QUIET_MS = 4000;
@@ -198,6 +200,7 @@ const corner = (selector, box, at, gap) => ({ corner: [selector, box, at, gap] }
 const inWindow = (selector) => ({ inWindow: selector });
 const uncovered = (selector) => ({ uncovered: selector });
 const still = () => ({ still: true });
+const paged = (page, o) => ({ paged: [page, o !== undefined && o.barMoved === true] });
 const asked = (titles) => ({ nativeMenu: titles });
 const askedExactly = (byWidth) => ({ nativeMenu: [], byWidth });
 const chooseNative = (title) => ({ choose: title });
@@ -1193,10 +1196,10 @@ function states() {
       click(".plans-sheet button.plans-settings-row", "Settings…"),
       expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
       reveal(`${PHONE_GENERAL} > h2.settings-group-title`, "General"),
-      ...generalRows(PHONE_GENERAL, "iPhone", 4),
-      count(`${PHONE_GENERAL} [data-settings-row="general.tab"]`, 0),
+      ...generalRows(PHONE_GENERAL, "iPhone", 5),
+      count(`${PHONE_GENERAL} [data-settings-row="general.tab"]`, 1),
       count(`${PHONE_GENERAL} [role="radiogroup"]`, 0),
-      ...GENERAL_PULLS.filter(([field]) => field !== "tab").flatMap(([field, rows]) => [
+      ...GENERAL_PULLS.flatMap(([field, rows]) => [
         reveal(`${PHONE_GENERAL} button.settings-pick[data-pick="${field}"]`),
         height(`${PHONE_GENERAL} button.settings-pick[data-pick="${field}"]`, 44, 60),
         click(`${PHONE_GENERAL} button.settings-pick[data-pick="${field}"]`),
@@ -1481,9 +1484,11 @@ function states() {
     actions: [viewExpect("list"), exampleHead, expect(".list .list-name", "QA and fixes")],
   });
   add("example/phone-timeline", "example", {
+    place: listPlace,
     sizes: "phone",
     actions: [
       expect(".phone-head .phone-plan-name", EXAMPLE_PLAN),
+      expect('.phone-views [role="tab"][aria-selected="true"]', "List"),
       click('.phone-views [role="tab"]', "Timeline"),
       expect('.phone-views [role="tab"][aria-selected="true"]', "Timeline"),
       expect(".tl-canvas"),
@@ -1538,10 +1543,12 @@ function states() {
   });
   const planSheet = [click(".toolbar button", "Plan"), expect('.sheet[role="dialog"] .sheet-title', "Plan"), expect(".sheet .panel h2", "Plan")];
   add("phone/list", "mesa", {
+    place: listPlace,
     sizes: "phone",
     actions: [count(".sidebar", 0), expect('.phone-views [role="tab"][aria-selected="true"]', "List"), expect(".phone-list .prow .prow-name"), expect(".phone-list .prow .prow-meta")],
   });
   add("phone/list-rows", "mesa", {
+    place: listPlace,
     sizes: "phone",
     actions: [
       expect(".phone-list .plist-top .search-field input"),
@@ -1553,6 +1560,7 @@ function states() {
     ],
   });
   add("phone/list-search", "mesa", {
+    place: listPlace,
     sizes: "phone",
     actions: [fill(".phone-list .plist-top input", "dome"), count(".phone-list .prow", PHONE_DOME_ROWS), expect(".phone-list .list-status .list-count", PHONE_DOME_COUNT)],
   });
@@ -1743,7 +1751,7 @@ function states() {
       count(".removed-banner button", 3),
     ],
   });
-  add("long-names/phone", "long-names", { sizes: "phone", clip: true, actions: [expect(".phone-list .prow .prow-name")] });
+  add("long-names/phone", "long-names", { place: listPlace, sizes: "phone", clip: true, actions: [expect(".phone-list .prow .prow-name")] });
   add("detail/summary", "mesa", {
     actions: [
       viewExpect("timeline"),
@@ -1914,7 +1922,7 @@ function states() {
   const FIELDS = '.sheet input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), .sheet select, .sheet textarea';
   const phoneItemSheet = [click(".phone-list .prow"), expect('.sheet[role="dialog"] [data-detail="sheet"] .detail-body')];
   const phoneSettings = [click(".phone-head button", "Plans"), click(".plans-sheet button.plans-settings-row", "Settings…"), expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"), expect(`${SETTINGS_SHEET} section.settings-group[data-section="theme"] .theme-body`)];
-  add("ios-fields/phone-item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, fontMin(FIELDS, 16)] });
+  add("ios-fields/phone-item", "mesa-ios-phone", { place: listPlace, sizes: "phone", dialog: true, actions: [...phoneItemSheet, fontMin(FIELDS, 16)] });
   add("ios-fields/phone-settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, fontMin(FIELDS, 16)] });
   const settingsFromMore = [click('.toolbar button[aria-label="More"]'), chooseNative("Settings")];
   const NEW_ROWS = ["New task", "New milestone", "New group"];
@@ -1922,19 +1930,148 @@ function states() {
   const INSPECTOR_DRAWER = '.inspector-overlay[role="dialog"][aria-label="Inspector"]';
   const padItem = [click(".tl-row .name", PICKED), still(), expect(`${INSPECTOR_DRAWER} .panel .kind`, "TASK"), count(".sheet", 0)];
   add("ios44/phone/plan", "mesa-ios-phone", { sizes: "phone", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
-  add("ios44/phone/list", "mesa-ios-phone", { sizes: "phone", actions: [expect(".phone-list .prow .prow-meta"), hitChrome("phoneBars", "phoneList")] });
+  add("ios44/phone/list", "mesa-ios-phone", { place: listPlace, sizes: "phone", actions: [expect(".phone-list .prow .prow-meta"), hitChrome("phoneBars", "phoneList")] });
   add("ios44/phone/plans", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [click(".phone-head button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), hitChrome("sheetHead", "planList")] });
-  add("ios44/phone/item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal('.sheet .detail-body [data-detail-field="group"]'), expect(".sheet .detail-body .actions button", "Move up"), hitChrome("sheetHead", "panelActions")] });
-  add("ios44/phone/item-end", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal(".sheet .detail-body > .actions button", "Delete"), hitChrome("sheetHead", "panelActions")] });
+  add("ios44/phone/item", "mesa-ios-phone", { place: listPlace, sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal('.sheet .detail-body [data-detail-field="group"]'), expect(".sheet .detail-body .actions button", "Move up"), hitChrome("sheetHead", "panelActions")] });
+  add("ios44/phone/item-end", "mesa-ios-phone", { place: listPlace, sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal(".sheet .detail-body > .actions button", "Delete"), hitChrome("sheetHead", "panelActions")] });
   add("phone/detent-medium", "mesa-ios-phone", {
+    place: listPlace,
     sizes: "phone",
     dialog: true,
     actions: [...phoneItemSheet, still(), count('.sheet[data-detent="medium"]', 1), heightShare(".sheet", 50, 54), expect(".sheet .detail-head .detail-expand"), inWindow(".sheet"), hitChrome("sheetHead", "detailHead")],
   });
   add("phone/detent-large", "mesa-ios-phone", {
+    place: listPlace,
     sizes: "phone",
     dialog: true,
     actions: [...phoneItemSheet, still(), swipe(".sheet .sheet-title", 0, -120), still(), count('.sheet[data-detent="large"]', 1), heightShare(".sheet", 95, 100), inWindow(".sheet")],
+  });
+  const phoneBoardPlace = { view: "board", zoom: "W" };
+  const PHONE_BY_DATES = "Pages follow dates. Move a card or add one to use your own steps.";
+  const LONG_STEP = "Spectrograph calibration and dome seeing measurements, parts";
+  const pageOf = (key) => `.board-page[data-page="${key}"]`;
+  const tabOf = (key) => `.step-bar .step-tab[data-page="${key}"]`;
+  const pageTo = (key) => [click(tabOf(key)), still(), paged(key)];
+  const boardHit = (...picked) => ({ hit44: [...CHROME.phoneBars, PB_TABS, ...picked], whole: true });
+  add("phone-board/page", "mesa-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone",
+    actions: [
+      expect('.phone-views [role="tab"][aria-selected="true"]', "Board"),
+      count(".board-pages > .board-page", 4),
+      count(".step-bar > .step-tab", 4),
+      width(".board-pages", 390, 390),
+      width(".board-page", 390, 390),
+      expect('.step-bar .step-tab[aria-selected="true"] .step-tab-name', "Now"),
+      expect(".phone-board .board-line [data-by-dates]", PHONE_BY_DATES),
+      paged("now"),
+      height(PB_TABS, 44, 44),
+      fontMin(".board-page .card-name", 15),
+      fontMin(".board-page .card-meta", 11.5),
+      boardHit(PB_HEAD, PB_CARDS),
+    ],
+  });
+  add("phone-board/step-bar-scrolled", "mesa-steps-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone",
+    actions: [count(".step-bar > .step-tab", 6), click(tabOf("done")), still(), paged("done", { barMoved: true })],
+  });
+  add("phone-board/no-step", "mesa-steps-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone",
+    board: { v: 1, hidden: [], doneOpen: false },
+    actions: [
+      paged("no-step"),
+      expect(`${pageOf("no-step")} .page-head h2`, "NO STEP"),
+      expect(`${pageOf("no-step")} .page-head .col-badge`, "1"),
+      expect(`${pageOf("no-step")} .col-note button.move-all`, "Move all to…"),
+      count(`${pageOf("no-step")} [data-card="u2"]`, 1),
+      height(`${pageOf("no-step")} .page-head`, 44, 60),
+      boardHit(PB_MOVE_ALL, PB_CARDS),
+    ],
+  });
+  add("phone-board/folded", "mesa-steps-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone",
+    board: { v: 1, hidden: [], doneOpen: false },
+    actions: [
+      ...pageTo("done"),
+      expect(`${pageOf("done")} .page-folded`, "Collapsed on this device: 2 items."),
+      expect(`${pageOf("done")} button.page-show`, "Expand"),
+      count(`${pageOf("done")} [data-card]`, 0),
+      height(`${pageOf("done")} .page-head`, 44, 60),
+      boardHit(PB_SHOW),
+    ],
+  });
+  add("phone-board/done-open", "mesa-steps-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone",
+    board: { v: 1, hidden: [], doneOpen: true },
+    actions: [
+      ...pageTo("done"),
+      count(`${pageOf("done")} [data-card]`, 2),
+      count(`${pageOf("done")} .page-head .col-add`, 1),
+      count(`${pageOf("done")} .page-head .col-collapse`, 1),
+      height(`${pageOf("done")} .page-head`, 44, 60),
+      boardHit(PB_HEAD, PB_CARDS),
+    ],
+  });
+  add("phone-board/hidden", "mesa-steps-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone",
+    board: { v: 1, hidden: [STEP_QA], doneOpen: false },
+    actions: [
+      count(`${tabOf(STEP_QA)}[data-hidden]`, 1),
+      ...pageTo(STEP_QA),
+      expect(`${pageOf(STEP_QA)} .page-hidden`, "Hidden on this device: 1 item."),
+      expect(`${pageOf(STEP_QA)} button.page-show`, "Show"),
+      count(`${pageOf(STEP_QA)} [data-card]`, 0),
+      height(`${pageOf(STEP_QA)} .page-head`, 44, 60),
+      boardHit(PB_SHOW),
+    ],
+  });
+  add("phone-board/long-names", "mesa-steps-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone",
+    actions: [
+      paged("no-step"),
+      relabel(`${tabOf("no-step")} .step-tab-name`, LONG_STEP),
+      relabel(`${pageOf("no-step")} .page-head h2`, LONG_STEP.toLocaleUpperCase()),
+      still(),
+      ellipsed(`${tabOf("no-step")} .step-tab-name`),
+      ellipsed(`${pageOf("no-step")} .page-head h2`),
+      width(tabOf("no-step"), 44, 220),
+      oneLine(".step-bar", { scrolls: true }),
+    ],
+  });
+  add("phone-board/chip", "mesa-ios-phone", {
+    place: listPlace,
+    sizes: "phone",
+    actions: [
+      fill(".phone-list .plist-top input", "dome"),
+      click('.phone-views [role="tab"]', "Board"),
+      expect(".phone-board .board-line .filter-chip .chip-text", "Filtered: dome"),
+      height(PB_CHIP_X, 44, 60),
+      width(PB_CHIP_X, 44, 60),
+      { hit44: [PB_CHIP_X] },
+      click(PB_CHIP_X),
+      count(".phone-board .board-line .filter-chip", 0),
+    ],
+  });
+  add("phone-board/card-menu", "mesa-people-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone",
+    actions: [
+      paged("now"),
+      context(T2),
+      count(".context-menu", 0),
+      askedExactly([[0, ["Open", "group Move to", "Now ✓", "Next", "Later", "Done", "group Assign", "Mira Okafor ✓", "Ole Berg", "Ana Ruiz ✓", "Duplicate", "Delete"]]]),
+    ],
+  });
+  add("ios44/phone/board", "mesa-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone",
+    actions: [expect(".phone-board .step-bar .step-tab"), boardHit(PB_HEAD, PB_CARDS)],
   });
   const filesRows = [reveal(`${SETTINGS_SHEET} section.settings-group[data-section="files"] > h2.settings-group-title`, "Import & export"), expect(`${SETTINGS_SHEET} [data-settings-row="files.import"] button`, "Import plan…"), expect(`${SETTINGS_SHEET} [data-settings-row="files.export"] button`, "Export plan…")];
   add("ios44/phone/settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, ...filesRows, hitChrome("sheetHead", "settingsRows")] });
@@ -2036,6 +2173,7 @@ function states() {
     ],
   });
   add("ios44/phone/assignees", "mesa-people-ios-phone", {
+    place: listPlace,
     sizes: "phone",
     dialog: true,
     actions: [
@@ -2538,8 +2676,10 @@ function states() {
     actions: [viewExpect("timeline"), count(".list-edge", 1), count('.tl-frame[data-outline="collapsed"]', 1), uncovered(".outline-strip"), click(".outline-strip"), count('.tl-frame[data-outline="open"]', 1), count(".plan-overlay-layer", 0)],
   });
   add("panes/outline-phone", "mesa-ios-phone", {
+    place: listPlace,
     sizes: "phone",
     actions: [
+      expect('.phone-views [role="tab"][aria-selected="true"]', "List"),
       click('.phone-views [role="tab"]', "Timeline"),
       expect(".tl-canvas"),
       width(".tl-grid", 132, 132),
@@ -2612,7 +2752,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.unclipped === undefined && last.noOverhang === undefined && last.within === undefined && last.fitLabels === undefined && last.weekStart === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.aligned === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.unclipped === undefined && last.noOverhang === undefined && last.within === undefined && last.fitLabels === undefined && last.weekStart === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.aligned === undefined && last.paged === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -3590,7 +3730,9 @@ window.__probeAct = function (a) {
         var c = clippedByAncestors(raw, el);
         return { el: el, raw: raw, box: c.box, by: c.by };
       }).filter(function (t) {
-        return t.by === null || (t.box.right > t.box.left && t.box.bottom > t.box.top);
+        if (t.by === null) return true;
+        if (a.whole === true) return false;
+        return t.box.right > t.box.left && t.box.bottom > t.box.top;
       });
       if (found.length === 0) unmatched.push(selector);
       found.forEach(function (t) {
@@ -3912,6 +4054,42 @@ window.__probeAct = function (a) {
     var ending = document.getAnimations().filter(function (an) { return an.effect === null || an.effect.getComputedTiming().iterations !== Infinity; });
     return Promise.all(ending.map(function (an) { return an.finished.catch(function () { return null; }); })).then(function () {
       return new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(function () { r({ ok: true }); }); }); });
+    });
+  }
+  if (a.paged !== undefined) {
+    var pagerEl = firstShown(".board-pages");
+    var stepBar = firstShown(".step-bar");
+    if (pagerEl === undefined || stepBar === undefined) return { fail: "no " + (pagerEl === undefined ? ".board-pages" : ".step-bar") + " on screen to page" };
+    var pagedKey = a.paged[0];
+    var pageEl = pagerEl.querySelector('.board-page[data-page="' + pagedKey + '"]');
+    var pageTab = stepBar.querySelector('.step-tab[data-page="' + pagedKey + '"]');
+    if (pageEl === null || pageTab === null) return { fail: "no " + (pageEl === null ? "page" : "tab") + " " + JSON.stringify(pagedKey) + " on the Board" };
+    var PAGED_MS = 3000;
+    var STEADY_FRAMES = 6;
+    var pagedFrom = performance.now();
+    return new Promise(function (resolve) {
+      var lastAt = [pagerEl.scrollLeft, stepBar.scrollLeft];
+      var steady = 0;
+      function judgePaged() {
+        var pr = pagerEl.getBoundingClientRect();
+        var gr = pageEl.getBoundingClientRect();
+        if (Math.abs(gr.left - pr.left) > 1) return { fail: "the pager sits at scrollLeft " + tenth(pagerEl.scrollLeft) + ", " + tenth(gr.left - pr.left) + " px from page " + JSON.stringify(pagedKey) };
+        if (pageTab.getAttribute("aria-selected") !== "true") return { fail: "the tab of page " + JSON.stringify(pagedKey) + " is not selected" };
+        var br = stepBar.getBoundingClientRect();
+        var tr = pageTab.getBoundingClientRect();
+        if (tr.left < br.left - 0.5 || tr.right > br.right + 0.5) return { fail: "the tab of page " + JSON.stringify(pagedKey) + " spans " + tenth(tr.left) + ".." + tenth(tr.right) + ", not wholly inside .step-bar " + tenth(br.left) + ".." + tenth(br.right) };
+        if (a.paged[1] && stepBar.scrollLeft <= 0) return { fail: ".step-bar did not move: scrollLeft " + stepBar.scrollLeft };
+        return { ok: true };
+      }
+      function frame() {
+        var now = [pagerEl.scrollLeft, stepBar.scrollLeft];
+        steady = now[0] === lastAt[0] && now[1] === lastAt[1] ? steady + 1 : 0;
+        lastAt = now;
+        if (steady >= STEADY_FRAMES) return resolve(judgePaged());
+        if (performance.now() - pagedFrom > PAGED_MS) return resolve({ fail: "the pager or .step-bar was still scrolling after " + PAGED_MS + " ms" });
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
     });
   }
   if (a.keep !== undefined) {

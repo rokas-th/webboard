@@ -22,6 +22,8 @@ export interface BoardLayout {
 
 export type Nearness = { kind: "late" } | { kind: "soon"; days: number };
 
+export const NO_STEP_KEY = "no-step";
+
 const SOON_DAYS = 7;
 
 export const statusOf = (view: PlanView, id: ItemId) => {

@@ -145,7 +145,7 @@ function decoded(f: Fixture, doc: string) {
   return { ydoc, actions, log, plan, cs, held: heldItems(cs, plan) };
 }
 
-const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "mesa-people-ios-pad": "iPad", "mesa-people-ios-phone": "iPhone", "mesa-defaults-ios-pad": "iPad", "mesa-defaults-ios-phone": "iPhone", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
+const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "mesa-steps-ios-phone": "iPhone", "mesa-people-ios-pad": "iPad", "mesa-people-ios-phone": "iPhone", "mesa-defaults-ios-pad": "iPad", "mesa-defaults-ios-phone": "iPhone", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
 
 const openRegistries: Registry[] = [];
 
@@ -226,6 +226,7 @@ describe("layout fixtures", () => {
       "mesa-people-ios-phone",
       "mesa-steps",
       "mesa-steps-ios-pad",
+      "mesa-steps-ios-phone",
       "phone-choice",
       "phone-plans",
       "phone-removed-banner",
@@ -400,7 +401,7 @@ describe("layout fixtures", () => {
       const answered = Object.keys(f.ipc).filter((cmd) => cmd in UIKIT);
       expect([name, answered]).toEqual([name, f.platform.os === "ios" ? Object.keys(UIKIT) : []]);
     });
-    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(13);
+    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(14);
   });
 
   it("every fixture carries a platform global its device_info agrees with", () => {
@@ -532,6 +533,9 @@ describe("layout fixtures", () => {
     expect(fixture("mesa-steps-ios-pad").docs).toEqual(f.docs);
     expect(fixture("mesa-steps-ios-pad").ipc).toEqual({ ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" }, ...UIKIT });
     expect(fixture("mesa-steps-ios-pad").platform).toEqual({ os: "ios", idiom: "pad" });
+    expect(fixture("mesa-steps-ios-phone").docs).toEqual(f.docs);
+    expect(fixture("mesa-steps-ios-phone").ipc).toEqual({ ...f.ipc, device_info: { deviceId: "iphone", platform: "ios" }, ...UIKIT });
+    expect(fixture("mesa-steps-ios-phone").platform).toEqual({ os: "ios", idiom: "phone" });
   });
 
   it("mesa-people is mesa plus three actions that add four people, assign three open cards and remove Dana Lee, who stays on t4 as a former person", () => {
@@ -761,7 +765,7 @@ describe("layout fixtures", () => {
     for (const [name, f] of Object.entries(FIXTURES).filter(([n]) => n !== "example")) {
       resetTauri(answersOf(f));
       setPlatform(f.platform);
-      if (name === "mesa-ios-phone" || name === "mesa-people-ios-phone" || name === "mesa-defaults-ios-phone") setScreen(390, 844);
+      if (name === "mesa-ios-phone" || name === "mesa-steps-ios-phone" || name === "mesa-people-ios-phone" || name === "mesa-defaults-ios-phone") setScreen(390, 844);
       if (name === "mesa-ios-pad" || name === "mesa-steps-ios-pad" || name === "mesa-people-ios-pad" || name === "mesa-defaults-ios-pad") setScreen(834, 1194);
       const registry = await Registry.open({ clock: fixedClock("2026-11-09") });
       try {

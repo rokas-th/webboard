@@ -125,10 +125,8 @@ export const sectionTitle = (id: SettingsSection): string => TITLES[id];
 
 export const cappedLookRows = (platform: Platform): readonly string[] => [...(platform.os === "ios" ? ["density"] : []), ...(textSizesOn(platform).length < 2 ? ["text-size"] : [])];
 
-export const cappedGeneralRows = (platform: Platform): readonly string[] => (platform.os === "ios" && platform.idiom === "phone" ? ["tab"] : []);
-
 const droppedRows = (id: SettingsSection, hasUpdates: boolean, platform: Platform): readonly string[] =>
-  id === "general" ? [...cappedGeneralRows(platform), ...(hasUpdates ? [] : [UPDATES_ROW])] : id === "theme" ? cappedLookRows(platform) : [];
+  id === "general" ? (hasUpdates ? [] : [UPDATES_ROW]) : id === "theme" ? cappedLookRows(platform) : [];
 
 export function shownSections(hasPlan: boolean, hasUpdates: boolean, platform: Platform): readonly SectionSpec[] {
   return SETTINGS_SECTIONS.filter((s) => hasPlan || !s.plan).map((s) => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
 import type { ItemId, PlanId } from "../../domain/model";
 import { usesNativeAlert } from "../../services/alert";
 import type { Clock } from "../../services/clock";
@@ -9,11 +9,11 @@ import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
 import { toast, Toasts } from "../common/Toast";
 import { DetailContext, type DetailApi } from "../detail/DetailContext";
-import { phoneOrder, stepPatch } from "../detail/order";
+import { stepPatch, tabSearch } from "../detail/order";
 import { ghostIds } from "../ghosts";
-import { rowContext, type NoteText } from "../list/columns";
+import { useBoardPrefs } from "../board/prefs";
+import type { NoteText } from "../list/columns";
 import { useListPrefs } from "../list/prefs";
-import { searchMatcher } from "../search/match";
 import { OpenChoice } from "../run";
 import { ConvertedReport } from "../shell/ConvertedReport";
 import { moveAllToSpace } from "../shell/moving";
@@ -24,7 +24,7 @@ import { ExampleButton, NewPlanButton } from "../shell/Sidebar";
 import { RemovedBanner } from "../sync/RemovedBanner";
 import { SyncActionButtons, syncMessage } from "../sync/SyncPanes";
 import { useDevice, useMe } from "../DeviceProvider";
-import { UiContext, useUi, useUiValue, type DialogState, type SyncPane } from "../state";
+import { UiContext, useUi, useUiValue, type DialogState, type SyncPane, type ViewKind } from "../state";
 import { useCanHover } from "../theme/ThemePanel";
 import { Settings, type SettingsCloser } from "../settings/Settings";
 import { Timeline, usePhoneOutline } from "../timeline/Timeline";
@@ -32,17 +32,12 @@ import { toastRemoteTrash } from "../trashed";
 import { ChoiceSheet } from "./ChoiceSheet";
 import { RevertDialog } from "../panel/History";
 import { ItemSheet } from "./ItemSheet";
+import { PhoneBoard } from "./PhoneBoard";
 import { PhoneList } from "./PhoneList";
+import { PHONE_VIEWS, phoneViewPatch } from "./views";
 import { PhoneStatus } from "./PhoneStatus";
 import { PhoneTopBar } from "./PhoneTopBar";
 import { CreateError, ImportButton, NEW_PLAN, PlansSheet } from "./PlansSheet";
-
-type PhoneView = "list" | "timeline";
-
-const VIEWS: readonly (readonly [PhoneView, string])[] = [
-  ["list", "List"],
-  ["timeline", "Timeline"],
-];
 
 function PlanDialog(p: { session: PlanSession; dialog: DialogState; local: string; onClose(): void }): ReactElement | null {
   const d = p.dialog;
@@ -89,13 +84,55 @@ function useSheetLetGo(session: PlanSession, device: string): void {
   );
 }
 
+const ViewIds = createContext<string | null>(null);
+
+const viewTabId = (base: string, v: ViewKind): string => `${base}-tab-${v}`;
+const viewPanelId = (base: string): string => `${base}-panel`;
+
+const useViewIds = (): string => {
+  const base = useContext(ViewIds);
+  if (base === null) throw new Error("PhoneViews: rendered outside an open plan's view ids");
+  return base;
+};
+
+function PhoneViews(p: { value: ViewKind; onPick(v: ViewKind): void }) {
+  const base = useViewIds();
+  return (
+    <div className="seg phone-views" role="tablist" aria-label="Views">
+      {PHONE_VIEWS.map(([v, label]) => (
+        <button
+          key={v}
+          id={viewTabId(base, v)}
+          type="button"
+          role="tab"
+          aria-selected={p.value === v}
+          aria-controls={viewPanelId(base)}
+          className={p.value === v ? "active" : undefined}
+          onClick={() => p.onPick(v)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ViewPanel(p: { view: ViewKind; session: PlanSession; outline: ReturnType<typeof usePhoneOutline>; onOpen(id: ItemId): void }) {
+  switch (p.view) {
+    case "timeline":
+      return <Timeline session={p.session} outline={p.outline} readOnly />;
+    case "board":
+      return <PhoneBoard session={p.session} />;
+    case "list":
+      return <PhoneList session={p.session} onOpen={p.onOpen} />;
+  }
+}
+
 function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock }) {
   const { ui, setUi } = useUiValue();
-  const [view, setView] = useState<PhoneView>("list");
+  const view = ui.view;
   const outline = usePhoneOutline();
   const base = useId();
-  const tabId = (v: PhoneView): string => `${base}-tab-${v}`;
-  const panelId = `${base}-panel`;
   const local = p.registry.device.name;
   useSheetLetGo(p.session, p.registry.device.deviceId);
   const selected = ui.selected !== null && p.session.view().plan.items.has(ui.selected) ? ui.selected : null;
@@ -104,15 +141,15 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
   const named = useCallback(() => setUi({ naming: null }), [setUi]);
   const planView = usePlanView(p.session);
   const listPrefs = useListPrefs(planView.plan.id);
+  const boardPrefs = useBoardPrefs(planView.plan.id);
   const query = ui.query.trim();
-  const notesSeen = useNotes(p.session, view === "list" && query !== "");
+  const notesSeen = useNotes(p.session, view !== "timeline" && query !== "");
   const session = p.session;
   const me = useMe(planView.plan.id);
   const order = useMemo(() => {
     const notes: NoteText = (id) => session.note(id).toString();
-    const match = view === "list" ? searchMatcher(rowContext(planView, notes, me, null), query) : null;
-    return phoneOrder(planView, view, ui.collapsed, listPrefs, notes, me, match);
-  }, [planView, view, ui.collapsed, listPrefs, session, query, notesSeen, me]);
+    return tabSearch(planView, { view, collapsed: ui.collapsed, query: ui.query }, boardPrefs, listPrefs, notes, me).order;
+  }, [planView, view, ui.collapsed, ui.query, boardPrefs, listPrefs, session, notesSeen, me]);
   const follows = view === "timeline";
   const detailApi: DetailApi = {
     order,
@@ -130,28 +167,18 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
   };
   return (
     <DetailContext.Provider value={detailApi}>
-      <div id={panelId} className="phone-main" role="tabpanel" aria-labelledby={tabId(view)}>
-        {view === "list" ? <PhoneList session={p.session} onOpen={(id) => setUi({ selected: id })} /> : <Timeline session={p.session} outline={outline} readOnly />}
+      <div id={viewPanelId(base)} className="phone-main" role="tabpanel" aria-labelledby={viewTabId(base, view)}>
+        <ViewPanel view={view} session={p.session} outline={outline} onOpen={(id) => setUi({ selected: id })} />
       </div>
-      <div className="seg phone-views" role="tablist" aria-label="Views">
-        {VIEWS.map(([v, label]) => (
-          <button
-            key={v}
-            id={tabId(v)}
-            type="button"
-            role="tab"
-            aria-selected={view === v}
-            aria-controls={panelId}
-            className={view === v ? "active" : undefined}
-            onClick={() => {
-              setView(v);
-              if (v !== "list") setUi({ query: "" });
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <ViewIds.Provider value={base}>
+        <PhoneViews
+          value={view}
+          onPick={(v) => {
+            const patch = phoneViewPatch(view, v);
+            if (patch !== null) setUi(patch);
+          }}
+        />
+      </ViewIds.Provider>
       {dialog !== null ? (
         <PlanDialog session={p.session} dialog={dialog} local={local} onClose={closeDialog} />
       ) : (

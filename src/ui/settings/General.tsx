@@ -1,7 +1,6 @@
 import { useId, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { formerText, q } from "../../actions/copy";
 import { Refused } from "../../actions/intents";
-import { readPlatform } from "../../platform";
 import { usesNativeMenu } from "../../services/nativeMenu";
 import { fmtNear, type DateFormat, type WeekStart } from "../../domain/dates";
 import { meOf, type MeState } from "../../domain/me";
@@ -21,7 +20,7 @@ import { UpdateLine } from "../shell/UpdateLine";
 import type { ViewKind } from "../state";
 import { checkRow, idOfRow } from "./defaultsPick";
 import { Row } from "./Row";
-import { cappedGeneralRows, GENERAL_LABELS } from "./sections";
+import { GENERAL_LABELS } from "./sections";
 
 const SECTION = "general";
 
@@ -256,14 +255,11 @@ export function General(p: { session: PlanSession | null; device: string; rename
   const weekHint = `${hints}-week`;
   const datesHintId = `${hints}-dates`;
   const today = p.clock.today();
-  const capped = cappedGeneralRows(readPlatform(window));
   return (
     <>
-      {!capped.includes("tab") && (
-        <Row section={SECTION} row="tab" label={GENERAL_LABELS.tab} rowClassName={ROW_CLASS} hint={{ id: tabHint, text: TAB_HINT }}>
-          <SegChoice field="tab" label={GENERAL_LABELS.tab} hint={tabHint} options={TAB_OPTIONS} value={prefs.tab} onChange={(tab) => set({ tab })} />
-        </Row>
-      )}
+      <Row section={SECTION} row="tab" label={GENERAL_LABELS.tab} rowClassName={ROW_CLASS} hint={{ id: tabHint, text: TAB_HINT }}>
+        <SegChoice field="tab" label={GENERAL_LABELS.tab} hint={tabHint} options={TAB_OPTIONS} value={prefs.tab} onChange={(tab) => set({ tab })} />
+      </Row>
       <Row section={SECTION} row="week" label={GENERAL_LABELS.week} rowClassName={ROW_CLASS} hint={{ id: weekHint, text: WEEK_HINT }}>
         <SegChoice field="week" label={GENERAL_LABELS.week} hint={weekHint} options={WEEK_OPTIONS} value={prefs.week} onChange={(week) => set({ week })} />
       </Row>

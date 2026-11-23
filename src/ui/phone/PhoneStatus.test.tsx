@@ -11,7 +11,7 @@ import { encodeAction } from "../../store/doc";
 import { Registry } from "../../store/registry";
 import { NEWER_PLAN, type PlanSession } from "../../store/session";
 import { CH_ZH, holidayDay, holidayYear } from "../../test/fixtures/calendars";
-import { phoneRegistry } from "../../test/phone";
+import { phoneRegistry, startOnList } from "../../test/phone";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { seededStore, type SeededStore } from "../../test/shell";
@@ -39,6 +39,7 @@ const registries: Registry[] = [];
 
 beforeEach(() => {
   window.localStorage.clear();
+  startOnList();
   setScreen(390, 844);
 });
 
