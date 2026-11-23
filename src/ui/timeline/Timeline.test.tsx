@@ -1530,3 +1530,50 @@ describe("the outline", () => {
     expect(window.localStorage.getItem(PANES_KEY)).toBeNull();
   });
 });
+
+describe("search on the Timeline", () => {
+  const SEED: SeedItem[] = [
+    { id: "g", name: "Site", kind: "group" },
+    { id: "p", name: "Pour", parent: "g", start: "2026-11-10", dur: 2 },
+    { id: "r", name: "Rail", start: "2026-11-12", dur: 3 },
+    { id: "a", name: "Dome A", start: "2026-11-11", dur: 2 },
+    { id: "m", name: "Dome set", kind: "milestone", start: "2026-11-20" },
+  ];
+
+  const geometryOf = (): string[] =>
+    [...all(".tl-row").map((r) => `${r.dataset.row}:${r.style.top}`), ...all("[data-bar]").map((b) => `${b.dataset.bar}:${b.style.left},${b.style.top},${b.style.width}`)].sort();
+
+  const classesOf = (): string[] => [...all(".tl-row"), ...all("[data-bar]")].map((e) => e.className);
+
+  const dimmed = (sel: string, key: "row" | "bar"): (string | undefined)[] =>
+    all(sel)
+      .filter((e) => e.classList.contains("dimmed"))
+      .map((e) => e.dataset[key])
+      .sort();
+
+  it("dims the rows and bars that do not match, keeps every row and its top, and leaves the classes as they were without a query", async () => {
+    const t = await made(SEED, { today: "2026-11-10" });
+    render(<Bare session={t.session} />);
+    await settle();
+    const before = geometryOf();
+    const plain = classesOf();
+    expect(all(".dimmed")).toEqual([]);
+    act(() => uiNow()[1]({ query: "dome" }));
+    expect(dimmed(".tl-row", "row")).toEqual(["g", "p", "r"]);
+    expect(dimmed("[data-bar]", "bar")).toEqual(["p", "r"]);
+    expect(all(".bar-label.dimmed").map((l) => l.firstChild?.textContent)).toEqual(["Pour", "Rail"]);
+    expect(geometryOf()).toEqual(before);
+    expect(all(".tl-row")).toHaveLength(5);
+    act(() => uiNow()[1]({ query: "" }));
+    expect(classesOf()).toEqual(plain);
+    expect(all(".dimmed")).toEqual([]);
+  });
+
+  it("keeps a group lit when a child matches", async () => {
+    const t = await made(SEED, { today: "2026-11-10" });
+    render(<Bare session={t.session} />);
+    await settle();
+    act(() => uiNow()[1]({ query: "pour" }));
+    expect(dimmed(".tl-row", "row")).toEqual(["a", "m", "r"]);
+  });
+});

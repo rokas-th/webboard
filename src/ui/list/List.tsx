@@ -1,55 +1,145 @@
-import { useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { fmtShort, toIso, type Day } from "../../domain/dates";
-import type { Item, ItemId, Link } from "../../domain/model";
-import { liveLinks } from "../../plan/project";
-import type { PlanView } from "../../store/doc";
-import { usePlanView, type PlanSession } from "../../store/session";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import type { ItemId } from "../../domain/model";
+import { useNotes, usePlanView, type PlanSession } from "../../store/session";
 import { EMPTY_PLAN } from "../copy";
-import { ghostIds } from "../ghosts";
-import { useUiValue } from "../state";
 import { useDetail } from "../detail/DetailContext";
+import { useUiValue } from "../state";
 import { isClick } from "../timeline/gesture";
-import { listGroups, statusLabel, type StatusLabel } from "./groups";
+import { columnById, rowContext, type ColumnSpec, type RowContext } from "./columns";
+import { ListBar } from "./ListBar";
+import { listModel, planOrder, sortClick, type ListSection } from "./model";
+import { useListPrefs, writeListPrefs, type ColumnId, type ListPrefs } from "./prefs";
+import { nothingText, SORT_DOWN, SORT_TITLE, SORT_UP, sortDirText, sortRankText } from "./text";
+import { listWindow, ROW_PX } from "./window";
+import { searchMatcher } from "../search/match";
 
-const HEADS: readonly string[] = ["Item", "Start", "End", "Days", "Status", "Depends on"];
+type Entry = { kind: "group"; section: ListSection; count: number } | { kind: "row"; id: ItemId };
 
-const STATUS_CLASS: Readonly<Record<StatusLabel, string>> = {
-  conflict: "st conflict",
-  held: "st held",
-  late: "st late",
-  "in progress": "st doing",
-  done: "st done",
-  "not started": "st todo",
+interface Port {
+  top: number;
+  height: number;
+}
+
+interface Shown {
+  spec: ColumnSpec;
+  w: number;
+}
+
+const entriesOf = (sections: readonly ListSection[], ghosts: ReadonlySet<ItemId>): Entry[] =>
+  sections.flatMap((s): Entry[] => {
+    const heading: Entry[] = s.title === "" ? [] : [{ kind: "group", section: s, count: s.rows.filter((id) => !ghosts.has(id)).length }];
+    return [...heading, ...s.rows.map((id): Entry => ({ kind: "row", id }))];
+  });
+
+const ariaSort = (prefs: ListPrefs, id: ColumnId): "ascending" | "descending" | undefined => {
+  const primary = prefs.sort[0];
+  if (primary === undefined || primary.id !== id) return undefined;
+  return primary.dir === "asc" ? "ascending" : "descending";
 };
 
-const itemOf = (view: PlanView, id: ItemId): Item => {
-  const item = view.plan.items.get(id);
-  if (item === undefined) throw new Error(`List: no item ${id}`);
-  return item;
+const cellClass = (spec: ColumnSpec, empty: boolean): string | undefined => {
+  const classes = [spec.id === "name" ? "item" : "", spec.align === "end" ? "end" : "", empty ? "nil" : ""].filter((c) => c !== "");
+  return classes.length === 0 ? undefined : classes.join(" ");
 };
 
-const dateOf = (m: ReadonlyMap<ItemId, Day>, id: ItemId, what: string): string => {
-  const d = m.get(id);
-  if (d === undefined) throw new Error(`List: scheduled item ${id} has no ${what}`);
-  return fmtShort(toIso(d));
-};
-
-const lagText = (lag: number): string => (lag === 0 ? "" : `${lag > 0 ? "+" : ""}${lag}d`);
-
-export const depsOf = (view: PlanView, links: readonly Link[], id: ItemId): string =>
-  links
-    .filter((l) => l.to === id)
-    .map((l) => `${itemOf(view, l.from).name} ${l.type}${lagText(l.lag)}`)
-    .join(", ");
+function Head(p: { cols: readonly Shown[]; prefs: ListPrefs; headRef: RefObject<HTMLTableSectionElement | null>; onSort(id: ColumnId, shift: boolean): void }) {
+  const ranked = p.prefs.sort.length >= 2;
+  const base = useId();
+  return (
+    <thead ref={p.headRef}>
+      <tr>
+        {p.cols.map(({ spec }) => {
+          const rank = p.prefs.sort.findIndex((s) => s.id === spec.id);
+          const key = rank < 0 ? null : p.prefs.sort[rank];
+          const described = `${base}-${spec.id}`;
+          return (
+            <th key={spec.id} data-col={spec.id} aria-sort={ariaSort(p.prefs, spec.id)} className={spec.align === "end" ? "end" : undefined}>
+              <button
+                type="button"
+                className="th-sort"
+                title={SORT_TITLE}
+                aria-describedby={key === null ? undefined : described}
+                onClick={(e: ReactMouseEvent<HTMLButtonElement>) => p.onSort(spec.id, e.shiftKey)}
+              >
+                {spec.title}
+              </button>
+              {key !== null && (
+                <>
+                  <span className="sort-chev" data-dir={key.dir} aria-hidden="true">
+                    {key.dir === "asc" ? SORT_UP : SORT_DOWN}
+                    {ranked && <span className="sort-rank">{rank + 1}</span>}
+                  </span>
+                  <span id={described} className="sort-said">
+                    {ranked ? sortRankText(rank + 1, p.prefs.sort.length, key.dir) : sortDirText(key.dir)}
+                  </span>
+                </>
+              )}
+            </th>
+          );
+        })}
+      </tr>
+    </thead>
+  );
+}
 
 export function List(p: { session: PlanSession }) {
   const view = usePlanView(p.session);
+  const plan = view.plan.id;
+  const prefs = useListPrefs(plan);
   const { ui } = useUiValue();
+  const q = ui.query.trim();
+  const notesSeen = useNotes(p.session, q !== "" || prefs.cols.some((c) => c.id === "note"));
   const detail = useDetail();
   const down = useRef<{ id: ItemId; x: number; y: number } | null>(null);
-  const sections = listGroups(view);
-  const ghosts = ghostIds(view);
-  const links = liveLinks(view.plan);
+  const wrap = useRef<HTMLDivElement>(null);
+  const head = useRef<HTMLTableSectionElement>(null);
+  const scrolledFor = useRef<ItemId | null>(null);
+  const [port, setPort] = useState<Port>({ top: 0, height: 0 });
+  const session = p.session;
+  const ctx: RowContext = useMemo(() => rowContext(view, (id) => session.note(id).toString()), [view, session, notesSeen]);
+  const match = useMemo(() => searchMatcher(ctx, q), [ctx, q]);
+  const model = useMemo(() => listModel(ctx, prefs, match), [ctx, prefs, match]);
+  const listed = useMemo(() => planOrder(ctx).length, [ctx]);
+  const cols: Shown[] = useMemo(() => prefs.cols.map((c) => ({ spec: columnById(c.id), w: c.w })), [prefs]);
+  const width = cols.reduce((sum, c) => sum + c.w, 0);
+  const entries = useMemo(() => entriesOf(model.sections, ctx.ghosts), [model, ctx]);
+  const win = listWindow(port.top, port.height, entries.length);
+  const selectedAt = ui.selected === null ? -1 : entries.findIndex((e) => e.kind === "row" && e.id === ui.selected);
+
+  useLayoutEffect(() => {
+    const el = wrap.current;
+    if (el === null) throw new Error("List: no scroller");
+    const measure = (): void => setPort({ top: el.scrollTop, height: el.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (scrolledFor.current === ui.selected) return;
+    scrolledFor.current = ui.selected;
+    if (selectedAt < 0) return;
+    const el = wrap.current;
+    if (el === null) throw new Error("List: no scroller");
+    const thead = head.current;
+    if (thead === null) throw new Error("List: no header");
+    const headH = thead.offsetHeight;
+    const top = selectedAt * ROW_PX;
+    const bottom = headH + (selectedAt + 1) * ROW_PX;
+    if (top < el.scrollTop) el.scrollTop = top;
+    else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
+    else return;
+    setPort({ top: el.scrollTop, height: el.clientHeight });
+  }, [ui.selected, selectedAt]);
+
+  const setPrefs = (next: ListPrefs): void => {
+    writeListPrefs(window.localStorage, plan, next);
+  };
+
+  const onSort = (id: ColumnId, shift: boolean): void => {
+    setPrefs(sortClick(prefs, id, shift));
+  };
 
   const onDown = (e: ReactPointerEvent<HTMLTableRowElement>, id: ItemId): void => {
     down.current = e.button === 0 ? { id, x: e.clientX, y: e.clientY } : null;
@@ -69,12 +159,18 @@ export function List(p: { session: PlanSession }) {
     else detail.promote(id);
   };
 
+  const groupRow = (s: ListSection, count: number) => (
+    <tr key={`grp:${s.key}`} className="grp" data-group-row={s.key}>
+      <td colSpan={cols.length}>
+        {s.swatch !== null && <span className="swatch" style={{ "--step": `var(--s-${s.swatch})` }} />}
+        <span className="grp-name">{s.title}</span>
+        <span className="grp-count">{count}</span>
+      </td>
+    </tr>
+  );
+
   const row = (id: ItemId) => {
-    const item = itemOf(view, id);
-    const label = statusLabel(view, id);
-    const milestone = item.kind === "milestone";
-    const ghost = ghosts.has(id);
-    const dated = !ghost && item.schedule !== null && item.schedule.start !== null;
+    const ghost = ctx.ghosts.has(id);
     const classes = [ghost ? "ghost-row" : "", ui.selected === id ? "selected" : ""].filter((c) => c !== "").join(" ");
     return (
       <tr
@@ -89,40 +185,48 @@ export function List(p: { session: PlanSession }) {
         }}
         onKeyDown={(e) => onKey(e, id)}
       >
-        <td className="item">
-          <span className="list-name">{milestone ? `◆ ${item.name}` : item.name}</span>
-        </td>
-        <td>{dated ? dateOf(view.derived.start, id, "start") : ""}</td>
-        <td>{dated && !milestone ? dateOf(view.derived.end, id, "end") : ""}</td>
-        <td>{ghost || item.schedule === null || milestone ? "" : item.schedule.dur}</td>
-        <td>
-          <span className={STATUS_CLASS[label]}>{label}</span>
-        </td>
-        <td className="wrap">{ghost ? "" : depsOf(view, links, id)}</td>
+        {cols.map(({ spec }) => {
+          const empty = spec.value(ctx, id) === "";
+          return (
+            <td key={spec.id} className={cellClass(spec, empty)}>
+              {empty ? null : spec.render(ctx, id, q)}
+            </td>
+          );
+        })}
       </tr>
     );
   };
 
+  const pad = (key: string, height: number) =>
+    height === 0 ? null : (
+      <tr key={key} className="list-pad" aria-hidden="true" style={{ height }}>
+        <td colSpan={cols.length} />
+      </tr>
+    );
+
+  const tableStyle: CSSProperties = { width };
+
+  const empty = listed === 0 ? EMPTY_PLAN : model.order.length === 0 ? nothingText(prefs.scope, prefs.chips.length > 0, q) : null;
+
   return (
-    <div className="list-wrap">
-      <table className="list">
-        <thead>
-          <tr>
-            {HEADS.map((h) => (
-              <th key={h}>{h}</th>
+    <>
+      <ListBar ctx={ctx} prefs={prefs} model={model} searching={q !== ""} onPrefs={setPrefs} />
+      <div className="list-wrap" ref={wrap} onScroll={(e) => setPort({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}>
+        <table className="list" style={tableStyle}>
+          <colgroup>
+            {cols.map(({ spec, w }) => (
+              <col key={spec.id} style={{ width: w }} />
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sections.flatMap((s) => [
-            <tr key={`grp:${s.group ?? ""}`} className="grp">
-              <td colSpan={HEADS.length}>{s.name}</td>
-            </tr>,
-            ...s.items.map(row),
-          ])}
-        </tbody>
-      </table>
-      {sections.length === 0 && <p className="note">{EMPTY_PLAN}</p>}
-    </div>
+          </colgroup>
+          <Head cols={cols} prefs={prefs} headRef={head} onSort={onSort} />
+          <tbody>
+            {pad("pad:top", win.top)}
+            {entries.slice(win.first, win.last).map((e) => (e.kind === "group" ? groupRow(e.section, e.count) : row(e.id)))}
+            {pad("pad:bottom", win.bottom)}
+          </tbody>
+        </table>
+        {empty !== null && <p className="note">{empty}</p>}
+      </div>
+    </>
   );
 }

@@ -262,6 +262,38 @@ describe("Board No step", () => {
     expect(document.querySelector('[data-col="no-step"]')).toBeNull();
     expect(cardsIn("later")).toEqual(["w", "x"]);
   });
+
+  it("moves only the No step cards a search shows, and offers no Move all to… when it shows none", async () => {
+    const t = await made([...SEED, { name: "wx" }, { name: "x" }]);
+    t.session.apply({ t: "step", op: "add", name: "QA", colour: "amber", after: "later" });
+    const qa = stepId(t, "QA");
+    const phone = await t.peer("iphone");
+    sessions.push(phone.session);
+    phone.session.apply({ t: "toStep", items: ["w", "wx", "x"], step: qa });
+    t.session.apply({ t: "step", op: "delete", step: qa, to: null });
+    phone.sync();
+    await board(t);
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "f", metaKey: true });
+    });
+    await settle();
+    const field = screen.getByRole("searchbox", { name: "Search this plan" });
+    act(() => {
+      fireEvent.change(field, { target: { value: "w" } });
+    });
+    expect(cardsIn("no-step")).toEqual(["w", "wx"]);
+    const apply = vi.spyOn(t.session, "apply");
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Move all to…" }));
+    });
+    act(() => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Later" }));
+    });
+    expect(apply.mock.calls).toEqual([[{ t: "toStep", items: ["w", "wx"], step: "later" }]]);
+    expect(cardsIn("no-step")).toEqual([]);
+    expect(screen.queryByRole("button", { name: "Move all to…" })).toBeNull();
+    expect(one(".col-badge", col("no-step")).textContent).toBe("1");
+  });
 });
 
 describe("Board card badges", () => {

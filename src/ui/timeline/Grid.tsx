@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, type MouseEvent } from "react";
 import { useDetail } from "../detail/DetailContext";
 import type { ItemId, LinkType } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
+import type { Matcher } from "../search/match";
 import type { SetUi, UiState } from "../state";
 import type { Geometry } from "./geometry";
 import { ROW } from "./geometry";
@@ -25,11 +26,12 @@ const dotOf = (view: PlanView, marks: Marks, id: ItemId): string => {
   return status === "done" ? "dot dot-done" : status === "doing" ? "dot dot-doing" : "dot";
 };
 
-function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Marks; ui: UiState; setUi: SetUi; tabStop: boolean }) {
+function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Marks; ui: UiState; setUi: SetUi; tabStop: boolean; dimmed: boolean }) {
   const { row, index } = p.placed;
   const item = p.view.plan.items.get(row.id);
   if (item === undefined) throw new Error(`Timeline row ${row.id} is not in the plan`);
   const selected = p.ui.selected === row.id;
+  const dim = p.dimmed ? " dimmed" : "";
   const { press } = useDetail();
   const pad = 14 + row.depth * 16;
   const common = {
@@ -43,7 +45,7 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
   };
   if (row.kind === "ghost") {
     return (
-      <div className={selected ? "tl-row ghost-row selected" : "tl-row ghost-row"} {...common}>
+      <div className={`${selected ? "tl-row ghost-row selected" : "tl-row ghost-row"}${dim}`} {...common}>
         <span className="name">{item.name}</span>
       </div>
     );
@@ -58,7 +60,7 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
       p.setUi({ collapsed: next });
     };
     return (
-      <div className={selected ? "tl-row group selected" : "tl-row group"} {...common}>
+      <div className={`${selected ? "tl-row group selected" : "tl-row group"}${dim}`} {...common}>
         <button
           type="button"
           className="caret"
@@ -79,7 +81,7 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
   if (item.schedule === null) throw new Error(`Timeline row ${row.id} has no schedule`);
   const dur = item.schedule.dur;
   return (
-    <div className={`tl-row ${row.kind}${selected ? " selected" : ""}`} {...common}>
+    <div className={`tl-row ${row.kind}${selected ? " selected" : ""}${dim}`} {...common}>
       <span className={dotOf(p.view, p.marks, row.id)} />
       <span className="name">{item.name}</span>
       <span className="days">{row.kind === "milestone" ? "◆" : `${dur}d`}</span>
@@ -87,7 +89,7 @@ function GridRow(p: { placed: Placed; view: PlanView; geo: Geometry; marks: Mark
   );
 }
 
-export function Grid(p: { id: string; mounted: readonly Placed[]; count: number; view: PlanView; geo: Geometry; marks: Marks; ui: UiState; setUi: SetUi }) {
+export function Grid(p: { id: string; mounted: readonly Placed[]; count: number; view: PlanView; geo: Geometry; marks: Marks; ui: UiState; setUi: SetUi; match: Matcher | null }) {
   const stop = p.mounted.some((m) => m.row.id === p.ui.selected) ? p.ui.selected : p.mounted.length === 0 ? null : p.mounted[0].row.id;
   const list = useRef<HTMLDivElement>(null);
   const selected = p.ui.selected;
@@ -101,7 +103,7 @@ export function Grid(p: { id: string; mounted: readonly Placed[]; count: number;
     <div id={p.id} className="tl-grid">
       <div className="tl-rows" ref={list} role="listbox" aria-label="Plan rows" style={{ height: p.count * ROW }}>
         {p.mounted.map((placed) => (
-          <GridRow key={placed.row.id} placed={placed} view={p.view} geo={p.geo} marks={p.marks} ui={p.ui} setUi={p.setUi} tabStop={placed.row.id === stop} />
+          <GridRow key={placed.row.id} placed={placed} view={p.view} geo={p.geo} marks={p.marks} ui={p.ui} setUi={p.setUi} tabStop={placed.row.id === stop} dimmed={p.match !== null && !p.match(placed.row.id)} />
         ))}
       </div>
     </div>

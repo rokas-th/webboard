@@ -7,7 +7,7 @@ import type { Clock } from "../../services/clock";
 import { AppError } from "../../services/ipc";
 import { SPACE_PREFIX } from "../../store/plan-id";
 import type { PlanListing, Registry } from "../../store/registry";
-import type { PlanSession } from "../../store/session";
+import { useNotes, type PlanSession } from "../../store/session";
 import { readPlatform, shortcutsUseCommand } from "../../platform";
 import { openersFrom } from "../common/Dialog";
 import { closeTopOverlay, commitFocus } from "../common/dismiss";
@@ -33,9 +33,12 @@ import { createClickPair, type ClickMark } from "../detail/clickPair";
 import { ItemDetail, promoteText, type DetailContainer } from "../detail/ItemDetail";
 import { ItemModal, rememberFocus, type FocusMemo } from "../detail/ItemModal";
 import { useBoardPrefs } from "../board/prefs";
+import { useListPrefs } from "../list/prefs";
 import { GROUP_NO_STEP, noStepNumber, SELECTION_GONE } from "../board/text";
 import { stepsOf } from "../../domain/steps";
-import { stepPatch, tabOrder } from "../detail/order";
+import { firstMatch, stepPatch, tabSearch, type TabSearch } from "../detail/order";
+import type { SearchProps } from "../search/SearchField";
+import { countText } from "../search/text";
 import { PrintSheet } from "../print/PrintSheet";
 import { startPrint } from "../print/start";
 import { useCanHover } from "../theme/ThemePanel";
@@ -88,6 +91,8 @@ const SETTINGS_PASSES = "[data-item-modal], [data-settings-modal]";
 const INSPECTOR_DRAWER_PASS: ReadonlySet<string> = new Set(["select-next", "select-prev", "detail-modal", "detail-open", "rename"]);
 
 const TO_STEP = /^to-step-([1-9])$/;
+
+const NO_SEARCH: TabSearch = { order: [], match: null, count: null };
 
 function toStepByKey(c: CommandCtx, n: number): void {
   if (c.session === null) throw new Error(`Shell: ⌥⌘${n} reached the shell without an open plan`);
@@ -244,6 +249,13 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
 
   const session = main.k === "open" && main.id === ui.plan ? main.session : null;
   const boardPrefs = useBoardPrefs(session === null ? null : session.view().plan.id);
+  const listPrefs = useListPrefs(session === null ? null : session.view().plan.id);
+  const notesSeen = useNotes(session, ui.query.trim() !== "" || (ui.view === "list" && listPrefs.cols.some((c) => c.id === "note")));
+  const shownView = session === null ? null : session.view();
+  const found = useMemo(
+    () => (session === null || shownView === null ? NO_SEARCH : tabSearch(shownView, { view: ui.view, collapsed: ui.collapsed, query: ui.query }, boardPrefs, listPrefs, (id) => session.note(id).toString())),
+    [session, shownView, ui.view, ui.collapsed, ui.query, boardPrefs, listPrefs, notesSeen],
+  );
   const selectedItemShown = session !== null && ui.selected !== null && session.view().plan.items.has(ui.selected) ? ui.selected : null;
   const itemModal = session !== null && selectedItemShown !== null && ui.dialog !== null && ui.dialog.t === "item";
   const modalHidesInspector = itemModal;
@@ -791,8 +803,22 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   };
   const inspectorBody = (s: PlanSession, container: "column" | "drawer") =>
     selectedItemShown !== null ? itemDetail(selectedItemShown, s, container) : <PlanPanel key={s.view().plan.id} session={s} readOnly={readOnly} />;
-  const order = session === null ? [] : tabOrder(session.view(), ui, boardPrefs);
+  const order = found.order;
   const follows = ui.view === "timeline";
+  const search: SearchProps | null =
+    session === null
+      ? null
+      : {
+          query: ui.query,
+          count: found.count === null ? null : countText(found.count.shown, found.count.total),
+          ask: ui.searchAsk,
+          onQuery: (query) => setUi({ query }),
+          onFirst: () => {
+            const first = firstMatch(found);
+            if (first === null) return;
+            setUi(follows ? { selected: first, follow: first } : { selected: first });
+          },
+        };
   const detailApi: DetailApi = {
     order,
     press,
@@ -820,6 +846,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
           compact={sheetBase ? { button: sidebarButton, onPlans: () => setSheet("plans"), onPlan: () => setSheet("plan") } : null}
           sidebar={sidebarToggle}
           inspector={inspectorToggle}
+          search={search}
         />
         <div ref={appBody} className="app-body" style={bodyStyle}>
           {listEdge && <ListEdge onOpen={() => setDrawerAsked("list")} />}

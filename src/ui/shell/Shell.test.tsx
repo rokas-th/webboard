@@ -22,6 +22,7 @@ import { hold, offeredSettings, resetTauri, tauri, type Call } from "../../test/
 import { orderedSides } from "../choices/order";
 import { CHOICE_TITLE } from "../choices/pick";
 import { clearToasts } from "../common/Toast";
+import { DEFAULT_LIST_PREFS, listKey } from "../list/prefs";
 import { forgetLastPlan, NO_PLAN_KEY, PLACE_KEY, PLACE_UNREADABLE, pickPlan, useUi, type UiState } from "../state";
 import { closeConverted, CONVERTED_TITLE, OPEN_PLAN, showConverted, shownConverted } from "./ConvertedReport";
 import { exportFlow, importFlow } from "./fileFlows";
@@ -2585,5 +2586,182 @@ describe("Shell: ⌥⌘1-9 moves the selection to a step", () => {
     });
     expect(apply).not.toHaveBeenCalled();
     expect(toastTexts()).toEqual(["The selected item is no longer in this plan."]);
+  });
+});
+
+describe("search in the shell", () => {
+  const glass = (): HTMLElement => within(screen.getByRole("banner")).getByRole("button", { name: "Search" });
+
+  const field = (): HTMLElement => within(screen.getByRole("dialog", { name: "Search" })).getByRole("searchbox", { name: "Search this plan" });
+
+  const find = (): void => {
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "f", metaKey: true });
+    });
+  };
+
+  it("opens the search on ⌘F and on /, and ⌘F also from inside the field", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    expect(screen.queryByRole("dialog", { name: "Search" })).toBeNull();
+    find();
+    await settle();
+    expect(document.activeElement).toBe(field());
+    expect(glass().getAttribute("aria-expanded")).toBe("true");
+    act(() => {
+      fireEvent.keyDown(field(), { key: "Escape" });
+    });
+    expect(screen.queryByRole("dialog", { name: "Search" })).toBeNull();
+    expect(document.activeElement).toBe(glass());
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "/", code: "Digit7", shiftKey: true });
+    });
+    await settle();
+    expect(document.activeElement).toBe(field());
+    act(() => {
+      fireEvent.keyDown(field(), { key: "f", metaKey: true });
+    });
+    await settle();
+    expect(document.activeElement).toBe(field());
+    expect(screen.getAllByRole("dialog", { name: "Search" })).toHaveLength(1);
+  });
+
+  it("runs Search this plan from the palette with its ⌘F hint", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    });
+    const palette = screen.getByRole("dialog", { name: "Command palette" });
+    const input = within(palette).getByRole("textbox", { name: "Command" });
+    act(() => {
+      fireEvent.change(input, { target: { value: "Search this plan" } });
+    });
+    expect(within(palette).getByText("⌘F")).toBeTruthy();
+    act(() => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await settle();
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+    expect(document.activeElement).toBe(field());
+  });
+
+  it("filters, counts and highlights the List, clears on Esc without closing, and selects the first match on Return", async () => {
+    const t = await made(MESA_SEED);
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, view: "list", zoom: "W" }));
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const counted = /^(\d+) items$/.exec(document.querySelector(".list-count")?.textContent ?? "");
+    if (counted === null) throw new Error("no item count");
+    const all = Number(counted[1]);
+    expect(all).toBeGreaterThan(2);
+    find();
+    await settle();
+    act(() => {
+      fireEvent.change(field(), { target: { value: "camera" } });
+    });
+    const rows = [...document.querySelectorAll<HTMLElement>("tr[data-lrow]")].map((r) => r.dataset.lrow);
+    expect(rows).toEqual(["t4", "t5"]);
+    expect([...document.querySelectorAll("table.list mark")].map((m) => m.textContent)).toEqual(["Camera", "camera"]);
+    expect(document.querySelector(".list-count")?.textContent).toBe(`2 of ${all}`);
+    expect(within(screen.getByRole("dialog", { name: "Search" })).getByText(`2 of ${all}`)).toBeTruthy();
+    expect(glass().classList.contains("has-query")).toBe(true);
+    act(() => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+    expect(lastUi().selected).toBe("t4");
+    expect(screen.queryByRole("dialog", { name: "Search" })).toBeNull();
+    expect(lastUi().query).toBe("camera");
+    find();
+    await settle();
+    act(() => {
+      fireEvent.keyDown(field(), { key: "Escape" });
+    });
+    expect(lastUi().query).toBe("");
+    expect(document.activeElement).toBe(field());
+    expect(document.querySelectorAll("tr[data-lrow]").length).toBeGreaterThan(2);
+    expect(document.querySelector(".list-count")?.textContent).toBe(`${all} items`);
+  });
+
+  it("selects the first matching Timeline row on Return, not the first row", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    find();
+    await settle();
+    act(() => {
+      fireEvent.change(field(), { target: { value: "camera" } });
+    });
+    const rows = [...document.querySelectorAll<HTMLElement>(".tl-row[data-row]")];
+    const firstShown = rows.find((r) => !r.classList.contains("dimmed"));
+    expect([rows[0].dataset.row, rows[0].classList.contains("dimmed"), firstShown?.dataset.row]).toEqual(["g1", true, "g2"]);
+    act(() => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+    expect([lastUi().view, lastUi().selected]).toEqual(["timeline", "g2"]);
+  });
+
+  it("follows a note edit in the inspector's position and Previous while the List sorts by Note and nothing is searched", async () => {
+    const t = await made([
+      { id: "a", name: "A", note: "2" },
+      { id: "b", name: "B", note: "3" },
+      { id: "c", name: "C", note: "4" },
+    ]);
+    const plan = t.session.view().plan.id;
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan, view: "list", zoom: "W" }));
+    window.localStorage.setItem(
+      listKey(plan),
+      JSON.stringify({ ...DEFAULT_LIST_PREFS, cols: [{ id: "name", w: 300 }, { id: "note", w: 240 }], sort: [{ id: "note", dir: "asc" }] }),
+    );
+    render(withSync(shellFor(t).ui));
+    await settle();
+    setUiNow({ selected: "a" });
+    const pos = (): string | null | undefined => document.querySelector("#inspector .detail-pos")?.textContent;
+    expect(pos()).toBe("1 / 3");
+    act(() => {
+      t.session.note("c").delete(0, 1);
+      t.session.note("c").insert(0, "1");
+    });
+    expect([...document.querySelectorAll<HTMLElement>("tr[data-lrow]")].map((r) => r.dataset.lrow)).toEqual(["c", "a", "b"]);
+    expect(pos()).toBe("2 / 3");
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Previous item" }));
+    });
+    expect(lastUi().selected).toBe("c");
+  });
+
+  it("says nothing matches in the List", async () => {
+    const t = await made(MESA_SEED);
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, view: "list", zoom: "W" }));
+    render(withSync(shellFor(t).ui));
+    await settle();
+    setUiNow({ query: "zebra" });
+    expect(document.querySelectorAll("tr[data-lrow]")).toHaveLength(0);
+    expect(screen.getByText("Nothing in Open matches “zebra”.")).toBeTruthy();
+  });
+
+  it("clears the query when another plan opens", async () => {
+    await store(["Alpha", "Beta"]);
+    const registry = await opened();
+    render(withSync(shellOn(registry)));
+    await settle();
+    find();
+    await settle();
+    act(() => {
+      fireEvent.change(field(), { target: { value: "dome" } });
+    });
+    expect(lastUi().query).toBe("dome");
+    act(() => {
+      fireEvent.keyDown(field(), { key: "Escape" });
+    });
+    act(() => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    });
+    fireEvent.click(within(entry("Beta")).getByRole("button", { name: "Beta" }));
+    await settle();
+    expect(lastUi().query).toBe("");
+    expect(glass().classList.contains("has-query")).toBe(false);
   });
 });

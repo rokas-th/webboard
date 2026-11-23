@@ -4,7 +4,7 @@ import { projectBoard, stepsOf } from "../../domain/steps";
 import type { PlanView } from "../../store/doc";
 import type { PlanSession } from "../../store/session";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
-import { boardLayout, cardOrder, nearnessOf, statusOf, type BoardColumn, type BoardLayout } from "./layout";
+import { boardLayout, cardOrder, filterLayout, nearnessOf, statusOf, type BoardColumn, type BoardLayout } from "./layout";
 import { EMPTY_BOARD_PREFS, type BoardPrefs } from "./prefs";
 import { NO_OPEN_STEP } from "./text";
 
@@ -126,6 +126,26 @@ describe("cardOrder", () => {
     const t = await made(SEED);
     expect(cardOrder(layoutOf(t.session.view()))).toEqual(["soon", "mid", "u", "w"]);
     expect(cardOrder(layoutOf(t.session.view(), prefs(["next"], true)))).toEqual(["soon", "w", "d1", "d2"]);
+  });
+});
+
+describe("filterLayout", () => {
+  const shownOf = (c: BoardColumn): string => (c.kind === "noStep" || c.kind === "step" ? c.shown.map((i) => i.id).join(",") : `${c.kind}=${c.count}`);
+
+  it("is the layout itself without a matcher", async () => {
+    const t = await made(SEED);
+    const l = layoutOf(t.session.view());
+    expect(filterLayout(l, null)).toBe(l);
+    expect(l.columns.map(shownOf)).toEqual(["soon", "mid,u", "w", "doneStrip=2"]);
+  });
+
+  it("drops the cards that do not match from what is shown, keeps every column's items and strip counts, and orders only the shown cards", async () => {
+    const t = await made(SEED);
+    const l = filterLayout(layoutOf(t.session.view(), prefs([], true)), (id) => id === "u" || id === "d2");
+    expect(l.columns.map(shownOf)).toEqual(["", "u", "", "d2"]);
+    expect(shapes(l)).toEqual(["now[soon]", "next[mid,u]", "later[w]", "done![d1,d2]"]);
+    expect(cardOrder(l)).toEqual(["u", "d2"]);
+    expect(filterLayout(layoutOf(t.session.view()), () => false).columns.map(shownOf)).toEqual(["", "", "", "doneStrip=2"]);
   });
 });
 

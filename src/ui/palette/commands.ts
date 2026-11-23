@@ -15,7 +15,10 @@ import { placeStep } from "../panel/placeStep";
 import { exportFlow, importFlow } from "../shell/fileFlows";
 import type { PlanListMode } from "../shell/planListMode";
 import { readBoardPrefs } from "../board/prefs";
+import { readListPrefs } from "../list/prefs";
 import { stepPatch, tabOrder } from "../detail/order";
+import { planMatcher } from "../search/match";
+import { SEARCH_THIS_PLAN } from "../search/text";
 import { STALE_CONFIRM } from "../common/NativeConfirm";
 import { toast } from "../common/Toast";
 import { heldOf } from "../people/assign";
@@ -280,7 +283,11 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
     label,
     keys,
     run: () => {
-      const patch = stepPatch(tabOrder(session.view(), ctx.ui, readBoardPrefs(window.localStorage, session.view().plan.id)), ctx.ui.selected, by, ctx.ui.view === "timeline");
+      const view = session.view();
+      const plan = view.plan.id;
+      const notes = (item: ItemId): string => session.note(item).toString();
+      const order = tabOrder(view, ctx.ui, readBoardPrefs(window.localStorage, plan), readListPrefs(window.localStorage, plan), notes, planMatcher(view, notes, ctx.ui.query));
+      const patch = stepPatch(order, ctx.ui.selected, by, ctx.ui.view === "timeline");
       if (patch !== null) ctx.setUi(patch);
     },
   });
@@ -293,6 +300,8 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
           { id: "expand-all", group: "View", label: "Expand all groups", run: () => ctx.setUi({ collapsed: new Set() }) },
         ];
   const steps = [step("select-next", "Select the next item", "↓ or J", 1), step("select-prev", "Select the previous item", "↑ or K", -1)];
+  const find: Command[] =
+    ctx.listMode === "phone" ? [] : [{ id: "find", group: "Edit", label: SEARCH_THIS_PLAN, keys: ctx.command ? "⌘F" : "Ctrl F", run: () => ctx.setUi({ searchAsk: ctx.ui.searchAsk + 1 }) }];
   return [
     create("task", "N"),
     create("milestone", "M"),
@@ -300,6 +309,7 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
     ...views,
     { id: "today", group: "View", label: "Jump to today", keys: "T", run: () => ctx.reveal("today") },
     ...steps,
+    ...find,
     ...folding,
     ...baselines,
     ...zooms,

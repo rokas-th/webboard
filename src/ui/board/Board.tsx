@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { fmtShort, toIso, type Day } from "../../domain/dates";
 import { STEP_COLOURS, type Item, type ItemId, type PersonId, type StepColour, type StepId } from "../../domain/model";
 import { peopleOf } from "../../domain/people";
@@ -6,8 +6,9 @@ import { projectBoard, stepsOf, type Step } from "../../domain/steps";
 import { readPlatform } from "../../platform";
 import { haptic } from "../../services/haptics";
 import type { PlanView } from "../../store/doc";
-import { usePlanView, type PlanSession } from "../../store/session";
+import { useNotes, usePlanView, type PlanSession } from "../../store/session";
 import type { PickSection, Point } from "../common/ContextMenu";
+import { CloseGlyph } from "../common/dismiss";
 import { STALE_CONFIRM } from "../common/NativeConfirm";
 import { pointBelow, usePickMenu } from "../common/pickMenu";
 import { toast } from "../common/Toast";
@@ -20,10 +21,11 @@ import { duplicateRow } from "../duplicate";
 import { assigneeName, assignSection, cardPeople, heldOf, personOfRow } from "../people/assign";
 import { Avatar } from "../people/Avatar";
 import { assigneesLabel, moreText } from "../people/text";
+import { planMatcher } from "../search/match";
 import { isClick } from "../timeline/gesture";
 import { useDeleteStep } from "./DeleteStep";
 import { HoldGesture, type HoldEvent } from "./hold";
-import { boardLayout, nearnessOf, statusOf, type BoardColumn, type BoardLayout } from "./layout";
+import { boardLayout, filterLayout, nearnessOf, statusOf, type BoardColumn, type BoardLayout } from "./layout";
 import { MoveAll } from "./MoveAll";
 import { useBoardPrefs, writeBoardPrefs, type BoardPrefs } from "./prefs";
 import { ColourPop, LimitPop, limitOfText } from "./StepPopovers";
@@ -31,6 +33,7 @@ import {
   addLabel,
   BY_DATES,
   CARD_MENU,
+  CLEAR_SEARCH,
   collapseLabel,
   COLOUR_ROW,
   COMPLETES_ROW,
@@ -42,6 +45,7 @@ import {
   draftLabel,
   DROP_TO_FINISH,
   DUPLICATE_ROW,
+  filteredText,
   HIDE_ROW,
   hiddenDoneText,
   hiddenStripLabel,
@@ -55,6 +59,7 @@ import {
   NO_STEP,
   NO_STEP_LINE,
   NOTHING_HERE,
+  nothingMatchesText,
   OPEN_ROW,
   overLimit,
   RENAME,
@@ -133,10 +138,18 @@ function CardPeople(p: { view: PlanView; item: Item }) {
   );
 }
 
-function BoardLine(p: { layout: BoardLayout; completing: boolean }) {
+function BoardLine(p: { layout: BoardLayout; completing: boolean; query: string; onClear(): void }) {
   const l = p.layout;
   return (
     <p className="board-line" role="status">
+      {p.query !== "" && (
+        <span className="filter-chip" data-filter-chip="">
+          <span className="chip-text">{filteredText(p.query)}</span>
+          <button type="button" className="chip-x" aria-label={CLEAR_SEARCH} title={CLEAR_SEARCH} onClick={p.onClear}>
+            <CloseGlyph />
+          </button>
+        </span>
+      )}
       {l.mode === "dates" && (
         <span className="quiet-line" data-by-dates="">
           {BY_DATES}
@@ -278,7 +291,11 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
   const [renaming, setRenaming] = useState<StepId | null>(null);
   const [pop, setPop] = useState<Pop | null>(null);
   const projection = projectBoard(view.plan, view.derived);
-  const layout = boardLayout(view, projection, prefs);
+  const query = ui.query.trim();
+  const notesSeen = useNotes(p.session, query !== "");
+  const session = p.session;
+  const match = useMemo(() => planMatcher(view, (id) => session.note(id).toString(), query), [view, session, query, notesSeen]);
+  const layout = filterLayout(boardLayout(view, projection, prefs), match);
   const steps = projection.steps;
   const live: ReadonlySet<StepId> = new Set(steps.map((s) => s.id));
   const os = readPlatform(window).os;
@@ -792,7 +809,9 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
     </button>
   );
 
-  const stepColumn = (step: Step, items: readonly Item[], completing: boolean) => {
+  const emptyNote = (items: readonly Item[], completing: boolean): string => (items.length > 0 ? nothingMatchesText(query) : completing ? DROP_TO_FINISH : NOTHING_HERE);
+
+  const stepColumn = (step: Step, items: readonly Item[], shown: readonly Item[], completing: boolean) => {
     const past = step.limit !== null && items.length > step.limit;
     const naming = renaming === step.id;
     return (
@@ -848,13 +867,13 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
         </div>
         <div className="col-body">
           {draft === step.id && !p.readOnly && <DraftCard key={`draft-${step.id}`} step={step} onCommit={(name) => commitDraft(step, name)} onDiscard={() => setDraft(null)} />}
-          {items.length === 0 ? draft === step.id ? null : <p className="note">{completing ? DROP_TO_FINISH : NOTHING_HERE}</p> : items.map(card)}
+          {shown.length === 0 ? draft === step.id ? null : <p className="note">{emptyNote(items, completing)}</p> : shown.map(card)}
         </div>
       </section>
     );
   };
 
-  const noStepColumn = (items: readonly Item[]) => (
+  const noStepColumn = (items: readonly Item[], shown: readonly Item[]) => (
     <section key={NO_STEP_KEY} className="col col-nostep" data-col={NO_STEP_KEY}>
       <div className="col-head">
         <span className="swatch warn" />
@@ -863,17 +882,17 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
       </div>
       <div className="col-note">
         <span>{NO_STEP_LINE}</span>
-        {!p.readOnly && <MoveAll steps={steps} onPick={(step) => run({ t: "toStep", items: items.map((i) => i.id), step })} />}
+        {!p.readOnly && shown.length > 0 && <MoveAll steps={steps} onPick={(step) => run({ t: "toStep", items: shown.map((i) => i.id), step })} />}
       </div>
-      <div className="col-body">{items.map(card)}</div>
+      <div className="col-body">{shown.length === 0 ? <p className="note">{emptyNote(items, false)}</p> : shown.map(card)}</div>
     </section>
   );
 
   const column = (c: BoardColumn) => {
-    if (c.kind === "noStep") return noStepColumn(c.items);
+    if (c.kind === "noStep") return noStepColumn(c.items, c.shown);
     if (c.kind === "doneStrip") return strip(c.step, c.count, false);
     if (c.kind === "hiddenStrip") return strip(c.step, c.count, true);
-    return stepColumn(c.step, c.items, c.completing);
+    return stepColumn(c.step, c.items, c.shown, c.completing);
   };
 
   const popStep = pop === null ? undefined : steps.find((s) => s.id === pop.step);
@@ -901,7 +920,7 @@ export function Board(p: { session: PlanSession; readOnly: boolean }) {
 
   return (
     <div className="board">
-      <BoardLine layout={layout} completing={projection.completing !== null} />
+      <BoardLine layout={layout} completing={projection.completing !== null} query={query} onClear={() => setUi({ query: "" })} />
       <div className="nnl">
         {layout.empty !== null && (
           <p className="note" data-empty-board="">

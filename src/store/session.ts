@@ -65,6 +65,8 @@ export class PlanSession implements HolidayHost {
   private readonly undecoded = new Set<ActionId>();
   private readonly devOf = new Map<ActionId, DeviceId>();
   private readonly subscribers = new Set<() => void>();
+  private readonly noteSubscribers = new Set<() => void>();
+  private notesSeen = 0;
   private readonly undoStack: ActionId[] = [];
   private readonly redoStack: ActionId[] = [];
   private readonly offs: (() => void)[] = [];
@@ -109,6 +111,7 @@ export class PlanSession implements HolidayHost {
       this.deps.clock.subscribe(this.onClock),
       this.deps.onDevices(this.onDevices),
       this.doc.onError(() => this.notify()),
+      this.planDoc.onNotes(this.onNoteChange),
     );
     const cal = this.current.plan.calendar;
     const region = cal.region;
@@ -146,6 +149,11 @@ export class PlanSession implements HolidayHost {
     const bad = this.ingest(changes.map(([id]) => id));
     this.recompute(local ? "own" : "merge");
     if (local && bad.length > 0) throw new Error(`This device wrote an action it cannot read: ${bad.map((b) => b.error).join("; ")}`);
+  };
+
+  private readonly onNoteChange = (): void => {
+    this.notesSeen += 1;
+    notifyEach(this.noteSubscribers);
   };
 
   private readonly onClock = (): void => {
@@ -438,6 +446,17 @@ export class PlanSession implements HolidayHost {
     return this.planDoc.note(item);
   }
 
+  onNotes(cb: () => void): () => void {
+    this.noteSubscribers.add(cb);
+    return () => {
+      this.noteSubscribers.delete(cb);
+    };
+  }
+
+  notesVersion(): number {
+    return this.notesSeen;
+  }
+
   encodeState(): Uint8Array {
     return Y.encodeStateAsUpdate(this.doc.ydoc);
   }
@@ -468,5 +487,13 @@ export class PlanSession implements HolidayHost {
 export function usePlanView(session: PlanSession): PlanView {
   const subscribe = useCallback((cb: () => void) => session.subscribe(cb), [session]);
   const snapshot = useCallback(() => session.view(), [session]);
+  return useSyncExternalStore(subscribe, snapshot);
+}
+
+const quiet = (): (() => void) => () => undefined;
+
+export function useNotes(session: PlanSession | null, active: boolean): number {
+  const subscribe = useCallback((cb: () => void) => (active && session !== null ? session.onNotes(cb) : quiet()), [session, active]);
+  const snapshot = useCallback(() => (active && session !== null ? session.notesVersion() : 0), [session, active]);
   return useSyncExternalStore(subscribe, snapshot);
 }

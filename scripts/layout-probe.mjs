@@ -84,6 +84,7 @@ export const CHROME = Object.freeze({
   workflowRows: [".workflow-row button", ".workflow-add"],
   peopleRows: [".people-row button", ".people-add"],
   assignees: [".assignees .chip-x", ".assignees .chip-add"],
+  listBar: [".scope-bar button", ".list-status button", ".chip-x", ".th-sort"],
 });
 const hitChrome = (...groups) => ({ hit44: groups.flatMap((g) => CHROME[g]) });
 const READY_MS = 5000;
@@ -111,6 +112,7 @@ const STATUS_REFUSED = "Holidays for 2031 not available — open calendar";
 
 const expect = (selector, text) => ({ expect: text === undefined ? [selector] : [selector, text] });
 const count = (selector, n) => ({ count: [selector, n] });
+const atMost = (selector, n) => ({ atMost: [selector, n] });
 const loaded = (selector) => ({ loaded: selector });
 const click = (selector, text) => ({ click: text === undefined ? [selector] : [selector, text] });
 const tap = (selector, text) => ({ tap: [selector, text] });
@@ -145,7 +147,7 @@ const oneRow = (selector, n) => ({ oneRow: [selector, n] });
 const centred = (selector) => ({ centred: selector });
 const nearCentre = (selector) => ({ nearCentre: selector });
 const edgeAt = (selector, side, at) => ({ edgeAt: [selector, side, at] });
-const oneLine = (selector) => ({ oneLine: selector });
+const oneLine = (selector, o) => (o !== undefined && o.scrolls === true ? { oneLine: selector, scrolls: true } : { oneLine: selector });
 const spare = (selector, min, below) => ({ spare: [selector, min, below === undefined ? null : below] });
 const focus = (selector) => ({ focus: selector });
 const fill = (selector, text) => ({ fill: [selector, text] });
@@ -202,6 +204,7 @@ function states() {
       theme: o.theme ?? null,
       panes: o.panes === undefined ? null : panesFor(o.place === undefined ? { view: "timeline", zoom: "W" } : o.place, o.panes),
       board: o.board ?? null,
+      list: o.list ?? null,
     });
 
   add("empty", "empty", {
@@ -233,6 +236,131 @@ function states() {
   });
   add("fit/labels", "mesa", { place: { view: "timeline", zoom: "F" }, actions: [viewExpect("timeline"), fitLabels(), monthCut()] });
   add("scale", "scale", { actions: [expect(".tl-row .name", "WS01 task 01"), valued(".plan-head h1 input", "Scale: 1,000 items")] });
+  const listPlace = { view: "list", zoom: "W" };
+  const LIST_HEADS = [
+    ["name", "Name"],
+    ["step", "Step"],
+    ["assignees", "Assignees"],
+    ["start", "Start"],
+    ["end", "End"],
+    ["status", "Status"],
+  ];
+  const listTable = [
+    viewExpect("list"),
+    count("table.list thead th", LIST_HEADS.length),
+    ...LIST_HEADS.map(([id, title]) => expect(`table.list thead th[data-col="${id}"] .th-sort`, title)),
+    style("table.list", "table-layout", "fixed"),
+    width("table.list tbody tr[data-lrow] td.item", 180, 100000),
+    style('table.list th[data-col="name"]', "position", "sticky"),
+    style('table.list th[data-col="name"]', "left", "0px"),
+    style('table.list th[data-col="status"]', "top", "0px"),
+    style("table.list td.item", "position", "sticky"),
+    style("table.list td.item", "left", "0px"),
+    style("table.list td.item", "background-color", "rgb(10, 10, 20)"),
+    height("table.list tbody tr[data-lrow]", 34, 34),
+    height("table.list tbody tr.grp", 34, 34),
+    expect("table.list tbody tr[data-lrow] .cell-who .avatar"),
+    oneLine(".list-status"),
+  ];
+  add("list/table", "mesa-people", { place: listPlace, actions: listTable });
+  add("list/table-ipad", "mesa-people-ios-pad", { place: listPlace, sizes: "ipad-column", actions: [...listTable, height('table.list th[data-col="name"]', 44, 44)] });
+  const ALL_COLUMNS = [
+    ["name", 300],
+    ["step", 140],
+    ["status", 110],
+    ["assignees", 170],
+    ["start", 88],
+    ["end", 88],
+    ["days", 64],
+    ["progress", 110],
+    ["late", 84],
+    ["deps", 180],
+    ["blocks", 180],
+    ["group", 160],
+    ["kind", 90],
+    ["note", 240],
+  ];
+  add("list/all-columns", "mesa-people", {
+    place: listPlace,
+    list: { v: 1, cols: ALL_COLUMNS.map(([id, w]) => ({ id, w })), sort: [], scope: "all", chips: [], group: "outline" },
+    actions: [
+      viewExpect("list"),
+      count("table.list thead th", 14),
+      oneLine("table.list thead tr"),
+      height('table.list thead th[data-col="deps"]', 34, 34),
+      height('table.list thead th[data-col="late"]', 34, 34),
+      width("table.list", 2004, 2004),
+      expect('table.list thead th[data-col="late"] .th-sort', "Late by"),
+      expect('table.list thead th[data-col="deps"] .th-sort', "Depends on"),
+      height("table.list tbody tr[data-lrow]", 34, 34),
+    ],
+  });
+  add("list/virtual", "scale", {
+    place: listPlace,
+    actions: [viewExpect("list"), expect(".list .list-name", "WS01 task 01"), atMost("table.list tbody tr[data-lrow]", 60), count("table.list tbody tr.list-pad", 1), height("table.list tbody tr[data-lrow]", 34, 34)],
+  });
+  const listPrefs = (o) => ({ v: 1, cols: LIST_HEADS.map(([id]) => ({ id, w: ALL_COLUMNS.find(([c]) => c === id)[1] })), sort: [], scope: "open", chips: [], group: "outline", ...o });
+  const scopeBar = [
+    viewExpect("list"),
+    count('.scope-bar[role="radiogroup"] [role="radio"]', 9),
+    expect('.scope-bar [aria-checked="true"] .scope-label', "Open"),
+    expect(".scope-bar .scope-label", "All"),
+    oneLine(".scope-bar", { scrolls: true }),
+    oneLine(".list-status"),
+  ];
+  add("list/scope-bar/mac", "mesa", { place: listPlace, sizes: "smallest", actions: scopeBar });
+  add("list/scope-bar/linux", "mesa-linux", { place: listPlace, sizes: "panes-1024", actions: scopeBar });
+  add("list/scope-bar/ipad", "mesa-ios-pad", {
+    place: listPlace,
+    sizes: "ipad-11-portrait",
+    list: listPrefs({ cols: LIST_HEADS.filter(([id]) => id !== "step" && id !== "assignees").map(([id]) => ({ id, w: ALL_COLUMNS.find(([c]) => c === id)[1] })), sort: [{ id: "start", dir: "asc" }], chips: [{ f: "kind", v: "task" }] }),
+    actions: [...scopeBar, expect(".chip-row .filter-chip .chip-text", "Kind is Task"), expect(".list-status .link-button", "Plan order"), hitChrome("listBar")],
+  });
+  add("list/chips", "mesa-people", {
+    place: listPlace,
+    list: listPrefs({ chips: [{ f: "assignee", v: "mira" }, { f: "assignee", v: "dana" }, { f: "kind", v: "task" }, { f: "group", v: "g1" }, { f: "group", v: null }] }),
+    actions: [
+      viewExpect("list"),
+      count(".chip-row .filter-chip", 5),
+      expect(".filter-chip .chip-text", "Assignee is Mira Okafor"),
+      expect(".filter-chip .chip-text", "Assignee is Former: Dana Lee"),
+      expect(".filter-chip .chip-text", "Kind is Task"),
+      expect(".filter-chip .chip-text", "Group is Site works · dome and pier"),
+      expect(".filter-chip .chip-text", "Group is Not in a group"),
+      expect('.filter-chip .chip-x[aria-label="Remove filter Kind is Task"]'),
+      expect(".chip-row .link-button", "Clear all"),
+      expect('.tool-btn[data-list="filter"] .tool-n', "5"),
+      count("table.list tbody tr[data-lrow]", 1),
+      expect("table.list tbody tr[data-lrow] .list-name", "Dome shell delivery, crane and bolts"),
+      height(".chip-row .filter-chip", 24, 24),
+    ],
+  });
+  add("list/group-step", "mesa", {
+    place: listPlace,
+    list: listPrefs({ group: "step" }),
+    actions: [
+      viewExpect("list"),
+      expect("table.list tr.grp .grp-name", "Now"),
+      expect("table.list tr.grp .grp-name", "Later"),
+      none("table.list tr.grp .grp-name", "Done"),
+      expect('.tool-btn[data-list="group"] .tool-val', "Step"),
+      height("table.list tbody tr.grp", 34, 34),
+    ],
+  });
+  add("list/group-assignee", "mesa-people", {
+    place: listPlace,
+    list: listPrefs({ group: "assignee", scope: "all" }),
+    actions: [
+      viewExpect("list"),
+      expect("table.list tr.grp .grp-name", "Mira Okafor"),
+      expect("table.list tr.grp .grp-name", "Ole Berg"),
+      expect("table.list tr.grp .grp-name", "Former: Dana Lee"),
+      expect("table.list tr.grp .grp-name", "Unassigned"),
+      none("table.list tr.grp .grp-name", "Ana Ruiz"),
+      expect('.tool-btn[data-list="group"] .tool-val', "Assignee"),
+      height("table.list tbody tr.grp", 34, 34),
+    ],
+  });
   add("print/scale", "scale-print", {
     sizes: "standard",
     shotMedia: "print",
@@ -1607,8 +1735,8 @@ function states() {
     actions: [viewExpect("timeline"), oneLine(".toolbar"), count(MORE, 1), count(".toolbar .seg-zoom", 0), none(".toolbar button", "Today"), count(".toolbar .chip-compact", 1), expect(".toolbar .seg-modes button", "Board"), ...oneRowBar],
   });
   add("ipad-toolbar/roomy-min", "mesa-ios-pad", { sizes: "ipad-roomy-min", actions: [viewExpect("timeline"), count(MORE, 0), oneLine(".toolbar"), spare(".toolbar", BOUNDARY_SPARE, BOUNDARY_SPARE + 10)] });
-  add("ipad-toolbar/medium-min", "mesa-ios-pad", { sizes: "ipad-medium-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 1), oneLine(".toolbar"), spare(".toolbar", BOUNDARY_SPARE, BOUNDARY_SPARE + 10)] });
-  add("ipad-toolbar/narrow-min", "mesa-ios-pad", { sizes: "ipad-narrow-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 0), oneLine(".toolbar"), spare(".toolbar", 0)] });
+  add("ipad-toolbar/medium-min", "mesa-ios-pad", { sizes: "ipad-medium-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 1), oneLine(".toolbar"), spare(".toolbar", BOUNDARY_SPARE, BOUNDARY_SPARE + 10), count(".toolbar-start .sidebar-toggle", 1), style(".toolbar .chip-compact", "margin-left", "7px"), hitChrome("toolbar")] });
+  add("ipad-toolbar/narrow-min", "mesa-ios-pad", { sizes: "ipad-narrow-min", actions: [viewExpect("timeline"), count(MORE, 1), count(".toolbar .seg-zoom", 0), oneLine(".toolbar"), spare(".toolbar", 0), count(".toolbar-start .sidebar-toggle", 0), style(".toolbar .chip-compact", "margin-left", "6px"), hitChrome("toolbar")] });
   add("ipad-toolbar/owner-landscape", "mesa-ios-pad", { sizes: "ipad-owner-landscape", panes: OUTLINE_CLOSED, actions: [...fullShell, ...oneRowBar] });
   add("ipad-toolbar/overlay-open", "mesa-ios-pad", {
     sizes: "ipad-more-open",
@@ -1625,12 +1753,52 @@ function states() {
     actions: [...overlayOpened, click(SETTINGS_GEAR), ...sectionOn("General"), still(), count(`${TOGGLE}[aria-expanded="true"]`, 1), uncovered(`${SETTINGS_MODAL} .modal-head ${CONTROL}`)],
   });
   const MORE_ROWS = [
-    [0, ["group Zoom", "Week ✓", "Month", "Quarter", "Fit", "Go to today", "Settings"]],
-    [MEDIUM_MIN, ["Settings"]],
+    [0, ["Search…", "group Zoom", "Week ✓", "Month", "Quarter", "Fit", "Go to today", "Settings"]],
+    [MEDIUM_MIN, ["Search…", "Settings"]],
   ];
   add("ipad-toolbar/more-open", "mesa-ios-pad", {
     sizes: "ipad-more-open",
     actions: [viewExpect("timeline"), click(MORE), askedExactly(MORE_ROWS)],
+  });
+  const SEARCH_GLASS = '.toolbar [data-tb="search"]';
+  const SEARCH_FIELD = ".toolbar .search-field";
+  const SEARCH_POP = '.search-pop[role="dialog"]';
+  const fieldShown = [viewExpect("list"), count(SEARCH_FIELD, 1), count(SEARCH_GLASS, 0), expect(`${SEARCH_FIELD} input[placeholder="Search"]`), width(SEARCH_FIELD, 180, 180), oneLine(".toolbar"), centred(".seg-modes")];
+  const listGlass = [viewExpect("list"), count(SEARCH_GLASS, 1), count(SEARCH_FIELD, 0), oneLine(".toolbar")];
+  add("search/field/mac", "mesa", { place: listPlace, sizes: "widest", actions: fieldShown });
+  add("search/glass/list-mac-standard", "mesa", { place: listPlace, sizes: "standard-only", actions: [...listGlass, centred(".seg-modes")] });
+  add("search/glass/list-linux", "mesa-linux", { place: listPlace, sizes: "standard-only", actions: [...listGlass, centred(".seg-modes")] });
+  add("search/field/linux-widest", "mesa-linux", { place: listPlace, sizes: "widest", actions: fieldShown });
+  add("search/glass/list-ipad", "mesa-ios-pad", { place: listPlace, sizes: "ipad-pro", actions: [...listGlass, nearCentre(".seg-modes"), hitChrome("toolbar")] });
+  add("search/glass/timeline-centred", "mesa", { sizes: "widest", actions: [viewExpect("timeline"), count(SEARCH_GLASS, 1), count(SEARCH_FIELD, 0), centred(".seg-modes")] });
+  const glassShown = [viewExpect("timeline"), count(SEARCH_GLASS, 1), count(SEARCH_FIELD, 0), oneLine(".toolbar")];
+  const glassPop = [click(SEARCH_GLASS), expect(`${SEARCH_POP} input[aria-label="Search this plan"]`), count(`${SEARCH_POP} .popover-close`, 1), inWindow(SEARCH_POP)];
+  add("search/glass/mac", "mesa", { sizes: "search-glass-desk", actions: glassShown });
+  add("search/glass/linux", "mesa-linux", { sizes: "search-glass-desk", actions: glassShown });
+  add("search/glass/ipad", "mesa-ios-pad", { sizes: "search-glass-ipad", actions: [...glassShown, count(MORE, 0), hitChrome("toolbar")] });
+  add("search/glass/mac-open", "mesa", { sizes: "panes-1024", dialog: true, actions: [...glassShown, ...glassPop, count('[role="dialog"]', 1)] });
+  add("search/glass/ipad-open", "mesa-ios-pad", { sizes: "ipad-owner-portrait", dialog: true, actions: [...glassShown, ...glassPop, hitChrome("toolbar")] });
+  add("search/in-more", "mesa-ios-pad", {
+    sizes: "search-in-more",
+    dialog: true,
+    actions: [viewExpect("timeline"), count(MORE, 1), count(SEARCH_GLASS, 0), count(SEARCH_FIELD, 0), oneLine(".toolbar"), click(MORE), chooseNative("Search…"), expect(`${SEARCH_POP} input[aria-label="Search this plan"]`), count(`${SEARCH_POP} .popover-close`, 1), inWindow(SEARCH_POP)],
+  });
+  add("search/board", "mesa-people", {
+    place: boardPlace,
+    sizes: "widest",
+    actions: [expect(".nnl section.col"), count("[data-filter-chip]", 0), count(SEARCH_FIELD, 1), fill(`${SEARCH_FIELD} input`, "Mira"), expect(".board-line span.filter-chip[data-filter-chip]", "Filtered: Mira"), expect('[data-filter-chip] button.chip-x[aria-label="Clear search"]'), expect(".nnl .card"), oneLine(".toolbar")],
+  });
+  add("search/board/glass", "mesa-people", {
+    place: boardPlace,
+    sizes: "standard-only",
+    dialog: true,
+    actions: [expect(".nnl section.col"), count("[data-filter-chip]", 0), count(SEARCH_FIELD, 0), click(SEARCH_GLASS), fill(`${SEARCH_POP} input`, "Mira"), expect(".board-line span.filter-chip[data-filter-chip]", "Filtered: Mira"), expect('[data-filter-chip] button.chip-x[aria-label="Clear search"]'), expect(".nnl .card"), oneLine(".toolbar")],
+  });
+  const TL_ROWS = 21;
+  add("search/timeline", "mesa", {
+    sizes: "search-glass-desk",
+    dialog: true,
+    actions: [...glassShown, count(".tl-row", TL_ROWS), count(".tl-row.dimmed", 0), keep('.tl-row[data-index="3"]'), click(SEARCH_GLASS), fill(`${SEARCH_POP} input`, "camera"), count(".tl-row", TL_ROWS), atMost(".tl-row.dimmed", TL_ROWS - 1), atMost("[data-bar].dimmed", TL_ROWS - 1), kept('.tl-row[data-index="3"]')],
   });
   add("ipad-toolbar/settings-over-overlay", "mesa-ios-pad", {
     sizes: "ipad-more-open",
@@ -1972,6 +2140,10 @@ const SIZES = {
   "ipad-medium": namesOf([IPAD_TIERS[2], IPAD_TIERS[3]]),
   "ipad-narrow": namesOf([IPAD_TIERS[0], IPAD_WINDOWS[1], IPAD_WINDOWS[0], IPAD_TIERS[1], IPAD_11[0]]),
   "mac-834": namesOf(MAC_834),
+  "standard-only": ["1440x920"],
+  "search-glass-desk": ["1024x700", "1100x760", "1180x760"],
+  "search-glass-ipad": namesOf([IPAD_TIERS[4], IPAD_OWNER[0]]),
+  "search-in-more": namesOf([IPAD_TIERS[3], IPAD_TIERS[2], IPAD_11[0], IPAD_TIERS[0]]),
   "panes-1024": ["1024x700"],
   "panes-1100": ["1100x760"],
   "panes-1180": ["1180x760"],
@@ -1996,6 +2168,7 @@ const SHIM = String.raw`
   if (P.theme !== null) localStorage.setItem("webboard.theme", JSON.stringify(P.theme));
   if (P.panes !== null) localStorage.setItem("webboard.panes", JSON.stringify(P.panes));
   if (P.board !== null) localStorage.setItem("webboard.board.planMesa001", JSON.stringify(P.board));
+  if (P.list !== null) localStorage.setItem("webboard.list.planMesa001", JSON.stringify(P.list));
   window.__PROBE_MISSING__ = [];
   window.__PROBE_TICKETS__ = {};
   window.__PROBE_MENUS__ = [];
@@ -2412,7 +2585,7 @@ const MEASURE = String.raw`
     for (var i = 0; i < el.children.length; i++) {
       var kid = el.children[i];
       var display = getComputedStyle(kid).display;
-      if (display === "none") continue;
+      if (display === "none" || display === "table-column-group" || display === "table-column") continue;
       if (display === "contents") {
         out = out.concat(boxKids(kid));
         continue;
@@ -2609,11 +2782,18 @@ const MEASURE = String.raw`
         Math.round(box.right) + "," + Math.round(box.bottom) + ")");
     }
     if (d.scrollWidth > d.clientWidth + EPS) faults.push(path(d) + " overflows horizontally by " + (d.scrollWidth - d.clientWidth) + "px");
+    var overX = function (el) {
+      if (!el.matches(".popover-close") || getComputedStyle(el, "::before").position !== "absolute") return el.scrollWidth - el.clientWidth;
+      var range = document.createRange();
+      range.selectNodeContents(el);
+      var own = el.getBoundingClientRect();
+      return Math.max(0, Math.round(range.getBoundingClientRect().right - (own.left + el.clientLeft + el.clientWidth)));
+    };
     Array.prototype.forEach.call(d.querySelectorAll("*"), function (el) {
-      if (!rendered(el) || el.scrollWidth <= el.clientWidth + EPS) return;
+      if (!rendered(el) || overX(el) <= EPS) return;
       var s = getComputedStyle(el);
       if (s.textOverflow === "ellipsis" || s.display === "inline") return;
-      faults.push(path(el) + " overflows horizontally by " + (el.scrollWidth - el.clientWidth) + "px inside the dialog");
+      faults.push(path(el) + " overflows horizontally by " + overX(el) + "px inside the dialog");
     });
     Array.prototype.forEach.call(d.querySelectorAll("button"), function (b) {
       if (!rendered(b)) return;
@@ -3060,6 +3240,11 @@ window.__probeAct = function (a) {
     if (n !== a.count[1]) return { fail: a.count[0] + " matches " + n + " elements, not " + a.count[1] };
     return { ok: true };
   }
+  if (a.atMost !== undefined) {
+    var many = document.querySelectorAll(a.atMost[0]).length;
+    if (many < 1 || many > a.atMost[1]) return { fail: a.atMost[0] + " matches " + many + " elements, not 1 to " + a.atMost[1] };
+    return { ok: true };
+  }
   function onScreen(el) {
     var r = el.getBoundingClientRect();
     return (r.width > 0 || r.height > 0) && getComputedStyle(el).visibility !== "hidden";
@@ -3308,7 +3493,11 @@ window.__probeAct = function (a) {
     var off = lineTop.filter(function (el, i) { return Math.abs(mids[i] - mids[0]) > 1; });
     if (off.length > 0) return { fail: a.oneLine + " runs onto more than one row: " + off.map(function (el) { return JSON.stringify((el.getAttribute("aria-label") || el.textContent.trim()).slice(0, 20)); }).join(", ") + " sit off the first control's line" };
     var lineBox = lineBar.getBoundingClientRect();
-    var lineOut = lineTop.filter(function (el) { var r0 = el.getBoundingClientRect(); return r0.left < lineBox.left - 0.5 || r0.right > lineBox.right + 0.5; });
+    var lineScrolls = a.scrolls === true && /^(auto|scroll)$/.test(getComputedStyle(lineBar).overflowX) && lineBar.scrollWidth > lineBar.clientWidth;
+    if (lineScrolls && (lineBox.left < -0.5 || lineBox.right > window.innerWidth + 0.5)) return { fail: a.oneLine + " scrolls sideways but runs out of the window" };
+    var lineFrom = lineScrolls ? lineBox.left + lineBar.clientLeft - lineBar.scrollLeft : lineBox.left;
+    var lineTo = lineScrolls ? lineFrom + lineBar.scrollWidth : lineBox.right;
+    var lineOut = lineTop.filter(function (el) { var r0 = el.getBoundingClientRect(); return r0.left < lineFrom - 0.5 || r0.right > lineTo + 0.5; });
     if (lineOut.length > 0) return { fail: lineOut.length + " controls spill out of " + a.oneLine };
     return { ok: true };
   }
@@ -3318,7 +3507,7 @@ window.__probeAct = function (a) {
     if (bar === null) return { fail: "no .toolbar to measure " + tabSel + " in" };
     var tabsEl = bar.querySelector(tabSel);
     if (tabsEl === null || !onScreen(tabsEl)) return { fail: "no " + tabSel + " on screen in the toolbar" };
-    var pickedCtl = Array.prototype.slice.call(bar.querySelectorAll("button, .seg, .wordmark")).filter(onScreen);
+    var pickedCtl = Array.prototype.slice.call(bar.querySelectorAll("button, .seg, .wordmark, .search-field")).filter(onScreen);
     var ctls = pickedCtl.filter(function (el) { return !pickedCtl.some(function (other) { return other !== el && other.contains(el); }); });
     var at = ctls.indexOf(tabsEl);
     var prevEl = ctls[at - 1];
@@ -3341,10 +3530,21 @@ window.__probeAct = function (a) {
     var room = towardEnd ? nextR.left - t.right : t.left - prevR.right;
     if (room > gap + 1) return { fail: where + ": the tabs stop short of the window centre with " + r1(room) + " px free toward it, gap " + gap + " px" };
     var side = towardEnd ? ctls.slice(at) : ctls.slice(0, at + 1).reverse();
+    var setMargin = function (el, prop) {
+      var m = el.computedStyleMap().get(prop);
+      if (m instanceof CSSUnitValue) {
+        if (m.unit !== "px") throw new Error("probe: " + prop + " of " + el.className + " computes to " + m.toString() + ", not px");
+        return m.value;
+      }
+      if (m instanceof CSSKeywordValue && m.value === "auto") return 0;
+      throw new Error("probe: " + prop + " of " + el.className + " computes to " + String(m));
+    };
     var loose = side.slice(1).map(function (el, i) {
-      var a1 = side[i].getBoundingClientRect();
-      var b1 = el.getBoundingClientRect();
-      return { el: el, space: towardEnd ? b1.left - a1.right : a1.left - b1.right };
+      var leftEl = towardEnd ? side[i] : el;
+      var rightEl = towardEnd ? el : side[i];
+      var a1 = leftEl.getBoundingClientRect();
+      var b1 = rightEl.getBoundingClientRect();
+      return { el: el, space: b1.left - a1.right - setMargin(leftEl, "margin-right") - setMargin(rightEl, "margin-left") };
     }).filter(function (s1) { return s1.space > gap + 1; });
     if (loose.length > 0) return { fail: where + ": the side that pushes the tabs is not packed, " + r1(loose[0].space) + " px before " + JSON.stringify(loose[0].el.textContent.trim().slice(0, 20)) };
     var outer = side[side.length - 1];
@@ -4100,6 +4300,7 @@ async function main() {
       theme: state.theme,
       panes: state.panes,
       board: state.board,
+      list: state.list,
       fixture: fixtures.get(state.fixture),
       clip: state.clip,
       clipIn: state.clipIn,

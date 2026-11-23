@@ -376,3 +376,30 @@ describe("keyToCommand: ⌥⌘1-9 moves the selection to a step", () => {
     expect(keyToCommand(k("ˆ", { code: "KeyI", metaKey: true, altKey: true }), SEL)).toBe("inspector");
   });
 });
+
+describe("keyToCommand: find", () => {
+  it("finds on ⌘F on the Mac and Ctrl F elsewhere, also while typing, never in a dialog, with Shift or Alt, or by the other platform's modifier", () => {
+    expect(keyToCommand(k("f", { metaKey: true }), MAC)).toBe("find");
+    expect(keyToCommand(k("F", { metaKey: true }), { ...MAC, typing: true })).toBe("find");
+    expect(keyToCommand(k("f", { ctrlKey: true }), PC)).toBe("find");
+    expect(keyToCommand(k("f", { ctrlKey: true }), { ...PC, typing: true })).toBe("find");
+    expect(keyToCommand(k("f", { metaKey: true }), { ...MAC, dialog: true })).toBeNull();
+    expect(keyToCommand(k("f", { ctrlKey: true }), { ...PC, dialog: true, typing: true })).toBeNull();
+    expect(keyToCommand(k("f", { metaKey: true, shiftKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("ƒ", { code: "KeyF", metaKey: true, altKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("f", { ctrlKey: true }), MAC)).toBeNull();
+    expect(keyToCommand(k("f", { metaKey: true }), PC)).toBeNull();
+  });
+
+  it("finds on / with and without Shift, which types it on a Swiss keyboard, and with or without a selection", () => {
+    expect(keyToCommand(k("/", { code: "Slash" }), MAC)).toBe("find");
+    expect(keyToCommand(k("/", { code: "Digit7", shiftKey: true }), MAC)).toBe("find");
+    expect(keyToCommand(k("/", { code: "Slash" }), { ...PC, selected: true })).toBe("find");
+  });
+
+  it("leaves / to a text field and to a dialog", () => {
+    expect(keyToCommand(k("/", { code: "Slash" }), { ...MAC, typing: true })).toBeNull();
+    expect(keyToCommand(k("/", { code: "Digit7", shiftKey: true }), { ...MAC, typing: true })).toBeNull();
+    expect(keyToCommand(k("/", { code: "Slash" }), { ...MAC, dialog: true })).toBeNull();
+  });
+});

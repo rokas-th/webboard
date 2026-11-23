@@ -52,6 +52,8 @@ const UI: UiState = {
   syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,
+  query: "",
+  searchAsk: 0,
 };
 
 const SMALL: readonly SeedItem[] = [
@@ -944,5 +946,26 @@ describe("inspector and outline commands", () => {
     const c = find({ ...h.ctx, listMode: "sheet", outline: { open: true, toggle } }, "outline");
     expect([c.label, c.keys]).toEqual(["Hide the outline", "⌥⌘L"]);
     expect(keyToCommand({ key: "¬", code: "KeyL", metaKey: true, ctrlKey: false, shiftKey: false, altKey: true }, { command: true, typing: false, dialog: false, selected: false, control: false, listMode: "sheet" })).toBe(c.id);
+  });
+});
+
+describe("search commands", () => {
+  it("offers Search this plan with ⌘F or Ctrl F, asking the toolbar once more, and not on the phone or without a plan", async () => {
+    const t = await made(SMALL);
+    const h = harness(t, { searchAsk: 4 });
+    const c = find(h.ctx, "find");
+    expect([c.group, c.label, c.keys]).toEqual(["Edit", "Search this plan", "⌘F"]);
+    c.run();
+    expect(h.setUi.mock.calls).toEqual([[{ searchAsk: 5 }]]);
+    expect(find({ ...h.ctx, command: false }, "find").keys).toBe("Ctrl F");
+    expect(ids({ ...h.ctx, listMode: "phone" }).includes("find")).toBe(false);
+    expect(ids({ ...h.ctx, session: null, run: null, undo: null, redo: null }).includes("find")).toBe(false);
+  });
+
+  it("steps through the List's matches only while a search is set", async () => {
+    const t = await made(SMALL);
+    const h = harness(t, { view: "list", query: "one", selected: null });
+    find(h.ctx, "select-next").run();
+    expect(h.setUi.mock.calls).toEqual([[{ selected: "one" }]]);
   });
 });

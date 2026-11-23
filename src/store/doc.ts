@@ -114,6 +114,12 @@ export class PlanDoc {
     return () => this.actionMap.unobserve(observer);
   }
 
+  onNotes(cb: () => void): () => void {
+    const observer = (): void => cb();
+    this.notes.observeDeep(observer);
+    return () => this.notes.unobserveDeep(observer);
+  }
+
   note(item: ItemId): Y.Text {
     const text = this.notes.get(item);
     if (text === undefined) throw new Error(`Item ${item} has no note: it was created without one`);

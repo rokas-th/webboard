@@ -1,49 +1,328 @@
+.list-bar {
+  display: flex;
+  flex: none;
+  min-width: 0;
+  padding: 12px 24px 0;
+}
+
+.scope-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(var(--panel-rgb), 0.5);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.scope-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 0 8px;
+  border-color: transparent;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.scope-n {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--dim);
+}
+
+.scope.active {
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+  background: rgba(var(--cyan-rgb), 0.08);
+}
+
+.scope.active .scope-n {
+  color: var(--cyan);
+}
+
+.chip-row {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px 0;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-height: 24px;
+  padding: 0 1px 0 10px;
+  border: 1px solid var(--cyan-dim);
+  border-radius: 12px;
+  font-family: var(--prose);
+  font-size: 11.5px;
+  color: var(--cyan);
+}
+
+.chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-chip .chip-x {
+  color: var(--cyan);
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  font-family: var(--prose);
+  font-size: 11.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--cyan);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .link-button:hover:not(:disabled) {
+    background: none;
+    color: var(--text);
+  }
+}
+
+.list-status {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 24px;
+  font-family: var(--prose);
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+.sort-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-count {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.list-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.tool-glyph {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+.tool-val {
+  color: var(--text);
+}
+
+.tool-n {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--on-accent);
+  background: var(--cyan);
+}
+
+.pull-caret {
+  letter-spacing: 0;
+}
+
 .list-wrap {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 4px 24px 24px;
+  padding: 0 0 24px;
+  overscroll-behavior: contain;
+}
+
+table.list mark {
+  color: inherit;
+  background: rgba(var(--cyan-rgb), 0.25);
+  border-radius: 2px;
 }
 
 table.list {
-  width: 100%;
-  border-collapse: collapse;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
+}
+
+table.list th,
+table.list td {
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
 }
 
 table.list th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
+  height: 34px;
+  padding: 0 10px;
   background: var(--void);
   font-family: var(--display);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  text-align: left;
   color: var(--dim);
-  padding: 10px 10px 8px;
-  border-bottom: 1px solid var(--line);
+  box-shadow: inset 0 -1px var(--line);
+}
+
+table.list th[data-col="name"] {
+  left: 0;
+  z-index: 3;
+  box-shadow: inset -1px 0 var(--line), inset 0 -1px var(--line);
+}
+
+table.list th:first-child,
+table.list td:first-child {
+  padding-left: 24px;
+}
+
+table.list th.end,
+table.list td.end {
+  text-align: right;
+}
+
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+table.list th[aria-sort] {
+  color: var(--cyan);
+}
+
+.sort-chev {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 4px;
+  font-size: 8px;
+  color: var(--cyan);
+  vertical-align: middle;
+}
+
+.sort-rank {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+table.list .sort-said {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+table.list tbody tr {
+  height: 34px;
 }
 
 table.list td {
-  padding: 8px 10px;
+  height: 34px;
+  padding: 0 10px;
   border-bottom: 1px solid rgba(var(--line-rgb), 0.7);
   vertical-align: middle;
-  white-space: nowrap;
 }
 
 table.list td.item {
-  width: 36%;
-  min-width: 180px;
-  max-width: 0;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--void);
+  box-shadow: inset -1px 0 var(--line);
 }
 
-table.list td.wrap {
-  white-space: normal;
+table.list td.nil::before {
+  content: "–";
+  color: var(--dim);
 }
 
 .list-name {
@@ -53,19 +332,19 @@ table.list td.wrap {
   white-space: nowrap;
 }
 
-table.list tbody tr {
+table.list tbody tr[data-lrow] {
   cursor: pointer;
   transition: background 0.12s ease-out;
 }
 
 @media (hover: hover) {
-  table.list tbody tr:hover {
+  table.list tbody tr[data-lrow]:hover td {
     background: var(--panel-2);
   }
 }
 
 table.list tr.selected td {
-  background: var(--active);
+  background: linear-gradient(var(--active), var(--active)), var(--void);
 }
 
 table.list tr.ghost-row td {
@@ -83,14 +362,65 @@ table.list tr.grp td {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--amber);
-  padding-top: 16px;
+  border-bottom: 1px solid var(--line);
   cursor: default;
 }
 
-@media (hover: hover) {
-  table.list tr.grp:hover {
-    background: none;
-  }
+table.list tr.grp .swatch {
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.grp-name {
+  vertical-align: middle;
+}
+
+.grp-count {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--dim);
+}
+
+table.list tr.list-pad td {
+  height: auto;
+  padding: 0;
+  border: 0;
+}
+
+.cell-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  font-family: var(--display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--step);
+  vertical-align: middle;
+}
+
+.cell-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.who-names {
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-note {
+  color: var(--dim);
 }
 
 .st.conflict {
@@ -111,9 +441,46 @@ table.list tr.grp td {
 }
 
 .list-wrap .note {
-  margin: 12px 10px 0;
+  margin: 12px 24px 0;
   font-family: var(--prose);
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--dim);
+}
+
+@media (pointer: coarse) {
+  .list-wrap {
+    margin-right: 22px;
+  }
+}
+
+html[data-os="ios"] table.list th {
+  height: 44px;
+}
+
+html[data-os="ios"] .th-sort {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+html[data-os="ios"] .scope {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+html[data-os="ios"] .tool-btn {
+  height: 44px;
+}
+
+html[data-os="ios"] .link-button {
+  min-height: 44px;
+}
+
+html[data-os="ios"] .filter-chip {
+  min-height: 44px;
+  border-radius: 22px;
+}
+
+html[data-os="ios"] .filter-chip .chip-x {
+  margin: -1px 0;
 }

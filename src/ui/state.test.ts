@@ -60,3 +60,19 @@ describe("parsePlace and the plan list", () => {
     expect([result.current[0].sidebarOpen, result.current[0].sidebarWidth]).toEqual([true, null]);
   });
 });
+
+describe("the search query", () => {
+  it("starts blank, is never saved with the place, and clears when the plan changes", () => {
+    const { result } = renderHook(() => useUi());
+    expect([result.current[0].query, result.current[0].searchAsk]).toEqual(["", 0]);
+    act(() => result.current[1]({ plan: "p1", query: "dome", searchAsk: 2 }));
+    expect([result.current[0].query, result.current[0].searchAsk]).toEqual(["dome", 2]);
+    expect(JSON.parse(window.localStorage.getItem(PLACE_KEY) ?? "null")).toEqual({ plan: "p1", view: "timeline", zoom: "W", collapsed: [], sidebarOpen: true, sidebarWidth: null });
+    act(() => result.current[1]({ view: "board" }));
+    expect(result.current[0].query).toBe("dome");
+    act(() => result.current[1]({ plan: "p1" }));
+    expect(result.current[0].query).toBe("dome");
+    act(() => result.current[1]({ plan: "p2" }));
+    expect([result.current[0].query, result.current[0].searchAsk]).toEqual(["", 2]);
+  });
+});

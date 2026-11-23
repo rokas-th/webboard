@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanSession } from "../../store/session";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
@@ -418,5 +418,73 @@ describe("Board empty columns (refinement 50)", () => {
     expect(one(".col-body", col("now")).querySelector(".note")).toBeNull();
     expect(one(".col-body", col("next")).textContent).toBe("Nothing here.");
     expect(one(".col-body", col("later")).textContent).toBe("Nothing here.");
+  });
+});
+
+describe("Board under search", () => {
+  const SEED: SeedItem[] = [
+    { id: "a", name: "Dome A", start: "2026-11-20", dur: 2 },
+    { id: "r", name: "Rail", start: "2026-11-19", dur: 2 },
+    { id: "b", name: "Dome B", horizon: "next" },
+    { id: "w", name: "Wiring" },
+    { id: "d", name: "Done dome", start: "2026-11-02", dur: 1, status: "done", progress: 100 },
+  ];
+
+  const setUiNow = (patch: Partial<UiState>): void => {
+    const results = vi.mocked(useUi).mock.results;
+    const r = results[results.length - 1];
+    if (r === undefined || r.type !== "return") throw new Error("useUi has not returned");
+    act(() => r.value[1](patch));
+  };
+
+  it("drops cards that do not match under a Filtered chip, keeps totals and reads the emptied column", async () => {
+    const t = await made(SEED);
+    await board(t);
+    expect(document.querySelector("[data-filter-chip]")).toBeNull();
+    setUiNow({ query: "dome" });
+    expect(cardsIn("now")).toEqual(["a"]);
+    expect(cardsIn("next")).toEqual(["b"]);
+    expect(cardsIn("later")).toEqual([]);
+    expect(all(".col-head .col-count").map((e) => e.textContent)).toEqual(["2", "1", "1"]);
+    expect(one('[data-strip="done"] .strip-count').textContent).toBe("1");
+    expect(one(".col-body", col("later")).textContent).toBe("Nothing here matches “dome”.");
+    const chip = one(".board-line span.filter-chip[data-filter-chip]");
+    expect(chip.textContent).toBe("Filtered: dome");
+    const clear = within(chip).getByRole("button", { name: "Clear search" });
+    expect(clear.classList.contains("chip-x")).toBe(true);
+    act(() => {
+      fireEvent.click(clear);
+    });
+    expect(uiNow().query).toBe("");
+    expect(document.querySelector("[data-filter-chip]")).toBeNull();
+    expect(cardsIn("now")).toEqual(["a", "r"]);
+    expect(cardsIn("later")).toEqual(["w"]);
+  });
+
+  it("trims the query in the chip and the note, and still reads Nothing here. for a column with no cards at all", async () => {
+    const t = await made([{ id: "a", name: "Dome A", start: "2026-11-20", dur: 2 }]);
+    await board(t);
+    setUiNow({ query: "  rail " });
+    expect(one("[data-filter-chip]").textContent).toBe("Filtered: rail");
+    expect(one(".col-body", col("now")).textContent).toBe("Nothing here matches “rail”.");
+    expect(one(".col-body", col("next")).textContent).toBe("Nothing here.");
+  });
+
+  it("steps J and K over the matching cards only", async () => {
+    const t = await made(SEED);
+    await board(t);
+    setUiNow({ query: "dome", selected: "a" });
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "j" });
+    });
+    expect(uiNow().selected).toBe("b");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "j" });
+    });
+    expect(uiNow().selected).toBe("b");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "k" });
+    });
+    expect(uiNow().selected).toBe("a");
   });
 });

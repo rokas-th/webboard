@@ -32,6 +32,8 @@ export interface UiState {
   syncPane: SyncPane | null;
   sidebarOpen: boolean;
   sidebarWidth: number | null;
+  query: string;
+  searchAsk: number;
 }
 
 export const PLACE_KEY = "webboard.place";
@@ -61,6 +63,8 @@ const DEFAULTS: UiState = {
   syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,
+  query: "",
+  searchAsk: 0,
 };
 
 type Place = Pick<UiState, "plan" | "view" | "zoom" | "collapsed" | "sidebarOpen" | "sidebarWidth">;
@@ -149,7 +153,10 @@ export function useUi(): [UiState, SetUi] {
     savePlace(ui);
   }, [ui.plan, ui.view, ui.zoom, ui.collapsed, ui.sidebarOpen, ui.sidebarWidth]);
   const setUi = useCallback((patch: Partial<UiState>) => {
-    setState((prev) => ({ ...prev, ...patch }));
+    setState((prev) => {
+      const next = { ...prev, ...patch };
+      return next.plan !== prev.plan && patch.query === undefined ? { ...next, query: "" } : next;
+    });
   }, []);
   return [ui, setUi];
 }

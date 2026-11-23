@@ -7,7 +7,7 @@ import type { PlanView } from "../../store/doc";
 import { countedConflicts } from "../choices/HeadCounts";
 import { statusLabel } from "../list/groups";
 import { derivedStatus } from "../status";
-import { depsOf } from "../list/List";
+import { depsOf } from "../list/columns";
 import { fitSpan } from "../timeline/geometry";
 import { pct, printRows, printScale, type PrintRow } from "./sheet";
 

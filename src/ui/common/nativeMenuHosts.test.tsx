@@ -8,6 +8,10 @@ import type { PlanSession } from "../../store/session";
 import { IPAD, IPHONE, MAC, setPlatform, stubVisualViewport } from "../../test/platform";
 import { MESA_SEED, testSession } from "../../test/session";
 import { commandsSince, emitFromRust, hold, offeredSettings, resetTauri, tauri } from "../../test/tauriMock";
+import { rowContext, type RowContext } from "../list/columns";
+import { ListBar } from "../list/ListBar";
+import { listModel } from "../list/model";
+import { DEFAULT_LIST_PREFS, type ListPrefs } from "../list/prefs";
 import { MoreMenu } from "../shell/MoreMenu";
 import { PlanMenu } from "../shell/PlanMenu";
 import { NewItemMenu } from "./NewItemMenu";
@@ -103,6 +107,7 @@ const zoomProps = () => ({
   onToday: vi.fn(),
   onSettings: vi.fn(),
   onPlan: vi.fn(),
+  onSearch: vi.fn(),
   onFocusDropped: vi.fn(),
 });
 
@@ -300,12 +305,13 @@ describe("a row id the host does not know", () => {
 });
 
 describe("the More menu on iOS", () => {
-  it("sends the Zoom section with the current zoom checked, then Go to today, Settings and Plan", async () => {
+  it("sends Search… first, then the Zoom section with the current zoom checked, then Go to today, Settings and Plan", async () => {
     render(<MoreMenu {...zoomProps()} />);
     fireEvent.click(button("More"));
     await settle();
     expect(document.querySelector(".plan-menu-list")).toBeNull();
     expect(rowsOf(lastAsk())).toEqual([
+      [null, [["search", "Search…", false]]],
       [
         "Zoom",
         [
@@ -326,8 +332,8 @@ describe("the More menu on iOS", () => {
     ]);
   });
 
-  it("sends Settings alone when there is no zoom, today or plan", async () => {
-    render(<MoreMenu {...zoomProps()} zoom={null} onToday={null} onPlan={null} />);
+  it("sends Settings alone when there is no zoom, today, plan or search", async () => {
+    render(<MoreMenu {...zoomProps()} zoom={null} onToday={null} onPlan={null} onSearch={null} />);
     fireEvent.click(button("More"));
     await settle();
     expect(rowsOf(lastAsk())).toEqual([[null, [["settings", "Settings", false]]]]);
@@ -338,6 +344,7 @@ describe("the More menu on iOS", () => {
     ["today", "onToday", []],
     ["settings", "onSettings", []],
     ["plan", "onPlan", []],
+    ["search", "onSearch", []],
   ] as const)("runs %s through %s", async (id, handler, args) => {
     const p = zoomProps();
     render(<MoreMenu {...p} />);
@@ -493,6 +500,67 @@ describe("the plan head menu on iOS", () => {
     expect(reported.map((e) => (e instanceof Error ? e.message : String(e)))).toEqual(["PlanMenu: the window has no visual viewport to place the menu in"]);
     expect(opened).toEqual([true, false]);
     expect(asks()).toEqual([]);
+  });
+});
+
+describe("the List's Filter and Group by on iOS", () => {
+  const listBar = async (prefs: ListPrefs): Promise<{ ctx: RowContext; picked: ListPrefs[] }> => {
+    const { session } = await planned();
+    const ctx = rowContext(session.view(), (id) => session.note(id).toString());
+    const picked: ListPrefs[] = [];
+    render(<ListBar ctx={ctx} prefs={prefs} model={listModel(ctx, prefs, null)} searching={false} onPrefs={(next) => picked.push(next)} />);
+    return { ctx, picked };
+  };
+
+  const listButton = (which: string): HTMLElement => {
+    const el = document.querySelector(`[data-list="${which}"]`);
+    if (!(el instanceof HTMLElement)) throw new Error(`no ${which} button`);
+    return el;
+  };
+
+  it("sends Filter as the Step, Assignee, Kind and Group sections of checkable rows, a set chip ticked, and adds the chosen chip", async () => {
+    const prefs: ListPrefs = { ...DEFAULT_LIST_PREFS, chips: [{ f: "kind", v: "task" }] };
+    const { ctx, picked } = await listBar(prefs);
+    fireEvent.click(listButton("filter"));
+    await settle();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    const sent = rowsOf(lastAsk());
+    expect(sent.map(([title]) => title)).toEqual(["Step", "Assignee", "Kind", "Group"]);
+    expect(sent[0][1]).toEqual([...ctx.board.steps.map((s): [string, string, boolean] => [`step:${s.id}`, s.name, false]), ["step:", "No step", false]]);
+    expect(sent[1][1][sent[1][1].length - 1]).toEqual(["assignee:", "Unassigned", false]);
+    expect(sent[2][1]).toEqual([
+      ["kind:task", "Task", true],
+      ["kind:milestone", "Milestone", false],
+    ]);
+    expect(sent[3][1][sent[3][1].length - 1]).toEqual(["group:", "Not in a group", false]);
+    choose("kind:milestone");
+    await settle();
+    expect(picked.map((p) => p.chips)).toEqual([
+      [
+        { f: "kind", v: "task" },
+        { f: "kind", v: "milestone" },
+      ],
+    ]);
+  });
+
+  it("sends Group by as one section of four checkable rows, the current grouping ticked, and applies the chosen one", async () => {
+    const { picked } = await listBar(DEFAULT_LIST_PREFS);
+    fireEvent.click(listButton("group"));
+    await settle();
+    expect(rowsOf(lastAsk())).toEqual([
+      [
+        "Group by",
+        [
+          ["outline", "Plan outline", true],
+          ["step", "Step", false],
+          ["assignee", "Assignee", false],
+          ["none", "None", false],
+        ],
+      ],
+    ]);
+    choose("step");
+    await settle();
+    expect(picked.map((p) => p.group)).toEqual(["step"]);
   });
 });
 

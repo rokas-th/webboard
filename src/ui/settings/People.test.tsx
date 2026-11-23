@@ -684,6 +684,8 @@ describe("People in the phone Settings sheet", () => {
     syncPane: null,
     sidebarOpen: true,
     sidebarWidth: null,
+    query: "",
+    searchAsk: 0,
   };
 
   it("lists the people rows in the grouped list after Overview", async () => {

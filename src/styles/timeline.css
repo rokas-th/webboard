@@ -622,6 +622,12 @@
   visibility: hidden;
 }
 
+.tl-row.dimmed,
+[data-bar].dimmed,
+.bar-label.dimmed {
+  opacity: 0.35;
+}
+
 .bar-label .meta {
   color: var(--dim);
   margin-left: 8px;

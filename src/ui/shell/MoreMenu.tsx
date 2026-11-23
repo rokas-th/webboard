@@ -4,6 +4,7 @@ import { usesNativeMenu, type NativeMenuRow, type NativeMenuSection } from "../.
 import type { Zoom } from "../state";
 import { useNativeMenu } from "../common/menu";
 import { ZOOMS } from "./zooms";
+import { SEARCH_ROW } from "../search/text";
 
 type Props = {
   zoom: Zoom | null;
@@ -11,6 +12,7 @@ type Props = {
   onToday: (() => void) | null;
   onSettings(): void;
   onPlan: (() => void) | null;
+  onSearch: (() => void) | null;
   onFocusDropped(): void;
 };
 
@@ -31,7 +33,7 @@ function useFocusReport(box: RefObject<HTMLElement | null>, p: Props): void {
 }
 
 function useRowSetChange(p: Props, open: boolean, close: () => void): void {
-  const rowSet = [p.zoom !== null, p.onToday !== null, p.onPlan !== null].join(" ");
+  const rowSet = [p.zoom !== null, p.onToday !== null, p.onPlan !== null, p.onSearch !== null].join(" ");
   const seenRows = useRef(rowSet);
   useEffect(() => {
     if (seenRows.current === rowSet) return;
@@ -46,7 +48,8 @@ function moreSections(p: Props): NativeMenuSection[] {
   const { zoom } = p;
   const zooms: NativeMenuSection[] = zoom === null ? [] : [{ title: "Zoom", rows: ZOOMS.map((z) => row(`${ZOOM_ID}${z.zoom}`, z.row, z.zoom === zoom)) }];
   const rest = [...(p.onToday === null ? [] : [row("today", "Go to today")]), row("settings", "Settings"), ...(p.onPlan === null ? [] : [row("plan", "Plan")])];
-  return [...zooms, { title: null, rows: rest }];
+  const search: NativeMenuSection[] = p.onSearch === null ? [] : [{ title: null, rows: [row("search", SEARCH_ROW)] }];
+  return [...search, ...zooms, { title: null, rows: rest }];
 }
 
 const present = <T,>(run: T | null, id: string): T => {
@@ -63,6 +66,7 @@ function runRow(p: Props, id: string): void {
   if (id === "today") present(p.onToday, id)();
   else if (id === "settings") p.onSettings();
   else if (id === "plan") present(p.onPlan, id)();
+  else if (id === "search") present(p.onSearch, id)();
   else throw new Error(`MoreMenu: the native menu chose ${JSON.stringify(id)}, which is no row of the More menu`);
 }
 

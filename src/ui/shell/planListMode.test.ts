@@ -98,6 +98,7 @@ describe("toolbarTier", () => {
     expect(MEDIUM_MIN).toBeGreaterThan(560);
     expect(ROOMY_MIN).toBeGreaterThan(MEDIUM_MIN);
     expect(ROOMY_MIN).toBeLessThan(1180);
+    expect(ROOMY_MIN).toBeLessThanOrEqual(970);
     expect([MEDIUM_MIN % 10, ROOMY_MIN % 10]).toEqual([0, 0]);
   });
 

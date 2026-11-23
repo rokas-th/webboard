@@ -62,6 +62,7 @@ function modified(e: KeyInput, s: KeyState): string | null {
   if (s.dialog) return null;
   if (key === "k" && !e.shiftKey) return "palette";
   if (key === "p" && !e.shiftKey) return "print";
+  if (key === "f" && !e.shiftKey) return "find";
   if (s.typing) return null;
   if (e.key === "ArrowDown" && !e.shiftKey) return s.selected ? "detail-open" : null;
   if (key === "b" && !e.shiftKey) return panesShown(s) ? "sidebar" : null;
@@ -78,6 +79,7 @@ export function keyToCommand(e: KeyInput, s: KeyState): string | null {
     return s.typing ? null : "deselect";
   }
   if (s.typing || s.dialog) return null;
+  if (e.key === "/") return "find";
   const arrow = ARROWS[e.key];
   if (arrow !== undefined) {
     if (!s.selected) return null;

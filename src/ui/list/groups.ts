@@ -4,6 +4,7 @@ import { childrenOf } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { ghostIds } from "../ghosts";
 import { derivedStatus } from "../status";
+import { NOT_IN_A_GROUP } from "./text";
 
 interface ListSection {
   group: ItemId | null;
@@ -12,8 +13,6 @@ interface ListSection {
 }
 
 export type StatusLabel = "conflict" | "held" | "late" | "in progress" | "done" | "not started";
-
-const NOT_IN_A_GROUP = "Not in a group";
 
 const pathOf = (plan: PlanState, id: ItemId): string[] => {
   const g = plan.items.get(id);

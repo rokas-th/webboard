@@ -2,6 +2,11 @@ import { items, q } from "../../actions/copy";
 
 export const BY_DATES = "Columns follow dates. Edit a step or drag a card to use your own steps.";
 export const NOTHING_HERE = "Nothing here.";
+export const CLEAR_SEARCH = "Clear search";
+
+export const nothingMatchesText = (query: string): string => `Nothing here matches ${q(query)}.`;
+
+export const filteredText = (query: string): string => `Filtered: ${query}`;
 export const DROP_TO_FINISH = "Drop here to mark done.";
 export const NO_OPEN_STEP = "Every step in this plan completes items, so no open card has a column.";
 export const NO_STEP = "NO STEP";

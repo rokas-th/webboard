@@ -7,7 +7,8 @@ import { MoreMenu } from "./MoreMenu";
 import type { ToolbarTier } from "./planListMode";
 import { INSPECTOR_ID, PLAN_LIST_ID } from "./Sidebar";
 import { SyncChip } from "./SyncChip";
-import { useToolbarTight } from "./toolbarFit";
+import { useSearchField, useToolbarTight } from "./toolbarFit";
+import { SearchField, type SearchProps } from "../search/SearchField";
 import { ZOOMS } from "./zooms";
 
 const TABS: readonly (readonly [ViewKind, string, string])[] = [
@@ -106,6 +107,7 @@ interface ToolbarProps {
   compact: { button: RefObject<HTMLButtonElement | null>; onPlans(): void; onPlan(): void } | null;
   sidebar: SidebarToggle | null;
   inspector: InspectorToggle | null;
+  search: SearchProps | null;
 }
 
 function ViewTabs(p: { ui: UiState; setUi(patch: Partial<UiState>): void; short: boolean }) {
@@ -192,6 +194,14 @@ export function Toolbar(p: ToolbarProps) {
   const tier = p.tier;
   const trimmed = tier !== null;
   const folded = tier === "medium" || tier === "narrow";
+  const search = p.search;
+  const field = useSearchField(bar, search !== null && !folded && !tight);
+  const moreAnchor = (): HTMLElement => {
+    const header = bar.current;
+    const button = header === null ? null : header.querySelector<HTMLElement>('.toolbar-end button[aria-label="More"]');
+    if (button === null) throw new Error("Toolbar: Search was asked from More, but the toolbar has no More button");
+    return button;
+  };
   const toggleSettings = p.onSettings;
   const compact = p.compact;
   const onPlan = compact !== null && p.session !== null ? compact.onPlan : null;
@@ -220,6 +230,7 @@ export function Toolbar(p: ToolbarProps) {
           </button>
         )}
         <span className="wordmark">WebBoard</span>
+        <SyncChip compact={folded} />
       </div>
       {p.session !== null && <ViewTabs ui={p.ui} setUi={p.setUi} short={folded} />}
       <div className="toolbar-group toolbar-end" data-tauri-drag-region>
@@ -232,10 +243,10 @@ export function Toolbar(p: ToolbarProps) {
             {p.command ? "⌘K" : "Ctrl K"}
           </button>
         )}
+        {search !== null && <SearchField {...search} form={folded ? "more" : field ? "field" : "glass"} moreAnchor={moreAnchor} />}
         {p.session !== null && (
           <NewItemMenu label="+ New" className="button-primary" disabled={p.readOnly} onPick={(kind) => p.onCommand(`new-${kind}`)} />
         )}
-        <SyncChip compact={folded} />
         {!folded && <SettingsButton open={p.ui.settings !== null} onToggle={toggleSettings} button={settingsButton} />}
         {!folded && onPlan !== null && (
           <button type="button" onClick={onPlan}>
@@ -249,6 +260,7 @@ export function Toolbar(p: ToolbarProps) {
             onToday={inline ? null : goToday}
             onSettings={toggleSettings}
             onPlan={onPlan}
+            onSearch={search === null ? null : () => onCommand("find")}
             onFocusDropped={() => {
               moreDroppedFocus.current = true;
             }}

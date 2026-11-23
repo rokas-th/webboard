@@ -2,12 +2,13 @@ import { toDay } from "../../domain/dates";
 import type { Item, ItemId, StepId } from "../../domain/model";
 import type { BoardProjection, Step, StepColumn, StepMode, StepProblem } from "../../domain/steps";
 import type { PlanView } from "../../store/doc";
+import type { Matcher } from "../search/match";
 import type { BoardPrefs } from "./prefs";
 import { completesTwiceText, hiddenDoneText, NO_OPEN_STEP, openInCompletingText, sameNameText } from "./text";
 
 export type BoardColumn =
-  | { kind: "noStep"; items: readonly Item[] }
-  | { kind: "step"; step: Step; items: readonly Item[]; completing: boolean }
+  | { kind: "noStep"; items: readonly Item[]; shown: readonly Item[] }
+  | { kind: "step"; step: Step; items: readonly Item[]; shown: readonly Item[]; completing: boolean }
   | { kind: "doneStrip"; step: Step; count: number }
   | { kind: "hiddenStrip"; step: Step; count: number };
 
@@ -49,12 +50,13 @@ export function boardLayout(view: PlanView, projection: BoardProjection, prefs: 
   const isOpen = (i: Item): boolean => statusOf(view, i.id) !== "done";
   const columnOf = (c: StepColumn): BoardColumn => {
     const step = c.step;
-    if (step === null) return { kind: "noStep", items: c.items };
+    if (step === null) return { kind: "noStep", items: c.items, shown: c.items };
     if (hidden.has(step.id)) return { kind: "hiddenStrip", step, count: c.items.length };
-    if (step.id !== completingId) return { kind: "step", step, items: c.items, completing: false };
+    if (step.id !== completingId) return { kind: "step", step, items: c.items, shown: c.items, completing: false };
     const open = c.items.filter(isOpen);
     if (open.length === 0 && !prefs.doneOpen) return { kind: "doneStrip", step, count: c.items.length };
-    return { kind: "step", step, items: [...open, ...c.items.filter((i) => !isOpen(i))], completing: true };
+    const items = [...open, ...c.items.filter((i) => !isOpen(i))];
+    return { kind: "step", step, items, shown: items, completing: true };
   };
   const columns = projection.columns.map(columnOf);
   const finished = columns.reduce((n, c) => n + (c.kind === "doneStrip" || (c.kind === "hiddenStrip" && c.step.id === completingId) ? c.count : 0), 0);
@@ -69,8 +71,14 @@ export function boardLayout(view: PlanView, projection: BoardProjection, prefs: 
   };
 }
 
+export function filterLayout(layout: BoardLayout, match: Matcher | null): BoardLayout {
+  if (match === null) return layout;
+  const keep = (c: BoardColumn): BoardColumn => (c.kind === "noStep" || c.kind === "step" ? { ...c, shown: c.items.filter((i) => match(i.id)) } : c);
+  return { ...layout, columns: layout.columns.map(keep) };
+}
+
 export function cardOrder(layout: BoardLayout): readonly ItemId[] {
-  return layout.columns.flatMap((c) => (c.kind === "noStep" || c.kind === "step" ? c.items.map((i) => i.id) : []));
+  return layout.columns.flatMap((c) => (c.kind === "noStep" || c.kind === "step" ? c.shown.map((i) => i.id) : []));
 }
 
 export function nearnessOf(view: PlanView, mode: StepMode, item: Item): Nearness | null {

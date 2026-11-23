@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { PlanView } from "../../store/doc";
 import type { PlanSession } from "../../store/session";
 import { testSession, type SeedItem } from "../../test/session";
 import { EMPTY_BOARD_PREFS } from "../board/prefs";
+import type { NoteText } from "../list/columns";
+import { DEFAULT_LIST_PREFS, type ListPrefs } from "../list/prefs";
+import { planMatcher } from "../search/match";
 import { phoneOrder, stepFrom, tabOrder } from "./order";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -28,33 +32,50 @@ const SEED: readonly SeedItem[] = [
   },
 ];
 
-const view = async () => {
+const made = async (): Promise<{ v: PlanView; notes: NoteText }> => {
   const t = await testSession(SEED);
   sessions.push(t.session);
-  return t.session.view();
+  return { v: t.session.view(), notes: (id) => t.session.note(id).toString() };
 };
 
 describe("tabOrder", () => {
   it("is the Timeline's rows, groups included, minus what a collapsed group hides", async () => {
-    const v = await view();
-    expect(tabOrder(v, { view: "timeline", collapsed: new Set() }, EMPTY_BOARD_PREFS)).toEqual(["g", "a", "b", "n", "d"]);
-    expect(tabOrder(v, { view: "timeline", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS)).toEqual(["g", "n", "d"]);
+    const { v, notes } = await made();
+    expect(tabOrder(v, { view: "timeline", collapsed: new Set() }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null)).toEqual(["g", "a", "b", "n", "d"]);
+    expect(tabOrder(v, { view: "timeline", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null)).toEqual(["g", "n", "d"]);
   });
 
   it("is the Board's cards, Now then Next then Later, top to bottom, without the hidden done ones", async () => {
-    const v = await view();
-    expect(tabOrder(v, { view: "board", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS)).toEqual(["a", "n", "u", "b"]);
+    const { v, notes } = await made();
+    expect(tabOrder(v, { view: "board", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null)).toEqual(["a", "n", "u", "b"]);
   });
 
-  it("is the List's rows, section by section", async () => {
-    const v = await view();
-    expect(tabOrder(v, { view: "list", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS)).toEqual(["a", "b", "n", "u", "d"]);
+  it("skips the Board's cards the search filters out", async () => {
+    const { v, notes } = await made();
+    expect(tabOrder(v, { view: "board", collapsed: new Set() }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, (id) => id !== "n" && id !== "a")).toEqual(["u", "b"]);
+  });
+
+  it("is the List's rows, section by section, in Open without the done ones", async () => {
+    const { v, notes } = await made();
+    expect(tabOrder(v, { view: "list", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null)).toEqual(["a", "b", "n", "u"]);
+  });
+
+  it("is the List's rows in its scope and sort", async () => {
+    const { v, notes } = await made();
+    const prefs: ListPrefs = { ...DEFAULT_LIST_PREFS, scope: "all", group: "none", sort: [{ id: "start", dir: "desc" }] };
+    expect(tabOrder(v, { view: "list", collapsed: new Set() }, EMPTY_BOARD_PREFS, prefs, notes, null)).toEqual(["b", "n", "a", "d", "u"]);
+  });
+
+  it("is only the List's matching rows while a search is set", async () => {
+    const { v, notes } = await made();
+    const match = planMatcher(v, notes, "g");
+    expect(tabOrder(v, { view: "list", collapsed: new Set() }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, match)).toEqual(["a", "b"]);
   });
 });
 
 describe("phoneOrder", () => {
   it("is the list's rows on the list tab, whatever the bucket, and the rows on the timeline tab", async () => {
-    const v = await view();
+    const { v } = await made();
     expect(phoneOrder(v, "list", new Set(["g"]))).toEqual(["a", "b", "n", "u", "d"]);
     expect(phoneOrder(v, "timeline", new Set(["g"]))).toEqual(["g", "n", "d"]);
   });

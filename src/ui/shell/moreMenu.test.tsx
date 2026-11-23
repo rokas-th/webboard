@@ -109,7 +109,7 @@ const tab = (name: string): HTMLElement => within(bar()).getByRole("tab", { name
 describe("the iPad toolbar tiers", () => {
   it("shows everything inline in the roomy tier, with no More button", async () => {
     await at(ROOMY_MIN);
-    expect(inline()).toEqual(["Plan list", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "Local only", "Settings", "Inspector"]);
+    expect(inline()).toEqual(["Plan list", "Local only", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "Search", "+ New", "Settings", "Inspector"]);
     expect(within(bar()).queryByRole("button", { name: "More" })).toBeNull();
     expect(tab(BOARD).textContent).toBe(BOARD);
     expect(bar().querySelector(".sync-chip-text")?.textContent).toBe("Local only");
@@ -117,7 +117,7 @@ describe("the iPad toolbar tiers", () => {
 
   it("moves Settings into More in the medium tier, with short view labels, the sync dot and the Inspector button last", async () => {
     await at(ROOMY_MIN - 1);
-    expect(inline()).toEqual(["Plan list", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "Local only", "More", "Inspector"]);
+    expect(inline()).toEqual(["Plan list", "Local only", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "More", "Inspector"]);
     expect(bar().lastElementChild?.lastElementChild).toBe(within(bar()).getByRole("button", { name: "Inspector" }));
     expect(bar().lastElementChild?.lastElementChild?.previousElementSibling?.firstElementChild).toBe(more());
     expect(Array.from(bar().querySelectorAll(".seg-modes button")).map((b) => [b.textContent, b.getAttribute("aria-label"), b.getAttribute("title")])).toEqual([
@@ -125,35 +125,35 @@ describe("the iPad toolbar tiers", () => {
       ["Board", BOARD, BOARD],
       ["List", "List", "List"],
     ]);
-    expect(rows(await opened())).toEqual(["Settings"]);
+    expect(rows(await opened())).toEqual(["Search…", "Settings"]);
   });
 
   it("is the narrow tier at 834 and the medium tier at MEDIUM_MIN", async () => {
     await at(834);
-    expect(inline()).toEqual(["Plan list", "[Views]", "Undo", "Redo", "+ New", "Local only", "More", "Inspector"]);
+    expect(inline()).toEqual(["Plan list", "Local only", "[Views]", "Undo", "Redo", "+ New", "More", "Inspector"]);
     cleanup();
     await at(MEDIUM_MIN);
-    expect(inline()).toEqual(["Plan list", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "Local only", "More", "Inspector"]);
+    expect(inline()).toEqual(["Plan list", "Local only", "[Views]", "[Zoom]", "Today", "Undo", "Redo", "+ New", "More", "Inspector"]);
   });
 
   it("moves zoom and Today into More in the narrow tier", async () => {
     await at(MEDIUM_MIN - 1);
-    expect(inline()).toEqual(["Plan list", "[Views]", "Undo", "Redo", "+ New", "Local only", "More", "Inspector"]);
+    expect(inline()).toEqual(["Plan list", "Local only", "[Views]", "Undo", "Redo", "+ New", "More", "Inspector"]);
     expect([tab(BOARD).textContent, tab(BOARD).title]).toEqual(["Board", BOARD]);
     const m = await opened();
-    expect(rows(m)).toEqual(["group Zoom", "Week", "Month", "Quarter", "Fit", "Go to today", "Settings"]);
+    expect(rows(m)).toEqual(["Search…", "group Zoom", "Week", "Month", "Quarter", "Fit", "Go to today", "Settings"]);
     expect(checks(m)).toEqual([true, false, false, false]);
   });
 
   it("leads with Plans below 700 in the narrow tier", async () => {
     await at(600);
-    expect(inline()).toEqual(["Plans", "[Views]", "Undo", "Redo", "+ New", "Local only", "More"]);
-    expect(rows(await opened())).toEqual(["group Zoom", "Week", "Month", "Quarter", "Fit", "Go to today", "Settings", "Plan"]);
+    expect(inline()).toEqual(["Plans", "Local only", "[Views]", "Undo", "Redo", "+ New", "More"]);
+    expect(rows(await opened())).toEqual(["Search…", "group Zoom", "Week", "Month", "Quarter", "Fit", "Go to today", "Settings", "Plan"]);
   });
 
   it("leaves out the zoom rows off the timeline, as the toolbar leaves out the zoom", async () => {
     await at(760, { place: { view: "board" } });
-    expect(rows(await opened())).toEqual(["Go to today", "Settings"]);
+    expect(rows(await opened())).toEqual(["Search…", "Go to today", "Settings"]);
   });
 
   it("leaves out the plan rows with no plan open", async () => {
@@ -211,7 +211,7 @@ describe("the More menu", () => {
     choose(await opened(), "Quarter");
     gone();
     const again = await opened();
-    expect(again.sections[0].rows.map((r) => [r.title, r.checked])).toEqual([
+    expect(again.sections.filter((x) => x.title === "Zoom").flatMap((x) => x.rows.map((r) => [r.title, r.checked]))).toEqual([
       ["Week", false],
       ["Month", false],
       ["Quarter", true],
@@ -232,6 +232,23 @@ describe("the More menu", () => {
     choose(await opened(), "Settings");
     gone();
     expect(screen.getAllByRole("dialog").map((d) => [d.getAttribute("aria-label"), d.hasAttribute("data-settings-modal")])).toEqual([["General", true]]);
+  });
+
+  it("puts Search… in More at the medium tier, opens the Search popover from it with the field focused, and gives focus back to More on close", async () => {
+    await at(ROOMY_MIN - 1);
+    expect(within(bar()).queryByRole("button", { name: "Search" })).toBeNull();
+    expect(bar().querySelector(".search-field")).toBeNull();
+    choose(await opened(), "Search…");
+    gone();
+    await settle();
+    const pop = screen.getByRole("dialog", { name: "Search" });
+    const field = within(pop).getByRole("searchbox", { name: "Search this plan" });
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: "dome" } });
+    expect(within(pop).getByText(/^\d+ of \d+$/)).toBeTruthy();
+    fireEvent.click(within(pop).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Search" })).toBeNull();
+    expect(document.activeElement).toBe(more());
   });
 
   it("opens the Plan sheet from its row below 700", async () => {
@@ -285,6 +302,31 @@ describe("the More menu", () => {
     expect(within(bar()).queryByRole("button", { name: "More" })).toBeNull();
     expect(document.activeElement).toBe(within(bar()).getByRole("button", { name: "Settings" }));
     expect(tauri.calls.filter((c) => c.cmd === "menu_dismiss").map((c) => c.args)).toEqual([{ token: m.token }]);
+  });
+});
+
+describe("the sync chip's place", () => {
+  const placeOf = (): [boolean, boolean] => {
+    const chip = bar().querySelector(".sync-chip");
+    if (chip === null) throw new Error("no sync chip in the toolbar");
+    return [chip.closest(".toolbar-start") !== null, chip.closest(".toolbar-end") !== null];
+  };
+
+  it("sits in the leading group on the desk, not the trailing one", async () => {
+    setPlatform(MAC);
+    await at(1440, { over: { device: { deviceId: "d", name: "D", platform: "macos" } } });
+    expect([placeOf(), bar().querySelector(".toolbar-start .sync-chip-text")?.textContent]).toEqual([[true, false], "Local only"]);
+  });
+
+  it.each([
+    ["roomy", ROOMY_MIN, false],
+    ["medium", ROOMY_MIN - 1, true],
+    ["medium at its minimum", MEDIUM_MIN, true],
+    ["narrow", MEDIUM_MIN - 1, true],
+    ["narrow below 700", 600, true],
+  ])("sits in the leading group in the iPad %s tier, compact only when folded", async (_tier, width, compact) => {
+    await at(width);
+    expect([placeOf(), bar().querySelector(".toolbar-start .sync-chip")?.classList.contains("chip-compact")]).toEqual([[true, false], compact]);
   });
 });
 

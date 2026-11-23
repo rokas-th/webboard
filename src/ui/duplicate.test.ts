@@ -31,6 +31,8 @@ const UI: UiState = {
   syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,
+  query: "",
+  searchAsk: 0,
 };
 
 const SEED: readonly SeedItem[] = [

@@ -4,9 +4,10 @@ import { toDay, type Day } from "../../domain/dates";
 import { haptic } from "../../services/haptics";
 import type { ItemId, LinkType, PlanId } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
-import { usePlanView, type PlanSession } from "../../store/session";
+import { useNotes, usePlanView, type PlanSession } from "../../store/session";
 import { EMPTY_PLAN } from "../copy";
 import { useRun } from "../run";
+import { planMatcher } from "../search/match";
 import { useUiValue, type Zoom } from "../state";
 import { PaneDivider } from "../shell/PaneDivider";
 import { PHONE_OUTLINE } from "../shell/paneLayout";
@@ -145,6 +146,10 @@ export function Timeline(p: { session: PlanSession; outline: OutlineControl; rea
   const geo = useMemo(() => geometry(view, ui.zoom, fitWidth), [view, ui.zoom, fitWidth]);
   const rows = useMemo(() => timelineRows(view, ui.collapsed), [view, ui.collapsed]);
   const marks = useMemo(() => marksOf(view), [view]);
+  const query = ui.query.trim();
+  const notesSeen = useNotes(p.session, query !== "");
+  const session = p.session;
+  const match = useMemo(() => planMatcher(view, (id) => session.note(id).toString(), query), [view, session, query, notesSeen]);
   const scroller = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   const place = useRef<Place | null>(null);
@@ -418,7 +423,7 @@ export function Timeline(p: { session: PlanSession; outline: OutlineControl; rea
           <div className="tl-canvas" style={{ width: `calc(var(--grid-w) + ${geo.width}px)` }}>
             <Scale geo={geo} today={today} missing={view.derived.missingYears} onHide={hideOutline} />
             <div className="tl-body">
-              <Grid id={OUTLINE_ID} mounted={mounted} count={rows.length} view={view} geo={geo} marks={marks} ui={ui} setUi={setUi} />
+              <Grid id={OUTLINE_ID} mounted={mounted} count={rows.length} view={view} geo={geo} marks={marks} ui={ui} setUi={setUi} match={match} />
               <Chart
                 view={view}
                 geo={geo}
@@ -436,6 +441,7 @@ export function Timeline(p: { session: PlanSession; outline: OutlineControl; rea
                 ghost={ghost}
                 temp={temp}
                 touch={touch}
+                match={match}
               />
             </div>
           </div>

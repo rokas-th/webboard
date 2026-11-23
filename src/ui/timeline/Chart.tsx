@@ -5,6 +5,7 @@ import { fmtShort, toDay, toIso, type Day } from "../../domain/dates";
 import { linkKey, type Item, type ItemId } from "../../domain/model";
 import { liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
+import type { Matcher } from "../search/match";
 import type { SetUi, UiState, Zoom } from "../state";
 import { useDetail } from "../detail/DetailContext";
 import { pinched, ROW, WEEK_TICKS_PPD, type Geometry } from "./geometry";
@@ -90,6 +91,7 @@ interface ChartProps {
   ghost: DropGhost | null;
   temp: TempLink | null;
   touch: TouchHost;
+  match: Matcher | null;
 }
 
 export const rowAt = (mounted: readonly Placed[], y: number): Placed | null => {
@@ -353,7 +355,7 @@ function titleOf(p: ChartProps, item: Item, start: Day, end: Day): string {
   return `${item.name} · ${fmt(start)} – ${fmt(end)} · ${workingDays(p.geo.cal.workBetween(start, end))}`;
 }
 
-function BarLabel(p: { left: number; top: number; bar: number; fit: boolean; children: ReactNode }) {
+function BarLabel(p: { left: number; top: number; bar: number; fit: boolean; dimmed: boolean; children: ReactNode }) {
   const label = useRef<HTMLDivElement>(null);
   const [narrow, setNarrow] = useState(false);
   const { bar, fit } = p;
@@ -363,7 +365,7 @@ function BarLabel(p: { left: number; top: number; bar: number; fit: boolean; chi
     setNarrow(fit && bar < el.offsetWidth);
   });
   return (
-    <div ref={label} className={narrow ? "bar-label hidden" : "bar-label"} style={{ left: p.left, top: p.top }}>
+    <div ref={label} className={classes("bar-label", narrow && "hidden", p.dimmed && "dimmed")} style={{ left: p.left, top: p.top }}>
       {p.children}
     </div>
   );
@@ -396,6 +398,7 @@ function Bar(p: ChartProps & { placed: Placed; slip: ReadonlyMap<ItemId, number>
   const done = status === "done";
   const late = view.derived.late.has(row.id);
   const conflict = p.marks.early.has(row.id);
+  const dimmed = p.match !== null && !p.match(row.id);
   const shared = [
     done && "done",
     conflict && "conflict",
@@ -403,6 +406,7 @@ function Bar(p: ChartProps & { placed: Placed; slip: ReadonlyMap<ItemId, number>
     view.held.has(row.id) && "held",
     p.marks.dayoff.has(row.id) && "dayoff",
     p.dragging === row.id && "dragging",
+    dimmed && "dimmed",
   ];
   const slip = p.slip === null ? undefined : p.slip.get(row.id);
   const extra: ReactNode[] = [
@@ -431,7 +435,7 @@ function Bar(p: ChartProps & { placed: Placed; slip: ReadonlyMap<ItemId, number>
         <div className={classes("ms", ...shared)} data-bar={row.id} style={{ left: x, top: y + 10 }} title={title}>
           {nub}
         </div>
-        <div className="bar-label" style={{ left: x + 18, top: y + 8 }}>
+        <div className={classes("bar-label", dimmed && "dimmed")} style={{ left: x + 18, top: y + 8 }}>
           {item.name}
           <span className="meta">{fmt(span.start)}</span>
           {extra}
@@ -452,7 +456,7 @@ function Bar(p: ChartProps & { placed: Placed; slip: ReadonlyMap<ItemId, number>
         {!p.readOnly && <span className="h r" data-h="r" />}
         {nub}
       </div>
-      <BarLabel left={x + w + 22} top={y + 8} bar={w} fit={p.zoom === "F"}>
+      <BarLabel left={x + w + 22} top={y + 8} bar={w} fit={p.zoom === "F"} dimmed={dimmed}>
         {item.name}
         {meta !== "" && <span className="meta">{meta}</span>}
         {extra}

@@ -1,9 +1,14 @@
 import type { ItemId } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
-import { boardLayout, cardOrder } from "../board/layout";
+import { boardLayout, cardOrder, filterLayout } from "../board/layout";
 import type { BoardPrefs } from "../board/prefs";
 import { projectBoard } from "../../domain/steps";
+import { rowContext, type NoteText } from "../list/columns";
 import { listGroups } from "../list/groups";
+import { listModel } from "../list/model";
+import type { ListPrefs } from "../list/prefs";
+import { searchCount, type SearchCount } from "../search/count";
+import { planMatcher, searchMatcher, type Matcher } from "../search/match";
 import type { UiState } from "../state";
 import { timelineRows } from "../timeline/rows";
 
@@ -13,10 +18,32 @@ const listOrder = (view: PlanView): ItemId[] => listGroups(view).flatMap((s) => 
 
 const rowOrder = (view: PlanView, collapsed: ReadonlySet<ItemId>): ItemId[] => timelineRows(view, collapsed).map((r) => r.id);
 
-export function tabOrder(view: PlanView, ui: Pick<UiState, "view" | "collapsed">, prefs: BoardPrefs): readonly ItemId[] {
+export function tabOrder(view: PlanView, ui: Pick<UiState, "view" | "collapsed">, boardPrefs: BoardPrefs, listPrefs: ListPrefs, notes: NoteText, match: Matcher | null): readonly ItemId[] {
   if (ui.view === "timeline") return rowOrder(view, ui.collapsed);
-  if (ui.view === "list") return listOrder(view);
-  return cardOrder(boardLayout(view, projectBoard(view.plan, view.derived), prefs));
+  if (ui.view === "list") return listModel(rowContext(view, notes), listPrefs, match).order;
+  return cardOrder(filterLayout(boardLayout(view, projectBoard(view.plan, view.derived), boardPrefs), match));
+}
+
+export interface TabSearch {
+  order: readonly ItemId[];
+  match: Matcher | null;
+  count: SearchCount | null;
+}
+
+export function tabSearch(view: PlanView, ui: Pick<UiState, "view" | "collapsed" | "query">, boardPrefs: BoardPrefs, listPrefs: ListPrefs, notes: NoteText): TabSearch {
+  if (ui.view === "list") {
+    const ctx = rowContext(view, notes);
+    const match = searchMatcher(ctx, ui.query);
+    const model = listModel(ctx, listPrefs, match);
+    return { order: model.order, match, count: match === null ? null : { shown: model.shown, total: model.scoped } };
+  }
+  const match = planMatcher(view, notes, ui.query);
+  return { order: tabOrder(view, ui, boardPrefs, listPrefs, notes, match), match, count: searchCount(view, ui, listPrefs, notes, match) };
+}
+
+export function firstMatch(found: TabSearch): ItemId | null {
+  const { match } = found;
+  return (match === null ? found.order[0] : found.order.find(match)) ?? null;
 }
 
 export function phoneOrder(view: PlanView, tab: PhoneTab, collapsed: ReadonlySet<ItemId>): readonly ItemId[] {

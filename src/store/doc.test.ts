@@ -276,6 +276,37 @@ describe("onActions", () => {
   });
 });
 
+describe("onNotes", () => {
+  const created = (): Action => base("c1", [{ u: "e:i1", v: "task", c: "own" }]);
+
+  it("reports typing in a note, here and from another device, and new notes", () => {
+    const a = fresh();
+    const b = fresh();
+    const cb = vi.fn();
+    a.onNotes(cb);
+    a.append(created(), ["i1"]);
+    expect(cb).toHaveBeenCalledTimes(1);
+    send(a, b);
+    a.note("i1").insert(0, "mac");
+    expect(cb).toHaveBeenCalledTimes(2);
+    b.note("i1").insert(0, "phone");
+    send(b, a);
+    expect(cb).toHaveBeenCalledTimes(3);
+  });
+
+  it("is silent for an action without notes and stops after unsubscribing", () => {
+    const doc = fresh();
+    const cb = vi.fn();
+    const off = doc.onNotes(cb);
+    doc.append(base("x1"), []);
+    expect(cb).not.toHaveBeenCalled();
+    off();
+    doc.append(created(), ["i1"]);
+    doc.note("i1").insert(0, "x");
+    expect(cb).not.toHaveBeenCalled();
+  });
+});
+
 describe("size", () => {
   it("1,000 actions of the mix average at most 250 B each", () => {
     const { actions } = bigLog(1000, 1);
