@@ -692,6 +692,25 @@ mod tests {
     }
 
     #[test]
+    fn every_capability_file_lets_text_size_zoom_the_webview() {
+        [
+            (include_str!("../capabilities/default.json"), "default.json"),
+            (include_str!("../capabilities/ios.json"), "ios.json"),
+        ]
+        .iter()
+        .for_each(|(json, file)| {
+            let granted = plain_permissions(json, file);
+            assert!(
+                granted
+                    .iter()
+                    .any(|p| p == "core:webview:allow-set-webview-zoom"),
+                "capabilities/{file} does not grant core:webview:allow-set-webview-zoom, so every \
+                 text size toasts 'Text size could not be set': {granted:?}"
+            )
+        });
+    }
+
+    #[test]
     fn the_ios_capabilities_do_not_grant_the_window_background() {
         let granted = plain_permissions(include_str!("../capabilities/ios.json"), "ios.json");
         BACKGROUND_PERMISSIONS.iter().for_each(|unneeded| {

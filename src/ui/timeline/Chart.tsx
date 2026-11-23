@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { q, workingDays } from "../../actions/copy";
 import { haptic } from "../../services/haptics";
-import { fmtShort, toDay, toIso, type Day } from "../../domain/dates";
+import { fmtShort, toDay, toIso, type DateStyle, type Day } from "../../domain/dates";
 import { linkKey, type Item, type ItemId } from "../../domain/model";
 import { liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
@@ -49,7 +49,7 @@ export interface TempLink {
 const MS_HALF = 7;
 const GROUP_LABEL_GAP = 10;
 
-const fmt = (d: Day): string => fmtShort(toIso(d));
+const fmt = (d: Day, style: DateStyle): string => fmtShort(toIso(d), style);
 
 const classes = (...names: readonly (string | false)[]): string => names.filter((n): n is string => n !== false).join(" ");
 
@@ -92,6 +92,7 @@ interface ChartProps {
   temp: TempLink | null;
   touch: TouchHost;
   match: Matcher | null;
+  style: DateStyle;
 }
 
 export const rowAt = (mounted: readonly Placed[], y: number): Placed | null => {
@@ -344,15 +345,15 @@ function Links(p: ChartProps & { height: number }) {
 
 function titleOf(p: ChartProps, item: Item, start: Day, end: Day): string {
   const shownFrom = p.marks.dayoff.get(item.id);
-  if (shownFrom !== undefined) return `Starts on a day off — shown from ${dayLabel(shownFrom)}`;
+  if (shownFrom !== undefined) return `Starts on a day off — shown from ${dayLabel(shownFrom, p.style)}`;
   const early = p.marks.early.get(item.id);
   if (early !== undefined && early.doneOrDoing) {
     const pred = p.view.plan.items.get(early.pred);
     if (pred === undefined) throw new Error(`Conflict predecessor ${early.pred} is not in the plan`);
     return EARLY[early.type](q(pred.name));
   }
-  if (item.kind === "milestone") return `${item.name} · ${dayLabel(start)}`;
-  return `${item.name} · ${fmt(start)} – ${fmt(end)} · ${workingDays(p.geo.cal.workBetween(start, end))}`;
+  if (item.kind === "milestone") return `${item.name} · ${dayLabel(start, p.style)}`;
+  return `${item.name} · ${fmt(start, p.style)} – ${fmt(end, p.style)} · ${workingDays(p.geo.cal.workBetween(start, end))}`;
 }
 
 function BarLabel(p: { left: number; top: number; bar: number; fit: boolean; dimmed: boolean; children: ReactNode }) {
@@ -437,7 +438,7 @@ function Bar(p: ChartProps & { placed: Placed; slip: ReadonlyMap<ItemId, number>
         </div>
         <div className={classes("bar-label", dimmed && "dimmed")} style={{ left: x + 18, top: y + 8 }}>
           {item.name}
-          <span className="meta">{fmt(span.start)}</span>
+          <span className="meta">{fmt(span.start, p.style)}</span>
           {extra}
         </div>
       </>

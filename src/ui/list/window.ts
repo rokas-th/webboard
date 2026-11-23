@@ -1,5 +1,10 @@
+import type { Density } from "../device";
+
 export const ROW_PX = 34;
+export const COMPACT_ROW_PX = 28;
 export const OVERSCAN = 10;
+
+export const rowPx = (density: Density): number => (density === "compact" ? COMPACT_ROW_PX : ROW_PX);
 
 export interface ListWindow {
   first: number;

@@ -3,6 +3,7 @@ import { toIso } from "../../domain/dates";
 import type { ItemId } from "../../domain/model";
 import type { PlanSession } from "../../store/session";
 import { usePlanView } from "../../store/session";
+import { useDevice } from "../DeviceProvider";
 import { useRun } from "../run";
 import { useUiValue } from "../state";
 import { geometry } from "../timeline/geometry";
@@ -32,6 +33,7 @@ export function Tray(p: { session: PlanSession; readOnly: boolean }) {
   const view = usePlanView(p.session);
   const { ui, setUi } = useUiValue();
   const { run } = useRun(p.session);
+  const week = useDevice().prefs.week;
   const coarse = useSyncExternalStore(onCoarseChange, isCoarse);
   const drag = useRef<ChipDrag | null>(null);
   const [floating, setFloating] = useState<{ name: string; x: number; y: number } | null>(null);
@@ -78,7 +80,7 @@ export function Tray(p: { session: PlanSession; readOnly: boolean }) {
     if (chart === null) return;
     const scroller = chart.closest(".tl-scroll");
     if (!(scroller instanceof HTMLElement)) throw new Error("Tray: a chart outside the timeline scroller");
-    const day = geometry(view, ui.zoom, chartWidth(scroller)).dayAt(e.clientX - chart.getBoundingClientRect().left);
+    const day = geometry(view, ui.zoom, week, chartWidth(scroller)).dayAt(e.clientX - chart.getBoundingClientRect().left);
     run({ t: "schedule", item: d.id, set: { start: toIso(day) } });
   };
 

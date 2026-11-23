@@ -94,7 +94,7 @@ export function parsePanes(raw: string): PanesRecord | null {
 const DEFAULT_STATE: PaneState = { open: true, w: null };
 
 export function seedPanes(placeRaw: string | null): PanesRecord {
-  const place = placeRaw === null ? null : parsePlace(placeRaw);
+  const place = placeRaw === null ? null : parsePlace(placeRaw, "timeline");
   const list: PaneState = place === null ? DEFAULT_STATE : { open: place.sidebarOpen, w: place.sidebarWidth };
   const set: PaneSet = { list, outline: DEFAULT_STATE, inspector: DEFAULT_STATE };
   return { v: 1, desk: set, padLandscape: set, padPortrait: set };

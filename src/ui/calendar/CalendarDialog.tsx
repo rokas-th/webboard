@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Refused, type Built, type Intent } from "../../actions/intents";
 import { CLOSURE_TOO_LONG, closureTooLong, MAX_CLOSURE_DAYS, regionKey, type Calendar, type HolidayYear, type RegionRef, type Tuning } from "../../domain/calendar";
 import type { PlanId } from "../../domain/model";
-import { FIRST_PLAN_DATE, isCalendarDate, LAST_PLAN_DATE, toDay, toIso, yearOf, type Day, type IsoDate, type Weekday } from "../../domain/dates";
+import { FIRST_PLAN_DATE, isCalendarDate, LAST_PLAN_DATE, toDay, toIso, weekdaysFrom, yearOf, type Day, type IsoDate, type Weekday } from "../../domain/dates";
 import { planRules } from "../../plan/rules";
 import { key } from "../../plan/units";
 import type { Clock } from "../../services/clock";
@@ -18,6 +18,7 @@ import { useCloseGuard, type DraftGuard } from "../common/dismiss";
 import { Sheet } from "../common/Sheet";
 import { toast } from "../common/Toast";
 import { DATE_UNREADABLE } from "../copy";
+import { useDateStyle, useDevice } from "../DeviceProvider";
 import { historyTime } from "../panel/historyText";
 import { useExec, useRun } from "../run";
 import { DayList, type DraftYear } from "./DayList";
@@ -71,15 +72,7 @@ const REVIEW_TITLE = "Review changes";
 
 const SECTION = "working-time";
 
-const WEEK: readonly { d: Weekday; label: string }[] = [
-  { d: 1, label: "Mon" },
-  { d: 2, label: "Tue" },
-  { d: 3, label: "Wed" },
-  { d: 4, label: "Thu" },
-  { d: 5, label: "Fri" },
-  { d: 6, label: "Sat" },
-  { d: 7, label: "Sun" },
-];
+const DAY_LABELS: Readonly<Record<Weekday, string>> = { 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun" };
 
 function spanOf(view: PlanView): { from: Day; to: Day } {
   const today = toDay(view.today);
@@ -207,6 +200,8 @@ export function CalendarBody(p: CalendarProps) {
       setTaken((c) => withReady(c, ready));
     }
   }
+  const style = useDateStyle();
+  const week = useDevice().prefs.week;
   const span = spanOf(view);
   const spanYears = useMemo(() => yearsOf(span.from, span.to), [span.from, span.to]);
 
@@ -225,7 +220,7 @@ export function CalendarBody(p: CalendarProps) {
       mark(() => ({ k: "loading" }));
       void holidays.draftYears(region, years).then(
         (answers) => {
-          const tried = historyTime(clock.now(), clock.today());
+          const tried = historyTime(clock.now(), clock.today(), style);
           const got = [...answers].flatMap(([y, a]): [number, HolidayYear][] => (a instanceof AppError ? [] : [[y, a]]));
           setDraft((d) => (d.region === null || regionKey(d.region) !== rk ? d : { ...d, holidays: new Map([...d.holidays, ...got]) }));
           mark((y) => {
@@ -234,13 +229,13 @@ export function CalendarBody(p: CalendarProps) {
           });
         },
         (e: unknown) => {
-          const tried = historyTime(clock.now(), clock.today());
+          const tried = historyTime(clock.now(), clock.today(), style);
           mark(() => ({ k: "failed", message: messageOf(e), tried }));
           if (!(e instanceof AppError)) throw e;
         },
       );
     },
-    [holidays, clock],
+    [holidays, clock, style],
   );
 
   const pick = useCallback(
@@ -387,7 +382,7 @@ export function CalendarBody(p: CalendarProps) {
         {anchored(
           "days",
           <div className="seg seg-days" role="group" aria-label="Working days">
-            {WEEK.map((w) => {
+            {weekdaysFrom(week).map((d) => ({ d, label: DAY_LABELS[d] })).map((w) => {
               const on = draft.workdays.includes(w.d);
               return (
                 <button key={w.d} type="button" className={on ? "active" : ""} aria-pressed={on} onClick={() => change((c) => setWorkday(c, w.d, !on))}>

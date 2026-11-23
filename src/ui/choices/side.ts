@@ -1,5 +1,6 @@
 import { q } from "../../actions/copy";
 import type { OutcomeRow, Pick, ResolveOptions } from "../../actions/resolve";
+import type { DateStyle, WeekStart } from "../../domain/dates";
 import type { Lock } from "../../domain/schedule";
 import type { Choice } from "../../plan/choices";
 import type { PlanSession } from "../../store/session";
@@ -18,13 +19,13 @@ export interface SideContent {
 
 const REASON: Readonly<Record<Lock, string>> = { held: "held", done: "done", doing: "in progress" };
 
-export function sideContent(session: PlanSession, choice: Choice, pick: Pick, opts: ResolveOptions): SideContent {
+export function sideContent(session: PlanSession, choice: Choice, pick: Pick, opts: ResolveOptions, style: DateStyle, week: WeekStart): SideContent {
   const rp = session.previewResolve(choice.id, pick, opts);
   const plan = session.view().plan;
   const side = choice.sides.find((s) => s.key === pick.side);
   if (side === undefined) throw new Error(`Choice ${choice.id} has no side ${pick.side}`);
   const labels = new Map(session.history().map((e) => [e.id, e.label]));
-  const values = choice.units.filter((u) => side.values.has(u)).map((u) => `${unitSubject(u, plan)}: ${describeUnit(u, side.values.get(u), plan, labels)}`);
+  const values = choice.units.filter((u) => side.values.has(u)).map((u) => `${unitSubject(u, plan)}: ${describeUnit(u, side.values.get(u), plan, labels, style, week)}`);
   const stopped = rp.preview.stopped.map((s) => {
     const it = plan.items.get(s.id);
     if (it === undefined) throw new Error(`No item ${s.id}`);

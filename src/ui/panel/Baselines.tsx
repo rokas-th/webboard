@@ -1,13 +1,15 @@
-import { fmtShort, type IsoDate } from "../../domain/dates";
+import { fmtFull, fmtShort, LOG_STYLE, type IsoDate } from "../../domain/dates";
 import type { PlanView } from "../../store/doc";
 import type { Run } from "../run";
+import { useDateStyle } from "../DeviceProvider";
 import { useUiValue } from "../state";
 import { TextField } from "./TextField";
 
-export const baselineDefault = (today: IsoDate): string => `Baseline ${fmtShort(today)} ${today.slice(0, 4)}`;
+export const baselineDefault = (today: IsoDate): string => `Baseline ${fmtFull(today, LOG_STYLE)}`;
 
 export function Baselines(p: { view: PlanView; readOnly: boolean; run: Run; titled: boolean }) {
   const { ui, setUi } = useUiValue();
+  const style = useDateStyle();
   const list = [...p.view.plan.baselines.values()].sort((a, b) => (a.at === b.at ? (a.id < b.id ? -1 : 1) : a.at < b.at ? -1 : 1));
   return (
     <>
@@ -25,7 +27,7 @@ export function Baselines(p: { view: PlanView; readOnly: boolean; run: Run; titl
                   readOnly={p.readOnly}
                   onCommit={(next) => p.run.run({ t: "baseline", op: "rename", id: b.id, name: next }) !== null}
                 />
-                <span className="baseline-at">{fmtShort(b.at)}</span>
+                <span className="baseline-at">{fmtShort(b.at, style)}</span>
                 <button type="button" className="button-small" aria-pressed={shown} onClick={() => setUi({ baseline: shown ? null : b.id })}>
                   {shown ? "Hide" : "Show"}
                 </button>

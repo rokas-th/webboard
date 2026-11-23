@@ -1,4 +1,4 @@
-import { fmtShort } from "../domain/dates";
+import { fmtShort, LOG_STYLE } from "../domain/dates";
 import type { ItemId, PlanState } from "../domain/model";
 import type { LogState } from "../log/state";
 import { OWNER_CAUSES, type ActionId, type DeviceId, type UnitKey, type Write } from "../log/types";
@@ -383,7 +383,7 @@ const resultLabels = (r: Reader, g: Found, sides: readonly Side[], values: reado
   return sides.map((_, i) => {
     const start = startIn(i, named);
     if (start.kind === "none") throw new Error(`Side ${sides[i].actions[0]} has no value for ${named}`);
-    const head = start.start === null ? `“${itemName(r.plan, item)}” has no start` : `“${itemName(r.plan, item)}” starts ${fmtShort(start.start)}`;
+    const head = start.start === null ? `“${itemName(r.plan, item)}” has no start` : `“${itemName(r.plan, item)}” starts ${fmtShort(start.start, LOG_STYLE)}`;
     const n = starts.filter((row) => row.some((other, j) => j !== i && later(row[i], other))).length;
     return n === 0 ? head : n === 1 ? `${head}, 1 item moves` : `${head}, ${n} items move`;
   });

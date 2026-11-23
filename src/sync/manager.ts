@@ -343,7 +343,7 @@ export class SyncManager {
     this.registry.setSpaceReadOnly(false);
     await this.attach(gen);
     if (gen !== this.gen || this.revokedLatch) return;
-    this.registry.nameThisDevice(space.deviceName);
+    this.registry.nameThisDevice(this.registry.renamedDevice() ?? space.deviceName);
     this.emit();
   }
 
@@ -484,7 +484,7 @@ export class SyncManager {
     if (!this.attached) {
       if (open && !this.attaching && this.global === null) {
         void this.attach(gen).then(() => {
-          if (gen === this.gen && this.space !== null) this.registry.nameThisDevice(this.space.deviceName);
+          if (gen === this.gen && this.space !== null) this.registry.nameThisDevice(this.registry.renamedDevice() ?? this.space.deviceName);
         });
       }
       this.emit();

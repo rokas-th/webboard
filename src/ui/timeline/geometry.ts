@@ -1,5 +1,5 @@
 import { workCalendar, type WorkCalendar } from "../../domain/calendar";
-import { toDay, weekday, type Day } from "../../domain/dates";
+import { toDay, weekStartOf, type Day, type WeekStart } from "../../domain/dates";
 import type { ItemId } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import type { FixedZoom, Zoom } from "../state";
@@ -38,6 +38,7 @@ export function pinched(ppd: number, step: 1 | -1): FixedZoom | null {
 
 export interface Geometry {
   origin: Day;
+  week: WeekStart;
   days: number;
   ppd: number;
   width: number;
@@ -53,16 +54,17 @@ function ppdOf(view: PlanView, zoom: Zoom, visible: number | undefined): number 
   return fitPpd(view, visible);
 }
 
-export function geometry(view: PlanView, zoom: Zoom, visible?: number): Geometry {
+export function geometry(view: PlanView, zoom: Zoom, week: WeekStart, visible?: number): Geometry {
   const today = toDay(view.today);
   const { start, end } = view.derived;
   const lo = Math.min(today, ...start.values());
   const hi = Math.max(today, ...end.values());
-  const monday = lo - 7 - (weekday(lo - 7) - 1);
-  const days = hi + 35 - monday + 1;
+  const first = weekStartOf(lo - 7, week);
+  const days = hi + 35 - first + 1;
   const ppd = ppdOf(view, zoom, visible);
   return {
-    origin: monday,
+    origin: first,
+    week,
     days,
     ppd,
     width: Math.round(days * ppd),
@@ -72,7 +74,7 @@ export function geometry(view: PlanView, zoom: Zoom, visible?: number): Geometry
       const e = end.get(id);
       return s === undefined || e === undefined ? null : { start: s, end: e };
     },
-    x: (d) => Math.round((d - monday) * ppd),
-    dayAt: (px) => monday + Math.floor(px / ppd),
+    x: (d) => Math.round((d - first) * ppd),
+    dayAt: (px) => first + Math.floor(px / ppd),
   };
 }

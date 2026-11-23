@@ -681,6 +681,7 @@ describe("People in the phone Settings sheet", () => {
     follow: null,
     naming: null,
     settings: null,
+    settingsRow: null,
     syncPane: null,
     sidebarOpen: true,
     sidebarWidth: null,
@@ -700,9 +701,13 @@ describe("People in the phone Settings sheet", () => {
               <SettingsView
                 frame="sheet"
                 section="people"
+                row={null}
+                onRowShown={vi.fn()}
                 session={t.session}
                 readOnly={false}
                 device="Test iPhone"
+                renameDevice={vi.fn()}
+                backup={vi.fn()}
                 clock={fixedClock("2026-11-09")}
                 hover={false}
                 closer={closer}

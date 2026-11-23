@@ -5,6 +5,7 @@ import { fixedClock } from "../../services/clock";
 import { setSystemDark } from "../../test/matchMedia";
 import { IPHONE, MAC, setPlatform } from "../../test/platform";
 import { resetTauri, tauri } from "../../test/tauriMock";
+import { deviced } from "../../test/theme";
 import { DEFAULT_STORE, type ThemeStore } from "../../theme/store";
 import { ThemeProvider, useNativeScheme } from "../../theme/ThemeContext";
 import { SettingsView } from "../settings/Settings";
@@ -31,27 +32,33 @@ const panel = (): HTMLElement =>
   render(
     <ThemeProvider storage={window.localStorage} initial={{ store: STORE, unreadable: null }}>
       <NativeScheme />
-      <SettingsView
-        frame="modal"
-        section="theme"
-        session={null}
-        readOnly={false}
-        device="iPhone"
-        clock={fixedClock("2026-11-09")}
-        hover
-        closer={createRef()}
-        files={{ creating: false, importing: false, newPlan: () => undefined, newExample: () => undefined, importPlan: () => undefined }}
-        onSection={() => undefined}
-        onClose={() => undefined}
-        syncPane={null}
-        onSyncPane={() => undefined}
-        onTrashPlan={() => undefined}
-        sync={{ kind: "off" }}
-        syncName={() => null}
-        updates={null}
-        syncPanes={null}
-        planLocked={false}
-      />
+      {deviced(
+        <SettingsView
+          frame="modal"
+          section="theme"
+          row={null}
+          onRowShown={vi.fn()}
+          session={null}
+          readOnly={false}
+          device="iPhone"
+          renameDevice={vi.fn()}
+          backup={vi.fn()}
+          clock={fixedClock("2026-11-09")}
+          hover
+          closer={createRef()}
+          files={{ creating: false, importing: false, newPlan: () => undefined, newExample: () => undefined, importPlan: () => undefined }}
+          onSection={() => undefined}
+          onClose={() => undefined}
+          syncPane={null}
+          onSyncPane={() => undefined}
+          onTrashPlan={() => undefined}
+          sync={{ kind: "off" }}
+          syncName={() => null}
+          updates={null}
+          syncPanes={null}
+          planLocked={false}
+        />,
+      )}
     </ThemeProvider>,
   ).getByRole("region", { name: "Theme" });
 

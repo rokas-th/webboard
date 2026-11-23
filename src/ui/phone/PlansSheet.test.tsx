@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 function Host(p: { seen: { current: UiState | null }; children: ReactNode }) {
-  const [ui, setUi] = useUi();
+  const [ui, setUi] = useUi("timeline");
   p.seen.current = ui;
   useEffect(() => setUi({ plan: "plan0000001" }), [setUi]);
   return <UiContext.Provider value={{ ui, setUi }}>{p.children}</UiContext.Provider>;

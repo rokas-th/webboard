@@ -263,6 +263,10 @@ describe("layout fixtures", () => {
     Object.entries(FIXTURES).forEach(([name, f]) => expect(f.ipc.sync_status, name).toEqual(expected[name] ?? { space: null, revoked: false }));
   });
 
+  it("answers the text size zoom in every state", () => {
+    expect(Object.entries(FIXTURES).filter(([, f]) => f.ipc["plugin:webview|set_webview_zoom"] !== null).map(([name]) => name)).toEqual([]);
+  });
+
   it("answers the update check in every state with no update, except the update states, which are the mesa plan", () => {
     const UPDATE_STATES = ["update-available", "update-check-failed", "update-downloading"];
     Object.entries(FIXTURES)

@@ -114,7 +114,7 @@
 
 .choice-col.picked {
   border-color: var(--cyan-dim);
-  box-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.15);
+  box-shadow: 0 0 calc(12px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--cyan-rgb), 0.15);
 }
 
 .modal .choice-col p,

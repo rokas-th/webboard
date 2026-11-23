@@ -30,6 +30,7 @@ export interface Settings {
   names: Record<PlanId, string>;
   syncedHeads?: Record<string, readonly ActionId[]>;
   exampleOffered?: boolean;
+  deviceName?: string;
 }
 
 export interface DeviceInfo {
@@ -88,6 +89,8 @@ export function defaultDeviceName(platform: DeviceInfo["platform"], shortSide: n
   }
 }
 
+const isDeviceName = (v: unknown): v is string => typeof v === "string" && v.trim() !== "" && normalizeName(v) === v;
+
 function parseSettings(raw: unknown): Settings {
   if (raw === null) return { v: 1, lastRegion: null, names: {} };
   const bad = (what: string): AppError => new AppError("settings.corrupt", `settings.json does not hold WebBoard settings: ${what}.`);
@@ -108,6 +111,7 @@ function parseSettings(raw: unknown): Settings {
     throw bad(`lastRegion is not a region: ${messageOf(e)}`);
   }
   if ("exampleOffered" in raw && typeof raw.exampleOffered !== "boolean") throw bad("exampleOffered is not true or false");
+  if ("deviceName" in raw && !isDeviceName(raw.deviceName)) throw bad("deviceName is not a device name");
   const base: Settings = { ...raw, v: 1, lastRegion, names };
   if (!("syncedHeads" in raw)) return base;
   const heads = raw.syncedHeads;
@@ -200,6 +204,7 @@ export class Registry {
   private readonly deviceCbs = new Set<() => void>();
   private readonly subscribers = new Set<() => void>();
   private lastDevices: ReadonlyMap<DeviceId, string> = new Map();
+  private shownDevices: ReadonlyMap<DeviceId, string> = new Map();
   private settingsFailure: AppError | null = null;
   private settingsQueue: Promise<void> = Promise.resolve();
   private indexRepairPending = false;
@@ -438,6 +443,11 @@ export class Registry {
   private cacheName(id: PlanId, name: string): boolean {
     if (this.settings.names[id] === name) return false;
     this.settings = { ...this.settings, names: { ...this.settings.names, [id]: name } };
+    this.saveSettings();
+    return true;
+  }
+
+  private saveSettings(): void {
     void this.writeSettings().then(
       () => undefined,
       (e: unknown) => {
@@ -446,7 +456,6 @@ export class Registry {
         this.emit();
       },
     );
-    return true;
   }
 
   private writeSettings(): Promise<boolean> {
@@ -637,7 +646,9 @@ export class Registry {
 
   devices(): ReadonlyMap<DeviceId, string> {
     const ix = this.spaceIndex();
-    return ix === null ? this.local.devices() : new Map([...this.local.devices(), ...ix.devices()]);
+    const now = ix === null ? this.local.devices() : new Map([...this.local.devices(), ...ix.devices()]);
+    if (!sameDevices(now, this.shownDevices)) this.shownDevices = now;
+    return this.shownDevices;
   }
 
   private knownDevices(): ReadonlyMap<DeviceId, string> {
@@ -649,12 +660,24 @@ export class Registry {
     return [...this.local.unreadable(), ...(ix?.unreadable() ?? [])].map((u) => u.message);
   }
 
-  nameThisDevice(name: string): void {
+  nameThisDevice(name: string): string {
     this.usable();
     const normal = normalizeName(name);
     [this.local, this.spaceIndex()]
       .filter((ix): ix is IndexDoc => ix !== null && ix.devices().get(this.deviceId) !== normal)
       .forEach((ix) => ix.nameDevice(this.deviceId, normal));
+    return normal;
+  }
+
+  renameDevice(name: string): void {
+    const normal = this.nameThisDevice(name);
+    if (this.settings.deviceName === normal) return;
+    this.settings = { ...this.settings, deviceName: normal };
+    this.saveSettings();
+  }
+
+  renamedDevice(): string | null {
+    return this.settings.deviceName ?? null;
   }
 
   private async newCalendar(years: readonly number[]): Promise<Calendar> {

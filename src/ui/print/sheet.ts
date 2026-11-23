@@ -1,4 +1,4 @@
-import { fmtShort, toIso, weekday, type Day } from "../../domain/dates";
+import { fmtFull, fmtShort, toIso, weekday, type DateStyle, type Day, type WeekStart } from "../../domain/dates";
 import { goneSet } from "../../domain/derive";
 import type { ItemId, ItemKind } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
@@ -53,11 +53,16 @@ const withYears = (ticks: readonly { at: Day; label: string }[]): Tick[] =>
 
 const between = (first: Day, last: Day): Day[] => Array.from({ length: last - first + 1 }, (_, i) => first + i);
 
-export function printScale(first: Day, last: Day): Tick[] {
+const weekTicks = (all: readonly Day[], week: WeekStart, style: DateStyle): Tick[] =>
+  all
+    .filter((d) => weekday(d) === week)
+    .map((d, n, list) => ({ at: d, label: n === 0 || parts(list[n - 1]).y !== parts(d).y ? fmtFull(toIso(d), style) : fmtShort(toIso(d), style) }));
+
+export function printScale(first: Day, last: Day, week: WeekStart, style: DateStyle): Tick[] {
   if (last < first) throw new Error(`Print: the chart ends on ${toIso(last)}, before it starts on ${toIso(first)}`);
   const days = last - first + 1;
   const all = between(first, last);
-  if (days <= WEEKS_UP_TO) return withYears(all.filter((d) => weekday(d) === 1).map((d) => ({ at: d, label: fmtShort(toIso(d)) })));
+  if (days <= WEEKS_UP_TO) return weekTicks(all, week, style);
   const starts = all.filter((d) => parts(d).day === 1);
   if (days <= MONTHS_UP_TO) return withYears(starts.map((d) => ({ at: d, label: MONTHS[parts(d).m - 1] })));
   return withYears(starts.filter((d) => (parts(d).m - 1) % 3 === 0).map((d) => ({ at: d, label: `Q${(parts(d).m - 1) / 3 + 1}` })));

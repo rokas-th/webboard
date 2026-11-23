@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Refused } from "../../actions/intents";
+import { LOG_STYLE } from "../../domain/dates";
 import type { ResolveOptions } from "../../actions/resolve";
 import { newId } from "../../log/ids";
 import type { UnitKey } from "../../log/types";
@@ -206,8 +207,8 @@ describe("ChoiceSheet: Step 2's fixture", () => {
     const phone = cardOf(t, c, "a2");
     expect(one(".choice-summary", mac).textContent).toBe("moves 3 · show what moves");
     expect(one(".choice-summary", phone).textContent).toBe("moves 0 · show what moves");
-    expect(one(".choice-summary", mac).textContent).toBe(sideContent(t.session, c, { side: "a1" }, DEFAULTS).summary + CUE);
-    expect(one(".choice-summary", phone).textContent).toBe(sideContent(t.session, c, { side: "a2" }, DEFAULTS).summary + CUE);
+    expect(one(".choice-summary", mac).textContent).toBe(sideContent(t.session, c, { side: "a1" }, DEFAULTS, LOG_STYLE, 1).summary + CUE);
+    expect(one(".choice-summary", phone).textContent).toBe(sideContent(t.session, c, { side: "a2" }, DEFAULTS, LOG_STYLE, 1).summary + CUE);
     expect(one(".choice-summary .dim", mac).textContent).toBe(CUE);
     expect([switchOf("Push from predecessors").checked, switchOf("Return the items the other side's push moved").checked]).toEqual([true, true]);
     fireEvent.click(one(".choice-summary", mac));
@@ -270,7 +271,7 @@ describe("ChoiceSheet: Step 2's fixture", () => {
       new Set(["a1", "a2"].map((side) => JSON.stringify([c.id, { side }, off]))),
     );
     expect(one(".choice-summary", cardOf(t, c, "a1")).textContent).toBe("moves 2 · show what moves");
-    expect(one(".choice-summary", cardOf(t, c, "a1")).textContent).toBe(sideContent(t.session, c, { side: "a1" }, off).summary + CUE);
+    expect(one(".choice-summary", cardOf(t, c, "a1")).textContent).toBe(sideContent(t.session, c, { side: "a1" }, off, LOG_STYLE, 1).summary + CUE);
     fireEvent.click(within(sheet()).getByRole("radio", { name: "Mac" }));
     fireEvent.click(apply());
     expect(resolve.mock.calls).toEqual([[c.id, { side: "a1" }, off]]);
@@ -397,9 +398,9 @@ describe("ChoiceSheet: cards match the desktop column", () => {
       const side = c.sides.find((s) => s.key === key);
       if (side === undefined) throw new Error("no side");
       expect(one(".choice-side", card).textContent).toBe(label);
-      expect(describeUnit("n:Review", side.values.get("n:Review"), plan, labelsOf(t))).toBe(`“${value}”`);
+      expect(describeUnit("n:Review", side.values.get("n:Review"), plan, labelsOf(t), LOG_STYLE, 1)).toBe(`“${value}”`);
       expect(all(".choice-value", card).map((e) => e.textContent)).toContain(`${subject}: “${value}”`);
-      expect(card.textContent).toBe(textOf(t, c, key, sideContent(t.session, c, { side: key }, DEFAULTS)));
+      expect(card.textContent).toBe(textOf(t, c, key, sideContent(t.session, c, { side: key }, DEFAULTS, LOG_STYLE, 1)));
     });
   });
 
@@ -411,9 +412,9 @@ describe("ChoiceSheet: cards match the desktop column", () => {
     const plan = t.session.view().plan;
     c.sides.forEach((s) => {
       const card = cardOf(t, c, s.key);
-      expect(card.textContent).toContain(describeUnit("ct:2026-11-17", s.values.get("ct:2026-11-17"), plan, labelsOf(t)));
+      expect(card.textContent).toContain(describeUnit("ct:2026-11-17", s.values.get("ct:2026-11-17"), plan, labelsOf(t), LOG_STYLE, 1));
       expect(one(".recal", card).textContent).toBe(impactText(t.session.previewResolve(c.id, { side: s.key }, DEFAULTS).preview));
-      expect(card.textContent).toBe(textOf(t, c, s.key, sideContent(t.session, c, { side: s.key }, DEFAULTS)));
+      expect(card.textContent).toBe(textOf(t, c, s.key, sideContent(t.session, c, { side: s.key }, DEFAULTS, LOG_STYLE, 1)));
     });
   });
 
@@ -427,7 +428,7 @@ describe("ChoiceSheet: cards match the desktop column", () => {
     const plan = t.session.view().plan;
     const texts = c.sides.map((s) => {
       const card = cardOf(t, c, s.key);
-      expect(card.textContent).toContain(describeUnit("b:B1", s.values.get("b:B1"), plan, labelsOf(t)));
+      expect(card.textContent).toContain(describeUnit("b:B1", s.values.get("b:B1"), plan, labelsOf(t), LOG_STYLE, 1));
       return card.textContent;
     });
     expect(texts[0]).not.toBe(texts[1]);
@@ -523,7 +524,7 @@ describe("ChoiceSheet: cards match the desktop column", () => {
     expect(all(".choice-value", mac).map((e) => e.textContent)).toContain("“Sprint 4”: in the Trash");
     expect(all(".choice-value", phone).map((e) => e.textContent)).toContain("“Sprint 4”: in the plan");
     c.sides.forEach((side) => {
-      const expected = c.units.filter((u) => side.values.has(u)).map((u) => `${unitSubject(u, plan)}: ${describeUnit(u, side.values.get(u), plan, labelsOf(t))}`);
+      const expected = c.units.filter((u) => side.values.has(u)).map((u) => `${unitSubject(u, plan)}: ${describeUnit(u, side.values.get(u), plan, labelsOf(t), LOG_STYLE, 1)}`);
       expect(all(".choice-value", cardOf(t, c, side.key)).map((e) => e.textContent)).toEqual(expected);
     });
     expect(all(".pick-subject", sheet()).map((e) => e.textContent)).toEqual(c.units.map((u) => unitSubject(u, plan)));
@@ -575,12 +576,12 @@ describe("ChoiceSheet rows", () => {
     await shown(t);
     setUi({ dialog: { t: "choice", id: c.id } });
     const plan = t.session.view().plan;
-    const content = sideContent(t.session, c, { side: "a1" }, DEFAULTS);
+    const content = sideContent(t.session, c, { side: "a1" }, DEFAULTS, LOG_STYLE, 1);
     const card = cardOf(t, c, "a1");
     expect(card.querySelector(".moves-line")).toBeNull();
     fireEvent.click(one(".choice-summary", card));
     const sections = groupRows(content.rows, plan);
     expect(all(".moves-title", card).map((e) => e.textContent)).toEqual(sections.map((x) => x.title));
-    expect(all(".moves-line", card).map((e) => e.textContent)).toEqual(sections.flatMap((x) => x.rows.map((r) => outcomeLine(r, plan))));
+    expect(all(".moves-line", card).map((e) => e.textContent)).toEqual(sections.flatMap((x) => x.rows.map((r) => outcomeLine(r, plan, LOG_STYLE))));
   });
 });

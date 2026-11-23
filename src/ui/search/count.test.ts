@@ -34,21 +34,21 @@ describe("searchCount", () => {
   it("is null without a query", async () => {
     const { t, notes } = await made();
     const v = t.session.view();
-    expect(searchCount(v, { view: "list", collapsed: new Set() }, DEFAULT_LIST_PREFS, notes, planMatcher(v, notes, " "))).toBeNull();
+    expect(searchCount(v, { view: "list", collapsed: new Set() }, DEFAULT_LIST_PREFS, notes, null, planMatcher(v, notes, " "))).toBeNull();
   });
 
   it("counts the List's shown rows of its scoped rows", async () => {
     const { t, notes } = await made();
     const v = t.session.view();
-    expect(searchCount(v, { view: "list", collapsed: new Set() }, DEFAULT_LIST_PREFS, notes, planMatcher(v, notes, "dome"))).toEqual({ shown: 3, total: 4 });
+    expect(searchCount(v, { view: "list", collapsed: new Set() }, DEFAULT_LIST_PREFS, notes, null, planMatcher(v, notes, "dome"))).toEqual({ shown: 3, total: 4 });
   });
 
   it("counts the Timeline's task and milestone rows, without groups, unscheduled items or what a collapsed group hides", async () => {
     const { t, notes } = await made();
     const v = t.session.view();
     const match = planMatcher(v, notes, "dome");
-    expect(searchCount(v, { view: "timeline", collapsed: new Set() }, DEFAULT_LIST_PREFS, notes, match)).toEqual({ shown: 3, total: 4 });
-    expect(searchCount(v, { view: "timeline", collapsed: new Set(["g"]) }, DEFAULT_LIST_PREFS, notes, match)).toEqual({ shown: 2, total: 3 });
+    expect(searchCount(v, { view: "timeline", collapsed: new Set() }, DEFAULT_LIST_PREFS, notes, null, match)).toEqual({ shown: 3, total: 4 });
+    expect(searchCount(v, { view: "timeline", collapsed: new Set(["g"]) }, DEFAULT_LIST_PREFS, notes, null, match)).toEqual({ shown: 2, total: 3 });
   });
 
   it("counts the Board's cards among its column keys", async () => {
@@ -57,7 +57,7 @@ describe("searchCount", () => {
     const keys = [...projectBoard(v.plan, v.derived).columnOf.keys()];
     const match = planMatcher(v, notes, "dome");
     if (match === null) throw new Error("no matcher");
-    expect(searchCount(v, { view: "board", collapsed: new Set() }, DEFAULT_LIST_PREFS, notes, match)).toEqual({ shown: keys.filter(match).length, total: keys.length });
+    expect(searchCount(v, { view: "board", collapsed: new Set() }, DEFAULT_LIST_PREFS, notes, null, match)).toEqual({ shown: keys.filter(match).length, total: keys.length });
     expect(keys.filter(match).length).toBeGreaterThan(0);
   });
 });

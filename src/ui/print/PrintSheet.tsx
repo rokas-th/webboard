@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { fmtNear, toDay, toIso, type Day } from "../../domain/dates";
+import { fmtNear, toDay, toIso, type DateStyle, type Day } from "../../domain/dates";
 import type { Item, ItemId } from "../../domain/model";
 import { liveLinks } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { countedConflicts } from "../choices/HeadCounts";
+import { useDateStyle, useDevice } from "../DeviceProvider";
 import { statusLabel } from "../list/groups";
 import { derivedStatus } from "../status";
 import { depsOf } from "../list/columns";
@@ -30,11 +31,11 @@ const itemOf = (view: PlanView, id: ItemId): Item => {
 
 const conflictsText = (n: number): string => (n === 0 ? "" : ` · ${n} ${n === 1 ? "conflict" : "conflicts"}`);
 
-function subtitle(view: PlanView, rows: readonly PrintRow[]): string {
+function subtitle(view: PlanView, rows: readonly PrintRow[], style: DateStyle): string {
   const spans = rows.flatMap((r) => (r.span === null ? [] : [r.span]));
-  const near = (d: Day): string => fmtNear(toIso(d), view.today);
+  const near = (d: Day): string => fmtNear(toIso(d), view.today, style);
   const range = spans.length === 0 ? "" : `${near(Math.min(...spans.map((s) => s.start)))} → ${near(Math.max(...spans.map((s) => s.end)))} · `;
-  return `${range}printed ${fmtNear(view.today, view.today)}${conflictsText(countedConflicts(view).length)}`;
+  return `${range}printed ${fmtNear(view.today, view.today, style)}${conflictsText(countedConflicts(view).length)}`;
 }
 
 function Bar(p: { row: PrintRow; done: boolean; first: Day; days: number }) {
@@ -58,13 +59,15 @@ function Bar(p: { row: PrintRow; done: boolean; first: Day; days: number }) {
 
 function SheetBody(p: { view: PlanView }) {
   const { view } = p;
+  const style = useDateStyle();
+  const week = useDevice().prefs.week;
   const rows = printRows(view);
   const links = liveLinks(view.plan);
   const { first, last } = fitSpan(view);
   const days = last - first + 1;
   const today = toDay(view.today);
   const todayLine = today >= first && today <= last ? <span className="print-today" style={{ left: `${pct(today, first, days)}%` }} /> : null;
-  const near = (d: Day): string => fmtNear(toIso(d), view.today);
+  const near = (d: Day): string => fmtNear(toIso(d), view.today, style);
   const line = (r: PrintRow) => {
     const it = itemOf(view, r.id);
     const group = r.kind === "group";
@@ -94,7 +97,7 @@ function SheetBody(p: { view: PlanView }) {
   return (
     <>
       <h1>{view.plan.name}</h1>
-      <p className="print-sub">{subtitle(view, rows)}</p>
+      <p className="print-sub">{subtitle(view, rows, style)}</p>
       <table className="print-table">
         <thead>
           <tr>
@@ -105,7 +108,7 @@ function SheetBody(p: { view: PlanView }) {
             ))}
             <th className="print-chart">
               <div className="print-scale">
-                {printScale(first, last).map((t) => (
+                {printScale(first, last, week, style).map((t) => (
                   <span key={t.at} className="print-tick" style={{ left: `${pct(t.at, first, days)}%` }}>
                     {t.label}
                   </span>

@@ -2,8 +2,7 @@ import { useState } from "react";
 import { normalizeName } from "../../actions/build";
 import { syncPairJoin } from "../../services/ipc";
 import { useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
-import { toast } from "../common/Toast";
-import { enrolThenRestart, usePaneCommand } from "./command";
+import { enrolNamedThenRestart, usePaneCommand } from "./command";
 import { DEFAULT_SERVER } from "./SetupPane";
 
 export function JoinPane() {
@@ -16,10 +15,14 @@ export function JoinPane() {
   const join = (): void =>
     cmd.run(async () => {
       const deviceName = normalizeName(name);
-      await enrolThenRestart(async () => {
-        await syncPairJoin(server, code, deviceName);
-      }, restart);
-      toast("Joined the space");
+      await enrolNamedThenRestart(
+        async () => {
+          await syncPairJoin(server, code, deviceName);
+        },
+        () => registry.renameDevice(deviceName),
+        restart,
+        "Joined the space",
+      );
     });
   return (
     <div className="sync-form">

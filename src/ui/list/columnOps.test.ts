@@ -2,7 +2,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { clearToasts, Toasts } from "../common/Toast";
-import { addSortKey, dropIndex, fitWidth, hideColumn, moveColumn, removeSortKey, resetColumns, resizeColumn, setSort, showColumn } from "./columnOps";
+import { addSortKey, DATE_HEAD_MIN, dropIndex, fitWidth, hideColumn, minWidthOn, moveColumn, removeSortKey, resetColumns, resizeColumn, setSort, showColumn, TOUCH_HEAD_MIN } from "./columnOps";
 import { DEFAULT_LIST_PREFS, MAX_WIDTH, readListPrefs, writeListPrefs, type ColumnId, type ListPrefs } from "./prefs";
 import { SORT_LIMIT } from "./text";
 
@@ -93,6 +93,23 @@ describe("fitWidth", () => {
 
   it("throws without a width to fit", () => {
     expect(() => fitWidth(120, [])).toThrow("List: nothing to fit");
+  });
+});
+
+describe("minWidthOn", () => {
+  it("keeps a column's own minimum in system dates and lifts it for touch", () => {
+    expect([minWidthOn("start", false, "system"), minWidthOn("start", true, "system"), minWidthOn("name", true, "system")]).toEqual([72, TOUCH_HEAD_MIN, 180]);
+  });
+
+  it("widens Start and End to a full date in ISO and D.M.YYYY, and nothing else", () => {
+    expect([minWidthOn("start", false, "iso"), minWidthOn("end", false, "dmy"), minWidthOn("end", true, "iso"), minWidthOn("days", false, "iso"), minWidthOn("status", true, "dmy")]).toEqual([
+      DATE_HEAD_MIN,
+      DATE_HEAD_MIN,
+      DATE_HEAD_MIN,
+      56,
+      TOUCH_HEAD_MIN,
+    ]);
+    expect(DATE_HEAD_MIN).toBe(104);
   });
 });
 

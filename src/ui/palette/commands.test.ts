@@ -49,6 +49,7 @@ const UI: UiState = {
   follow: null,
   naming: null,
   settings: null,
+  settingsRow: null,
   syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,
@@ -131,6 +132,7 @@ function harness(t: TestSession, ui: Partial<UiState> = {}, plans: readonly stri
     updates: null,
     theme,
     detail: { promote, toggleModal, rename },
+    me: null,
   };
   return { ctx, setUi, select, newPlan, newExample, reveal, print, open, useCyberdeck, preview, toggleList, promote, toggleModal, rename };
 }

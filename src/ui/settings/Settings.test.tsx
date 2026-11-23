@@ -8,16 +8,18 @@ import type { SyncState } from "../../sync/manager";
 import { fixedClock } from "../../services/clock";
 import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { testRegistry } from "../../test/shell";
+import { deviced } from "../../test/theme";
 import { withSync } from "../../test/withSync";
-import { MAC, setPlatform } from "../../test/platform";
+import { IPAD, MAC, setPlatform } from "../../test/platform";
 import { DEFAULT_STORE } from "../../theme/store";
 import { ThemeProvider } from "../../theme/ThemeContext";
 import { HOLIDAY_ATTRIBUTION } from "../common/About";
 import type { CloseReason } from "../common/dismiss";
 import { toast } from "../common/Toast";
 import { refusal } from "../../actions/copy";
+import { DEFAULT_DEVICE, DEVICE_KEY } from "../device";
 import { OpenChoice } from "../run";
-import { exportFlow, exportListCsvFlow } from "../shell/fileFlows";
+import { exportFlow, exportIcsFlow, exportListCsvFlow } from "../shell/fileFlows";
 import type { PlanFiles } from "../shell/selection";
 import { UiContext, useUi, type SettingsSection, type SyncPane, type UiState } from "../state";
 import { DISCARDED } from "../theme/ThemePanel";
@@ -31,6 +33,8 @@ vi.mock("../common/Toast", () => ({ toast: vi.fn() }));
 vi.mock("../shell/fileFlows", () => ({
   exportFlow: vi.fn(async () => undefined),
   exportListCsvFlow: vi.fn(async () => undefined),
+  exportIcsFlow: vi.fn(async () => undefined),
+  backupFlow: vi.fn(async () => undefined),
   importFlow: vi.fn(async () => undefined),
 }));
 
@@ -44,6 +48,7 @@ afterEach(() => {
   vi.mocked(toast).mockClear();
   vi.mocked(exportFlow).mockClear();
   vi.mocked(exportListCsvFlow).mockClear();
+  vi.mocked(exportIcsFlow).mockClear();
 });
 
 const CYBERDECK_VOID = "#0A0A14";
@@ -79,10 +84,11 @@ interface Opts {
   hover?: boolean;
   readOnly?: boolean;
   planLocked?: boolean;
+  row?: string;
 }
 
 function UiHost(p: { seen: { current: UiState | null }; children: ReactNode }) {
-  const [ui, setUi] = useUi();
+  const [ui, setUi] = useUi("timeline");
   p.seen.current = ui;
   return <UiContext.Provider value={{ ui, setUi }}>{p.children}</UiContext.Provider>;
 }
@@ -96,6 +102,7 @@ function mount(o: Opts = {}) {
   const seen: { current: UiState | null } = { current: null };
   const closer = createRef<((r: CloseReason) => boolean) | null>();
   const files = fakeFiles();
+  const backup = vi.fn<() => void>();
   const panes = (pane: SyncPane | null) => (
     <div className="stub-panes" data-pane={pane ?? "resolved"}>
       {(["setup", "join", "pair", "devices"] as const).map((k) => (
@@ -108,31 +115,42 @@ function mount(o: Opts = {}) {
   const clock = o.t?.clock ?? fixedClock("2026-11-09");
   const registry = o.t === undefined ? null : testRegistry(o.t);
   const synced = (el: ReactElement): ReactElement => (registry === null ? el : withSync(el, { registry }));
+  const onRowShown = vi.fn<() => void>();
+  let row: string | null = o.row ?? null;
+  onRowShown.mockImplementation(() => {
+    row = null;
+  });
   const ui = (section: SettingsSection, session: PlanSession | null, pane: SyncPane | null, frameNow: SettingsFrame) => synced(
     <OpenChoice.Provider value={openChoice}>
       <UiHost seen={seen}>
         <ThemeProvider storage={window.localStorage} initial={{ store: DEFAULT_STORE, unreadable: null }}>
-          <SettingsView
-            frame={frameNow}
-            section={section}
-            session={session}
-            readOnly={o.readOnly ?? false}
-            device="Rokas’s Mac"
-            clock={clock}
-            hover={o.hover ?? false}
-            closer={closer}
-            files={files}
-            onSection={onSection}
-            syncPane={pane}
-            onClose={onClose}
-            onSyncPane={onSyncPane}
-            onTrashPlan={onTrashPlan}
-            sync={o.sync ?? { kind: "off" }}
-            syncName={(doc) => (doc === "p1" ? "Launch" : null)}
-            updates={o.updates === undefined ? null : o.updates}
-            syncPanes={panes(pane)}
-            planLocked={o.planLocked ?? false}
-          />
+          {deviced(
+            <SettingsView
+              frame={frameNow}
+              section={section}
+              row={row}
+              onRowShown={onRowShown}
+              session={session}
+              readOnly={o.readOnly ?? false}
+              device="Rokas’s Mac"
+              renameDevice={vi.fn()}
+              backup={backup}
+              clock={clock}
+              hover={o.hover ?? false}
+              closer={closer}
+              files={files}
+              onSection={onSection}
+              syncPane={pane}
+              onClose={onClose}
+              onSyncPane={onSyncPane}
+              onTrashPlan={onTrashPlan}
+              sync={o.sync ?? { kind: "off" }}
+              syncName={(doc) => (doc === "p1" ? "Launch" : null)}
+              updates={o.updates === undefined ? null : o.updates}
+              syncPanes={panes(pane)}
+              planLocked={o.planLocked ?? false}
+            />,
+          )}
         </ThemeProvider>
       </UiHost>
     </OpenChoice.Provider>,
@@ -154,11 +172,13 @@ function mount(o: Opts = {}) {
   return {
     view,
     onSection,
+    onRowShown,
     onClose,
     onSyncPane,
     onTrashPlan,
     closer,
     files,
+    backup,
     registry,
     uiNow(): UiState {
       if (seen.current === null) throw new Error("no ui state");
@@ -306,6 +326,25 @@ describe("Settings in the modal frame", () => {
     ]);
   });
 
+  it("finds This is me by mine and the device name by rename, and a row entry focuses the device field", () => {
+    const m = mount();
+    const rows = (): (string | undefined)[][] => [...nav(m.root()).querySelectorAll<HTMLElement>("button.settings-nav-row")].map((b) => [b.dataset["row"], b.textContent ?? undefined]);
+    typeSearch(m.root(), "mine");
+    expect(rows()).toEqual([["general.me", "This is me"]]);
+    typeSearch(m.root(), "rename");
+    expect(rows()).toEqual([["general.device", "Device name"]]);
+    fireEvent.click(within(nav(m.root())).getByRole("button", { name: "Device name" }));
+    expect(document.activeElement?.matches('[data-settings-row="general.device"] input.settings-device-name')).toBe(true);
+  });
+
+  it.each([["modal"], ["sheet"]] as const)("opened at the me row in the %s, focuses the This is me pick and hands the row back", async (frame) => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ t, frame, row: "me" });
+    expect(document.activeElement?.matches('[data-settings-row="general.me"] button.settings-pick[data-pick="me"]')).toBe(true);
+    expect(m.onRowShown).toHaveBeenCalledTimes(1);
+    await t.session.close();
+  });
+
   it("Return in the search opens the first match", () => {
     const m = mount();
     typeSearch(m.root(), "sync");
@@ -339,6 +378,34 @@ describe("Settings in the modal frame", () => {
     typeSearch(m.root(), "updates");
     fireEvent.click(within(nav(m.root())).getByRole("button", { name: "Updates" }));
     expect(document.activeElement?.textContent).toBe("Install and restart");
+  });
+
+  it("Theme ends with Density, Text size and Reduce glow on the Mac, and search jumps to each", () => {
+    const m = mount({ section: "theme" });
+    const rows = (): (string | undefined)[] => [...sectionEl(m.root(), "theme").querySelectorAll<HTMLElement>("[data-settings-row]")].map((r) => r.dataset["settingsRow"]);
+    expect(rows()).toEqual(["theme.density", "theme.text-size", "theme.glow"]);
+    m.show("general");
+    typeSearch(m.root(), "glow");
+    fireEvent.click(within(nav(m.root())).getByRole("button", { name: "Reduce glow" }));
+    expect(shownSection(m.root())).toEqual(["theme"]);
+    expect(document.activeElement).toBe(within(sectionEl(m.root(), "theme")).getByRole("switch", { name: "Reduce glow" }));
+    typeSearch(m.root(), "density");
+    fireEvent.click(within(nav(m.root())).getByRole("button", { name: "Density" }));
+    expect(document.activeElement?.textContent).toBe("Comfortable");
+  });
+
+  it("Theme drops Density and Text size on the iPad, and search finds neither", () => {
+    setPlatform(IPAD);
+    const m = mount({ section: "theme" });
+    const theme = sectionEl(m.root(), "theme");
+    expect([...theme.querySelectorAll<HTMLElement>("[data-settings-row]")].map((r) => r.dataset["settingsRow"])).toEqual(["theme.glow"]);
+    expect(within(theme).queryAllByRole("radio")).toEqual([]);
+    typeSearch(m.root(), "density");
+    expect(within(nav(m.root())).queryByRole("button", { name: "Density" })).toBeNull();
+    typeSearch(m.root(), "text size");
+    expect(within(nav(m.root())).queryByRole("button", { name: "Text size" })).toBeNull();
+    typeSearch(m.root(), "glow");
+    expect(within(nav(m.root())).getByRole("button", { name: "Reduce glow" })).toBeTruthy();
   });
 
   it("an anchorless row entry opens its section at the top", () => {
@@ -403,24 +470,29 @@ describe("Settings in the modal frame", () => {
     expect(m.closer.current).toBeNull();
   });
 
-  it("General shows this device, the update line with an updater, and About", () => {
+  it("General shows This is me, the device name, the update line with an updater, and About", () => {
     const m = mount({ updates: fakeUpdates() });
     const general = sectionEl(m.root(), "general");
     const rows = [...general.querySelectorAll<HTMLElement>(".settings-row")];
     expect(rows.map((r) => [r.dataset["settingsRow"], r.querySelector(".settings-label")?.textContent])).toEqual([
-      ["general.device", "This device"],
+      ["general.tab", "Default tab"],
+      ["general.week", "Week starts on"],
+      ["general.dates", "Date format"],
+      ["general.me", "This is me"],
+      ["general.device", "Device name"],
       ["general.updates", "Updates"],
       ["general.about", "About"],
     ]);
-    expect(rows[0].querySelector(".settings-control")?.textContent).toBe("Rokas’s Mac");
-    expect(within(rows[1]).getByText("WebBoard 9.9.9 is available")).toBeTruthy();
-    expect(rows[2].querySelector("img.about-mark")?.getAttribute("src")).toBe("/logo-mark.svg");
-    expect([...rows[2].querySelectorAll("p")].map((p) => p.textContent)).toEqual([`WebBoard ${version}`, HOLIDAY_ATTRIBUTION]);
+    expect(rows[3].querySelector(".settings-control")?.textContent).toBe("Open a plan to choose who you are in it.");
+    expect(rows[4].querySelector<HTMLInputElement>(".settings-control input.settings-device-name")?.value).toBe("Rokas’s Mac");
+    expect(within(rows[5]).getByText("WebBoard 9.9.9 is available")).toBeTruthy();
+    expect(rows[6].querySelector("img.about-mark")?.getAttribute("src")).toBe("/logo-mark.svg");
+    expect([...rows[6].querySelectorAll("p")].map((p) => p.textContent)).toEqual([`WebBoard ${version}`, HOLIDAY_ATTRIBUTION]);
   });
 
   it("General has no Updates row without an updater", () => {
     const m = mount();
-    expect([...sectionEl(m.root(), "general").querySelectorAll<HTMLElement>(".settings-row")].map((r) => r.dataset["settingsRow"])).toEqual(["general.device", "general.about"]);
+    expect([...sectionEl(m.root(), "general").querySelectorAll<HTMLElement>(".settings-row")].map((r) => r.dataset["settingsRow"])).toEqual(["general.tab", "general.week", "general.dates", "general.me", "general.device", "general.about"]);
   });
 
   it.each([
@@ -490,8 +562,66 @@ describe("Settings in the modal frame", () => {
     expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Export plan…", "Export List as CSV…"]);
     expect(within(row).getByText("CSV holds the List's columns, sort, scope and filters on this device.")).toBeTruthy();
     fireEvent.click(within(row).getByRole("button", { name: "Export List as CSV…" }));
-    expect([vi.mocked(exportListCsvFlow).mock.calls, vi.mocked(exportFlow).mock.calls]).toEqual([[[t.session]], []]);
+    expect([vi.mocked(exportListCsvFlow).mock.calls, vi.mocked(exportFlow).mock.calls]).toEqual([[[t.session, null]], []]);
     await t.session.close();
+  });
+
+  it("exports the List as CSV with this device's me for the plan", async () => {
+    const t = await testSession(MESA_SEED);
+    window.localStorage.setItem(DEVICE_KEY, JSON.stringify({ ...DEFAULT_DEVICE, me: { [t.session.view().plan.id]: "mira" } }));
+    const m = mount({ section: "files" });
+    m.plan(t.session);
+    const row = m.root().querySelector<HTMLElement>('[data-settings-row="files.export"]');
+    if (row === null) throw new Error("no export row");
+    fireEvent.click(within(row).getByRole("button", { name: "Export List as CSV…" }));
+    expect(vi.mocked(exportListCsvFlow).mock.calls).toEqual([[t.session, "mira"]]);
+    await t.session.close();
+  });
+
+  it("exports the open plan's milestones as ICS, and backs up all plans with or without a plan", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ section: "files" });
+    const rowOf = (id: string): HTMLElement => {
+      const row = m.root().querySelector<HTMLElement>(`[data-settings-row="files.${id}"]`);
+      if (row === null) throw new Error(`no ${id} row`);
+      return row;
+    };
+    expect([...sectionEl(m.root(), "files").querySelectorAll<HTMLElement>(".settings-row")].map((r) => r.dataset["settingsRow"])).toEqual(["files.import", "files.export", "files.ics", "files.backup"]);
+    expect([rowOf("ics").querySelector(".settings-label")?.textContent, rowOf("ics").querySelector(".settings-value.dim")?.textContent, within(rowOf("ics")).queryByRole("button")]).toEqual([
+      "Calendar (ICS)",
+      "Open a plan to export its milestones.",
+      null,
+    ]);
+    const backup = within(rowOf("backup")).getByRole("button", { name: "Back up…" });
+    expect([rowOf("backup").querySelector(".settings-label")?.textContent, rowOf("backup").querySelector(".settings-hint")?.textContent, backup.getAttribute("aria-describedby")]).toEqual([
+      "Back up all plans",
+      "One .zip with every plan as a .webboard file. Unzip it and import a plan to restore it.",
+      rowOf("backup").querySelector(".settings-hint")?.id,
+    ]);
+    fireEvent.click(backup);
+    expect(m.backup).toHaveBeenCalledTimes(1);
+    m.plan(t.session);
+    const name = t.session.view().plan.name;
+    const ics = within(rowOf("ics")).getByRole("button", { name: "Export milestones…" });
+    expect(rowOf("ics").querySelector(".settings-hint")?.textContent).toBe(`Dated milestones of “${name}” as all-day events.`);
+    fireEvent.click(ics);
+    expect(vi.mocked(exportIcsFlow).mock.calls.map(([session, clock]) => [session, clock.now()])).toEqual([[t.session, fixedClock("2026-11-09").now()]]);
+    act(() => t.session.apply({ t: "planName", name: "MESA 2.0" }));
+    expect(rowOf("ics").querySelector(".settings-hint")?.textContent).toBe("Dated milestones of “MESA 2.0” as all-day events.");
+    fireEvent.click(within(rowOf("backup")).getByRole("button", { name: "Back up…" }));
+    expect([m.backup.mock.calls.length, vi.mocked(exportFlow).mock.calls]).toEqual([2, []]);
+    await t.session.close();
+  });
+
+  it("finds Calendar (ICS) and Back up all plans by their search terms", () => {
+    const m = mount();
+    const rows = (): (string | undefined)[][] => [...nav(m.root()).querySelectorAll<HTMLElement>("button.settings-nav-row")].map((b) => [b.dataset["row"], b.textContent ?? undefined]);
+    typeSearch(m.root(), "milestones");
+    expect(rows()).toEqual([["files.ics", "Calendar (ICS)"]]);
+    typeSearch(m.root(), "ZIP");
+    expect(rows()).toEqual([["files.backup", "Back up all plans"]]);
+    typeSearch(m.root(), "archive");
+    expect(rows()).toEqual([["files.backup", "Back up all plans"]]);
   });
 
   it("plan group absent without a plan", async () => {

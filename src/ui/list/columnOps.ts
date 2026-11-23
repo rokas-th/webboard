@@ -1,3 +1,4 @@
+import type { DateFormat } from "../../domain/dates";
 import { columnById } from "./columns";
 import { DEFAULT_LIST_PREFS, MAX_WIDTH, type ColumnId, type ColumnPref, type ListPrefs, type SortDir } from "./prefs";
 
@@ -5,7 +6,12 @@ const clamp = (v: number, min: number, max: number): number => Math.min(max, Mat
 
 export const TOUCH_HEAD_MIN = 96;
 
-export const minWidthOn = (id: ColumnId, touch: boolean): number => (touch ? Math.max(columnById(id).minWidth, TOUCH_HEAD_MIN) : columnById(id).minWidth);
+export const DATE_HEAD_MIN = 104;
+
+const DATED: ReadonlySet<ColumnId> = new Set<ColumnId>(["start", "end"]);
+
+export const minWidthOn = (id: ColumnId, touch: boolean, dates: DateFormat): number =>
+  Math.max(columnById(id).minWidth, touch ? TOUCH_HEAD_MIN : 0, dates !== "system" && DATED.has(id) ? DATE_HEAD_MIN : 0);
 
 const indexOf = (p: ListPrefs, id: ColumnId): number => {
   const at = p.cols.findIndex((c) => c.id === id);

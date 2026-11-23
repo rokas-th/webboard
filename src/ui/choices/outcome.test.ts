@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OutcomeRow, ResolvePreview } from "../../actions/resolve";
 import type { Preview } from "../../actions/intents";
-import { toDay } from "../../domain/dates";
+import { LOG_STYLE, toDay } from "../../domain/dates";
 import type { PlanSession } from "../../store/session";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
 import { groupRows, outcomeLine, sideSummary } from "./outcome";
@@ -51,13 +51,13 @@ describe("outcomeLine", () => {
     const plan = (await made([{ id: "a", name: "Review", start: "2026-11-19", dur: 2 }])).session.view().plan;
     const before = span("2026-11-19", "2026-11-20");
     const after = span("2026-11-16", "2026-11-17");
-    expect(outcomeLine(row("a", before, after, -3), plan)).toBe("Review  Thu 19 Nov → Mon 16 Nov · −3 working days");
-    expect(outcomeLine(row("a", after, before, 3), plan)).toBe("Review  Mon 16 Nov → Thu 19 Nov · +3 working days");
-    expect(outcomeLine(row("a", before, before, 1), plan)).toBe("Review  Thu 19 Nov → Thu 19 Nov · +1 working day");
-    expect(outcomeLine(row("a", before, before, 0), plan)).toBe("Review  Thu 19 Nov → Thu 19 Nov · unchanged");
-    expect(outcomeLine(row("a", null, after), plan)).toBe("Review  unscheduled → Mon 16 Nov");
-    expect(outcomeLine(row("a", before, null), plan)).toBe("Review  Thu 19 Nov → unscheduled");
-    expect(() => outcomeLine(row("zz", before, after), plan)).toThrow(new Error("No item zz"));
+    expect(outcomeLine(row("a", before, after, -3), plan, LOG_STYLE)).toBe("Review  Thu 19 Nov → Mon 16 Nov · −3 working days");
+    expect(outcomeLine(row("a", after, before, 3), plan, LOG_STYLE)).toBe("Review  Mon 16 Nov → Thu 19 Nov · +3 working days");
+    expect(outcomeLine(row("a", before, before, 1), plan, LOG_STYLE)).toBe("Review  Thu 19 Nov → Thu 19 Nov · +1 working day");
+    expect(outcomeLine(row("a", before, before, 0), plan, LOG_STYLE)).toBe("Review  Thu 19 Nov → Thu 19 Nov · unchanged");
+    expect(outcomeLine(row("a", null, after), plan, LOG_STYLE)).toBe("Review  unscheduled → Mon 16 Nov");
+    expect(outcomeLine(row("a", before, null), plan, LOG_STYLE)).toBe("Review  Thu 19 Nov → unscheduled");
+    expect(() => outcomeLine(row("zz", before, after), plan, LOG_STYLE)).toThrow(new Error("No item zz"));
   });
 });
 

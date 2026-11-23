@@ -41,46 +41,46 @@ const made = async (): Promise<{ v: PlanView; notes: NoteText }> => {
 describe("tabOrder", () => {
   it("is the Timeline's rows, groups included, minus what a collapsed group hides", async () => {
     const { v, notes } = await made();
-    expect(tabOrder(v, { view: "timeline", collapsed: new Set() }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null)).toEqual(["g", "a", "b", "n", "d"]);
-    expect(tabOrder(v, { view: "timeline", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null)).toEqual(["g", "n", "d"]);
+    expect(tabOrder(v, { view: "timeline", collapsed: new Set() }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null, null)).toEqual(["g", "a", "b", "n", "d"]);
+    expect(tabOrder(v, { view: "timeline", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null, null)).toEqual(["g", "n", "d"]);
   });
 
   it("is the Board's cards, Now then Next then Later, top to bottom, without the hidden done ones", async () => {
     const { v, notes } = await made();
-    expect(tabOrder(v, { view: "board", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null)).toEqual(["a", "n", "u", "b"]);
+    expect(tabOrder(v, { view: "board", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null, null)).toEqual(["a", "n", "u", "b"]);
   });
 
   it("skips the Board's cards the search filters out", async () => {
     const { v, notes } = await made();
-    expect(tabOrder(v, { view: "board", collapsed: new Set() }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, (id) => id !== "n" && id !== "a")).toEqual(["u", "b"]);
+    expect(tabOrder(v, { view: "board", collapsed: new Set() }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null, (id) => id !== "n" && id !== "a")).toEqual(["u", "b"]);
   });
 
   it("is the List's rows, section by section, in Open without the done ones", async () => {
     const { v, notes } = await made();
-    expect(tabOrder(v, { view: "list", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null)).toEqual(["a", "b", "n", "u"]);
+    expect(tabOrder(v, { view: "list", collapsed: new Set(["g"]) }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null, null)).toEqual(["a", "b", "n", "u"]);
   });
 
   it("is the List's rows in its scope and sort", async () => {
     const { v, notes } = await made();
     const prefs: ListPrefs = { ...DEFAULT_LIST_PREFS, scope: "all", group: "none", sort: [{ id: "start", dir: "desc" }] };
-    expect(tabOrder(v, { view: "list", collapsed: new Set() }, EMPTY_BOARD_PREFS, prefs, notes, null)).toEqual(["b", "n", "a", "d", "u"]);
+    expect(tabOrder(v, { view: "list", collapsed: new Set() }, EMPTY_BOARD_PREFS, prefs, notes, null, null)).toEqual(["b", "n", "a", "d", "u"]);
   });
 
   it("is only the List's matching rows while a search is set", async () => {
     const { v, notes } = await made();
     const match = planMatcher(v, notes, "g");
-    expect(tabOrder(v, { view: "list", collapsed: new Set() }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, match)).toEqual(["a", "b"]);
+    expect(tabOrder(v, { view: "list", collapsed: new Set() }, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, notes, null, match)).toEqual(["a", "b"]);
   });
 });
 
 describe("phoneOrder", () => {
   it("is the list's rows on the list tab, in its scope, sort and search, and the rows on the timeline tab", async () => {
     const { v, notes } = await made();
-    expect(phoneOrder(v, "list", new Set(["g"]), DEFAULT_LIST_PREFS, notes, null)).toEqual(["a", "b", "n", "u"]);
+    expect(phoneOrder(v, "list", new Set(["g"]), DEFAULT_LIST_PREFS, notes, null, null)).toEqual(["a", "b", "n", "u"]);
     const prefs: ListPrefs = { ...DEFAULT_LIST_PREFS, scope: "all", group: "none", sort: [{ id: "start", dir: "desc" }] };
-    expect(phoneOrder(v, "list", new Set(), prefs, notes, null)).toEqual(["b", "n", "a", "d", "u"]);
-    expect(phoneOrder(v, "list", new Set(), DEFAULT_LIST_PREFS, notes, planMatcher(v, notes, "g"))).toEqual(["a", "b"]);
-    expect(phoneOrder(v, "timeline", new Set(["g"]), prefs, notes, null)).toEqual(["g", "n", "d"]);
+    expect(phoneOrder(v, "list", new Set(), prefs, notes, null, null)).toEqual(["b", "n", "a", "d", "u"]);
+    expect(phoneOrder(v, "list", new Set(), DEFAULT_LIST_PREFS, notes, null, planMatcher(v, notes, "g"))).toEqual(["a", "b"]);
+    expect(phoneOrder(v, "timeline", new Set(["g"]), prefs, notes, null, null)).toEqual(["g", "n", "d"]);
   });
 });
 

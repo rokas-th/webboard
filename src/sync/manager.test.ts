@@ -388,6 +388,18 @@ describe("SyncManager: connecting", () => {
     expect(appendsTo(from, "P")).toHaveLength(1);
   });
 
+  it("attach keeps a renamed name", async () => {
+    const plain = await started();
+    expect(plain.r.device.name).toBe("Mac");
+    plain.m.stop();
+    const { r } = await started({
+      before: (w) => {
+        w.settings.value = { ...offeredSettings(), deviceName: "Studio Mac" };
+      },
+    });
+    expect([r.device.name, r.devices().get("dev-A"), r.renamedDevice()]).toEqual(["Studio Mac", "Studio Mac", "Studio Mac"]);
+  });
+
   it("no space, no connect", async () => {
     const f = fakeFactory();
     const { m } = await started({ f, before: (w) => (w.status = () => ({ space: null, revoked: false })) });

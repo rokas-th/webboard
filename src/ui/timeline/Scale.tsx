@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { toDay, toIso, weekday, yearOf, type Day } from "../../domain/dates";
+import { toDay, toIso, weekday, yearOf, type Day, type WeekStart } from "../../domain/dates";
 import { WEEKDAYS } from "./dayText";
 import { DAY_TICKS_PPD, WEEK_TICKS_PPD, type Geometry } from "./geometry";
 
@@ -15,6 +15,8 @@ export function isoWeek(d: Day): number {
   const thursday = d - (weekday(d) - 1) + 3;
   return Math.floor((thursday - toDay(`${yearOf(thursday)}-01-01`)) / 7) + 1;
 }
+
+export const mondayOf = (weekStart: Day, week: WeekStart): Day => (week === 1 ? weekStart : weekStart + 1);
 
 interface Month {
   day: Day;
@@ -74,12 +76,15 @@ export const Scale = memo(function Scale(p: { geo: Geometry; today: Day; missing
               );
             })
           : days
-              .filter((d) => weekday(d) === 1)
-              .map((d) => (
-                <div key={d} className="tl-tick" style={{ left: geo.x(d), width: 7 * geo.ppd }}>
-                  {geo.ppd >= WEEK_TICKS_PPD ? `W${isoWeek(d)} · ${dateOf(d)}` : isoWeek(d)}
-                </div>
-              ))}
+              .filter((d) => weekday(d) === geo.week)
+              .map((d) => {
+                const week = isoWeek(mondayOf(d, geo.week));
+                return (
+                  <div key={d} className="tl-tick" data-day={toIso(d)} style={{ left: geo.x(d), width: 7 * geo.ppd }}>
+                    {geo.ppd >= WEEK_TICKS_PPD ? `W${week} · ${dateOf(d)}` : week}
+                  </div>
+                );
+              })}
         <div className="tl-today-label" style={{ left: tx }}>
           TODAY
         </div>

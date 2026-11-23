@@ -24,21 +24,29 @@ import "./styles/phone.css";
 import "./styles/print.css";
 import App from "./App";
 import { RootBoundary } from "./ui/shell/RootBoundary";
-import { applyTokens } from "./theme/apply";
+import { applyLook, applyTokens } from "./theme/apply";
 import { tokensOf } from "./theme/presets";
 import { loadStore, shownTheme } from "./theme/store";
 import { ThemeProvider } from "./theme/ThemeContext";
+import { bootDevice } from "./ui/device";
+import { DeviceProvider } from "./ui/DeviceProvider";
 import { readPlatform, stampPlatform } from "./platform";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("index.html has no #root element");
 
-try {
-  stampPlatform(document.documentElement, readPlatform(window));
-} catch (e) {
-  root.textContent = `WebBoard could not start: it could not tell which platform it runs on (${e instanceof Error ? e.message : String(e)}).`;
-  throw e;
-}
+const readStamped = (): ReturnType<typeof readPlatform> => {
+  try {
+    const platform = readPlatform(window);
+    stampPlatform(document.documentElement, platform);
+    return platform;
+  } catch (e) {
+    root.textContent = `WebBoard could not start: it could not tell which platform it runs on (${e instanceof Error ? e.message : String(e)}).`;
+    throw e;
+  }
+};
+
+const platform = readStamped();
 
 const loadTheme = (): ReturnType<typeof loadStore> => {
   try {
@@ -61,11 +69,14 @@ if (import.meta.env.VITE_WEBBOARD_PROBE === "1") {
       throw e;
     });
 } else {
+  const device = bootDevice(window.localStorage, platform, (look) => applyLook(document.documentElement, look), root);
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
       <RootBoundary reload={() => window.location.reload()}>
         <ThemeProvider storage={window.localStorage} initial={boot}>
-          <App />
+          <DeviceProvider storage={window.localStorage} locale={new Intl.DateTimeFormat().resolvedOptions().locale} initial={device}>
+            <App />
+          </DeviceProvider>
         </ThemeProvider>
       </RootBoundary>
     </React.StrictMode>,

@@ -1,18 +1,27 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { CANCEL_LABEL, usesNativeAlert, type NativeAsk } from "../../services/alert";
 import { syncDevices, syncRemoveDevice, type DeviceEntry } from "../../services/ipc";
+import { useSyncRegistry } from "../../sync/SyncProvider";
 import { NativeConfirm } from "../common/NativeConfirm";
 import { toast } from "../common/Toast";
+import { useDateStyle } from "../DeviceProvider";
 import { PaneFailures, usePaneCommand } from "./command";
 import { dayTime } from "./time";
 
 export const REMOVE_CONFIRM = "Remove device";
 export const REMOVE_TEXT = "It stops syncing at once and keeps its plans read-only.";
-export const removeLabel = (d: DeviceEntry): string => `Remove ${d.name}?`;
+export const removeLabel = (name: string): string => `Remove ${name}?`;
 
-export const removeAsk = (d: DeviceEntry): NativeAsk => ({ title: removeLabel(d), message: REMOVE_TEXT, confirm: { label: REMOVE_CONFIRM, destructive: true }, cancel: CANCEL_LABEL });
+export const removeAsk = (name: string): NativeAsk => ({ title: removeLabel(name), message: REMOVE_TEXT, confirm: { label: REMOVE_CONFIRM, destructive: true }, cancel: CANCEL_LABEL });
+
+export const joinedAs = (name: string): string => `Joined as “${name}”`;
 
 export function DevicesPane() {
+  const style = useDateStyle();
+  const registry = useSyncRegistry();
+  const subscribe = useCallback((cb: () => void) => registry.subscribe(cb), [registry]);
+  const names = useSyncExternalStore(subscribe, () => registry.devices());
+  const shownName = (d: DeviceEntry): string => names.get(d.id) ?? d.name;
   const [devices, setDevices] = useState<readonly DeviceEntry[] | null>(null);
   const [asking, setAsking] = useState<DeviceEntry | null>(null);
   const cmd = usePaneCommand();
@@ -25,7 +34,7 @@ export function DevicesPane() {
     cmd.run(async () => {
       const removal = await syncRemoveDevice(d.id).then(
         () => {
-          toast(`${d.name} removed`);
+          toast(`${shownName(d)} removed`);
           return [];
         },
         (e: unknown) => [e],
@@ -48,8 +57,11 @@ export function DevicesPane() {
         <ul className="sync-devices">
           {devices.map((d) => (
             <li key={d.id} className="sync-device">
-              <span className="sync-device-name">{d.name}</span>
-              <span className="dim">{d.current ? "This device" : `Last seen ${dayTime(d.lastSeenAt)}`}</span>
+              <span className="sync-device-who">
+                <span className="sync-device-name">{shownName(d)}</span>
+                {shownName(d) !== d.name && <span className="sync-joined dim">{joinedAs(d.name)}</span>}
+              </span>
+              <span className="dim">{d.current ? "This device" : `Last seen ${dayTime(d.lastSeenAt, style)}`}</span>
               {!d.current && (
                 <button type="button" className="sync-remove danger" disabled={native && (asking !== null || cmd.busy)} onClick={() => setAsking(d)}>
                   Remove
@@ -59,10 +71,10 @@ export function DevicesPane() {
           ))}
         </ul>
       )}
-      {native && asking !== null && <NativeConfirm ask={removeAsk(asking)} run={() => remove(asking)} onClose={() => setAsking(null)} />}
+      {native && asking !== null && <NativeConfirm ask={removeAsk(shownName(asking))} run={() => remove(asking)} onClose={() => setAsking(null)} />}
       {!native && asking !== null && (
         <div className="sync-confirm">
-          <p>{`${removeLabel(asking)} ${REMOVE_TEXT}`}</p>
+          <p>{`${removeLabel(shownName(asking))} ${REMOVE_TEXT}`}</p>
           <div className="sync-buttons">
             <button type="button" onClick={() => setAsking(null)}>
               {CANCEL_LABEL}

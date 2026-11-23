@@ -57,3 +57,16 @@ export const removeEmptyText = (name: string): string => `Remove “${name}” f
 export const removeHeldText = (name: string, n: number): string => `“${name}” is assigned to ${n === 1 ? "1 item" : `${n} items`}. Give them to…`;
 
 export const trashedOfThem = (n: number): string => `${n} of them ${n === 1 ? "is" : "are"} in the Trash.`;
+
+export const THIS_IS_ME = "This is me";
+
+export const MINE_UNTIL = "Mine shows nothing until you choose again.";
+
+export const meGoneText = (name: string | null): string =>
+  name === null ? `The person chosen as you is not in this plan’s people. ${MINE_UNTIL}` : `“${name}” was removed from this plan’s people. ${MINE_UNTIL}`;
+
+export const MINE_NEEDS_ME = "Mine needs “This is me”. Choose who you are in Settings › General.";
+
+export const CHOOSE_ME = "Choose…";
+
+export const mineTitle = (name: string): string => `Open items assigned to ${name} (This is me)`;

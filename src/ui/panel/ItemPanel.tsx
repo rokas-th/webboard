@@ -1,5 +1,5 @@
 import { useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { fmtNear, isCalendarDate, toIso, type Day, type IsoDate } from "../../domain/dates";
+import { fmtNear, isCalendarDate, toIso, type DateStyle, type Day, type IsoDate } from "../../domain/dates";
 import { MAX_TASK_DUR, type Horizon, type Item, type ItemId, type PlanState, type Schedule, type Status } from "../../domain/model";
 import { statusPreds } from "../../domain/derive";
 import { stepModeOf } from "../../domain/steps";
@@ -12,6 +12,7 @@ import { FixActions } from "../choices/FixActions";
 import { toast } from "../common/Toast";
 import { planGroupPath } from "../list/groups";
 import { OpenChoice, useRun, type Run } from "../run";
+import { useDateStyle } from "../DeviceProvider";
 import { duplicateRow } from "../duplicate";
 import { useUiValue } from "../state";
 import { derivedStatus } from "../status";
@@ -70,10 +71,10 @@ export function groupOptions(plan: PlanState, item: ItemId): { id: ItemId | null
   return [{ id: null, label: TOP_LEVEL }, ...walk(null)];
 }
 
-const dayText = (m: ReadonlyMap<ItemId, Day>, it: Item, what: string, today: IsoDate): string => {
+const dayText = (m: ReadonlyMap<ItemId, Day>, it: Item, what: string, today: IsoDate, style: DateStyle): string => {
   const d = m.get(it.id);
   if (d === undefined) throw new Error(`ItemPanel: scheduled item ${it.id} has no derived ${what}`);
-  return fmtNear(toIso(d), today);
+  return fmtNear(toIso(d), today, style);
 };
 
 export const durText = (dur: number): string => `${dur} ${dur === 1 ? "working day" : "working days"}`;
@@ -114,6 +115,7 @@ function ProgressField(p: { value: number; readOnly: boolean; onCommit(v: number
 }
 
 function GroupFields(p: { view: PlanView; item: Item }) {
+  const style = useDateStyle();
   const plan = p.view.plan;
   const start = p.view.derived.start.get(p.item.id);
   const end = p.view.derived.end.get(p.item.id);
@@ -123,7 +125,7 @@ function GroupFields(p: { view: PlanView; item: Item }) {
     <>
       <div className="fields">
         <label>Span</label>
-        <span className="val">{start === undefined || end === undefined ? "—" : `${fmtNear(toIso(start), p.view.today)} – ${fmtNear(toIso(end), p.view.today)}`}</span>
+        <span className="val">{start === undefined || end === undefined ? "—" : `${fmtNear(toIso(start), p.view.today, style)} – ${fmtNear(toIso(end), p.view.today, style)}`}</span>
         <label>Items</label>
         <span className="val">{kids}</span>
       </div>
@@ -166,6 +168,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
   const sc = scheduleOf(it);
   const statusId = useId();
   const assigneesId = useId();
+  const style = useDateStyle();
   const dated = sc.start !== null && !it.trashed;
   const milestone = it.kind === "milestone";
   const derivedFromPreds = milestone && statusPreds(p.view.plan, it.id).length > 0;
@@ -236,7 +239,7 @@ function ScheduleFields(p: { view: PlanView; item: Item; readOnly: boolean; run:
           {dated && !p.readOnly ? (
             <EndField view={p.view} item={it} label="End" run={p.run} field="end" />
           ) : (
-            <span className="val">{dated ? dayText(p.view.derived.end, it, "end", p.view.today) : "—"}</span>
+            <span className="val">{dated ? dayText(p.view.derived.end, it, "end", p.view.today, style) : "—"}</span>
           )}
         </>
       )}

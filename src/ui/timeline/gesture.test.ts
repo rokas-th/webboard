@@ -17,8 +17,8 @@ beforeEach(async () => {
     { id: "f", name: "F", start: "2026-11-11", dur: 3 },
   ]);
   sessions.push(t.session);
-  W = geometry(t.session.view(), "W");
-  M = geometry(t.session.view(), "M");
+  W = geometry(t.session.view(), "W", 1);
+  M = geometry(t.session.view(), "M", 1);
 });
 
 afterEach(async () => {

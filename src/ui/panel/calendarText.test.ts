@@ -25,12 +25,19 @@ describe("regionText", () => {
 
 describe("weekdaysText", () => {
   it("joins a run of three or more with a dash, anything else with commas", () => {
-    expect(weekdaysText([1, 2, 3, 4, 5])).toBe("Mon–Fri");
-    expect(weekdaysText([1, 2, 3, 4])).toBe("Mon–Thu");
-    expect(weekdaysText([1, 3, 5])).toBe("Mon, Wed, Fri");
-    expect(weekdaysText([1, 2])).toBe("Mon, Tue");
-    expect(weekdaysText([7])).toBe("Sun");
-    expect(weekdaysText([5, 1, 2, 3, 4])).toBe("Mon–Fri");
+    expect(weekdaysText([1, 2, 3, 4, 5], 1)).toBe("Mon–Fri");
+    expect(weekdaysText([1, 2, 3, 4], 1)).toBe("Mon–Thu");
+    expect(weekdaysText([1, 3, 5], 1)).toBe("Mon, Wed, Fri");
+    expect(weekdaysText([1, 2], 1)).toBe("Mon, Tue");
+    expect(weekdaysText([7], 1)).toBe("Sun");
+    expect(weekdaysText([5, 1, 2, 3, 4], 1)).toBe("Mon–Fri");
+  });
+
+  it("a Sunday week starts on Sunday", () => {
+    expect([weekdaysText([7, 1, 2, 3, 4], 7), weekdaysText([7, 1, 2, 3, 4], 1)]).toEqual(["Sun–Thu", "Mon, Tue, Wed, Thu, Sun"]);
+    expect([weekdaysText([6, 7], 7), weekdaysText([6, 7], 1)]).toEqual(["Sun, Sat", "Sat, Sun"]);
+    expect(weekdaysText([1, 2, 3, 4, 5], 7)).toBe("Mon–Fri");
+    expect(calendarSummary(cal({ workdays: [7, 1, 2, 3, 4] }), 7)).toBe("No holiday region · Sun–Thu · no closures");
   });
 });
 
@@ -40,14 +47,14 @@ describe("calendarSummary", () => {
       region: { src: "openholidays", country: "CH", subdivision: "CH-ZH" },
       closures: new Map([["c1", { id: "c1", from: "2026-12-28", to: "2026-12-31", name: "Year-end" }]]),
     });
-    expect(calendarSummary(one)).toBe("CH-ZH · Mon–Fri · 1 closure");
-    expect(calendarSummary(cal({ workdays: [1, 2, 3, 4] }))).toBe("No holiday region · Mon–Thu · no closures");
+    expect(calendarSummary(one, 1)).toBe("CH-ZH · Mon–Fri · 1 closure");
+    expect(calendarSummary(cal({ workdays: [1, 2, 3, 4] }), 1)).toBe("No holiday region · Mon–Thu · no closures");
     const two = cal({
       closures: new Map([
         ["c1", { id: "c1", from: "2026-12-28", to: "2026-12-31", name: "Year-end" }],
         ["c2", { id: "c2", from: "2027-08-02", to: "2027-08-06", name: "Summer" }],
       ]),
     });
-    expect(calendarSummary(two)).toBe("No holiday region · Mon–Fri · 2 closures");
+    expect(calendarSummary(two, 1)).toBe("No holiday region · Mon–Fri · 2 closures");
   });
 });

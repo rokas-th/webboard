@@ -346,7 +346,7 @@
 
 .dot-doing {
   background: var(--cyan);
-  box-shadow: 0 0 6px rgba(var(--cyan-rgb), 0.55);
+  box-shadow: 0 0 calc(6px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--cyan-rgb), 0.55);
 }
 
 .dot-done {
@@ -355,12 +355,12 @@
 
 .dot-late {
   background: var(--amber);
-  box-shadow: 0 0 8px rgba(var(--amber-rgb), 0.6);
+  box-shadow: 0 0 calc(8px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--amber-rgb), 0.6);
 }
 
 .dot-conflict {
   background: var(--magenta);
-  box-shadow: 0 0 8px rgba(var(--magenta-rgb), 0.6);
+  box-shadow: 0 0 calc(8px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--magenta-rgb), 0.6);
 }
 
 .tl-chart {
@@ -403,7 +403,7 @@
   bottom: 0;
   width: 1px;
   background: var(--amber);
-  box-shadow: 0 0 8px rgba(var(--amber-rgb), 0.6);
+  box-shadow: 0 0 calc(8px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--amber-rgb), 0.6);
   pointer-events: none;
   z-index: 2;
 }
@@ -485,7 +485,7 @@
 @media (hover: hover) {
   .bar:hover {
     border-color: var(--cyan);
-    box-shadow: 0 0 10px rgba(var(--cyan-rgb), 0.3);
+    box-shadow: 0 0 calc(10px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--cyan-rgb), 0.3);
   }
 }
 
@@ -541,7 +541,7 @@
 }
 
 .bar.selected {
-  box-shadow: 0 0 0 1px var(--amber), 0 0 12px rgba(var(--amber-rgb), 0.35);
+  box-shadow: 0 0 0 1px var(--amber), 0 0 calc(12px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--amber-rgb), 0.35);
 }
 
 .bar .h {
@@ -689,13 +689,13 @@
   transform: rotate(45deg);
   border: 1px solid var(--amber);
   background: rgba(var(--amber-rgb), 0.22);
-  box-shadow: 0 0 8px rgba(var(--amber-rgb), 0.45);
+  box-shadow: 0 0 calc(8px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--amber-rgb), 0.45);
   transition: box-shadow 0.12s ease-out;
 }
 
 @media (hover: hover) {
   .ms:hover::before {
-    box-shadow: 0 0 14px rgba(var(--amber-rgb), 0.75);
+    box-shadow: 0 0 calc(14px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--amber-rgb), 0.75);
   }
 }
 
@@ -714,11 +714,11 @@
 .ms.conflict::before {
   border-color: var(--magenta);
   background: rgba(var(--magenta-rgb), 0.25);
-  box-shadow: 0 0 8px rgba(var(--magenta-rgb), 0.5);
+  box-shadow: 0 0 calc(8px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--magenta-rgb), 0.5);
 }
 
 .ms.selected::before {
-  box-shadow: 0 0 0 1px var(--heading), 0 0 14px rgba(var(--amber-rgb), 0.8);
+  box-shadow: 0 0 0 1px var(--heading), 0 0 calc(14px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--amber-rgb), 0.8);
 }
 
 .ms .nub {
@@ -827,5 +827,5 @@
   background: var(--panel);
   color: var(--cyan);
   font-size: 11.5px;
-  box-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.35);
+  box-shadow: 0 0 calc(12px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--cyan-rgb), 0.35);
 }

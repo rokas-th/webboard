@@ -1,21 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { Preview } from "../../actions/intents";
 import { historyTime, revertImpact, revertText } from "./historyText";
+import { LOG_STYLE } from "../../domain/dates";
 
 const NONE: Preview = { itemsChanged: 0, endsChanged: 0, movedLater: 0, stopped: [], conflictsAfter: 0, kept: [] };
 
 describe("historyTime", () => {
   it("reads HH:MM for today", () => {
-    expect(historyTime(new Date(2026, 10, 8, 9, 5).getTime(), "2026-11-08")).toBe("09:05");
+    expect(historyTime(new Date(2026, 10, 8, 9, 5).getTime(), "2026-11-08", LOG_STYLE)).toBe("09:05");
   });
 
   it("puts the day before the time on other days", () => {
-    expect(historyTime(new Date(2026, 10, 7, 14, 2).getTime(), "2026-11-08")).toBe("7 Nov 14:02");
+    expect(historyTime(new Date(2026, 10, 7, 14, 2).getTime(), "2026-11-08", LOG_STYLE)).toBe("7 Nov 14:02");
   });
 
   it("uses the 24 h clock", () => {
-    expect(historyTime(new Date(2026, 10, 8, 23, 59).getTime(), "2026-11-08")).toBe("23:59");
-    expect(historyTime(new Date(2026, 10, 8, 0, 0).getTime(), "2026-11-08")).toBe("00:00");
+    expect(historyTime(new Date(2026, 10, 8, 23, 59).getTime(), "2026-11-08", LOG_STYLE)).toBe("23:59");
+    expect(historyTime(new Date(2026, 10, 8, 0, 0).getTime(), "2026-11-08", LOG_STYLE)).toBe("00:00");
   });
 });
 

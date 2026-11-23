@@ -7,6 +7,7 @@ import type { PlanSession } from "../../store/session";
 import { testSession, fs, type SeedItem, type TestSession } from "../../test/session";
 import { UiContext, useUi } from "../state";
 import { PhoneList } from "./PhoneList";
+import { deviced } from "../../test/theme";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
@@ -29,9 +30,9 @@ const made = async (...a: Parameters<typeof testSession>): Promise<TestSession> 
 };
 
 function Phone(p: { session: PlanSession; onOpen: (item: string) => void }) {
-  const [ui, setUi] = useUi();
+  const [ui, setUi] = useUi("timeline");
   const value = useMemo(() => ({ ui, setUi }), [ui, setUi]);
-  return (
+  return deviced(
     <UiContext.Provider value={value}>
       <PhoneList session={p.session} onOpen={p.onOpen} />
     </UiContext.Provider>
@@ -284,7 +285,7 @@ describe("PhoneList", () => {
   it("marks the row of the selected item", async () => {
     const t = await made(SPRINT);
     function Selected(p: { session: PlanSession }) {
-      const [ui, setUi] = useUi();
+      const [ui, setUi] = useUi("timeline");
       const value = useMemo(() => ({ ui: { ...ui, selected: "Ship" }, setUi }), [ui, setUi]);
       return (
         <UiContext.Provider value={value}>
@@ -292,7 +293,7 @@ describe("PhoneList", () => {
         </UiContext.Provider>
       );
     }
-    render(<Selected session={t.session} />);
+    render(deviced(<Selected session={t.session} />));
     expect(all(".prow.selected").map((r) => one(".prow-name", r).textContent)).toEqual(["Ship"]);
   });
 

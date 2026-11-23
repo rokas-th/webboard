@@ -1,15 +1,16 @@
 import { useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { formerText } from "../../actions/copy";
 import { goneSet } from "../../domain/derive";
+import type { MeState } from "../../domain/me";
 import type { Item, ItemId } from "../../domain/model";
 import { CloseGlyph } from "../common/dismiss";
 import type { PickSection } from "../common/ContextMenu";
 import { pointBelow, usePickMenu } from "../common/pickMenu";
-import { UNASSIGNED } from "../people/text";
+import { mineTitle, UNASSIGNED } from "../people/text";
 import { columnById, type RowContext } from "./columns";
 import { planGroupPath } from "./groups";
-import { toggleChip, type ListModel } from "./model";
-import { SCOPE_IDS, type Chip, type ChipField, type GroupBy, type ListPrefs, type ScopeId } from "./prefs";
+import { shownScopes, toggleChip, type ListModel } from "./model";
+import type { Chip, ChipField, GroupBy, ListPrefs, ScopeId } from "./prefs";
 import {
   chipText,
   CLEAR_ALL,
@@ -147,7 +148,10 @@ const refade = (el: HTMLElement, set: Dispatch<SetStateAction<Fade>>): void => {
   set((was) => (was.start === next.start && was.end === next.end ? was : next));
 };
 
-function ScopeBar(p: { prefs: ListPrefs; counts: Readonly<Record<ScopeId, number>>; onScope(s: ScopeId): void }) {
+const scopeTitle = (s: ScopeId, me: MeState): string | null => (s === "mine" && me.kind === "live" ? mineTitle(me.person.name) : SCOPE_TITLES[s]);
+
+function ScopeBar(p: { prefs: ListPrefs; counts: Readonly<Record<ScopeId, number>>; me: MeState; onScope(s: ScopeId): void }) {
+  const scopes = shownScopes(p.me, p.prefs.scope);
   const bar = useRef<HTMLDivElement>(null);
   const [fade, setFade] = useState<Fade>({ start: false, end: false });
   useLayoutEffect(() => {
@@ -171,8 +175,8 @@ function ScopeBar(p: { prefs: ListPrefs; counts: Readonly<Record<ScopeId, number
   const onKey = (e: ReactKeyboardEvent<HTMLButtonElement>, from: ScopeId): void => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
-    const at = SCOPE_IDS.indexOf(from);
-    const next = SCOPE_IDS[(at + (e.key === "ArrowRight" ? 1 : SCOPE_IDS.length - 1)) % SCOPE_IDS.length];
+    const at = scopes.indexOf(from);
+    const next = scopes[(at + (e.key === "ArrowRight" ? 1 : scopes.length - 1)) % scopes.length];
     const bar = e.currentTarget.parentElement;
     if (bar === null) throw new Error("List: a scope has no bar");
     p.onScope(next);
@@ -190,9 +194,9 @@ function ScopeBar(p: { prefs: ListPrefs; counts: Readonly<Record<ScopeId, number
       data-fade-end={String(fade.end)}
       onScroll={(e) => refade(e.currentTarget, setFade)}
     >
-      {SCOPE_IDS.map((s) => {
+      {scopes.map((s) => {
         const on = p.prefs.scope === s;
-        const title = SCOPE_TITLES[s];
+        const title = scopeTitle(s, p.me);
         return (
           <button
             key={s}
@@ -248,7 +252,7 @@ export function ListBar(p: { ctx: RowContext; prefs: ListPrefs; model: ListModel
   return (
     <>
       <div className="list-bar">
-        <ScopeBar prefs={prefs} counts={model.scopeCounts} onScope={(scope) => p.onPrefs({ ...prefs, scope })} />
+        <ScopeBar prefs={prefs} counts={model.scopeCounts} me={ctx.me} onScope={(scope) => p.onPrefs({ ...prefs, scope })} />
       </div>
       {prefs.chips.length > 0 && (
         <div className="chip-row">

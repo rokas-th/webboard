@@ -1,10 +1,11 @@
 import { formerText } from "../../actions/copy";
+import { meId, type MeState } from "../../domain/me";
 import type { Item, ItemId, PersonId, StepColour } from "../../domain/model";
 import { derivedStatus } from "../status";
 import { heldOf } from "../people/assign";
 import { stepOf, columnById, type RowContext, type SortValue } from "./columns";
 import { listGroups } from "./groups";
-import type { Chip, ChipField, ColumnId, ListPrefs, ScopeId, SortKey } from "./prefs";
+import { SCOPE_IDS, type Chip, type ChipField, type ColumnId, type ListPrefs, type ScopeId, type SortKey } from "./prefs";
 import { UNASSIGNED } from "../people/text";
 import { NO_STEP } from "./text";
 import type { Matcher } from "../search/match";
@@ -66,9 +67,14 @@ const SCOPES: Readonly<Record<ScopeId, (ctx: RowContext, id: ItemId) => boolean>
   milestones: (ctx, id) => itemOf(ctx, id).kind === "milestone",
   done,
   all: () => true,
+  mine: (ctx, id) => !done(ctx, id) && heldOf(ctx.view, id).some((p) => p === meId(ctx.me)),
 };
 
-export const inScope = (ctx: RowContext, scope: ScopeId, id: ItemId): boolean => ctx.ghosts.has(id) || SCOPES[scope](ctx, id);
+export const shownScopes = (me: MeState, stored: ScopeId): readonly ScopeId[] => SCOPE_IDS.filter((s) => s !== "mine" || me.kind !== "none" || stored === "mine");
+
+const scopeLive = (ctx: RowContext, scope: ScopeId): boolean => scope !== "mine" || meId(ctx.me) !== null;
+
+export const inScope = (ctx: RowContext, scope: ScopeId, id: ItemId): boolean => scopeLive(ctx, scope) && (ctx.ghosts.has(id) || SCOPES[scope](ctx, id));
 
 const CHIP_TEST: Readonly<Record<ChipField, (ctx: RowContext, id: ItemId, v: string | null) => boolean>> = {
   step: (ctx, id, v) => (stepOf(ctx, id)?.id ?? null) === v,
@@ -216,6 +222,7 @@ export function listModel(ctx: RowContext, prefs: ListPrefs, match: Matcher | nu
       milestones: count("milestones"),
       done: count("done"),
       all: count("all"),
+      mine: count("mine"),
     },
   };
 }

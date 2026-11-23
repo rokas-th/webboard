@@ -26,14 +26,22 @@ describe("geometry", () => {
 
   it("starts on the Monday a week before the earliest start, today in range", async () => {
     const view = await viewOf([{ name: "A", start: "2026-11-11", dur: 2 }]);
-    const g = geometry(view, "W");
+    const g = geometry(view, "W", 1);
     expect(toIso(g.origin)).toBe("2026-11-02");
-    expect([g.x(g.origin + 3), geometry(view, "M").x(g.origin + 3), geometry(view, "Q").x(g.origin + 3)]).toEqual([120, 48, 18]);
+    expect([g.x(g.origin + 3), geometry(view, "M", 1).x(g.origin + 3), geometry(view, "Q", 1).x(g.origin + 3)]).toEqual([120, 48, 18]);
+  });
+
+  it("a Sunday week starts on Sunday", async () => {
+    const view = await viewOf([{ name: "A", start: "2026-11-11", dur: 2 }]);
+    const g = geometry(view, "W", 7);
+    expect([toIso(g.origin), g.week]).toEqual(["2026-11-01", 7]);
+    expect(toIso(g.origin + g.days - 1)).toBe(toIso(geometry(view, "W", 1).origin + geometry(view, "W", 1).days - 1));
+    expect(toIso(g.dayAt(0))).toBe("2026-11-01");
   });
 
   it("runs five weeks past the latest end and keeps an earlier today in range", async () => {
     const view = await viewOf([{ name: "A", start: "2026-12-01", dur: 2 }], { today: "2026-11-18" });
-    const g = geometry(view, "M");
+    const g = geometry(view, "M", 1);
     expect(toIso(g.origin)).toBe("2026-11-09");
     expect(toIso(g.origin + g.days - 1)).toBe(toIso(toDay("2026-12-02") + 35));
     expect(g.ppd).toBe(16);
@@ -46,7 +54,7 @@ describe("geometry", () => {
       { id: "a", name: "A", parent: "g", start: "2026-11-11", dur: 2 },
       { id: "u", name: "U" },
     ]);
-    const g = geometry(view, "W");
+    const g = geometry(view, "W", 1);
     expect(toIso(g.dayAt(0))).toBe("2026-11-02");
     expect(toIso(g.dayAt(39))).toBe("2026-11-02");
     expect(toIso(g.dayAt(200))).toBe("2026-11-07");
@@ -69,9 +77,9 @@ describe("fit zoom", () => {
     const days = toDay("2026-12-18") + 7 - (toDay("2026-12-01") - 7) + 1;
     expect(days).toBe(32);
     expect(fitPpd(view, 640)).toBe(20);
-    const g = geometry(view, "F", 640);
+    const g = geometry(view, "F", 1, 640);
     expect(g.ppd).toBe(20);
-    expect(toIso(g.origin)).toBe(toIso(geometry(view, "W").origin));
+    expect(toIso(g.origin)).toBe(toIso(geometry(view, "W", 1).origin));
     expect(g.x(toDay("2026-12-01") - 7)).toBe(Math.round((toDay("2026-12-01") - 7 - g.origin) * 20));
     expect(fitPpd(view, 333)).toBeCloseTo(333 / 32, 10);
   });
@@ -90,8 +98,8 @@ describe("fit zoom", () => {
 
   it("needs the visible width, and the fixed zooms ignore it", async () => {
     const view = await viewOf([{ name: "A", start: "2026-11-10", dur: 1 }]);
-    expect(() => geometry(view, "F")).toThrow("Fit zoom needs the visible chart width");
-    expect(geometry(view, "W", 900).ppd).toBe(40);
+    expect(() => geometry(view, "F", 1)).toThrow("Fit zoom needs the visible chart width");
+    expect(geometry(view, "W", 1, 900).ppd).toBe(40);
   });
 });
 

@@ -15,6 +15,7 @@ import { historyTime, revertText } from "./historyText";
 import { groupOptions, ItemPanel } from "./ItemPanel";
 import { withSync } from "../../test/withSync";
 import { IPAD, LINUX, MAC, setPlatform } from "../../test/platform";
+import { LOG_STYLE } from "../../domain/dates";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -217,7 +218,7 @@ describe("ItemPanel fields", () => {
         <OpenChoice.Provider value={vi.fn()}>
           <UiContext.Provider
             value={{
-              ui: { plan: null, view: "timeline", zoom: "W", selected: "Late", collapsed: new Set(), baseline: null, dialog: null, reveal: null, follow: null, naming: null, settings: null, syncPane: null, sidebarOpen: true, sidebarWidth: null, query: "", searchAsk: 0, columnsAsk: 0 },
+              ui: { plan: null, view: "timeline", zoom: "W", selected: "Late", collapsed: new Set(), baseline: null, dialog: null, reveal: null, follow: null, naming: null, settings: null, settingsRow: null, syncPane: null, sidebarOpen: true, sidebarWidth: null, query: "", searchAsk: 0, columnsAsk: 0 },
               setUi: vi.fn(),
             }}
           >
@@ -1081,7 +1082,7 @@ describe("History", () => {
     await shownHistory(t);
     const h = t.session.history();
     expect(rows().map((li) => li.dataset.action)).toEqual(h.map((e) => e.id));
-    expect(rows().map(rowText)).toEqual(h.map((e) => `${historyTime(e.at, "2026-11-09")} · Mac · ${e.label}`));
+    expect(rows().map(rowText)).toEqual(h.map((e) => `${historyTime(e.at, "2026-11-09", LOG_STYLE)} · Mac · ${e.label}`));
     expect(rows().map((li) => li.classList.contains("inactive"))).toEqual(h.map((e) => !e.active));
     expect(rows().map((li) => all("button", li).map((b) => [b.textContent, b.getAttribute("aria-label")]))).toEqual([
       [["Revert", "Revert this action"]],
@@ -1181,7 +1182,7 @@ describe("History", () => {
     const entry: HistoryEntry = { id: "x0", label: "Created the plan", device: "Mac", at: 0, active: true, root: true };
     vi.spyOn(t.session, "history").mockReturnValue([entry]);
     await shownHistory(t);
-    expect(rows().map(rowText)).toEqual([`${historyTime(0, "2026-11-09")} · Mac · Created the plan`]);
+    expect(rows().map(rowText)).toEqual([`${historyTime(0, "2026-11-09", LOG_STYLE)} · Mac · Created the plan`]);
     expect(all("button", rows()[0])).toEqual([]);
   });
 

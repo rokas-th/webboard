@@ -29,6 +29,7 @@ export interface UiState {
   follow: ItemId | null;
   naming: ItemId | null;
   settings: SettingsSection | null;
+  settingsRow: string | null;
   syncPane: SyncPane | null;
   sidebarOpen: boolean;
   sidebarWidth: number | null;
@@ -61,6 +62,7 @@ const DEFAULTS: UiState = {
   follow: null,
   naming: null,
   settings: null,
+  settingsRow: null,
   syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,
@@ -71,7 +73,9 @@ const DEFAULTS: UiState = {
 
 type Place = Pick<UiState, "plan" | "view" | "zoom" | "collapsed" | "sidebarOpen" | "sidebarWidth">;
 
-export function parsePlace(raw: string): Place | null {
+type StoredPlace = Omit<Place, "view"> & { view: ViewKind | null };
+
+function readPlace(raw: string): StoredPlace | null {
   let v: unknown;
   try {
     v = JSON.parse(raw);
@@ -81,35 +85,46 @@ export function parsePlace(raw: string): Place | null {
   }
   if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
   const plan = "plan" in v ? v.plan : DEFAULTS.plan;
-  const view = "view" in v ? v.view : DEFAULTS.view;
+  const view = "view" in v ? v.view : undefined;
   const zoom = "zoom" in v ? v.zoom : DEFAULTS.zoom;
   const collapsed = "collapsed" in v ? v.collapsed : [];
   const sidebarOpen = "sidebarOpen" in v ? v.sidebarOpen : DEFAULTS.sidebarOpen;
   const sidebarWidth = "sidebarWidth" in v ? v.sidebarWidth : DEFAULTS.sidebarWidth;
-  if (!(plan === null || typeof plan === "string") || !isView(view) || !isZoom(zoom) || !isIds(collapsed)) return null;
+  if (!(plan === null || typeof plan === "string") || !(view === undefined || isView(view)) || !isZoom(zoom) || !isIds(collapsed)) return null;
   if (typeof sidebarOpen !== "boolean" || !isWidth(sidebarWidth)) return null;
-  return { plan, view, zoom, collapsed: new Set(collapsed), sidebarOpen, sidebarWidth };
+  return { plan, view: view ?? null, zoom, collapsed: new Set(collapsed), sidebarOpen, sidebarWidth };
 }
 
-function loadPlace(): { state: UiState; unreadable: boolean } {
+export function parsePlace(raw: string, tab: ViewKind): Place | null {
+  const place = readPlace(raw);
+  return place === null ? null : { ...place, view: place.view ?? tab };
+}
+
+function loadPlace(tab: ViewKind): { state: UiState; unreadable: boolean } {
+  const fresh: UiState = { ...DEFAULTS, view: tab };
   const raw = window.localStorage.getItem(PLACE_KEY);
-  if (raw === null) return { state: DEFAULTS, unreadable: false };
-  const place = parsePlace(raw);
-  if (place === null) return { state: DEFAULTS, unreadable: true };
+  if (raw === null) return { state: fresh, unreadable: false };
+  const place = parsePlace(raw, tab);
+  if (place === null) return { state: fresh, unreadable: true };
   return { state: { ...DEFAULTS, ...place }, unreadable: false };
 }
 
-const savePlace = (s: UiState): void => {
-  window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: s.plan, view: s.view, zoom: s.zoom, collapsed: [...s.collapsed], sidebarOpen: s.sidebarOpen, sidebarWidth: s.sidebarWidth }));
+const writePlace = (s: StoredPlace): void => {
+  window.localStorage.setItem(
+    PLACE_KEY,
+    JSON.stringify({ plan: s.plan, ...(s.view === null ? {} : { view: s.view }), zoom: s.zoom, collapsed: [...s.collapsed], sidebarOpen: s.sidebarOpen, sidebarWidth: s.sidebarWidth }),
+  );
 };
+
+const savePlace = (s: UiState): void => writePlace(s);
 
 export function forgetLastPlan(): void {
   window.localStorage.setItem(NO_PLAN_KEY, "1");
   const raw = window.localStorage.getItem(PLACE_KEY);
   if (raw === null) return;
-  const place = parsePlace(raw);
+  const place = readPlace(raw);
   if (place === null) return;
-  savePlace({ ...DEFAULTS, ...place, plan: null });
+  writePlace({ ...place, plan: null });
 }
 
 export const holdsNoPlan = (): boolean => window.localStorage.getItem(NO_PLAN_KEY) !== null;
@@ -139,8 +154,8 @@ export function useUiValue(): UiValue {
   return value;
 }
 
-export function useUi(): [UiState, SetUi] {
-  const [loaded] = useState(loadPlace);
+export function useUi(tab: ViewKind): [UiState, SetUi] {
+  const [loaded] = useState(() => loadPlace(tab));
   const [ui, setState] = useState<UiState>(loaded.state);
   const told = useRef(false);
   useEffect(() => {

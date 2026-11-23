@@ -2,8 +2,7 @@ import { useState } from "react";
 import { normalizeName } from "../../actions/build";
 import { syncSetup } from "../../services/ipc";
 import { useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
-import { toast } from "../common/Toast";
-import { enrolThenRestart, usePaneCommand } from "./command";
+import { enrolNamedThenRestart, usePaneCommand } from "./command";
 
 export const DEFAULT_SERVER = "https://webboard.rokass.org";
 
@@ -17,11 +16,15 @@ export function SetupPane() {
   const create = (): void =>
     cmd.run(async () => {
       const deviceName = normalizeName(name);
-      await enrolThenRestart(async () => {
-        await syncSetup(server, secret, deviceName);
-        setSecret("");
-      }, restart);
-      toast("Sync set up");
+      await enrolNamedThenRestart(
+        async () => {
+          await syncSetup(server, secret, deviceName);
+          setSecret("");
+        },
+        () => registry.renameDevice(deviceName),
+        restart,
+        "Sync set up",
+      );
     });
   return (
     <div className="sync-form">

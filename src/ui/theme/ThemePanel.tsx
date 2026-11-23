@@ -4,6 +4,7 @@ import { derive, schemeOf, type Scheme, type Seeds } from "../../theme/derive";
 import { DEFAULT_DARK, DEFAULT_LIGHT, tokensOf } from "../../theme/presets";
 import { allThemes, DEFAULT_STORE, themeById, ThemeSaveError } from "../../theme/store";
 import { DISCARDED, useTheme } from "../../theme/ThemeContext";
+import { Switch } from "../common/Switch";
 import { toast } from "../common/Toast";
 import { ThemeCards } from "./ThemeCards";
 import { Customize, ImportColours, Notes, Readability } from "./ThemeEditor";
@@ -43,15 +44,7 @@ function Follow() {
             Switch with the light and dark mode of macOS, Pop!_OS and iOS
           </small>
         </span>
-        <button
-          type="button"
-          role="switch"
-          className="theme-switch"
-          aria-checked={on}
-          aria-label="Follow the system"
-          aria-describedby={hint}
-          onClick={() => api.setMode(on ? "fixed" : "system")}
-        />
+        <Switch label="Follow the system" checked={on} describedBy={hint} onToggle={() => api.setMode(on ? "fixed" : "system")} />
       </div>
       {on && (
         <div className="theme-follow">

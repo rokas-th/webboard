@@ -6,6 +6,7 @@ import { testSession, type SeedItem, type TestSession } from "../../test/session
 import { rowContext, type RowContext } from "../list/columns";
 import { Highlight } from "./Highlight";
 import { searchMatcher, type Matcher } from "./match";
+import { LOG_STYLE } from "../../domain/dates";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
@@ -47,7 +48,7 @@ const made = async (): Promise<TestSession> => {
   return t;
 };
 
-const ctxOf = (t: TestSession): RowContext => rowContext(t.session.view(), (id) => t.session.note(id).toString());
+const ctxOf = (t: TestSession): RowContext => rowContext(t.session.view(), (id) => t.session.note(id).toString(), null, LOG_STYLE);
 
 const IDS = ["g", "h", "a", "m", "b", "u", "e"];
 

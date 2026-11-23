@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 function Ui(p: { children: ReactNode }) {
-  const [ui, setUi] = useUi();
+  const [ui, setUi] = useUi("timeline");
   const value = useMemo(() => ({ ui, setUi }), [ui, setUi]);
   return <UiContext.Provider value={value}>{p.children}</UiContext.Provider>;
 }

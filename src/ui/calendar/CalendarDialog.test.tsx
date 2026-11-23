@@ -15,6 +15,7 @@ import { tauri, type Answer } from "../../test/tauriMock";
 import { clearToasts } from "../common/Toast";
 import { DATE_UNREADABLE } from "../copy";
 import { Shell } from "../shell/Shell";
+import { DEFAULT_DEVICE, DEVICE_KEY } from "../device";
 import { useUi, type UiState } from "../state";
 import CONSUMER_HOSTS from "../../../crates/webboard-core/tests/fixtures/holidays/consumer-hosts.json";
 import { impactText } from "./impact";
@@ -670,6 +671,15 @@ describe("weekdays, days off and closures", () => {
     fireEvent.click(within(group).getByRole("button", { name: "Mon" }));
     await clickApply();
     expect(t.session.view().plan.calendar.workdays).toEqual([3]);
+  });
+
+  it("a Sunday week starts the working days on Sunday", async () => {
+    window.localStorage.setItem(DEVICE_KEY, JSON.stringify({ ...DEFAULT_DEVICE, week: 7 }));
+    const t = await made([]);
+    await shown(t);
+    await openDialog();
+    const group = inDialog().getByRole("group", { name: "Working days" });
+    expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
   });
 
   it("bounds the day-off dates to the plan window", async () => {

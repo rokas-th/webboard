@@ -7,6 +7,7 @@ import { chipText } from "../../sync/manager";
 import { docName, useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
 import { CalendarBody, type CalendarReview } from "../calendar/CalendarDialog";
 import { Sheet } from "../common/Sheet";
+import { useDevice } from "../DeviceProvider";
 import { toast } from "../common/Toast";
 import { Baselines } from "../panel/Baselines";
 import { calendarSummary } from "../panel/calendarText";
@@ -80,6 +81,7 @@ export function PlanSheet(p: { session: PlanSession; files: PlanFiles; onClose()
   const readOnly = useReadOnly(p.session);
   const run = useRun(p.session);
   const { setUi } = useUiValue();
+  const week = useDevice().prefs.week;
   const plan = view.plan;
   const rename = (next: string): boolean => commitPlanName(run, plan.name, next);
   return (
@@ -90,7 +92,7 @@ export function PlanSheet(p: { session: PlanSession; files: PlanFiles; onClose()
         <Trash view={view} readOnly={readOnly} run={run} />
         <Baselines view={view} readOnly={readOnly} run={run} titled />
         <h2>Calendar</h2>
-        <p className="val-line">{calendarSummary(plan.calendar)}</p>
+        <p className="val-line">{calendarSummary(plan.calendar, week)}</p>
         <div className="actions">
           <button
             type="button"

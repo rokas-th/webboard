@@ -1,13 +1,12 @@
 import { workCalendar, type Calendar, type ListedDay, type Tuning } from "../../domain/calendar";
-import { fmtShort, toDay, toIso, yearOf, type Day, type IsoDate } from "../../domain/dates";
+import { fmtFull, toDay, toIso, yearOf, type Day, type IsoDate } from "../../domain/dates";
+import { useDateStyle } from "../DeviceProvider";
 import { NOT_AVAILABLE, noticeText, type HolidayNotice } from "../../services/holidays";
 import { originLabel } from "./origin";
 
 export type DraftYear = { k: "loading" } | { k: "failed"; message: string; tried: string };
 
 const NOT_LOADED = "not loaded — dates use weekdays and closures";
-
-const fmtDay = (d: IsoDate): string => `${fmtShort(d)} ${yearOf(toDay(d))}`;
 
 function scopeOf(cal: Calendar, day: ListedDay): string | null {
   if (day.kind === "added" || day.kind === "closure") return null;
@@ -47,6 +46,8 @@ export function DayList(p: {
   onRetryDraft(year: number): void;
   onLoad(year: number): void;
 }) {
+  const style = useDateStyle();
+  const fmtDay = (d: IsoDate): string => fmtFull(d, style);
   const cal = workCalendar(p.draft);
   const days = cal.listed(p.from, p.to);
   const missing = cal.missingYears(p.from, p.to);

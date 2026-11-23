@@ -1,4 +1,4 @@
-import type { ItemId } from "../../domain/model";
+import type { ItemId, PersonId } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import { boardLayout, cardOrder, filterLayout } from "../board/layout";
 import type { BoardPrefs } from "../board/prefs";
@@ -15,9 +15,9 @@ export type PhoneTab = "list" | "timeline";
 
 const rowOrder = (view: PlanView, collapsed: ReadonlySet<ItemId>): ItemId[] => timelineRows(view, collapsed).map((r) => r.id);
 
-export function tabOrder(view: PlanView, ui: Pick<UiState, "view" | "collapsed">, boardPrefs: BoardPrefs, listPrefs: ListPrefs, notes: NoteText, match: Matcher | null): readonly ItemId[] {
+export function tabOrder(view: PlanView, ui: Pick<UiState, "view" | "collapsed">, boardPrefs: BoardPrefs, listPrefs: ListPrefs, notes: NoteText, me: PersonId | null, match: Matcher | null): readonly ItemId[] {
   if (ui.view === "timeline") return rowOrder(view, ui.collapsed);
-  if (ui.view === "list") return listModel(rowContext(view, notes), listPrefs, match).order;
+  if (ui.view === "list") return listModel(rowContext(view, notes, me, null), listPrefs, match).order;
   return cardOrder(filterLayout(boardLayout(view, projectBoard(view.plan, view.derived), boardPrefs), match));
 }
 
@@ -27,15 +27,15 @@ export interface TabSearch {
   count: SearchCount | null;
 }
 
-export function tabSearch(view: PlanView, ui: Pick<UiState, "view" | "collapsed" | "query">, boardPrefs: BoardPrefs, listPrefs: ListPrefs, notes: NoteText): TabSearch {
+export function tabSearch(view: PlanView, ui: Pick<UiState, "view" | "collapsed" | "query">, boardPrefs: BoardPrefs, listPrefs: ListPrefs, notes: NoteText, me: PersonId | null): TabSearch {
   if (ui.view === "list") {
-    const ctx = rowContext(view, notes);
+    const ctx = rowContext(view, notes, me, null);
     const match = searchMatcher(ctx, ui.query);
     const model = listModel(ctx, listPrefs, match);
     return { order: model.order, match, count: match === null ? null : { shown: model.shown, total: model.scoped } };
   }
   const match = planMatcher(view, notes, ui.query);
-  return { order: tabOrder(view, ui, boardPrefs, listPrefs, notes, match), match, count: searchCount(view, ui, listPrefs, notes, match) };
+  return { order: tabOrder(view, ui, boardPrefs, listPrefs, notes, me, match), match, count: searchCount(view, ui, listPrefs, notes, me, match) };
 }
 
 export function firstMatch(found: TabSearch): ItemId | null {
@@ -43,8 +43,8 @@ export function firstMatch(found: TabSearch): ItemId | null {
   return (match === null ? found.order[0] : found.order.find(match)) ?? null;
 }
 
-export function phoneOrder(view: PlanView, tab: PhoneTab, collapsed: ReadonlySet<ItemId>, listPrefs: ListPrefs, notes: NoteText, match: Matcher | null): readonly ItemId[] {
-  return tab === "list" ? listModel(rowContext(view, notes), listPrefs, match).order : rowOrder(view, collapsed);
+export function phoneOrder(view: PlanView, tab: PhoneTab, collapsed: ReadonlySet<ItemId>, listPrefs: ListPrefs, notes: NoteText, me: PersonId | null, match: Matcher | null): readonly ItemId[] {
+  return tab === "list" ? listModel(rowContext(view, notes, me, null), listPrefs, match).order : rowOrder(view, collapsed);
 }
 
 export function stepFrom(order: readonly ItemId[], selected: ItemId | null, by: 1 | -1): ItemId | null {

@@ -7,8 +7,10 @@ import { fs, TEST_PLAN, testSession, type SeedItem, type TestSession, type TestS
 import { shellFor } from "../../test/shell";
 import { emitFromRust, resetTauri, tauri } from "../../test/tauriMock";
 import { clearToasts } from "../common/Toast";
+import { DEFAULT_DEVICE, DEVICE_KEY } from "../device";
 import { useUi, type UiState } from "../state";
 import { LONG_PRESS_MS } from "../timeline/touch";
+import { DATE_HEAD_MIN } from "./columnOps";
 import { statusLabel } from "./groups";
 import { listModel } from "./model";
 import { DEFAULT_LIST_PREFS, listKey, type ListPrefs } from "./prefs";
@@ -265,6 +267,31 @@ describe("List", () => {
     }
   });
 
+  it("windows compact rows at 28 px on the Mac", async () => {
+    window.localStorage.setItem(DEVICE_KEY, JSON.stringify({ ...DEFAULT_DEVICE, density: "compact" }));
+    const restore = stubHeight(680);
+    try {
+      const t = await made(THOUSAND);
+      await list(t);
+      expect(all("tbody tr.list-pad").map((r) => r.style.height)).toEqual([`${(1001 - 35) * 28}px`]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps 34 px rows on the iPad even when compact is stored", async () => {
+    setPlatform(IPAD);
+    window.localStorage.setItem(DEVICE_KEY, JSON.stringify({ ...DEFAULT_DEVICE, density: "compact" }));
+    const restore = stubHeight(680);
+    try {
+      const t = await made(THOUSAND);
+      await list(t);
+      expect(all("tbody tr.list-pad").map((r) => r.style.height)).toEqual([`${(1001 - 30) * 34}px`]);
+    } finally {
+      restore();
+    }
+  });
+
   it("builds the List model once per change, not once per scroll", async () => {
     const restore = stubHeight(680);
     try {
@@ -482,6 +509,54 @@ describe("List", () => {
     });
     expect([checkedScope(), focusedScope()]).toEqual(["all", "all"]);
     expect(rowIds()).toEqual(["L", "P", "C", "D", "U"]);
+  });
+
+  it("shows Mine last once This is me is set, titled with the person, and lists that person's open items", async () => {
+    const t = await made(STATUS_SEED);
+    act(() => {
+      t.session.apply({ t: "person", op: "add", name: "Mira Okafor", initials: "MO", colour: "sky", after: null });
+    });
+    const mira = t.session.view().people.people[0].id;
+    act(() => {
+      t.session.apply({ t: "assign", items: ["P", "D"], person: mira });
+    });
+    window.localStorage.setItem(DEVICE_KEY, JSON.stringify({ ...DEFAULT_DEVICE, me: { [TEST_PLAN]: mira } }));
+    await list(t);
+    expect(scopes().map((s) => s[0])).toEqual(["open", "soon", "late", "blocked", "unscheduled", "unassigned", "milestones", "done", "all", "mine"]);
+    expect(scopes()[9]).toEqual(["mine", "Mine", "1", "false", "Open items assigned to Mira Okafor (This is me)"]);
+    act(() => {
+      one('[data-scope="all"]').focus();
+      fireEvent.keyDown(one('[data-scope="all"]'), { key: "ArrowRight" });
+    });
+    expect([checkedScope(), focusedScope(), rowIds(), one(".list-count").textContent]).toEqual(["mine", "mine", ["P"], "1 item"]);
+    expect(all(".mine-note")).toEqual([]);
+  });
+
+  it("hides Mine without This is me, keeps a stored Mine scope and says it needs This is me, with Choose… opening General", async () => {
+    const t = await made(STATUS_SEED);
+    await list(t);
+    expect(all('[data-scope="mine"]')).toEqual([]);
+    cleanup();
+    window.localStorage.setItem(listKey(TEST_PLAN), JSON.stringify({ ...DEFAULT_LIST_PREFS, scope: "mine" }));
+    await list(t);
+    expect([checkedScope(), scopes()[9]]).toEqual(["mine", ["mine", "Mine", "0", "true", null]]);
+    expect(rowIds()).toEqual([]);
+    expect(one('.list-wrap p.note.mine-note[role="status"] .mine-note-text').textContent).toBe("Mine needs “This is me”. Choose who you are in Settings › General.");
+    expect(all(".list-wrap p.note:not(.mine-note)")).toEqual([]);
+    act(() => {
+      fireEvent.click(one(".mine-note button.mine-choose"));
+    });
+    expect([uiNow().settings, uiNow().settingsRow, document.activeElement?.matches('[data-settings-row="general.me"] button.settings-pick[data-pick="me"]')]).toEqual(["general", null, true]);
+    expect(JSON.parse(window.localStorage.getItem(listKey(TEST_PLAN)) ?? "null").scope).toBe("mine");
+  });
+
+  it("says a removed or unknown me leaves Mine empty", async () => {
+    const t = await made(STATUS_SEED);
+    window.localStorage.setItem(listKey(TEST_PLAN), JSON.stringify({ ...DEFAULT_LIST_PREFS, scope: "mine" }));
+    window.localStorage.setItem(DEVICE_KEY, JSON.stringify({ ...DEFAULT_DEVICE, me: { [TEST_PLAN]: "nobody" } }));
+    await list(t);
+    expect(one(".mine-note").textContent).toBe("The person chosen as you is not in this plan’s people. Mine shows nothing until you choose again.");
+    expect([all(".mine-note button"), rowIds()]).toEqual([[], []]);
   });
 
   it("adds a chip through Filter, lists every field's values, and removes the chip by its X", async () => {
@@ -914,6 +989,15 @@ describe("List columns with a mouse", () => {
     headPointer(edge("end"), "cancel", 700);
     headPointer(edge("end"), "up", 700);
     expect([colWidths()[4], stored()]).toEqual(["88px", null]);
+  });
+
+  it("draws Start and End wide enough for a full date in ISO and D.M.YYYY, and resizes them no narrower", async () => {
+    window.localStorage.setItem(DEVICE_KEY, JSON.stringify({ ...DEFAULT_DEVICE, dates: "iso" }));
+    const t = await made(STATUS_SEED);
+    await list(t);
+    expect([colWidths(), edge("start").getAttribute("aria-valuemin"), edge("status").getAttribute("aria-valuemin")]).toEqual([["300px", "140px", "170px", `${DATE_HEAD_MIN}px`, `${DATE_HEAD_MIN}px`, "110px"], String(DATE_HEAD_MIN), "90"]);
+    press(edge("end"), "ArrowLeft", { shiftKey: true });
+    expect([stored()?.cols[4], colWidths()[4]]).toEqual([{ id: "end", w: DATE_HEAD_MIN }, `${DATE_HEAD_MIN}px`]);
   });
 
   it("resizes from the keyboard: Left and Right by 8, with Shift by 32", async () => {

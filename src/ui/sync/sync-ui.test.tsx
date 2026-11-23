@@ -440,6 +440,20 @@ describe("the sync panes", () => {
     expect(tauri.calls.filter((c) => c.cmd === "sync_pair_join").map((c) => argsOf(c).deviceName)).toEqual(["iPad 2"]);
   });
 
+  it("setup and join rename this device to the name typed", async () => {
+    const w = offWorld({ sync_setup: () => SPACE, sync_pair_join: () => SPACE });
+    const { r } = await mounted(w);
+    const setup = await openPane("Set up sync");
+    type(field(setup, "Setup secret"), "s3cr3t");
+    type(field(setup, "Device name"), " Studio  Mac ");
+    await click(button(setup, "Create or join space"));
+    expect([r.device.name, r.renamedDevice()]).toEqual(["Studio  Mac", "Studio  Mac"]);
+    await click(within(dialog()).getByRole("tab", { name: "Join with a code" }));
+    type(field(pane("Join with a code"), "Device name"), "Field iPad");
+    await click(button(pane("Join with a code"), "Join space"));
+    expect([r.device.name, r.renamedDevice()]).toEqual(["Field iPad", "Field iPad"]);
+  });
+
   it("the server address is prefilled and checked", async () => {
     const w = offWorld({ sync_setup: fail({ code: "sync.host", message: "This build syncs only with webboard.rokass.org." }) });
     await mounted(w);
@@ -509,6 +523,40 @@ describe("the sync panes", () => {
     expect(calls("sync_devices")).toBe(2);
     expect(within(pane("Devices")).queryByText("iPad")).toBeNull();
     expect(toasts()).toEqual(["iPad removed"]);
+  });
+
+  it("Devices shows the index name and Joined as", async () => {
+    let list = [
+      { id: "dev-A", name: "Mac", createdAt: 0, lastSeenAt: NOW, current: true },
+      { id: "dev-I", name: "iPad", createdAt: 0, lastSeenAt: NOW, current: false },
+      { id: "dev-P", name: "iPhone", createdAt: 0, lastSeenAt: NOW, current: false },
+    ];
+    const w = await spaceWorld({
+      answers: {
+        sync_devices: () => list,
+        sync_remove_device: () => {
+          list = list.filter((d) => d.id !== "dev-I");
+          return null;
+        },
+      },
+    });
+    seedIndex(w.mem, IX, [ixAct("s-i", ["s-P"], [own("dn:dev-I", "Field iPad")], "dev-I", "Name device")]);
+    const { r, f } = await mounted(w);
+    syncAll(f);
+    act(() => r.renameDevice("Studio Mac"));
+    const p = await openPane("Devices");
+    const rows = (): (string | null)[][] => [...pane("Devices").querySelectorAll("li.sync-device")].map((li) => [li.querySelector(".sync-device-name")?.textContent ?? null, li.querySelector(".sync-joined")?.textContent ?? null]);
+    expect(rows()).toEqual([
+      ["Studio Mac", "Joined as “Mac”"],
+      ["Field iPad", "Joined as “iPad”"],
+      ["iPhone", null],
+    ]);
+    expect([...p.querySelectorAll(".sync-joined.dim")].length).toBe(2);
+    await click(within(p).getAllByRole("button", { name: "Remove" })[0]);
+    expect(within(pane("Devices")).getByText("Remove Field iPad? It stops syncing at once and keeps its plans read-only.")).toBeTruthy();
+    await click(within(pane("Devices")).getByRole("button", { name: "Remove device" }));
+    expect(tauri.calls.filter((c) => c.cmd === "sync_remove_device").map(argsOf)).toEqual([{ id: "dev-I" }]);
+    expect(toasts()).toEqual(["Field iPad removed"]);
   });
 
   it("a failed removal closes the question, refreshes the list and keeps the error", async () => {
@@ -753,6 +801,24 @@ describe("the sync panes", () => {
   });
 
   it.each([
+    ["Set up sync", "Create or join space", "Sync set up"],
+    ["Join with a code", "Join space", "Joined the space"],
+  ])("the %s pane confirms the join and names a device rename that failed afterwards as its own error", async (name, label, done) => {
+    const w = offWorld({ sync_setup: () => SPACE, sync_pair_join: () => SPACE });
+    const { r } = await mounted(w);
+    const restart = vi.spyOn(SyncManager.prototype, "restart");
+    const failure = new AppError("store.io", "The index could not be written.");
+    vi.spyOn(r, "renameDevice").mockImplementation(() => {
+      throw failure;
+    });
+    const p = await openPane(name);
+    await click(button(p, label));
+    expect(restart).toHaveBeenCalledTimes(1);
+    expect(errorText(pane(name))).toEqual([]);
+    expect(toasts()).toEqual([`${done}, but the device name could not be saved here: The index could not be written.`]);
+  });
+
+  it.each([
     ["Set up sync", "Create or join space", "sync_setup"],
     ["Join with a code", "Join space", "sync_pair_join"],
   ])("the %s pane restarts sync after a join that failed once sync.json named the new space", async (name, label, cmd) => {
@@ -881,7 +947,7 @@ describe("removal and the space", () => {
     stubState(errorState("revoked"));
     const { registry } = shellFor(t, { plans: () => [] });
     const Host = () => {
-      const [ui, setUi] = useUi();
+      const [ui, setUi] = useUi("timeline");
       return (
         <UiContext.Provider value={{ ui, setUi }}>
           <RemovedBanner session={t.session} />

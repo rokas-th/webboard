@@ -21,6 +21,9 @@ import { isControl, isTyping, keyToCommand } from "../palette/keymap";
 import { Palette } from "../palette/Palette";
 import { PhoneShell } from "../phone/PhoneShell";
 import { OpenChoice, runWith } from "../run";
+import { meFor } from "../device";
+import { useDevice } from "../DeviceProvider";
+import { useAppliedLook } from "../settings/Look";
 import { UiContext, useUi, useUiValue, type SyncPane } from "../state";
 import { Board } from "../board/Board";
 import { ChoiceDialog } from "../choices/ChoiceDialog";
@@ -252,9 +255,11 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
   const listPrefs = useListPrefs(session === null ? null : session.view().plan.id);
   const notesSeen = useNotes(session, ui.query.trim() !== "" || (ui.view === "list" && listPrefs.cols.some((c) => c.id === "note")));
   const shownView = session === null ? null : session.view();
+  const devicePrefs = useDevice().prefs;
+  const me = shownView === null ? null : meFor(devicePrefs, shownView.plan.id);
   const found = useMemo(
-    () => (session === null || shownView === null ? NO_SEARCH : tabSearch(shownView, { view: ui.view, collapsed: ui.collapsed, query: ui.query }, boardPrefs, listPrefs, (id) => session.note(id).toString())),
-    [session, shownView, ui.view, ui.collapsed, ui.query, boardPrefs, listPrefs, notesSeen],
+    () => (session === null || shownView === null ? NO_SEARCH : tabSearch(shownView, { view: ui.view, collapsed: ui.collapsed, query: ui.query }, boardPrefs, listPrefs, (id) => session.note(id).toString(), me)),
+    [session, shownView, ui.view, ui.collapsed, ui.query, boardPrefs, listPrefs, notesSeen, me],
   );
   const selectedItemShown = session !== null && ui.selected !== null && session.view().plan.items.has(ui.selected) ? ui.selected : null;
   const itemModal = session !== null && selectedItemShown !== null && ui.dialog !== null && ui.dialog.t === "item";
@@ -348,7 +353,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
     const modal = document.querySelector<HTMLElement>("[data-item-modal]");
     if (modal === null) throw new Error("Shell: Settings opened over the item modal, but the modal is not in the page");
     if (!commitFocus(modal, "The item modal")) {
-      setUi({ settings: null });
+      setUi({ settings: null, settingsRow: null });
       return;
     }
     setUi({ dialog: null });
@@ -544,6 +549,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
     updates,
     theme,
     detail: session === null ? null : { promote, toggleModal, rename },
+    me,
   };
   const ctxRef = useRef(ctx);
   const openDrawer: Drawer | null = listDrawer ? "list" : inspectorDrawer ? "inspector" : null;
@@ -954,16 +960,17 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
           <Settings
             frame={settingsFrame(readPlatform(window).os, listMode)}
             section={ui.settings}
+            row={ui.settingsRow}
+            onRowShown={() => setUi({ settingsRow: null })}
             session={session}
             readOnly={readOnly}
-            device={registry.device.name}
             clock={p.clock}
             hover={hover}
             closer={settingsCloser}
             files={files}
             onSection={(s) => setUi({ settings: s })}
             syncPane={ui.syncPane}
-            onClose={() => setUi({ settings: null, syncPane: null })}
+            onClose={() => setUi({ settings: null, settingsRow: null, syncPane: null })}
             onSyncPane={(pane) => setUi({ syncPane: pane })}
             onTrashPlan={(id) => void trashOwn(id)}
           />
@@ -1007,7 +1014,8 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
 }
 
 function WideShell(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null; size: WindowSize }) {
-  const [ui, setUi] = useUi();
+  const tab = useDevice().prefs.tab;
+  const [ui, setUi] = useUi(tab);
   const uiValue = useMemo(() => ({ ui, setUi }), [ui, setUi]);
   return (
     <UiContext.Provider value={uiValue}>
@@ -1020,6 +1028,7 @@ export function Shell(p: ShellProps) {
   const { mode: listMode, tier, window: size } = useShellShape();
   useNativeBackground(p.registry.device.platform);
   useNativeScheme();
+  useAppliedLook();
   useEffect(() => {
     const onError = (e: ErrorEvent): void => {
       const error: unknown = e.error;

@@ -6,6 +6,7 @@ import { lagThatHolds, type Conflict, type SchedView } from "../../domain/schedu
 import { choiceHolding } from "../../plan/choices";
 import type { PlanView } from "../../store/doc";
 import { OpenChoice, type Run } from "../run";
+import { useDateStyle } from "../DeviceProvider";
 import { dayLabel, dayLabelNear } from "../timeline/dayText";
 import { EARLY } from "../timeline/earlyText";
 
@@ -44,6 +45,7 @@ type Button = readonly [string, () => void];
 
 function Fix(p: { view: PlanView; conflict: Conflict; sv: SchedView | null; readOnly: boolean; run: Run }) {
   const open = useContext(OpenChoice);
+  const style = useDateStyle();
   if (open === null) throw new Error("FixActions needs an OpenChoice provider");
   const c = p.conflict;
   const view = p.view;
@@ -70,7 +72,7 @@ function Fix(p: { view: PlanView; conflict: Conflict; sv: SchedView | null; read
     );
   };
   if (c.kind === "dayoff") {
-    return line(`Starts on a day off — shown from ${dayLabel(c.shownFrom)}`, "dayoff-text", [["Snap to next working day", () => p.run.run({ t: "snap", item: c.item })]]);
+    return line(`Starts on a day off — shown from ${dayLabel(c.shownFrom, style)}`, "dayoff-text", [["Snap to next working day", () => p.run.run({ t: "snap", item: c.item })]]);
   }
   if (c.kind === "loop") {
     return line(`The link from ${q(nameOf(p.view, linkOf(p.view, c.link).from))} is part of a loop.`, "conflict-text", [["Remove the link", () => fix("remove")]]);
@@ -83,7 +85,7 @@ function Fix(p: { view: PlanView; conflict: Conflict; sv: SchedView | null; read
   }
   const text = `Starts earlier than the link from ${pred} allows.`;
   if (c.succLock === "held") return line(text, "conflict-text", [], [["Open the choice", () => open(choiceHolding(p.view.choices, p.view.plan, c.succ))]]);
-  return line(text, "conflict-text", [[`Push ${q(nameOf(p.view, c.succ))} to ${dayLabelNear(c.need, p.view.today)}`, () => fix("push")]]);
+  return line(text, "conflict-text", [[`Push ${q(nameOf(p.view, c.succ))} to ${dayLabelNear(c.need, p.view.today, style)}`, () => fix("push")]]);
 }
 
 export function FixActions(p: { view: PlanView; item: ItemId; readOnly: boolean; run: Run }) {

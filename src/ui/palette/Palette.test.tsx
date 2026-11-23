@@ -425,7 +425,7 @@ describe("the palette list", () => {
     const scroll = document.querySelector(".tl-scroll");
     if (!(scroll instanceof HTMLElement)) throw new Error("no timeline");
     const view = t.session.view();
-    const todayAt = Math.max(0, geometry(view, "W").x(toDay(view.today)) - leadFor(0));
+    const todayAt = Math.max(0, geometry(view, "W", 1).x(toDay(view.today)) - leadFor(0));
     expect(todayAt).toBeGreaterThan(0);
     setUi({ view: "list" });
     runFromPalette("Jump to today");

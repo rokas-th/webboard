@@ -11,6 +11,7 @@ import { unitSubject } from "./describe";
 import { groupRows, outcomeLine } from "./outcome";
 import { orderedSides } from "./order";
 import { CHOICE_TITLE, DEFAULTS, pickOf, usePicks, useSettledClose, type Picks } from "./pick";
+import { useDateStyle, useDevice } from "../DeviceProvider";
 import { sideContent, type SideContent } from "./side";
 import { UndoOffer } from "./UndoOffer";
 
@@ -19,6 +20,7 @@ const NO_PICKS: Picks = new Map();
 function Column(p: { plan: PlanState; choice: Choice; side: string; label: string; content: SideContent; picked: boolean; readOnly: boolean; onKeep(): void }) {
   const plan = p.plan;
   const c = p.content;
+  const style = useDateStyle();
   return (
     <section className={p.picked ? "choice-col picked" : "choice-col"}>
       <p className="choice-side">{sideText(p.choice, p.side, plan)}</p>
@@ -46,7 +48,7 @@ function Column(p: { plan: PlanState; choice: Choice; side: string; label: strin
             <p className="moves-title">{s.title}</p>
             {s.rows.map((r) => (
               <p key={r.item} className="moves-line">
-                {outcomeLine(r, plan)}
+                {outcomeLine(r, plan, style)}
               </p>
             ))}
           </div>
@@ -69,9 +71,11 @@ function Body(p: { session: PlanSession; choice: Choice; side: string | undefine
   const [live, setPerUnit] = usePicks(choice, plan);
   const base = useId();
   const picks = perItem ? live : NO_PICKS;
+  const style = useDateStyle();
+  const week = useDevice().prefs.week;
   const contents = useMemo(
-    () => sides.map((s) => sideContent(p.session, choice, pickOf(s.key, picks), opts)),
-    [p.session, choice, sides, picks, opts, view],
+    () => sides.map((s) => sideContent(p.session, choice, pickOf(s.key, picks), opts, style, week)),
+    [p.session, choice, sides, picks, opts, view, style, week],
   );
   const pickUnit = (u: UnitKey, side: string): void => {
     const next = new Map(live);

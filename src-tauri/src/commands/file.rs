@@ -14,11 +14,17 @@ const IMPORT_FILTER: &str = "WebBoard or GanttProject plan";
 const EXPORT_FILTER: &str = "WebBoard plan";
 const CSV_EXTENSION: &str = "csv";
 const CSV_FILTER: &str = "CSV table";
+const ICS_EXTENSION: &str = "ics";
+const ICS_FILTER: &str = "Calendar";
+const ZIP_EXTENSION: &str = "zip";
+const ZIP_FILTER: &str = "WebBoard backup";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Format {
     Webboard,
     Csv,
+    Ics,
+    Zip,
 }
 
 impl Format {
@@ -26,7 +32,11 @@ impl Format {
         match value {
             "webboard" => Ok(Format::Webboard),
             "csv" => Ok(Format::Csv),
-            other => Err(io(format!("x-format is \"{other}\", not webboard or csv"))),
+            "ics" => Ok(Format::Ics),
+            "zip" => Ok(Format::Zip),
+            other => Err(io(format!(
+                "x-format is \"{other}\", not webboard, csv, ics or zip"
+            ))),
         }
     }
 
@@ -34,6 +44,8 @@ impl Format {
         match self {
             Format::Webboard => EXTENSION,
             Format::Csv => CSV_EXTENSION,
+            Format::Ics => ICS_EXTENSION,
+            Format::Zip => ZIP_EXTENSION,
         }
     }
 
@@ -41,6 +53,8 @@ impl Format {
         match self {
             Format::Webboard => EXPORT_FILTER,
             Format::Csv => CSV_FILTER,
+            Format::Ics => ICS_FILTER,
+            Format::Zip => ZIP_FILTER,
         }
     }
 }
@@ -826,7 +840,7 @@ mod tests {
             .unwrap_err(),
             json!({ "code": "file.io", "message": "missing x-format header" })
         );
-        ["pdf", "CSV", ""].iter().for_each(|format| {
+        ["pdf", "CSV", "ICS", "Zip", ""].iter().for_each(|format| {
             assert_eq!(
                 invoke_with(
                     &h,
@@ -837,7 +851,7 @@ mod tests {
                 .unwrap_err(),
                 json!({
                     "code": "file.io",
-                    "message": format!("x-format is \"{format}\", not webboard or csv")
+                    "message": format!("x-format is \"{format}\", not webboard, csv, ics or zip")
                 }),
                 "{format}"
             )
@@ -848,9 +862,17 @@ mod tests {
     fn a_format_names_its_extension_and_filter() {
         assert_eq!(Format::parse("webboard"), Ok(Format::Webboard));
         assert_eq!(Format::parse("csv"), Ok(Format::Csv));
+        assert_eq!(Format::parse("ics"), Ok(Format::Ics));
+        assert_eq!(Format::parse("zip"), Ok(Format::Zip));
         assert_eq!(
-            [Format::Webboard, Format::Csv].map(|f| (f.extension(), f.filter())),
-            [("webboard", "WebBoard plan"), ("csv", "CSV table")]
+            [Format::Webboard, Format::Csv, Format::Ics, Format::Zip]
+                .map(|f| (f.extension(), f.filter())),
+            [
+                ("webboard", "WebBoard plan"),
+                ("csv", "CSV table"),
+                ("ics", "Calendar"),
+                ("zip", "WebBoard backup")
+            ]
         );
     }
 
@@ -895,6 +917,57 @@ mod tests {
         assert_eq!(
             fs::read(tmp.path().join("MESA 1.0 List.csv")).unwrap(),
             b"\xEF\xBB\xBFName\r\n"
+        );
+    }
+
+    #[test]
+    fn an_ics_export_is_named_and_corrected_to_ics() {
+        assert_eq!(
+            export_name("MESA 1.0 Milestones", Format::Ics).unwrap(),
+            "MESA 1.0 Milestones.ics"
+        );
+        assert_eq!(
+            export_name("Q3/Q4 Milestones", Format::Ics).unwrap(),
+            "Q3-Q4 Milestones.ics"
+        );
+        [
+            ("/x/Plan Milestones", "/x/Plan Milestones.ics"),
+            ("/x/Plan Milestones.ICS", "/x/Plan Milestones.ICS"),
+            ("/x/Plan Milestones.ics.", "/x/Plan Milestones.ics"),
+            ("/x/Plan Milestones.csv", "/x/Plan Milestones.csv.ics"),
+        ]
+        .iter()
+        .for_each(|(picked, written)| {
+            assert_eq!(
+                with_extension(PathBuf::from(picked), Format::Ics).unwrap(),
+                PathBuf::from(written),
+                "{picked}"
+            )
+        });
+    }
+
+    #[test]
+    fn a_zip_export_writes_under_the_zip_name() {
+        assert_eq!(
+            export_name("WebBoard backup 2026-11-23", Format::Zip).unwrap(),
+            "WebBoard backup 2026-11-23.zip"
+        );
+        let tmp = TempDir::new().unwrap();
+        let answer = export_with(
+            "WebBoard backup 2026-11-23.zip",
+            Format::Zip,
+            b"PK\x05\x06",
+            |_| Some(in_dir(tmp.path(), "WebBoard backup 2026-11-23")),
+            never_asked,
+        );
+        assert_eq!(
+            answer,
+            Ok(Some("WebBoard backup 2026-11-23.zip".to_string()))
+        );
+        assert_eq!(names(tmp.path()), ["WebBoard backup 2026-11-23.zip"]);
+        assert_eq!(
+            fs::read(tmp.path().join("WebBoard backup 2026-11-23.zip")).unwrap(),
+            b"PK\x05\x06"
         );
     }
 }

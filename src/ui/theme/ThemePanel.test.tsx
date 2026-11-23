@@ -10,6 +10,7 @@ import { installMatchMedia, setSystemDark } from "../../test/matchMedia";
 import type { SettingsFrame } from "../settings/frame";
 import { SettingsView } from "../settings/Settings";
 import { DISCARDED, useCanHover } from "./ThemePanel";
+import { deviced } from "../../test/theme";
 
 vi.mock("../common/Toast", () => ({ toast: vi.fn() }));
 vi.mock("../../theme/image", async (importOriginal) => {
@@ -29,29 +30,34 @@ const voidNow = (): string => document.documentElement.style.getPropertyValue("-
 
 const FILES = { creating: false, importing: false, newPlan: () => undefined, newExample: () => undefined, importPlan: () => undefined };
 
-const settings = (frame: SettingsFrame, hover: boolean, onClose: () => void) => (
-  <SettingsView
-    frame={frame}
-    section="theme"
-    session={null}
-    readOnly={false}
-    device="Mac"
-    clock={fixedClock("2026-11-09")}
-    hover={hover}
-    closer={createRef()}
-    files={FILES}
-    onSection={() => undefined}
-    onClose={onClose}
-    syncPane={null}
-    onSyncPane={() => undefined}
-    onTrashPlan={() => undefined}
-    sync={{ kind: "off" }}
-    syncName={() => null}
-    updates={null}
-    syncPanes={null}
-    planLocked={false}
-  />
-);
+const settings = (frame: SettingsFrame, hover: boolean, onClose: () => void) =>
+  deviced(
+    <SettingsView
+      frame={frame}
+      section="theme"
+      row={null}
+      onRowShown={vi.fn()}
+      session={null}
+      readOnly={false}
+      device="Mac"
+      renameDevice={vi.fn()}
+      backup={vi.fn()}
+      clock={fixedClock("2026-11-09")}
+      hover={hover}
+      closer={createRef()}
+      files={FILES}
+      onSection={() => undefined}
+      onClose={onClose}
+      syncPane={null}
+      onSyncPane={() => undefined}
+      onTrashPlan={() => undefined}
+      sync={{ kind: "off" }}
+      syncName={() => null}
+      updates={null}
+      syncPanes={null}
+      planLocked={false}
+    />,
+  );
 
 const mount = (frame: SettingsFrame, hover = false, store: ThemeStore = DEFAULT_STORE) => {
   const onClose = vi.fn();
@@ -156,7 +162,7 @@ describe("the Theme tab of Settings", () => {
     const region = getByRole("region", { name: "Theme" });
     expect(queryByLabelText("When dark")).toBeNull();
     const sw = getByRole("switch", { name: "Follow the system" });
-    expect(sw.getAttribute("aria-checked")).toBe("false");
+    expect([sw.getAttribute("aria-checked"), sw.className, sw.querySelectorAll(".switch-track[aria-hidden=true]").length]).toEqual(["false", "switch", 1]);
     fireEvent.click(sw);
     expect(sw.getAttribute("aria-checked")).toBe("true");
     const dark = getByLabelText("When dark");

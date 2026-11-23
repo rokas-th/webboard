@@ -110,7 +110,7 @@ const touchMove = (el: Element): Event => {
   return e;
 };
 
-const xOf = (t: TestSession, zoom: Zoom, day: IsoDate): number => geometry(t.session.view(), zoom).x(toDay(day));
+const xOf = (t: TestSession, zoom: Zoom, day: IsoDate): number => geometry(t.session.view(), zoom, 1).x(toDay(day));
 const x0 = (t: TestSession): number => xOf(t, "W", "2026-11-09");
 const links = (t: TestSession): ReturnType<typeof liveLinks> => liveLinks(t.session.view().plan);
 
@@ -303,7 +303,7 @@ describe("touch on the timeline bars", () => {
       throw new Error("expected the loop to be refused");
     })();
     const before = links(t);
-    const shipEnd = geometry(t.session.view(), "W").x(toDay("2026-11-16")) + 40;
+    const shipEnd = geometry(t.session.view(), "W", 1).x(toDay("2026-11-16")) + 40;
     holdAndDrag(one(".nub", barOf("Ship")), shipEnd + 20, x0(t) + 60, rowY("Ship"), rowY("Review"));
     expect(apply.mock.calls).toEqual([[loop]]);
     expect(links(t)).toEqual(before);
@@ -552,7 +552,7 @@ describe("haptics on the timeline", () => {
     ]);
     const apply = vi.spyOn(t.session, "apply");
     const from = tauri.calls.length;
-    const shipEnd = geometry(t.session.view(), "W").x(toDay("2026-11-16")) + 40;
+    const shipEnd = geometry(t.session.view(), "W", 1).x(toDay("2026-11-16")) + 40;
     holdAndDrag(one(".nub", barOf("Ship")), shipEnd + 20, x0(t) + 60, rowY("Ship"), rowY("Review"));
     expect(apply).toHaveBeenCalledTimes(1);
     expect(one('[role="alert"]').className).toBe("toast bad");

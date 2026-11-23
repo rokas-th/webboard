@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { toDay, weekday } from "../../domain/dates";
+import { LOG_STYLE, toDay, weekday } from "../../domain/dates";
 import type { PlanSession } from "../../store/session";
 import { deleteClash } from "../../test/fixtures/deleteClash";
 import { fs, testSession, type SeedItem } from "../../test/session";
@@ -71,7 +71,7 @@ describe("printScale", () => {
 
   it("ticks Mondays up to 62 days, with the year on the first tick and each new year", () => {
     const [first, last] = span("2026-12-02", 62);
-    const ticks = printScale(first, last);
+    const ticks = printScale(first, last, 1, LOG_STYLE);
     expect(ticks[0]).toEqual({ at: d("2026-12-07"), label: "7 Dec 2026" });
     expect(ticks[1]).toEqual({ at: d("2026-12-14"), label: "14 Dec" });
     expect(ticks.find((x) => x.at === d("2027-01-04"))).toEqual({ at: d("2027-01-04"), label: "4 Jan 2027" });
@@ -80,14 +80,32 @@ describe("printScale", () => {
     expect(ticks).toHaveLength(9);
   });
 
+  it("a Sunday week starts on Sunday", () => {
+    const [first, last] = span("2026-12-02", 62);
+    const ticks = printScale(first, last, 7, LOG_STYLE);
+    expect(ticks.slice(0, 2)).toEqual([
+      { at: d("2026-12-06"), label: "6 Dec 2026" },
+      { at: d("2026-12-13"), label: "13 Dec" },
+    ]);
+    expect(ticks.find((x) => x.at === d("2027-01-03"))?.label).toBe("3 Jan 2027");
+    expect(ticks.every((x) => weekday(x.at) === 7)).toBe(true);
+  });
+
+  it("labels weeks in the chosen date format", () => {
+    const [first, last] = span("2026-12-02", 62);
+    expect(printScale(first, last, 1, { format: "iso", order: "dm" }).slice(0, 2).map((x) => x.label)).toEqual(["2026-12-07", "2026-12-14"]);
+    expect(printScale(first, last, 1, { format: "dmy", order: "dm" }).slice(4, 6).map((x) => x.label)).toEqual(["4.1.2027", "11.1.2027"]);
+    expect(printScale(first, last, 1, { format: "system", order: "md" }).slice(0, 2).map((x) => x.label)).toEqual(["Dec 7 2026", "Dec 14"]);
+  });
+
   it("ticks months from 63 to 550 days", () => {
     const [first, last] = span("2026-12-02", 63);
-    expect(printScale(first, last)).toEqual([
+    expect(printScale(first, last, 1, LOG_STYLE)).toEqual([
       { at: d("2027-01-01"), label: "Jan 2027" },
       { at: d("2027-02-01"), label: "Feb" },
     ]);
     const [f2, l2] = span("2026-11-15", 550);
-    const months = printScale(f2, l2);
+    const months = printScale(f2, l2, 1, LOG_STYLE);
     expect(months[0]).toEqual({ at: d("2026-12-01"), label: "Dec 2026" });
     expect(months.map((x) => x.label)).toContain("Jan 2027");
     expect(months.map((x) => x.label)).toContain("Jan 2028");
@@ -96,6 +114,6 @@ describe("printScale", () => {
 
   it("ticks quarters from 551 days", () => {
     const [first, last] = span("2026-11-15", 551);
-    expect(printScale(first, last).map((x) => x.label)).toEqual(["Q1 2027", "Q2", "Q3", "Q4", "Q1 2028", "Q2"]);
+    expect(printScale(first, last, 1, LOG_STYLE).map((x) => x.label)).toEqual(["Q1 2027", "Q2", "Q3", "Q4", "Q1 2028", "Q2"]);
   });
 });

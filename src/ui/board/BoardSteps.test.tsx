@@ -139,7 +139,7 @@ describe("Board by steps", () => {
     ]);
     expect(offered("mid").filter(([, checked]) => checked)).toEqual([["Review", true]]);
     expect(all(".nnl > .col").map((c) => c.style.getPropertyValue("--step"))).toEqual(["var(--s-cyan)", "var(--s-violet)", "var(--s-slate)"]);
-    expect(tabOrder(t.session.view(), BOARD, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, (id) => t.session.note(id).toString(), null)).toEqual(["soon", "mid", "u", "w"]);
+    expect(tabOrder(t.session.view(), BOARD, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, (id) => t.session.note(id).toString(), null, null)).toEqual(["soon", "mid", "u", "w"]);
   });
 
   it("moves no card when a date changes", async () => {
@@ -190,7 +190,7 @@ describe("Board by steps", () => {
       ["Later", false],
       ["Done", false],
     ]);
-    expect(tabOrder(t.session.view(), BOARD, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, (id) => t.session.note(id).toString(), null)).toEqual(["w", "soon", "mid", "u"]);
+    expect(tabOrder(t.session.view(), BOARD, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, (id) => t.session.note(id).toString(), null, null)).toEqual(["w", "soon", "mid", "u"]);
     const apply = vi.spyOn(t.session, "apply");
     dragTo("soon", "no-step");
     expect(apply).not.toHaveBeenCalled();
@@ -233,7 +233,7 @@ describe("Board by steps", () => {
     expect(one(".col-body", col("done")).textContent).toBe("Nothing here.");
     expect(all(".board-line .board-problem").map((e) => e.textContent)).toEqual(["“Later” completes items but holds 1 item that is not done."]);
     expect(document.querySelector(".col-collapse")).toBeNull();
-    expect(tabOrder(t.session.view(), BOARD, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, (id) => t.session.note(id).toString(), null)).toEqual(["soon", "mid", "u", "w", "d1"]);
+    expect(tabOrder(t.session.view(), BOARD, EMPTY_BOARD_PREFS, DEFAULT_LIST_PREFS, (id) => t.session.note(id).toString(), null, null)).toEqual(["soon", "mid", "u", "w", "d1"]);
     moveVia("w", "Now");
     expect(cardsIn("now")).toEqual(["soon", "w"]);
     expect(cols()).toEqual(["now", "next", "done"]);

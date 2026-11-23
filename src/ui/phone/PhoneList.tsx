@@ -14,6 +14,8 @@ import { moreText, UNASSIGNED } from "../people/text";
 import { Highlight } from "../search/Highlight";
 import { searchMatcher } from "../search/match";
 import { SearchBox } from "../search/SearchField";
+import { useDateStyle, useMe } from "../DeviceProvider";
+import { mineLine, MineNote } from "../list/MineNote";
 import { useUiValue } from "../state";
 
 export const PHONE_EMPTY_PLAN = "No items yet. Add one with +.";
@@ -84,7 +86,9 @@ export function PhoneList(p: { session: PlanSession; onOpen: (item: ItemId) => v
   const menu = usePickMenu(SORT_AND_GROUP);
   const base = useId();
   const session = p.session;
-  const ctx: RowContext = useMemo(() => rowContext(view, (id) => session.note(id).toString()), [view, session, notesSeen]);
+  const style = useDateStyle();
+  const me = useMe(plan);
+  const ctx: RowContext = useMemo(() => rowContext(view, (id) => session.note(id).toString(), me, style), [view, session, notesSeen, me, style]);
   const match = useMemo(() => searchMatcher(ctx, q), [ctx, q]);
   const model = useMemo(() => listModel(ctx, prefs, match), [ctx, prefs, match]);
   const listed = useMemo(() => planOrder(ctx).length, [ctx]);
@@ -149,7 +153,8 @@ export function PhoneList(p: { session: PlanSession; onOpen: (item: ItemId) => v
     );
   };
 
-  const empty = listed === 0 ? PHONE_EMPTY_PLAN : model.order.length === 0 ? nothingText(prefs.scope, prefs.chips.length > 0, q) : null;
+  const mine = mineLine(prefs.scope, ctx.me);
+  const empty = mine !== null ? null : listed === 0 ? PHONE_EMPTY_PLAN : model.order.length === 0 ? nothingText(prefs.scope, prefs.chips.length > 0, q) : null;
 
   return (
     <div className="phone-list">
@@ -178,6 +183,7 @@ export function PhoneList(p: { session: PlanSession; onOpen: (item: ItemId) => v
         </button>
       </div>
       <ListBar ctx={ctx} prefs={prefs} model={model} searching={q !== ""} tools={false} onPrefs={setPrefs} />
+      {mine !== null && <MineNote line={mine} className="dim" />}
       {empty !== null && <p className="dim">{empty}</p>}
       {model.sections.map((s) => (
         <section key={s.key} className="psec">

@@ -7,6 +7,7 @@ import { Dialog } from "../common/Dialog";
 import { Sheet } from "../common/Sheet";
 import { OpenChoice, useExec } from "../run";
 import { useUiValue } from "../state";
+import { useDateStyle } from "../DeviceProvider";
 import { historyTime, revertText } from "./historyText";
 
 export const REVERT = "Revert this action";
@@ -23,6 +24,7 @@ const entryOf = (session: PlanSession, id: ActionId): HistoryEntry => {
 
 export function History(p: { session: PlanSession; readOnly: boolean }) {
   const view = usePlanView(p.session);
+  const style = useDateStyle();
   const exec = useExec(p.session);
   const { setUi } = useUiValue();
   const [shown, setShown] = useState(HISTORY_PAGE);
@@ -41,7 +43,7 @@ export function History(p: { session: PlanSession; readOnly: boolean }) {
         {entries.slice(0, shown).map((e) => (
           <li key={e.id} className={e.active ? undefined : "inactive"} data-action={e.id}>
             <span className="hist-text">
-              <span className="when">{historyTime(e.at, view.today)}</span>
+              <span className="when">{historyTime(e.at, view.today, style)}</span>
               {` · ${e.device} · ${e.label}`}
             </span>
             {!p.readOnly && !e.root && (

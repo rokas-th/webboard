@@ -18,6 +18,8 @@ import { UiContext, useUi } from "../state";
 import { PlanMenu } from "../shell/PlanMenu";
 import { NewItemMenu } from "./NewItemMenu";
 import { clearToasts, Toasts } from "./Toast";
+import { LOG_STYLE } from "../../domain/dates";
+import { deviced } from "../../test/theme";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauriMock"));
@@ -509,7 +511,7 @@ describe("the plan head menu on iOS", () => {
 describe("the List's Filter and Group by on iOS", () => {
   const listBar = async (prefs: ListPrefs): Promise<{ ctx: RowContext; picked: ListPrefs[] }> => {
     const { session } = await planned();
-    const ctx = rowContext(session.view(), (id) => session.note(id).toString());
+    const ctx = rowContext(session.view(), (id) => session.note(id).toString(), null, LOG_STYLE);
     const picked: ListPrefs[] = [];
     render(<ListBar ctx={ctx} prefs={prefs} model={listModel(ctx, prefs, null)} searching={false} tools onPrefs={(next) => picked.push(next)} />);
     return { ctx, picked };
@@ -569,9 +571,9 @@ describe("the List's Filter and Group by on iOS", () => {
 
 describe("the iPhone List's Sort and group", () => {
   function Phone(p: { session: PlanSession }) {
-    const [ui, setUi] = useUi();
+    const [ui, setUi] = useUi("timeline");
     const value = useMemo(() => ({ ui, setUi }), [ui, setUi]);
-    return (
+    return deviced(
       <UiContext.Provider value={value}>
         <PhoneList session={p.session} onOpen={() => undefined} />
       </UiContext.Provider>

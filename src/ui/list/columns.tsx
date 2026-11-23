@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { workCalendar, type WorkCalendar } from "../../domain/calendar";
-import { fmtShort, toDay, toIso, type Day } from "../../domain/dates";
+import { fmtShort, toDay, toIso, type DateStyle, type Day } from "../../domain/dates";
+import { meOf, type MeState } from "../../domain/me";
 import type { Item, ItemId, Link, PersonId, StepId } from "../../domain/model";
 import { projectBoard, storedStepOf, type BoardProjection, type Step } from "../../domain/steps";
 import { childrenOf, liveLinks } from "../../plan/project";
@@ -27,6 +28,8 @@ export interface RowContext {
   outline: ReadonlyMap<ItemId, number>;
   ghosts: ReadonlySet<ItemId>;
   notes: NoteText;
+  me: MeState;
+  style: DateStyle | null;
 }
 
 export type SortValue = number | string | null;
@@ -62,7 +65,7 @@ const outlineOf = (view: PlanView): Map<ItemId, number> => {
   return new Map(walk(null).map((id, i): [ItemId, number] => [id, i]));
 };
 
-export function rowContext(view: PlanView, notes: NoteText): RowContext {
+export function rowContext(view: PlanView, notes: NoteText, me: PersonId | null, style: DateStyle | null): RowContext {
   const board = projectBoard(view.plan, view.derived);
   return {
     view,
@@ -75,6 +78,8 @@ export function rowContext(view: PlanView, notes: NoteText): RowContext {
     outline: outlineOf(view),
     ghosts: ghostIds(view),
     notes,
+    me: meOf(view, me),
+    style,
   };
 }
 
@@ -168,7 +173,12 @@ const outlineKey = (ctx: RowContext, id: ItemId): number => {
 
 const firstLine = (text: string): string => text.split("\n")[0].trim();
 
-const fmtDay = (d: Day | null): string => (d === null ? "" : fmtShort(toIso(d)));
+const fmtDay = (d: Day | null, style: DateStyle): string => (d === null ? "" : fmtShort(toIso(d), style));
+
+export const styleOf = (ctx: RowContext): DateStyle => {
+  if (ctx.style === null) throw new Error("List: this row context orders and filters only, so it has no date style to show a date in");
+  return ctx.style;
+};
 
 const numText = (n: number | null): string => (n === null ? "" : String(n));
 
@@ -285,11 +295,11 @@ export const COLUMNS: readonly ColumnSpec[] = [
   ),
   column(
     { id: "start", title: "Start", minWidth: 72, defaultWidth: 88, align: "end" },
-    { value: (ctx, id) => fmtDay(startOf(ctx, id)), csv: (ctx, id) => isoDay(startOf(ctx, id)), sortKey: startOf },
+    { value: (ctx, id) => fmtDay(startOf(ctx, id), styleOf(ctx)), csv: (ctx, id) => isoDay(startOf(ctx, id)), sortKey: startOf },
   ),
   column(
     { id: "end", title: "End", minWidth: 72, defaultWidth: 88, align: "end" },
-    { value: (ctx, id) => fmtDay(endOf(ctx, id)), csv: (ctx, id) => isoDay(endOf(ctx, id)), sortKey: endOf },
+    { value: (ctx, id) => fmtDay(endOf(ctx, id), styleOf(ctx)), csv: (ctx, id) => isoDay(endOf(ctx, id)), sortKey: endOf },
   ),
   column(
     { id: "days", title: "Days", minWidth: 56, defaultWidth: 64, align: "end" },

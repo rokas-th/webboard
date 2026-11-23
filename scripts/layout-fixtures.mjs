@@ -798,6 +798,6 @@ export function buildFixtures() {
     }),
   };
   return Object.fromEntries(
-    Object.entries(fixtures).map(([name, f]) => [name, { ...f, ipc: { sync_status: { ...SYNC_OFF }, "plugin:updater|check": null, ...f.ipc } }]),
+    Object.entries(fixtures).map(([name, f]) => [name, { ...f, ipc: { sync_status: { ...SYNC_OFF }, "plugin:updater|check": null, "plugin:webview|set_webview_zoom": null, ...f.ipc } }]),
   );
 }

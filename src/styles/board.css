@@ -63,7 +63,7 @@
 .col.over,
 .col-strip.over {
   border-color: var(--step);
-  box-shadow: 0 0 12px rgba(var(--cyan-rgb), 0.18);
+  box-shadow: 0 0 calc(12px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--cyan-rgb), 0.18);
 }
 
 .col-head {
@@ -262,7 +262,7 @@ html[data-os="ios"] .col-head .col-rename {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--void);
-  padding: 9px 11px;
+  padding: var(--card-pad);
   cursor: pointer;
   transition: border-color 0.12s ease-out, background 0.12s ease-out;
 }
@@ -367,18 +367,18 @@ html[data-os="ios"] .col-head .col-rename {
 
 .dot.doing {
   background: var(--cyan);
-  box-shadow: 0 0 6px rgba(var(--cyan-rgb), 0.55);
+  box-shadow: 0 0 calc(6px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--cyan-rgb), 0.55);
 }
 
 .dot.late,
 .dot.held {
   background: var(--amber);
-  box-shadow: 0 0 8px rgba(var(--amber-rgb), 0.6);
+  box-shadow: 0 0 calc(8px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--amber-rgb), 0.6);
 }
 
 .dot.conflict {
   background: var(--magenta);
-  box-shadow: 0 0 8px rgba(var(--magenta-rgb), 0.6);
+  box-shadow: 0 0 calc(8px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--magenta-rgb), 0.6);
 }
 
 .col-head[draggable="true"] {

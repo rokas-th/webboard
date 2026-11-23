@@ -64,6 +64,6 @@ export function connectedStubs(t: TestSession): Partial<Registry> {
     setSyncedHeads: async (_doc: string, h: readonly string[]) => {
       heads = h;
     },
-    nameThisDevice: () => undefined,
+    nameThisDevice: (name: string) => name,
   };
 }

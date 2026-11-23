@@ -6,6 +6,7 @@ import { OpenChoice } from "../run";
 import { BareDetail } from "../../test/detail";
 import { UiContext, useUi } from "../state";
 import { Timeline, type OutlineControl } from "./Timeline";
+import { deviced } from "../../test/theme";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("./Grid", () => ({ Grid: () => <div className="tl-grid" /> }));
@@ -34,8 +35,8 @@ const noChoice = (): void => {
 };
 
 function Bare(p: { session: PlanSession }) {
-  const [ui, setUi] = useUi();
-  return (
+  const [ui, setUi] = useUi("timeline");
+  return deviced(
     <UiContext.Provider value={{ ui, setUi }}>
       <OpenChoice.Provider value={noChoice}>
         <BareDetail>

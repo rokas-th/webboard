@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { listWindow, ROW_PX } from "./window";
+import { listWindow, ROW_PX, rowPx } from "./window";
 
 describe("listWindow", () => {
   it("rows are 34 px", () => {
     expect(ROW_PX).toBe(34);
+  });
+
+  it("rows are 34 px comfortable and 28 px compact", () => {
+    expect([rowPx("comfortable"), rowPx("compact")]).toEqual([34, 28]);
+  });
+
+  it("windows compact rows at 28 px", () => {
+    expect(listWindow(2800, 560, 1000, rowPx("compact"))).toEqual({ first: 90, last: 130, top: 90 * 28, bottom: (1000 - 130) * 28 });
   });
 
   it("mounts the visible rows plus ten on each side, padding the rest", () => {

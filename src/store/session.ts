@@ -195,10 +195,12 @@ export class PlanSession implements HolidayHost {
     const cs = choices(this.log, plan, this.devices);
     const held = heldItems(cs, plan);
     const today = this.deps.clock.today();
+    const former = formerPeople(this.log, plan);
     return {
       plan,
       derived: derive(plan, held, today),
-      people: projectPeople(plan, formerPeople(this.log, plan)),
+      people: projectPeople(plan, former),
+      former,
       defaults: projectDefaults(plan, defaultNames(this.log, plan)),
       choices: cs,
       held,

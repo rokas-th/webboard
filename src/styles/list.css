@@ -399,7 +399,7 @@ html.col-resizing * {
   width: 2px;
   height: 34px;
   background: var(--cyan);
-  box-shadow: 0 0 8px rgba(var(--cyan-rgb), 0.7);
+  box-shadow: 0 0 calc(8px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--cyan-rgb), 0.7);
   pointer-events: none;
 }
 
@@ -469,11 +469,11 @@ table.list .sort-said {
 }
 
 table.list tbody tr {
-  height: 34px;
+  height: var(--list-row-h);
 }
 
 table.list td {
-  height: 34px;
+  height: var(--list-row-h);
   padding: 0 10px;
   border-bottom: 1px solid rgba(var(--line-rgb), 0.7);
   vertical-align: middle;

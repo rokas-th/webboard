@@ -1859,7 +1859,7 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     const t = await planSheetMade();
     await shown(t);
     openPlanSheet();
-    expect(within(planSheet()).getByText(calendarSummary(t.session.view().plan.calendar))).toBeTruthy();
+    expect(within(planSheet()).getByText(calendarSummary(t.session.view().plan.calendar, 1))).toBeTruthy();
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Change calendar…" }));
     expect([screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label")), lastUi().settings]).toEqual([["Settings"], "working-time"]);
     expect(screen.getByRole("dialog", { name: "Settings" }).querySelector('section.settings-group[data-section="working-time"] .cal-body')).not.toBeNull();

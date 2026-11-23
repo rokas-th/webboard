@@ -1948,6 +1948,50 @@ describe("Registry: spaces", () => {
     expect(appendsTo(again, IX)).toHaveLength(0);
   });
 
+  it("renameDevice writes both indexes and settings", async () => {
+    const e = spaceEnv();
+    const r = await open();
+    await r.attachSpace(SP);
+    await flush();
+    expect(r.renamedDevice()).toBeNull();
+    const from = tauri.calls.length;
+    expect(() => r.renameDevice("  ")).toThrow(new Refused("The name is empty. Type at least one character."));
+    await flush();
+    expect([appendsTo(from, "local"), appendsTo(from, IX), r.renamedDevice()]).toEqual([[], [], null]);
+    r.renameDevice("  Studio\nMac ");
+    await flush();
+    expect(writesOf(appendsTo(from, "local")[0])).toEqual([own("dn:dev-A", "Studio Mac")]);
+    expect(writesOf(appendsTo(from, IX)[0])).toEqual([own("dn:dev-A", "Studio Mac")]);
+    expect([r.device.name, r.renamedDevice()]).toEqual(["Studio Mac", "Studio Mac"]);
+    expect(e.state.settings).toEqual({ ...SPACE_SETTINGS, deviceName: "Studio Mac" });
+  });
+
+  it("devices() keeps one snapshot until a name changes, so a subscriber can compare it by identity", async () => {
+    spaceEnv();
+    const r = await open();
+    await r.attachSpace(SP);
+    await flush();
+    const first = r.devices();
+    expect(r.devices()).toBe(first);
+    r.renameDevice("Studio Mac");
+    await flush();
+    const renamed = r.devices();
+    expect([renamed === first, renamed.get("dev-A"), first.get("dev-A") === "Studio Mac"]).toEqual([false, "Studio Mac", false]);
+    expect(r.devices()).toBe(renamed);
+  });
+
+  it("reads a renamed device from settings", async () => {
+    spaceEnv({ settings: { ...SPACE_SETTINGS, deviceName: "Studio Mac" } });
+    const r = await open();
+    expect(r.renamedDevice()).toBe("Studio Mac");
+  });
+
+  it.each([[""], [" Studio"], ["Studio\nMac"], [7]])("refuses the deviceName %j in settings", async (deviceName) => {
+    env({ settings: { ...SPACE_SETTINGS, deviceName } });
+    const err = appErrorOf(await rejection(Registry.open()));
+    expect([err.code, err.message]).toEqual(["settings.corrupt", "settings.json does not hold WebBoard settings: deviceName is not a device name."]);
+  });
+
   it("revoked plans go to the local index", async () => {
     const e = spaceEnv();
     seedIndex(e.mem, "local", listing());

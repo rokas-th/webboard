@@ -46,6 +46,9 @@
   --active: rgba(255, 176, 0, 0.08);
   --rail: 28px;
   --row-h: 34px;
+  --list-row-h: 34px;
+  --card-pad: 9px 11px;
+  --glow: 1;
   --sidebar-w: 284px;
   --panel-w: 360px;
   --grid-w: 300px;
@@ -61,4 +64,19 @@
 
 html[data-form="phone"] {
   --grid-w: 132px;
+}
+
+html[data-density="compact"] {
+  --list-row-h: 28px;
+  --card-pad: 5px 9px;
+}
+
+html[data-glow="reduced"] {
+  --glow: 0;
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --glow: 0;
+  }
 }

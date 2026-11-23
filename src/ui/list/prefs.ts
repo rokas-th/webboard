@@ -6,7 +6,7 @@ import { CHIP_LIMIT, LIST_PREFS_UNREADABLE, recordText, SORT_LIMIT } from "./tex
 
 export type ColumnId = "name" | "step" | "status" | "assignees" | "start" | "end" | "days" | "progress" | "late" | "deps" | "blocks" | "group" | "kind" | "note";
 
-export type ScopeId = "open" | "soon" | "late" | "blocked" | "unscheduled" | "unassigned" | "milestones" | "done" | "all";
+export type ScopeId = "open" | "soon" | "late" | "blocked" | "unscheduled" | "unassigned" | "milestones" | "done" | "all" | "mine";
 
 export type ChipField = "step" | "assignee" | "kind" | "group";
 
@@ -38,7 +38,7 @@ export interface ListPrefs {
   group: GroupBy;
 }
 
-export const SCOPE_IDS: readonly ScopeId[] = ["open", "soon", "late", "blocked", "unscheduled", "unassigned", "milestones", "done", "all"];
+export const SCOPE_IDS: readonly ScopeId[] = ["open", "soon", "late", "blocked", "unscheduled", "unassigned", "milestones", "done", "all", "mine"];
 
 export const MAX_SORT = 3;
 export const MAX_CHIPS = 32;

@@ -183,7 +183,7 @@ describe("PhoneStatus without sync (Task 6.7)", () => {
     vi.spyOn(registry, "indexError").mockReturnValue(new AppError("store.corrupt", CORRUPT_SPACE));
     vi.spyOn(registry, "indexErrorDoc").mockReturnValue("ix-sp000000000");
     function Host() {
-      const [ui, setUi] = useUi();
+      const [ui, setUi] = useUi("timeline");
       return (
         <UiContext.Provider value={{ ui, setUi }}>
           <OpenChoice.Provider value={vi.fn()}>

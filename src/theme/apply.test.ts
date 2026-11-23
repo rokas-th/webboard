@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { applyTokens, paintNative } from "./apply";
+import { applyLook, applyTokens, paintNative, zoomNative } from "./apply";
 import { PRESETS, tokensOf } from "./presets";
 
 const windowSet = vi.fn<(c: string) => Promise<void>>();
 const webviewSet = vi.fn<(c: string) => Promise<void>>();
+const webviewZoom = vi.fn<(f: number) => Promise<void>>();
 
 vi.unmock("./apply");
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ setBackgroundColor: windowSet }) }));
-vi.mock("@tauri-apps/api/webview", () => ({ getCurrentWebview: () => ({ setBackgroundColor: webviewSet }) }));
+vi.mock("@tauri-apps/api/webview", () => ({ getCurrentWebview: () => ({ setBackgroundColor: webviewSet, setZoom: webviewZoom }) }));
 
 const preset = (id: string) => {
   const t = PRESETS.find((p) => p.id === id);
@@ -57,5 +58,32 @@ describe("paintNative", () => {
     windowSet.mockResolvedValue(undefined);
     webviewSet.mockRejectedValue(new Error("not allowed"));
     await expect(paintNative("#0A0A14")).rejects.toThrow("not allowed");
+  });
+});
+
+describe("applyLook", () => {
+  it("stamps density, text size and glow on the root", () => {
+    const el = document.createElement("html");
+    applyLook(el, { density: "compact", text: "small", glow: "reduced" });
+    expect([el.dataset.density, el.dataset.textSize, el.dataset.glow]).toEqual(["compact", "small", "reduced"]);
+    applyLook(el, { density: "comfortable", text: "default", glow: "full" });
+    expect([el.getAttribute("data-density"), el.getAttribute("data-text-size"), el.getAttribute("data-glow")]).toEqual(["comfortable", "default", "full"]);
+  });
+});
+
+describe("zoomNative", () => {
+  beforeEach(() => {
+    webviewZoom.mockReset();
+  });
+
+  it("sets the webview zoom to the factor", async () => {
+    webviewZoom.mockResolvedValue(undefined);
+    await zoomNative(1.15);
+    expect(webviewZoom.mock.calls).toEqual([[1.15]]);
+  });
+
+  it("rejects when the webview refuses", async () => {
+    webviewZoom.mockRejectedValue(new Error("not allowed"));
+    await expect(zoomNative(0.92)).rejects.toThrow("not allowed");
   });
 });

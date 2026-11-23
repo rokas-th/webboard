@@ -4,7 +4,7 @@ import { Refused } from "../../actions/intents";
 import type { Pick, ResolveOptions } from "../../actions/resolve";
 import { OfferRefused } from "../../actions/undo";
 import { schedView } from "../../domain/derive";
-import { toDay } from "../../domain/dates";
+import { LOG_STYLE, toDay } from "../../domain/dates";
 import { lagThatHolds, type Conflict } from "../../domain/schedule";
 import { sideText, type Choice } from "../../plan/choices";
 import type { PlanSession } from "../../store/session";
@@ -196,7 +196,7 @@ describe("head counts", () => {
     expect(index).toBeGreaterThan(20);
     const scroll = one(".tl-scroll");
     expect(scroll.scrollTop).toBe(index * ROW);
-    const geo = geometry(view, uiNow()[0].zoom);
+    const geo = geometry(view, uiNow()[0].zoom, 1);
     const span = geo.span(first.succ);
     if (span === null) throw new Error("fixture: successor has no dates");
     expect(scroll.scrollLeft).toBe(Math.max(0, geo.x(span.start) - leadFor(0)));
@@ -460,7 +460,7 @@ describe("choice dialog", () => {
       expect(within(moves).getByText("Show what moves")).toBeTruthy();
       const sections = groupRows(rp.rows, plan);
       expect(all(".moves-title", moves).map((e) => e.textContent)).toEqual(sections.map((x) => x.title));
-      expect(all(".moves-line", moves).map((e) => e.textContent)).toEqual(sections.flatMap((x) => x.rows.map((r) => outcomeLine(r, plan))));
+      expect(all(".moves-line", moves).map((e) => e.textContent)).toEqual(sections.flatMap((x) => x.rows.map((r) => outcomeLine(r, plan, LOG_STYLE))));
     });
     expect(c.sides.some((s) => one(".choice-summary", columnOf(s.label)).textContent !== "moves 0")).toBe(true);
   });

@@ -27,8 +27,9 @@ export function ctxOf(
   const plan = projectPlan(PLAN_ID, log);
   const cs = choices(log, plan, devices);
   const held = heldItems(cs, plan);
+  const former = formerPeople(log, plan);
   return {
-    view: { plan, derived: derive(plan, held, today), people: projectPeople(plan, formerPeople(log, plan)), defaults: projectDefaults(plan, defaultNames(log, plan)), choices: cs, held, pending: log.pending.length, today, unreadable: [], newer: false },
+    view: { plan, derived: derive(plan, held, today), people: projectPeople(plan, former), former, defaults: projectDefaults(plan, defaultNames(log, plan)), choices: cs, held, pending: log.pending.length, today, unreadable: [], newer: false },
     log,
     dev,
     ses: o.ses ?? "s-" + dev,

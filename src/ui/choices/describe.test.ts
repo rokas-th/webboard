@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HolidayDay, HolidayYear, RegionRef } from "../../domain/calendar";
 import type { PlanState } from "../../domain/model";
+import { LOG_STYLE } from "../../domain/dates";
 import type { PlanSession } from "../../store/session";
 import { testSession, type TestSession, type TestSessionOpts, type SeedItem } from "../../test/session";
 import { bannerText, describeUnit, heldChoice, itemChoices, unitSubject } from "./describe";
@@ -44,97 +45,97 @@ const withRegion = (plan: PlanState, region: RegionRef | null): PlanState => ({ 
 describe("describeUnit", () => {
   it("reads a schedule", async () => {
     const plan = await groupsPlan();
-    expect(describeUnit("s:a", ["2026-11-25", 4, "doing", 40, "now"], plan, NONE)).toBe("starts 25 Nov · 4 working days · in progress");
-    expect(describeUnit("s:a", ["2026-11-25", 4, "todo", 0, "now"], plan, NONE)).toBe("starts 25 Nov · 4 working days");
-    expect(describeUnit("s:a", ["2026-11-25", 1, "done", 100, "later"], plan, NONE)).toBe("starts 25 Nov · 1 working day · done");
-    expect(describeUnit("s:a", ["2026-11-25", 0, "todo", 0, "now"], plan, NONE)).toBe("starts 25 Nov");
-    expect(describeUnit("s:a", [null, 4, "todo", 0, "later"], plan, NONE)).toBe("unscheduled · 4 working days");
+    expect(describeUnit("s:a", ["2026-11-25", 4, "doing", 40, "now"], plan, NONE, LOG_STYLE, 1)).toBe("starts 25 Nov · 4 working days · in progress");
+    expect(describeUnit("s:a", ["2026-11-25", 4, "todo", 0, "now"], plan, NONE, LOG_STYLE, 1)).toBe("starts 25 Nov · 4 working days");
+    expect(describeUnit("s:a", ["2026-11-25", 1, "done", 100, "later"], plan, NONE, LOG_STYLE, 1)).toBe("starts 25 Nov · 1 working day · done");
+    expect(describeUnit("s:a", ["2026-11-25", 0, "todo", 0, "now"], plan, NONE, LOG_STYLE, 1)).toBe("starts 25 Nov");
+    expect(describeUnit("s:a", [null, 4, "todo", 0, "later"], plan, NONE, LOG_STYLE, 1)).toBe("unscheduled · 4 working days");
   });
 
   it("reads names, existence and place", async () => {
     const plan = await groupsPlan();
-    expect(describeUnit("n:a", "Plan file format", plan, NONE)).toBe("“Plan file format”");
-    expect(describeUnit("pn", "MESA 1.0", plan, NONE)).toBe("“MESA 1.0”");
-    expect(describeUnit("e:a", { k: "task", t: true }, plan, NONE)).toBe("in the Trash");
-    expect(describeUnit("e:a", { k: "task", t: false }, plan, NONE)).toBe("in the plan");
-    expect(describeUnit("p:a", ["S", "a0"], plan, NONE)).toBe("in “Sprint 4”");
-    expect(describeUnit("p:a", ["Q", "a0"], plan, NONE)).toBe("in “Sprint 4 › QA”");
-    expect(describeUnit("p:a", [null, "a0"], plan, NONE)).toBe("at the top level");
+    expect(describeUnit("n:a", "Plan file format", plan, NONE, LOG_STYLE, 1)).toBe("“Plan file format”");
+    expect(describeUnit("pn", "MESA 1.0", plan, NONE, LOG_STYLE, 1)).toBe("“MESA 1.0”");
+    expect(describeUnit("e:a", { k: "task", t: true }, plan, NONE, LOG_STYLE, 1)).toBe("in the Trash");
+    expect(describeUnit("e:a", { k: "task", t: false }, plan, NONE, LOG_STYLE, 1)).toBe("in the plan");
+    expect(describeUnit("p:a", ["S", "a0"], plan, NONE, LOG_STYLE, 1)).toBe("in “Sprint 4”");
+    expect(describeUnit("p:a", ["Q", "a0"], plan, NONE, LOG_STYLE, 1)).toBe("in “Sprint 4 › QA”");
+    expect(describeUnit("p:a", [null, "a0"], plan, NONE, LOG_STYLE, 1)).toBe("at the top level");
   });
 
   it("reads references, sorted, without their values", async () => {
     const plan = await groupsPlan();
-    expect(describeUnit("r:a", {}, plan, NONE)).toBe("no references");
-    expect(describeUnit("r:a", { "ticket:x/y#1": "" }, plan, NONE)).toBe("1 reference: ticket:x/y#1");
-    expect(describeUnit("r:a", { "ticket:x/y#2": "", "ticket:x/y#1": "" }, plan, NONE)).toBe("2 references: ticket:x/y#1, ticket:x/y#2");
+    expect(describeUnit("r:a", {}, plan, NONE, LOG_STYLE, 1)).toBe("no references");
+    expect(describeUnit("r:a", { "ticket:x/y#1": "" }, plan, NONE, LOG_STYLE, 1)).toBe("1 reference: ticket:x/y#1");
+    expect(describeUnit("r:a", { "ticket:x/y#2": "", "ticket:x/y#1": "" }, plan, NONE, LOG_STYLE, 1)).toBe("2 references: ticket:x/y#1, ticket:x/y#2");
   });
 
   it("reads a link", async () => {
     const plan = await groupsPlan();
-    expect(describeUnit("l:a>b", ["SS", 2], plan, NONE)).toBe("SS +2d");
-    expect(describeUnit("l:a>b", ["FS", 0], plan, NONE)).toBe("FS");
-    expect(describeUnit("l:a>b", ["FF", -1], plan, NONE)).toBe("FF −1d");
-    expect(describeUnit("l:a>b", null, plan, NONE)).toBe("no link");
+    expect(describeUnit("l:a>b", ["SS", 2], plan, NONE, LOG_STYLE, 1)).toBe("SS +2d");
+    expect(describeUnit("l:a>b", ["FS", 0], plan, NONE, LOG_STYLE, 1)).toBe("FS");
+    expect(describeUnit("l:a>b", ["FF", -1], plan, NONE, LOG_STYLE, 1)).toBe("FF −1d");
+    expect(describeUnit("l:a>b", null, plan, NONE, LOG_STYLE, 1)).toBe("no link");
   });
 
   it("reads weekdays and the holiday region", async () => {
     const plan = await groupsPlan();
-    expect(describeUnit("cw", [1, 2, 3, 4], plan, NONE)).toBe("Mon–Thu");
-    expect(describeUnit("cw", [1, 3, 5], plan, NONE)).toBe("Mon, Wed, Fri");
-    expect(describeUnit("cr", { src: "openholidays", country: "CH", subdivision: "CH-ZH" }, plan, NONE)).toBe("holiday region CH-ZH");
-    expect(describeUnit("cr", { src: "openholidays", country: "CH", subdivision: null }, plan, NONE)).toBe("holiday region CH");
-    expect(describeUnit("cr", { src: "govuk", division: "scotland" }, plan, NONE)).toBe("holiday region Scotland");
-    expect(describeUnit("cr", { src: "opm" }, plan, NONE)).toBe("holiday region US federal (OPM)");
-    expect(describeUnit("cr", { src: "ics", url: "https://x.example/a.ics", name: "Team" }, plan, NONE)).toBe("holiday region “Team”");
-    expect(describeUnit("cr", null, plan, NONE)).toBe("no holiday region");
+    expect(describeUnit("cw", [1, 2, 3, 4], plan, NONE, LOG_STYLE, 1)).toBe("Mon–Thu");
+    expect(describeUnit("cw", [1, 3, 5], plan, NONE, LOG_STYLE, 1)).toBe("Mon, Wed, Fri");
+    expect(describeUnit("cr", { src: "openholidays", country: "CH", subdivision: "CH-ZH" }, plan, NONE, LOG_STYLE, 1)).toBe("holiday region CH-ZH");
+    expect(describeUnit("cr", { src: "openholidays", country: "CH", subdivision: null }, plan, NONE, LOG_STYLE, 1)).toBe("holiday region CH");
+    expect(describeUnit("cr", { src: "govuk", division: "scotland" }, plan, NONE, LOG_STYLE, 1)).toBe("holiday region Scotland");
+    expect(describeUnit("cr", { src: "opm" }, plan, NONE, LOG_STYLE, 1)).toBe("holiday region US federal (OPM)");
+    expect(describeUnit("cr", { src: "ics", url: "https://x.example/a.ics", name: "Team" }, plan, NONE, LOG_STYLE, 1)).toBe("holiday region “Team”");
+    expect(describeUnit("cr", null, plan, NONE, LOG_STYLE, 1)).toBe("no holiday region");
   });
 
   it("reads closures and tuning", async () => {
     const plan = await groupsPlan();
-    expect(describeUnit("cc:c1", ["2026-12-28", "2026-12-31", "Year-end"], plan, NONE)).toBe("closure 28–31 Dec “Year-end”");
-    expect(describeUnit("cc:c1", ["2026-12-28", "2027-01-02", "Year-end"], plan, NONE)).toBe("closure 28 Dec–2 Jan “Year-end”");
-    expect(describeUnit("cc:c1", ["2026-12-24", "2026-12-24", "Eve"], plan, NONE)).toBe("closure 24 Dec “Eve”");
-    expect(describeUnit("cc:c1", null, plan, NONE)).toBe("no closure");
-    expect(describeUnit("ct:2026-11-17", { kind: "add", name: "Away" }, plan, NONE)).toBe("day off “Away”");
-    expect(describeUnit("ct:2026-11-17", { kind: "work" }, plan, NONE)).toBe("work this day");
-    expect(describeUnit("ct:2026-11-17", { kind: "off" }, plan, NONE)).toBe("counted as a day off");
-    expect(describeUnit("ct:2026-11-17", null, plan, NONE)).toBe("not tuned");
+    expect(describeUnit("cc:c1", ["2026-12-28", "2026-12-31", "Year-end"], plan, NONE, LOG_STYLE, 1)).toBe("closure 28–31 Dec “Year-end”");
+    expect(describeUnit("cc:c1", ["2026-12-28", "2027-01-02", "Year-end"], plan, NONE, LOG_STYLE, 1)).toBe("closure 28 Dec–2 Jan “Year-end”");
+    expect(describeUnit("cc:c1", ["2026-12-24", "2026-12-24", "Eve"], plan, NONE, LOG_STYLE, 1)).toBe("closure 24 Dec “Eve”");
+    expect(describeUnit("cc:c1", null, plan, NONE, LOG_STYLE, 1)).toBe("no closure");
+    expect(describeUnit("ct:2026-11-17", { kind: "add", name: "Away" }, plan, NONE, LOG_STYLE, 1)).toBe("day off “Away”");
+    expect(describeUnit("ct:2026-11-17", { kind: "work" }, plan, NONE, LOG_STYLE, 1)).toBe("work this day");
+    expect(describeUnit("ct:2026-11-17", { kind: "off" }, plan, NONE, LOG_STYLE, 1)).toBe("counted as a day off");
+    expect(describeUnit("ct:2026-11-17", null, plan, NONE, LOG_STYLE, 1)).toBe("not tuned");
   });
 
   it("reads a holiday year by its source", async () => {
     const plan = await groupsPlan();
-    expect(describeUnit("ch:2027", year("oh:CH:CH-ZH", 9), plan, NONE)).toBe("2027: 9 days from OpenHolidays");
-    expect(describeUnit("ch:2027", year("oh:CH:CH-ZH", 1), plan, NONE)).toBe("2027: 1 day from OpenHolidays");
-    expect(describeUnit("ch:2027", year("govuk:scotland", 9), plan, NONE)).toBe("2027: 9 days from GOV.UK");
-    expect(describeUnit("ch:2027", year("opm", 9), plan, NONE)).toBe("2027: 9 days from US OPM");
+    expect(describeUnit("ch:2027", year("oh:CH:CH-ZH", 9), plan, NONE, LOG_STYLE, 1)).toBe("2027: 9 days from OpenHolidays");
+    expect(describeUnit("ch:2027", year("oh:CH:CH-ZH", 1), plan, NONE, LOG_STYLE, 1)).toBe("2027: 1 day from OpenHolidays");
+    expect(describeUnit("ch:2027", year("govuk:scotland", 9), plan, NONE, LOG_STYLE, 1)).toBe("2027: 9 days from GOV.UK");
+    expect(describeUnit("ch:2027", year("opm", 9), plan, NONE, LOG_STYLE, 1)).toBe("2027: 9 days from US OPM");
     const ics = withRegion(plan, { src: "ics", url: "https://x.example/a.ics", name: "Team" });
-    expect(describeUnit("ch:2027", year("ics:https://x.example/a.ics", 9), ics, NONE)).toBe("2027: 9 days from “Team”");
-    expect(describeUnit("ch:2027", year("ics:https://y.example/b.ics", 9), ics, NONE)).toBe("2027: 9 days from a calendar link");
-    expect(describeUnit("ch:2027", null, plan, NONE)).toBe("2027: no holiday data");
+    expect(describeUnit("ch:2027", year("ics:https://x.example/a.ics", 9), ics, NONE, LOG_STYLE, 1)).toBe("2027: 9 days from “Team”");
+    expect(describeUnit("ch:2027", year("ics:https://y.example/b.ics", 9), ics, NONE, LOG_STYLE, 1)).toBe("2027: 9 days from a calendar link");
+    expect(describeUnit("ch:2027", null, plan, NONE, LOG_STYLE, 1)).toBe("2027: no holiday data");
   });
 
   it("reads baselines and activity", async () => {
     const plan = await groupsPlan();
-    expect(describeUnit("b:B1", { name: "Before", at: "2026-11-09", dates: {} }, plan, NONE)).toBe("baseline “Before”");
-    expect(describeUnit("b:B1", null, plan, NONE)).toBe("removed");
-    expect(describeUnit("a:x1", true, plan, NONE)).toBe("this change stands");
-    expect(describeUnit("a:x1", false, plan, new Map([["x1", "Moved “Review”"]]))).toBe("this change is undone: Moved “Review”");
-    expect(() => describeUnit("a:x1", false, plan, NONE)).toThrow(new Error("No label for action x1"));
+    expect(describeUnit("b:B1", { name: "Before", at: "2026-11-09", dates: {} }, plan, NONE, LOG_STYLE, 1)).toBe("baseline “Before”");
+    expect(describeUnit("b:B1", null, plan, NONE, LOG_STYLE, 1)).toBe("removed");
+    expect(describeUnit("a:x1", true, plan, NONE, LOG_STYLE, 1)).toBe("this change stands");
+    expect(describeUnit("a:x1", false, plan, new Map([["x1", "Moved “Review”"]]), LOG_STYLE, 1)).toBe("this change is undone: Moved “Review”");
+    expect(() => describeUnit("a:x1", false, plan, NONE, LOG_STYLE, 1)).toThrow(new Error("No label for action x1"));
   });
 
   it("reads a step and an item's step", async () => {
     const base = await groupsPlan();
     const plan: PlanState = { ...base, workflow: { steps: new Map([["qa", { n: "QA", c: "sky", o: "a1V" }], ["later", null]]), items: new Map() } };
-    expect(describeUnit("ws:qa", { n: "QA", c: "sky", o: "a1V" }, plan, NONE)).toBe("step “QA” · sky");
-    expect(describeUnit("ws:qa", { n: "Ship", c: "lime", o: "a1V", d: true }, plan, NONE)).toBe("step “Ship” · lime · completes");
-    expect(describeUnit("ws:qa", { n: "QA", c: "sky", o: "a1V", l: 4 }, plan, NONE)).toBe("step “QA” · sky · limit 4");
-    expect(describeUnit("ws:done", { n: "Done", c: "lime", o: "a3", d: true, l: 12 }, plan, NONE)).toBe("step “Done” · lime · completes · limit 12");
-    expect(describeUnit("ws:qa", null, plan, NONE)).toBe("removed");
-    expect(describeUnit("wi:a", null, plan, NONE)).toBe("no step");
-    expect(describeUnit("wi:a", "qa", plan, NONE)).toBe("in step “QA”");
-    expect(describeUnit("wi:a", "now", plan, NONE)).toBe("in step “Now”");
-    expect(describeUnit("wi:a", "later", plan, NONE)).toBe("in a removed step");
-    expect(describeUnit("wi:a", "gone", plan, NONE)).toBe("in a removed step");
+    expect(describeUnit("ws:qa", { n: "QA", c: "sky", o: "a1V" }, plan, NONE, LOG_STYLE, 1)).toBe("step “QA” · sky");
+    expect(describeUnit("ws:qa", { n: "Ship", c: "lime", o: "a1V", d: true }, plan, NONE, LOG_STYLE, 1)).toBe("step “Ship” · lime · completes");
+    expect(describeUnit("ws:qa", { n: "QA", c: "sky", o: "a1V", l: 4 }, plan, NONE, LOG_STYLE, 1)).toBe("step “QA” · sky · limit 4");
+    expect(describeUnit("ws:done", { n: "Done", c: "lime", o: "a3", d: true, l: 12 }, plan, NONE, LOG_STYLE, 1)).toBe("step “Done” · lime · completes · limit 12");
+    expect(describeUnit("ws:qa", null, plan, NONE, LOG_STYLE, 1)).toBe("removed");
+    expect(describeUnit("wi:a", null, plan, NONE, LOG_STYLE, 1)).toBe("no step");
+    expect(describeUnit("wi:a", "qa", plan, NONE, LOG_STYLE, 1)).toBe("in step “QA”");
+    expect(describeUnit("wi:a", "now", plan, NONE, LOG_STYLE, 1)).toBe("in step “Now”");
+    expect(describeUnit("wi:a", "later", plan, NONE, LOG_STYLE, 1)).toBe("in a removed step");
+    expect(describeUnit("wi:a", "gone", plan, NONE, LOG_STYLE, 1)).toBe("in a removed step");
   });
 
   it("reads a person and an item's assignees", async () => {
@@ -150,15 +151,15 @@ describe("describeUnit", () => {
         assignees: new Map(),
       },
     };
-    expect(describeUnit("pp:mira", { n: "Mira Okafor", i: "MO", c: "cyan", o: "a1" }, plan, NONE)).toBe("person “Mira Okafor” · MO · cyan");
-    expect(describeUnit("pp:mira", null, plan, NONE)).toBe("removed");
-    expect(describeUnit("pa:a", null, plan, NONE)).toBe("unassigned");
-    expect(describeUnit("pa:a", [], plan, NONE)).toBe("unassigned");
-    expect(describeUnit("pa:a", ["mira"], plan, NONE)).toBe("assigned to “Mira Okafor”");
-    expect(describeUnit("pa:a", ["gone", "mira"], plan, NONE)).toBe("assigned to “Mira Okafor” and a former person");
-    expect(describeUnit("pa:a", ["mira", "ole"], plan, NONE)).toBe("assigned to “Ole Berg” and “Mira Okafor”");
-    expect(describeUnit("pa:a", ["gone", "mira", "nobody", "ole"], plan, NONE)).toBe("assigned to “Ole Berg”, “Mira Okafor” and 2 former people");
-    expect(describeUnit("pa:a", ["gone"], plan, NONE)).toBe("assigned to a former person");
+    expect(describeUnit("pp:mira", { n: "Mira Okafor", i: "MO", c: "cyan", o: "a1" }, plan, NONE, LOG_STYLE, 1)).toBe("person “Mira Okafor” · MO · cyan");
+    expect(describeUnit("pp:mira", null, plan, NONE, LOG_STYLE, 1)).toBe("removed");
+    expect(describeUnit("pa:a", null, plan, NONE, LOG_STYLE, 1)).toBe("unassigned");
+    expect(describeUnit("pa:a", [], plan, NONE, LOG_STYLE, 1)).toBe("unassigned");
+    expect(describeUnit("pa:a", ["mira"], plan, NONE, LOG_STYLE, 1)).toBe("assigned to “Mira Okafor”");
+    expect(describeUnit("pa:a", ["gone", "mira"], plan, NONE, LOG_STYLE, 1)).toBe("assigned to “Mira Okafor” and a former person");
+    expect(describeUnit("pa:a", ["mira", "ole"], plan, NONE, LOG_STYLE, 1)).toBe("assigned to “Ole Berg” and “Mira Okafor”");
+    expect(describeUnit("pa:a", ["gone", "mira", "nobody", "ole"], plan, NONE, LOG_STYLE, 1)).toBe("assigned to “Ole Berg”, “Mira Okafor” and 2 former people");
+    expect(describeUnit("pa:a", ["gone"], plan, NONE, LOG_STYLE, 1)).toBe("assigned to a former person");
   });
 
   it("reads the plan's defaults", async () => {
@@ -169,13 +170,13 @@ describe("describeUnit", () => {
       workflow: { steps: new Map([["review", { n: "Review", c: "amber", o: "a15" }], ["later", null]]), items: new Map() },
     };
     const pd = { dur: 5, dated: false, who: "mira", group: "S", step: "review" };
-    expect(describeUnit("pd", pd, plan, NONE)).toBe("5 days · undated · “Mira Okafor” · into “Sprint 4” · to “Review”");
-    expect(describeUnit("pd", { dur: 1, dated: true, who: null, group: null, step: null }, plan, NONE)).toBe("1 day · dated · nobody · plan root · first open step");
-    expect(describeUnit("pd", { ...pd, who: "gone", group: "a", step: "later" }, plan, NONE)).toBe("5 days · undated · a removed person · into “Review”, not a group · to a removed step");
-    expect(describeUnit("pd", { ...pd, who: "nobody", group: "zz", step: "zz" }, plan, NONE)).toBe("5 days · undated · a removed person · into a missing group · to a removed step");
+    expect(describeUnit("pd", pd, plan, NONE, LOG_STYLE, 1)).toBe("5 days · undated · “Mira Okafor” · into “Sprint 4” · to “Review”");
+    expect(describeUnit("pd", { dur: 1, dated: true, who: null, group: null, step: null }, plan, NONE, LOG_STYLE, 1)).toBe("1 day · dated · nobody · plan root · first open step");
+    expect(describeUnit("pd", { ...pd, who: "gone", group: "a", step: "later" }, plan, NONE, LOG_STYLE, 1)).toBe("5 days · undated · a removed person · into “Review”, not a group · to a removed step");
+    expect(describeUnit("pd", { ...pd, who: "nobody", group: "zz", step: "zz" }, plan, NONE, LOG_STYLE, 1)).toBe("5 days · undated · a removed person · into a missing group · to a removed step");
     const trashed: PlanState = { ...plan, items: new Map([...plan.items].map(([id, i]) => [id, id === "S" ? { ...i, trashed: true } : i])) };
-    expect(describeUnit("pd", { ...pd, step: "done" }, trashed, NONE)).toBe("5 days · undated · “Mira Okafor” · into “Sprint 4” (in the Trash) · to “Done”, which completes items");
-    expect(() => describeUnit("pd", { ...pd, dur: 0 }, plan, NONE)).toThrow("pd: dur is not a whole number from 1 to 3650: 0");
+    expect(describeUnit("pd", { ...pd, step: "done" }, trashed, NONE, LOG_STYLE, 1)).toBe("5 days · undated · “Mira Okafor” · into “Sprint 4” (in the Trash) · to “Done”, which completes items");
+    expect(() => describeUnit("pd", { ...pd, dur: 0 }, plan, NONE, LOG_STYLE, 1)).toThrow("pd: dur is not a whole number from 1 to 3650: 0");
   });
 });
 

@@ -54,11 +54,61 @@ export function localToday(now: Date = new Date()): IsoDate {
   return `${pad(now.getFullYear(), 4)}-${pad(now.getMonth() + 1, 2)}-${pad(now.getDate(), 2)}`;
 }
 
-export function fmtShort(d: IsoDate): string {
-  toDay(d);
-  return `${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1]}`;
+export type DateFormat = "system" | "iso" | "dmy";
+export type WeekStart = 1 | 7;
+export type DayOrder = "dm" | "md";
+
+export interface DateStyle {
+  format: DateFormat;
+  order: DayOrder;
 }
 
-export function fmtNear(d: IsoDate, today: IsoDate): string {
-  return d.slice(0, 4) === today.slice(0, 4) ? fmtShort(d) : `${fmtShort(d)} ${d.slice(0, 4)}`;
+export const DATE_FORMATS: readonly DateFormat[] = ["system", "iso", "dmy"];
+export const WEEK_STARTS: readonly WeekStart[] = [1, 7];
+
+export const LOG_STYLE: DateStyle = Object.freeze({ format: "system", order: "dm" });
+
+const ORDER_PROBE = new Date(Date.UTC(2027, 2, 15));
+
+export function dayOrderOf(locale: string): DayOrder {
+  const parts = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone: "UTC" }).formatToParts(ORDER_PROBE);
+  const day = parts.findIndex((x) => x.type === "day");
+  const month = parts.findIndex((x) => x.type === "month");
+  if (day < 0 || month < 0) throw new Error(`the ${locale} locale writes a date without a day or a month`);
+  return day < month ? "dm" : "md";
+}
+
+const partsOf = (d: IsoDate): { y: string; m: string; day: number } => {
+  toDay(d);
+  return { y: d.slice(0, 4), m: MONTHS[Number(d.slice(5, 7)) - 1], day: Number(d.slice(8, 10)) };
+};
+
+export function fmtShort(d: IsoDate, style: DateStyle): string {
+  const { y, m, day } = partsOf(d);
+  switch (style.format) {
+    case "iso":
+      return d;
+    case "dmy":
+      return `${day}.${Number(d.slice(5, 7))}.${y}`;
+    case "system":
+      return style.order === "dm" ? `${day} ${m}` : `${m} ${day}`;
+  }
+}
+
+export function fmtFull(d: IsoDate, style: DateStyle): string {
+  const { y, m, day } = partsOf(d);
+  if (style.format !== "system") return fmtShort(d, style);
+  return style.order === "dm" ? `${day} ${m} ${y}` : `${m} ${day} ${y}`;
+}
+
+export function fmtNear(d: IsoDate, today: IsoDate, style: DateStyle): string {
+  return d.slice(0, 4) === today.slice(0, 4) ? fmtShort(d, style) : fmtFull(d, style);
+}
+
+export function weekStartOf(day: Day, week: WeekStart): Day {
+  return day - ((weekday(day) - week + 7) % 7);
+}
+
+export function weekdaysFrom(week: WeekStart): readonly Weekday[] {
+  return WEEKDAYS.map((_, i) => WEEKDAYS[(week - 1 + i) % 7]);
 }

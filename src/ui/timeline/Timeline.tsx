@@ -9,6 +9,7 @@ import { EMPTY_PLAN } from "../copy";
 import { useRun } from "../run";
 import { planMatcher } from "../search/match";
 import { useUiValue, type Zoom } from "../state";
+import { useDateStyle, useDevice } from "../DeviceProvider";
 import { PaneDivider } from "../shell/PaneDivider";
 import { PHONE_OUTLINE } from "../shell/paneLayout";
 import type { PaneState } from "../shell/panes";
@@ -143,7 +144,9 @@ export function Timeline(p: { session: PlanSession; outline: OutlineControl; rea
   const { run } = useRun(p.session);
   const [width, setWidth] = useState(0);
   const fitWidth = ui.zoom === "F" ? width : undefined;
-  const geo = useMemo(() => geometry(view, ui.zoom, fitWidth), [view, ui.zoom, fitWidth]);
+  const week = useDevice().prefs.week;
+  const style = useDateStyle();
+  const geo = useMemo(() => geometry(view, ui.zoom, week, fitWidth), [view, ui.zoom, week, fitWidth]);
   const rows = useMemo(() => timelineRows(view, ui.collapsed), [view, ui.collapsed]);
   const marks = useMemo(() => marksOf(view), [view]);
   const query = ui.query.trim();
@@ -442,6 +445,7 @@ export function Timeline(p: { session: PlanSession; outline: OutlineControl; rea
                 temp={temp}
                 touch={touch}
                 match={match}
+                style={style}
               />
             </div>
           </div>

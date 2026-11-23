@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useReducer, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import type { RegionRef } from "../../domain/calendar";
 import type { PlanId } from "../../domain/model";
+import { readPlatform } from "../../platform";
 import { AppError } from "../../services/ipc";
 import type { PlanListing } from "../../store/registry";
 import type { Clock } from "../../services/clock";
@@ -11,7 +12,6 @@ import { docName, useSyncRegistry, useSyncState } from "../../sync/SyncProvider"
 import { DISCARDED, useTheme, type ThemeApi } from "../../theme/ThemeContext";
 import { CalendarBody, type CalendarStash } from "../calendar/CalendarDialog";
 import { messageOf } from "../calendar/message";
-import { AboutText } from "../common/About";
 import { Dialog, focusables } from "../common/Dialog";
 import { requestCloseOf, type AfterClose, type CloseReason } from "../common/dismiss";
 import { Sheet } from "../common/Sheet";
@@ -19,17 +19,19 @@ import { toast } from "../common/Toast";
 import { Baselines } from "../panel/Baselines";
 import { commitPlanName } from "../panel/planName";
 import { TextField } from "../panel/TextField";
-import { ImportButton } from "../phone/PlansSheet";
 import { useRun } from "../run";
-import { exportFlow, exportListCsvFlow } from "../shell/fileFlows";
+import { backupFlow } from "../shell/fileFlows";
 import type { PlanFiles } from "../shell/selection";
 import { syncTone } from "../shell/SyncChip";
-import { UpdateLine, useUpdates } from "../shell/UpdateLine";
+import { useUpdates } from "../shell/UpdateLine";
 import type { SettingsSection, SyncPane } from "../state";
 import { isSyncPane, SyncPanes } from "../sync/SyncPanes";
 import { ThemeBody } from "../theme/ThemePanel";
 import type { SettingsFrame } from "./frame";
 import { Defaults } from "./Defaults";
+import { Files } from "./Files";
+import { General } from "./General";
+import { Look } from "./Look";
 import { saveSection } from "./lastSection";
 import { People } from "./People";
 import { Row, rowKey } from "./Row";
@@ -52,9 +54,10 @@ export type SettingsCloser = (reason: CloseReason, then?: AfterClose) => boolean
 export interface SettingsProps {
   frame: SettingsFrame;
   section: SettingsSection;
+  row: string | null;
+  onRowShown(): void;
   session: PlanSession | null;
   readOnly: boolean;
-  device: string;
   clock: Clock;
   hover: boolean;
   closer: RefObject<SettingsCloser | null>;
@@ -67,6 +70,9 @@ export interface SettingsProps {
 }
 
 export interface SettingsWorld {
+  device: string;
+  renameDevice(name: string): void;
+  backup(): void;
   sync: SyncState;
   syncName(doc: string): string | null;
   updates: Updates | null;
@@ -220,7 +226,7 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
   const api = useTheme();
   const planId = p.session === null ? null : p.session.view().plan.id;
   const planName = usePlanName(p.session);
-  const list = shownSections(p.session !== null, p.updates !== null);
+  const list = shownSections(p.session !== null, p.updates !== null, readPlatform(window));
   const [owner, setOwner] = useState<PlanId | null>(planId);
   const [asked, setAsked] = useState<SettingsSection>(p.section);
   const fresh = asked !== p.section;
@@ -284,6 +290,25 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
     previewed.current = shown;
     api.preview(null);
   }, [shown, api]);
+
+  const askedRow = p.row === null ? null : (list.find((s) => s.id === shown)?.rows.find((r) => r.id === p.row) ?? null);
+  if (p.row !== null && askedRow === null) throw new Error(`Settings: ${shown} has no row ${p.row} to open at`);
+  useLayoutEffect(() => {
+    if (askedRow === null) return;
+    setJump({ section: shown, row: askedRow });
+    latest.current.onRowShown();
+  }, [askedRow, shown]);
+
+  useLayoutEffect(() => {
+    if (frame !== "sheet" || jump === null || jump.row === null) return;
+    const sheet = body.current;
+    if (sheet === null) throw new Error("Settings: the sheet has no list to scroll to a row");
+    const key = rowKey(jump.section, jump.row.id);
+    const row = sheet.querySelector<HTMLElement>(`[data-settings-row="${key}"]`);
+    if (row === null) throw new Error(`Settings: the ${key} row is not in the sheet`);
+    row.scrollIntoView({ block: "nearest" });
+    focusables(row)[0]?.focus();
+  }, [frame, jump]);
 
   useLayoutEffect(() => {
     if (frame !== "modal") return;
@@ -356,23 +381,14 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
   const content = (s: SectionSpec): ReactNode => {
     switch (s.id) {
       case "general":
+        return <General session={p.session} device={p.device} renameDevice={p.renameDevice} clock={p.clock} updates={p.updates} onPeople={toPeople} />;
+      case "theme":
         return (
           <>
-            <Row section="general" row="device" label="This device">
-              <span className="settings-value">{p.device}</span>
-            </Row>
-            {p.updates !== null && (
-              <Row section="general" row="updates" label="Updates">
-                <UpdateLine updates={p.updates} />
-              </Row>
-            )}
-            <Row section="general" row="about" label="About" className="settings-about">
-              <AboutText />
-            </Row>
+            <ThemeBody hover={p.hover} />
+            <Look />
           </>
         );
-      case "theme":
-        return <ThemeBody hover={p.hover} />;
       case "sync":
         return (
           <>
@@ -382,33 +398,8 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
             <div className="settings-sync">{p.syncPanes}</div>
           </>
         );
-      case "files": {
-        const session = p.session;
-        return (
-          <>
-            <Row section="files" row="import" label="Import">
-              <ImportButton files={p.files} />
-            </Row>
-            <Row section="files" row="export" label="Export" className={session === null ? undefined : "settings-export"}>
-              {session === null ? (
-                <span className="settings-value dim">Open a plan to export it.</span>
-              ) : (
-                <>
-                  <div className="actions">
-                    <button type="button" onClick={() => void exportFlow(session)}>
-                      Export plan…
-                    </button>
-                    <button type="button" onClick={() => void exportListCsvFlow(session)}>
-                      Export List as CSV…
-                    </button>
-                  </div>
-                  <p className="settings-value dim">CSV holds the List&apos;s columns, sort, scope and filters on this device.</p>
-                </>
-              )}
-            </Row>
-          </>
-        );
-      }
+      case "files":
+        return <Files session={p.session} files={p.files} clock={p.clock} backup={p.backup} />;
       case "overview":
         return <OverviewSection session={planSession(s.id)} readOnly={p.readOnly} />;
       case "people":
@@ -542,5 +533,19 @@ export function Settings(p: SettingsProps) {
   const panes = <SyncPanes pane={p.syncPane} frame={p.frame === "sheet" ? "sheet" : "dialog"} onPane={p.onSyncPane} />;
   const planId = p.session === null ? null : p.session.view().plan.id;
   const planLocked = trashLocked(registry.plans(), planId, registry.spaceReadOnly());
-  return <SettingsView {...p} sync={state} syncName={docName(registry)} updates={updates} syncPanes={panes} planLocked={planLocked} />;
+  const subscribe = useCallback((cb: () => void) => registry.subscribe(cb), [registry]);
+  const device = useSyncExternalStore(subscribe, () => registry.device.name);
+  return (
+    <SettingsView
+      {...p}
+      device={device}
+      renameDevice={(name) => registry.renameDevice(name)}
+      backup={() => void backupFlow(registry, p.clock)}
+      sync={state}
+      syncName={docName(registry)}
+      updates={updates}
+      syncPanes={panes}
+      planLocked={planLocked}
+    />
+  );
 }

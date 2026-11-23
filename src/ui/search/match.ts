@@ -43,4 +43,4 @@ export function searchMatcher(ctx: RowContext, query: string): Matcher | null {
 }
 
 export const planMatcher = (view: PlanView, notes: NoteText, query: string): Matcher | null =>
-  searchQuery(query) === "" ? null : searchMatcher(rowContext(view, notes), query);
+  searchQuery(query) === "" ? null : searchMatcher(rowContext(view, notes, null, null), query);

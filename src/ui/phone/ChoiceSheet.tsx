@@ -11,6 +11,7 @@ import { orderedSides } from "../choices/order";
 import { groupRows, outcomeLine } from "../choices/outcome";
 import { CHOICE_TITLE, DEFAULTS, pickOf, usePicks, useSettledClose, type Picks } from "../choices/pick";
 import { sideContent, type SideContent } from "../choices/side";
+import { useDateStyle, useDevice } from "../DeviceProvider";
 import { Sheet } from "../common/Sheet";
 import { useExec } from "../run";
 import { useReadOnly } from "./readOnly";
@@ -24,6 +25,7 @@ function Card(p: { plan: PlanState; choice: Choice; side: string; content: SideC
   const [open, setOpen] = useState(false);
   const c = p.content;
   const plan = p.plan;
+  const style = useDateStyle();
   return (
     <section className={p.picked ? "choice-col picked" : "choice-col"}>
       <button type="button" role="radio" aria-checked={p.picked} className="choice-side" onClick={p.onPick}>
@@ -59,7 +61,7 @@ function Card(p: { plan: PlanState; choice: Choice; side: string; content: SideC
             <p className="moves-title">{s.title}</p>
             {s.rows.map((r) => (
               <p key={r.item} className="moves-line">
-                {outcomeLine(r, plan)}
+                {outcomeLine(r, plan, style)}
               </p>
             ))}
           </div>
@@ -89,9 +91,11 @@ function Body(p: {
   const [opts, setOpts] = useState<ResolveOptions>(DEFAULTS);
   const [live, setPicks] = usePicks(choice, plan);
   const base = useId();
+  const style = useDateStyle();
+  const week = useDevice().prefs.week;
   const contents = useMemo(
-    () => sides.map((s) => sideContent(p.session, choice, pickOf(s.key, othersThan(s.key, live)), opts)),
-    [p.session, choice, sides, live, opts, view],
+    () => sides.map((s) => sideContent(p.session, choice, pickOf(s.key, othersThan(s.key, live)), opts, style, week)),
+    [p.session, choice, sides, live, opts, view, style, week],
   );
   const pickUnit = (u: UnitKey, side: string): void => {
     const next = new Map(live);

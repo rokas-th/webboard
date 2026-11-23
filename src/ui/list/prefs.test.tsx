@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearToasts, COPY_DETAILS, Toasts } from "../common/Toast";
-import { DEFAULT_LIST_PREFS, listKey, readListPrefs, readListPrefsRecord, useListPrefs, writeListPrefs, type ColumnId, type ListPrefs, type SortKey } from "./prefs";
+import { DEFAULT_LIST_PREFS, listKey, SCOPE_IDS, readListPrefs, readListPrefsRecord, useListPrefs, writeListPrefs, type ColumnId, type ListPrefs, type SortKey } from "./prefs";
 import { CHIP_LIMIT, LIST_PREFS_UNREADABLE, SORT_LIMIT } from "./text";
 
 const PLAN = "planMesa001";
@@ -88,6 +88,11 @@ describe("list prefs", () => {
     expect(readListPrefsRecord(JSON.stringify(at(() => 640))).ok).toBe(true);
   });
 
+  it("accepts the mine scope, listed last", () => {
+    expect(SCOPE_IDS[SCOPE_IDS.length - 1]).toBe("mine");
+    expect(readListPrefsRecord(JSON.stringify({ ...FULL, scope: "mine" }))).toEqual({ ok: true, value: { ...FULL, scope: "mine" } });
+  });
+
   it("reads nothing stored as the defaults and writes nothing", () => {
     expect(readListPrefs(window.localStorage, PLAN)).toEqual(DEFAULT_LIST_PREFS);
     expect(window.localStorage.length).toBe(0);
@@ -107,7 +112,7 @@ describe("list prefs", () => {
     ["a bad sort direction", raw({ sort: [{ id: "name", dir: "up" }] }), "sort[0].dir is \"up\", not asc or desc"],
     ["four sort keys", raw({ cols: [{ id: "name", w: 300 }, { id: "step", w: 140 }, { id: "start", w: 88 }, { id: "end", w: 88 }], sort: ["name", "step", "start", "end"].map((id) => ({ id, dir: "asc" })) }), "sort holds 4 keys, not at most 3"],
     ["a repeated sort key", raw({ sort: [{ id: "name", dir: "asc" }, { id: "name", dir: "desc" }] }), "sort[1] repeats name"],
-    ["mine", raw({ scope: "mine" }), "scope is \"mine\", not one of open, soon, late, blocked, unscheduled, unassigned, milestones, done, all"],
+    ["an unknown scope", raw({ scope: "theirs" }), "scope is \"theirs\", not one of open, soon, late, blocked, unscheduled, unassigned, milestones, done, all, mine"],
     ["a bad chip field", raw({ chips: [{ f: "label", v: "x" }] }), "chips[0].f is \"label\", not step, assignee, kind or group"],
     ["a bad chip value", raw({ chips: [{ f: "step", v: "a b" }] }), "chips[0].v is \"a b\", not null or an id"],
     ["a bad kind chip", raw({ chips: [{ f: "kind", v: "group" }] }), "chips[0].v is \"group\", not task or milestone"],
@@ -134,7 +139,7 @@ describe("list prefs", () => {
     ["name not first", raw({ cols: [{ id: "step", w: 140 }, { id: "name", w: 300 }], sort: [] }), "cols[0] is step, not name"],
     ["a width under its minimum", raw({ cols: [{ id: "name", w: 120 }], sort: [] }), "cols[0].w is 120, not a whole number from 180 to 640"],
     ["a sort id outside the columns", raw({ sort: [{ id: "status", dir: "asc" }] }), "sort[0].id is status, which is not among the columns"],
-    ["mine", raw({ scope: "mine" }), "scope is \"mine\", not one of open, soon, late, blocked, unscheduled, unassigned, milestones, done, all"],
+    ["an unknown scope", raw({ scope: "theirs" }), "scope is \"theirs\", not one of open, soon, late, blocked, unscheduled, unassigned, milestones, done, all, mine"],
     ["a bad chip", raw({ chips: [{ f: "kind", v: "group" }] }), "chips[0].v is \"group\", not task or milestone"],
     ["an extra key", raw({ x: 1 }), "the record is {v, cols, sort, scope, chips, group, x}, not {chips, cols, group, scope, sort, v}"],
   ])("resets %s, removing only this plan's key, and toasts the reason", async (_, text, reason) => {

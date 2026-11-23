@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { newItemIntent } from "../../actions/newItem";
-import { fmtShort, toIso, type Day } from "../../domain/dates";
+import { fmtShort, toIso, type DateStyle, type Day } from "../../domain/dates";
 import { STEP_COLOURS, type Item, type ItemId, type PersonId, type StepColour, type StepId } from "../../domain/model";
 import { peopleOf } from "../../domain/people";
 import { projectBoard, stepsOf, type Step } from "../../domain/steps";
@@ -16,6 +16,7 @@ import { toast } from "../common/Toast";
 import { groupPath, statusLabel, type StatusLabel } from "../list/groups";
 import { createdItem } from "../palette/commands";
 import { useRun } from "../run";
+import { useDateStyle } from "../DeviceProvider";
 import { useUiValue } from "../state";
 import { useDetail } from "../detail/DetailContext";
 import { duplicateRow } from "../duplicate";
@@ -102,19 +103,20 @@ const STEP_ROW = "step:";
 
 const stepStyle = (c: StepColour): CSSProperties => ({ "--step": `var(--s-${c})` });
 
-const dayOf = (m: ReadonlyMap<ItemId, Day>, id: ItemId, what: string): string => {
+const dayOf = (m: ReadonlyMap<ItemId, Day>, id: ItemId, what: string, style: DateStyle): string => {
   const d = m.get(id);
   if (d === undefined) throw new Error(`Board: scheduled item ${id} has no ${what}`);
-  return fmtShort(toIso(d));
+  return fmtShort(toIso(d), style);
 };
 
 function When(p: { view: PlanView; item: Item }) {
+  const style = useDateStyle();
   const sc = p.item.schedule;
   if (sc === null) throw new Error(`Board: item ${p.item.id} has no schedule`);
   if (sc.start === null) return <span className="unsched">unscheduled</span>;
-  const start = dayOf(p.view.derived.start, p.item.id, "start");
+  const start = dayOf(p.view.derived.start, p.item.id, "start", style);
   if (p.item.kind === "milestone") return <span className="when">◆ {start}</span>;
-  return <span className="when">{`${start} – ${dayOf(p.view.derived.end, p.item.id, "end")}`}</span>;
+  return <span className="when">{`${start} – ${dayOf(p.view.derived.end, p.item.id, "end", style)}`}</span>;
 }
 
 function Near(p: { view: PlanView; layout: BoardLayout; item: Item }) {

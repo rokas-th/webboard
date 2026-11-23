@@ -2,6 +2,7 @@ import * as Y from "yjs";
 import type { Baseline, BaselineId, Item, ItemId, Link, LinkKey, People, PersonId, PlanId, PlanState, StepId, Workflow } from "../domain/model";
 import { linkKey } from "../domain/model";
 import type { Closure } from "../domain/calendar";
+import type { IsoDate } from "../domain/dates";
 import { newId } from "../log/ids";
 import { LogState } from "../log/state";
 import type { Action, DeviceId, SessionId, Write } from "../log/types";
@@ -14,6 +15,7 @@ import { newPlanId } from "./plan-id";
 import type { GanttReport } from "../import/gantt";
 import type { Registry } from "./registry";
 import type { PlanSession } from "./session";
+import { zipOf } from "./zip";
 
 export interface WbxHeader {
   planId: PlanId;
@@ -273,9 +275,12 @@ function snapshot(session: PlanSession): { body: Uint8Array; unreadable: number 
   };
 }
 
-type ExportFormat = "webboard" | "csv";
+type ExportFormat = "webboard" | "csv" | "ics" | "zip";
 
 const LIST_SUFFIX = " List";
+const MILESTONES_SUFFIX = " Milestones";
+const BACKUP_PREFIX = "WebBoard backup ";
+const WEBBOARD_EXTENSION = ".webboard";
 
 function checkedName(name: string): string {
   if (/\p{Cs}/u.test(name)) throw new AppError("file.io", "The plan name holds a character that cannot be written to a file name; rename the plan and export again.");
@@ -294,6 +299,49 @@ export async function exportPlan(session: PlanSession): Promise<Exported> {
 export async function exportListCsv(planName: string, text: string): Promise<string | null> {
   const name = `${checkedName(planName)}${LIST_SUFFIX}`;
   return callName("plan_export", new TextEncoder().encode(text), { headers: exportHeaders(name, "csv") });
+}
+
+export async function exportIcs(planName: string, text: string): Promise<string | null> {
+  const name = `${checkedName(planName)}${MILESTONES_SUFFIX}`;
+  return callName("plan_export", new TextEncoder().encode(text), { headers: exportHeaders(name, "ics") });
+}
+
+function backupStem(name: string): string {
+  if (/\p{Cs}/u.test(name)) throw new AppError("file.io", `The plan name “${name}” holds a character that cannot be written to a file name; rename the plan and back up again.`);
+  const stem = name.replace(/[/\\]/g, "-").replace(/\.+$/, "");
+  if (stem === "") throw new AppError("file.io", `The plan “${name}” has no name to back up under; rename it and back up again.`);
+  return stem;
+}
+
+export function backupFileNames(names: readonly string[]): string[] {
+  const taken = new Set<string>();
+  return names.map((name) => {
+    const stem = backupStem(name);
+    const free = (n: number): string => {
+      const candidate = n === 1 ? stem : `${stem} (${n})`;
+      return taken.has(candidate.toLowerCase()) ? free(n + 1) : candidate;
+    };
+    const chosen = free(1);
+    taken.add(chosen.toLowerCase());
+    return `${chosen}${WEBBOARD_EXTENSION}`;
+  });
+}
+
+export interface BackedUp {
+  name: string;
+  plans: number;
+  unreadable: number;
+}
+
+export async function exportBackup(sessions: readonly PlanSession[], today: IsoDate, when: Date): Promise<BackedUp | null> {
+  const files = backupFileNames(sessions.map((s) => s.view().plan.name));
+  const snaps = sessions.map(snapshot);
+  const zip = zipOf(
+    snaps.map((s, i) => ({ name: files[i], bytes: s.body })),
+    when,
+  );
+  const written = await callName("plan_export", zip, { headers: exportHeaders(`${BACKUP_PREFIX}${today}`, "zip") });
+  return written === null ? null : { name: written, plans: sessions.length, unreadable: snaps.filter((s) => s.unreadable > 0).length };
 }
 
 export function unframe(b: Uint8Array): { name: string; bytes: Uint8Array } {

@@ -4,6 +4,7 @@ import { fmtNear, isCalendarDate, toDay, toIso } from "../../domain/dates";
 import { MAX_TASK_DUR, type Item } from "../../domain/model";
 import type { PlanView } from "../../store/doc";
 import { toast } from "../common/Toast";
+import { useDateStyle } from "../DeviceProvider";
 import { DATE_UNREADABLE, endBeforeStart, endOnDayOff } from "../copy";
 import type { Run } from "../run";
 import { TextField } from "./TextField";
@@ -29,6 +30,7 @@ export function WholeField(p: { label: string; value: number; min: number; max: 
 
 export function EndField(p: { view: PlanView; item: Item; label: string; run: Run; field?: string }) {
   const it = p.item;
+  const style = useDateStyle();
   const cal = useMemo(() => workCalendar(p.view.plan.calendar), [p.view.plan.calendar]);
   const start = p.view.derived.start.get(it.id);
   const end = p.view.derived.end.get(it.id);
@@ -37,11 +39,11 @@ export function EndField(p: { view: PlanView; item: Item; label: string; run: Ru
     if (!isCalendarDate(next)) return false;
     const day = toDay(next);
     if (day < start) {
-      toast(endBeforeStart(fmtNear(toIso(start), p.view.today)), "bad");
+      toast(endBeforeStart(fmtNear(toIso(start), p.view.today, style)), "bad");
       return false;
     }
     if (!cal.isWork(day)) {
-      toast(endOnDayOff(fmtNear(next, p.view.today)), "bad");
+      toast(endOnDayOff(fmtNear(next, p.view.today, style)), "bad");
       return false;
     }
     return p.run.run({ t: "resize", item: it.id, dur: cal.workBetween(start, day) }) !== null;

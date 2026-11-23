@@ -1,4 +1,4 @@
-import type { ItemId } from "../../domain/model";
+import type { ItemId, PersonId } from "../../domain/model";
 import { projectBoard } from "../../domain/steps";
 import type { PlanView } from "../../store/doc";
 import { rowContext, type NoteText } from "../list/columns";
@@ -15,10 +15,10 @@ export interface SearchCount {
 
 const counted = (ids: readonly ItemId[], match: Matcher): SearchCount => ({ shown: ids.filter(match).length, total: ids.length });
 
-export function searchCount(view: PlanView, ui: Pick<UiState, "view" | "collapsed">, listPrefs: ListPrefs, notes: NoteText, match: Matcher | null): SearchCount | null {
+export function searchCount(view: PlanView, ui: Pick<UiState, "view" | "collapsed">, listPrefs: ListPrefs, notes: NoteText, me: PersonId | null, match: Matcher | null): SearchCount | null {
   if (match === null) return null;
   if (ui.view === "list") {
-    const model = listModel(rowContext(view, notes), listPrefs, match);
+    const model = listModel(rowContext(view, notes, me, null), listPrefs, match);
     return { shown: model.shown, total: model.scoped };
   }
   if (ui.view === "board") return counted([...projectBoard(view.plan, view.derived).columnOf.keys()], match);

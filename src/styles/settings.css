@@ -223,6 +223,18 @@ html[data-os="ios"] .settings-export .actions button {
   min-height: 44px;
 }
 
+.files-row .settings-control {
+  flex-shrink: 0;
+}
+
+.files-row button {
+  white-space: nowrap;
+}
+
+html[data-os="ios"] .files-row button {
+  min-height: 44px;
+}
+
 .settings-status {
   margin: 0;
   max-width: 100%;
@@ -298,6 +310,15 @@ html[data-os="ios"] .settings-row .settings-control button::before {
 .settings-plan-name {
   width: 280px;
   max-width: 100%;
+}
+
+.settings-device-name {
+  width: 220px;
+  max-width: 100%;
+}
+
+.settings-row-status {
+  color: var(--amber);
 }
 
 .settings-line {
@@ -810,8 +831,13 @@ html[data-os="ios"] .people-remove {
   flex: none;
 }
 
-.defaults-row .settings-control {
+.defaults-row .settings-control,
+.general-row .settings-control {
   flex-wrap: wrap;
+}
+
+.general-row .settings-control {
+  flex-shrink: 0;
 }
 
 .defaults-step {
@@ -849,14 +875,16 @@ html[data-os="ios"] .people-remove {
   color: var(--dim);
 }
 
-.defaults-seg button {
+.defaults-seg button,
+.general-seg button {
   font-family: var(--prose);
   font-size: 12.5px;
   letter-spacing: 0;
   text-transform: none;
 }
 
-.defaults-pick {
+.defaults-pick,
+.settings-pick {
   max-width: 100%;
   min-height: 28px;
   padding: 4px 10px;
@@ -870,18 +898,68 @@ html[data-os="ios"] .people-remove {
   white-space: nowrap;
 }
 
-.defaults-pick::after {
+.defaults-pick::after,
+.settings-pick::after {
   content: "▾";
   margin-left: 8px;
   color: var(--dim);
 }
 
-.settings-list .defaults-row {
+.settings-list .defaults-row,
+.settings-list .general-row {
   flex-wrap: wrap;
 }
 
-.settings-list .defaults-row .settings-control {
+.settings-list .defaults-row .settings-control,
+.settings-list .general-row .settings-control {
   max-width: 100%;
+}
+
+.switch {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  min-width: 34px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.switch-track {
+  position: relative;
+  box-sizing: border-box;
+  width: 34px;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--void);
+}
+
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+
+.switch[aria-checked="true"] .switch-track {
+  border-color: var(--cyan-dim);
+  background: var(--cyan-dim);
+}
+
+.switch[aria-checked="true"] .switch-track::after {
+  left: 17px;
+  background: var(--heading);
+}
+
+html[data-os="ios"] .switch {
+  min-width: 44px;
+  min-height: 44px;
 }
 
 html[data-os="ios"] .step-btn {
@@ -891,6 +969,9 @@ html[data-os="ios"] .step-btn {
 
 html[data-os="ios"] .defaults-dur,
 html[data-os="ios"] .defaults-pick,
-html[data-os="ios"] .defaults-seg button {
+html[data-os="ios"] .settings-pick,
+html[data-os="ios"] .settings-device-name,
+html[data-os="ios"] .defaults-seg button,
+html[data-os="ios"] .general-seg button {
   min-height: 44px;
 }

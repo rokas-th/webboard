@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { toDay } from "../../domain/dates";
 import type { PlanSession } from "../../store/session";
 import { fs, testSession, type SeedItem } from "../../test/session";
+import { deviced } from "../../test/theme";
 import { fitSpan } from "../timeline/geometry";
 import { PrintSheet } from "./PrintSheet";
 
@@ -46,7 +47,7 @@ const cells = (id: string): string[] => Array.from(row(id).querySelectorAll("td"
 describe("PrintSheet (product-8)", () => {
   it("renders into the body, outside the app root, with the plan name, its date range and the print day", async () => {
     const t = await made();
-    const { container } = render(<PrintSheet view={t.session.view()} onDone={() => undefined} />);
+    const { container } = render(deviced(<PrintSheet view={t.session.view()} onDone={() => undefined} />));
     expect(container.querySelector(".print-sheet")).toBeNull();
     expect(sheet().parentElement).toBe(document.body);
     expect(sheet().querySelector("h1")?.textContent).toBe(t.session.view().plan.name);
@@ -56,13 +57,13 @@ describe("PrintSheet (product-8)", () => {
   it("counts conflicts in the heading when there are some", async () => {
     const t = await made();
     t.session.apply({ t: "schedule", item: "b", set: { start: "2026-11-11" } });
-    render(<PrintSheet view={t.session.view()} onDone={() => undefined} />);
+    render(deviced(<PrintSheet view={t.session.view()} onDone={() => undefined} />));
     expect(sheet().querySelector(".print-sub")?.textContent).toBe("10 Nov → 20 Nov · printed 9 Nov · 1 conflict");
   });
 
   it("prints one row per item with its columns, groups bold, milestones with a diamond and unscheduled rows bare", async () => {
     const t = await made();
-    render(<PrintSheet view={t.session.view()} onDone={() => undefined} />);
+    render(deviced(<PrintSheet view={t.session.view()} onDone={() => undefined} />));
     expect(Array.from(sheet().querySelectorAll("tbody tr")).map((r) => r.getAttribute("data-prow"))).toEqual(["g1", "a", "b", "m", "u"]);
     expect(Array.from(sheet().querySelectorAll("thead th")).map((th) => th.textContent).slice(0, 6)).toEqual(["Item", "Start", "End", "Days", "Status", "Depends on"]);
     expect(row("g1").classList.contains("print-group")).toBe(true);
@@ -82,7 +83,7 @@ describe("PrintSheet (product-8)", () => {
   it("draws a done task's bar lighter even when its incoming link does not hold", async () => {
     const t = await made();
     t.session.apply({ t: "schedule", item: "b", set: { start: "2026-11-11", status: "done" } });
-    render(<PrintSheet view={t.session.view()} onDone={() => undefined} />);
+    render(deviced(<PrintSheet view={t.session.view()} onDone={() => undefined} />));
     expect(cells("b")[4]).toBe("conflict");
     expect(row("b").querySelector(".print-bar")?.classList.contains("done")).toBe(true);
   });
@@ -90,7 +91,7 @@ describe("PrintSheet (product-8)", () => {
   it("places bars by percent of the fit span, the group thin, the done bar lighter", async () => {
     const t = await made();
     const view = t.session.view();
-    render(<PrintSheet view={view} onDone={() => undefined} />);
+    render(deviced(<PrintSheet view={view} onDone={() => undefined} />));
     const { first, last } = fitSpan(view);
     const days = last - first + 1;
     const at = (iso: string): string => `${((toDay(iso) - first) / days) * 100}%`;
@@ -109,18 +110,18 @@ describe("PrintSheet (product-8)", () => {
 
   it("draws the today line only when today is inside the span", async () => {
     const t = await made();
-    render(<PrintSheet view={t.session.view()} onDone={() => undefined} />);
+    render(deviced(<PrintSheet view={t.session.view()} onDone={() => undefined} />));
     expect(sheet().querySelectorAll("tbody .print-today")).toHaveLength(5);
     cleanup();
     const far = await made("2027-06-01");
-    render(<PrintSheet view={far.session.view()} onDone={() => undefined} />);
+    render(deviced(<PrintSheet view={far.session.view()} onDone={() => undefined} />));
     expect(sheet().querySelectorAll(".print-today")).toHaveLength(0);
   });
 
   it("ends printing on afterprint and stops listening once unmounted", async () => {
     const t = await made();
     const onDone = vi.fn();
-    const { unmount } = render(<PrintSheet view={t.session.view()} onDone={onDone} />);
+    const { unmount } = render(deviced(<PrintSheet view={t.session.view()} onDone={onDone} />));
     act(() => {
       window.dispatchEvent(new Event("afterprint"));
     });

@@ -47,6 +47,7 @@ const UI: UiState = {
   follow: null,
   naming: null,
   settings: null,
+  settingsRow: null,
   syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,

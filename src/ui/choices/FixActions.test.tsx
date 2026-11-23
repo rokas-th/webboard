@@ -1,10 +1,12 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { lagThatHolds } from "../../domain/schedule";
 import type { PlanSession } from "../../store/session";
 import { fs, testSession } from "../../test/session";
 import { OpenChoice, type Run } from "../run";
 import { FixActions } from "./FixActions";
+import { deviced } from "../../test/theme";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../../domain/schedule", async (importOriginal) => {
@@ -22,6 +24,10 @@ afterEach(async () => {
 
 const run: Run = { run: () => null, undo: () => null, redo: () => null };
 
+function DevicedChoice(p: { children: ReactNode }) {
+  return deviced(<OpenChoice.Provider value={() => undefined}>{p.children}</OpenChoice.Provider>);
+}
+
 describe("FixActions", () => {
   it("names the year of a push target that is not this year", async () => {
     const t = await testSession([
@@ -30,9 +36,9 @@ describe("FixActions", () => {
     ]);
     sessions.push(t.session);
     render(
-      <OpenChoice.Provider value={() => undefined}>
+      <DevicedChoice>
         <FixActions view={t.session.view()} item="Review" readOnly={false} run={run} />
-      </OpenChoice.Provider>,
+      </DevicedChoice>,
     );
     expect(screen.getByRole("button", { name: "Push “Review” to Mon 22 Nov 2027" })).toBeTruthy();
   });
@@ -45,9 +51,9 @@ describe("FixActions", () => {
     sessions.push(t.session);
     const view = t.session.view();
     const ui = (readOnly: boolean) => (
-      <OpenChoice.Provider value={() => undefined}>
+      <DevicedChoice>
         <FixActions view={view} item="Review" readOnly={readOnly} run={run} />
-      </OpenChoice.Provider>
+      </DevicedChoice>
     );
     const { rerender } = render(ui(false));
     expect(screen.getByRole("button", { name: "Shorten the lag to 1" })).toBeTruthy();
@@ -65,9 +71,9 @@ describe("FixActions", () => {
     sessions.push(t.session);
     vi.mocked(lagThatHolds).mockReturnValueOnce(-1240);
     render(
-      <OpenChoice.Provider value={() => undefined}>
+      <DevicedChoice>
         <FixActions view={t.session.view()} item="Review" readOnly={false} run={run} />
-      </OpenChoice.Provider>,
+      </DevicedChoice>,
     );
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Remove the link"]);
   });

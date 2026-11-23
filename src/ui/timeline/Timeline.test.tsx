@@ -17,6 +17,7 @@ import { Timeline, usePhoneOutline, type OutlineControl } from "./Timeline";
 import { withSync } from "../../test/withSync";
 import { seedPanesClosed } from "../../test/panes";
 import { PANES_KEY, parsePanes, type PaneState } from "../shell/panes";
+import { deviced } from "../../test/theme";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
@@ -142,8 +143,8 @@ const BARE_OUTLINE: OutlineControl = {
 };
 
 function Bare(p: { session: PlanSession }) {
-  const [ui, setUi] = useUi();
-  return (
+  const [ui, setUi] = useUi("timeline");
+  return deviced(
     <UiContext.Provider value={{ ui, setUi }}>
       <OpenChoice.Provider value={noChoice}>
         <BareDetail>
@@ -155,9 +156,9 @@ function Bare(p: { session: PlanSession }) {
 }
 
 function PhoneBare(p: { session: PlanSession }) {
-  const [ui, setUi] = useUi();
+  const [ui, setUi] = useUi("timeline");
   const outline = usePhoneOutline();
-  return (
+  return deviced(
     <UiContext.Provider value={{ ui, setUi }}>
       <OpenChoice.Provider value={noChoice}>
         <BareDetail>
@@ -403,7 +404,7 @@ describe("shading on CH-ZH", () => {
 
   it("shades holidays, closures, and weekends except at Q", async () => {
     const t = await shown(SEED, { calendar, answers: { holidays_year: emptyYear } });
-    const g = geometry(t.session.view(), "W");
+    const g = geometry(t.session.view(), "W", 1);
     const weekends = Array.from({ length: g.days }, (_, i) => g.origin + i).filter((d) => weekday(d) >= 6).length;
     const hol = all(".tl-off.hol");
     expect(hol.map((e) => [e.title, e.style.left])).toEqual([["Christmas Day", `${g.x(toDay("2026-12-25"))}px`]]);
@@ -441,7 +442,7 @@ describe("shading on CH-ZH", () => {
 describe("today and baselines", () => {
   it("draws the today line mid-day and moves it with the clock", async () => {
     const t = await shown([{ name: "A", start: "2026-11-10", dur: 3 }]);
-    const g = geometry(t.session.view(), "W");
+    const g = geometry(t.session.view(), "W", 1);
     expect(one(".tl-today").style.left).toBe(`${g.x(toDay("2026-11-09")) + 20}px`);
     expect(one(".tl-today-label").style.left).toBe(`${g.x(toDay("2026-11-09")) + 20}px`);
     act(() => t.clock.set("2026-11-10"));
@@ -451,7 +452,7 @@ describe("today and baselines", () => {
   it("scrolls to today on open and keeps the day at the lead-in on a zoom change", async () => {
     const t = await shown([{ name: "A", start: "2026-12-01", dur: 10 }], { today: "2026-12-07" });
     const scroll = one(".tl-scroll");
-    const w = geometry(t.session.view(), "W");
+    const w = geometry(t.session.view(), "W", 1);
     expect(scroll.scrollLeft).toBe(w.x(toDay("2026-12-07")) - 160);
     act(() => {
       scroll.scrollLeft = 1000;
@@ -461,7 +462,7 @@ describe("today and baselines", () => {
     act(() => {
       fireEvent.click(within(one(".seg-zoom")).getByRole("button", { name: "M" }));
     });
-    const m = geometry(t.session.view(), "M");
+    const m = geometry(t.session.view(), "M", 1);
     expect(scroll.scrollLeft).toBe(Math.round((day - m.origin) * m.ppd - 160));
     act(() => {
       fireEvent.click(within(one(".seg-zoom")).getByRole("button", { name: "W" }));
@@ -475,7 +476,7 @@ describe("today and baselines", () => {
       { id: "b", name: "B", start: "2026-11-16", dur: 3 },
     ]);
     const scroll = one(".tl-scroll");
-    const before = geometry(t.session.view(), "W");
+    const before = geometry(t.session.view(), "W", 1);
     act(() => {
       scroll.scrollLeft = 400;
       fireEvent.scroll(scroll);
@@ -483,7 +484,7 @@ describe("today and baselines", () => {
     act(() => {
       t.session.apply({ t: "move", items: ["a"], days: -3 });
     });
-    const after = geometry(t.session.view(), "W");
+    const after = geometry(t.session.view(), "W", 1);
     expect(before.origin - after.origin).toBe(7);
     expect(scroll.scrollLeft).toBe(400 + 7 * 40);
     act(() => {
@@ -520,7 +521,7 @@ describe("today and baselines", () => {
   it("opens a plan that lies wholly after today at its first start, and still jumps to today by the toolbar and by T", async () => {
     const t = await shown([{ name: "A", start: "2026-12-10", dur: 3 }], { today: "2026-12-07" });
     const scroll = one(".tl-scroll");
-    const g = geometry(t.session.view(), "W");
+    const g = geometry(t.session.view(), "W", 1);
     expect(scroll.scrollLeft).toBe(g.x(toDay("2026-12-10")) - 160);
     const today = within(one(".toolbar")).getByRole("button", { name: "Today" });
     expect(today.title).toBe("Jump to today");
@@ -541,7 +542,7 @@ describe("today and baselines", () => {
 
   it("opens a plan that ended before today at its first start", async () => {
     const t = await shown([{ name: "A", start: "2026-10-01", dur: 3 }], { today: "2026-12-07" });
-    expect(one(".tl-scroll").scrollLeft).toBe(geometry(t.session.view(), "W").x(toDay("2026-10-01")) - 160);
+    expect(one(".tl-scroll").scrollLeft).toBe(geometry(t.session.view(), "W", 1).x(toDay("2026-10-01")) - 160);
   });
 
   it("scrolls a clicked row's bar into view only when it is off screen", async () => {
@@ -550,7 +551,7 @@ describe("today and baselines", () => {
       { id: "z", name: "Z", start: "2027-03-01", dur: 2 },
     ]);
     const scroll = one(".tl-scroll");
-    const g = geometry(t.session.view(), "W");
+    const g = geometry(t.session.view(), "W", 1);
     const row = (id: string): HTMLElement => one(`.tl-row[data-row="${id}"]`);
     expect(scroll.scrollLeft).toBe(g.x(toDay("2026-11-09")) - 160);
     act(() => {
@@ -575,7 +576,7 @@ describe("today and baselines", () => {
     widths.scroll = 390;
     widths.grid = 252;
     const t = await shown([{ name: "A", start: "2026-12-01", dur: 10 }], { today: "2026-12-07" });
-    const at = geometry(t.session.view(), "W").x(toDay("2026-12-07"));
+    const at = geometry(t.session.view(), "W", 1).x(toDay("2026-12-07"));
     expect(leadFor(390 - 252)).toBe(46);
     expect(one(".tl-scroll").scrollLeft).toBe(at - 46);
   });
@@ -584,7 +585,7 @@ describe("today and baselines", () => {
     widths.scroll = 0;
     widths.grid = 0;
     const t = await shown([{ name: "A", start: "2026-12-01", dur: 10 }], { today: "2026-12-07" });
-    expect(one(".tl-scroll").scrollLeft).toBe(geometry(t.session.view(), "W").x(toDay("2026-12-07")));
+    expect(one(".tl-scroll").scrollLeft).toBe(geometry(t.session.view(), "W", 1).x(toDay("2026-12-07")));
   });
 
   it("scrolls to today when the plan changes", async () => {
@@ -593,13 +594,13 @@ describe("today and baselines", () => {
     const { rerender } = render(<Bare session={one1.session} />);
     await settle();
     const scroll = one(".tl-scroll");
-    expect(scroll.scrollLeft).toBe(geometry(one1.session.view(), "W").x(toDay("2026-12-07")) - 160);
+    expect(scroll.scrollLeft).toBe(geometry(one1.session.view(), "W", 1).x(toDay("2026-12-07")) - 160);
     act(() => {
       scroll.scrollLeft = 0;
     });
     rerender(<Bare session={two.session} />);
     await settle();
-    const g = geometry(two.session.view(), "W");
+    const g = geometry(two.session.view(), "W", 1);
     expect(g.x(toDay("2026-12-07")) - 160).toBeGreaterThan(0);
     expect(scroll.scrollLeft).toBe(g.x(toDay("2026-12-07")) - 160);
   });
@@ -637,7 +638,7 @@ describe("today and baselines", () => {
     expect(all(".ghost")).toHaveLength(0);
     const [id] = [...t.session.view().plan.baselines.keys()];
     act(() => uiNow()[1]({ baseline: id }));
-    const g = geometry(t.session.view(), "W");
+    const g = geometry(t.session.view(), "W", 1);
     const ghosts = all(".ghost");
     expect(ghosts.map((e) => [e.className, e.style.left])).toEqual([
       ["ghost", `${g.x(toDay("2026-11-10"))}px`],
@@ -911,7 +912,7 @@ describe("tray", () => {
     act(() => {
       one(".tl-scroll").scrollLeft = 0;
     });
-    const g = geometry(t.session.view(), "W");
+    const g = geometry(t.session.view(), "W", 1);
     pointer(chip(), "down", 0);
     pointer(chip(), "move", 120);
     expect(one(".drag-ghost").textContent).toBe("u");
@@ -988,7 +989,7 @@ describe("tray", () => {
     const chart = one(".tl-chart");
     vi.spyOn(chart, "getBoundingClientRect").mockReturnValue(rect(0));
     vi.spyOn(document, "elementFromPoint").mockReturnValue(chart);
-    const g = geometry(t.session.view(), "W");
+    const g = geometry(t.session.view(), "W", 1);
     pointer(chip(), "down", 0);
     pointer(chip(), "up", g.x(toDay("2026-11-14")) + 20);
     expect(apply.mock.calls).toEqual([[{ t: "schedule", item: "u", set: { start: "2026-11-14" } }]]);
@@ -1080,7 +1081,7 @@ describe("keyboard rows", () => {
       ...Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, name: `T${i}`, parent: "g", start: i === 7 ? "2026-11-12" : "2026-11-10", dur: 1 })),
     ]);
     const scroll = one(".tl-scroll");
-    const g = geometry(t.session.view(), "W");
+    const g = geometry(t.session.view(), "W", 1);
     const opened = scroll.scrollLeft;
     expect(g.x(toDay("2026-11-12")) - leadFor(1440 - 300)).toBeGreaterThan(opened);
     act(() => uiNow()[1]({ selected: "t7", reveal: "t7" }));
@@ -1228,7 +1229,7 @@ describe("fit zoom", () => {
     expect(buttons[3].title).toBe("Fit the whole plan");
     fit();
     expect(uiNow()[0].zoom).toBe("F");
-    const g = geometry(t.session.view(), "F", 640);
+    const g = geometry(t.session.view(), "F", 1, 640);
     expect(g.ppd).toBe(20);
     expect(barOf("a").style.left).toBe(`${g.x(toDay("2026-12-01"))}px`);
     expect(barOf("b").style.width).toBe("100px");
@@ -1242,13 +1243,13 @@ describe("fit zoom", () => {
     const t = await shown(SEED, { today: "2026-11-10" });
     fit();
     resize(300 + 1140);
-    const wide = geometry(t.session.view(), "F", 1140);
+    const wide = geometry(t.session.view(), "F", 1, 1140);
     expect(wide.ppd).toBeCloseTo(35.625, 10);
     expect(barOf("a").style.left).toBe(`${wide.x(toDay("2026-12-01"))}px`);
     expect(one(".tl-scroll").scrollLeft).toBe(wide.x(FIRST));
     expect(ticks().slice(0, 2)).toEqual(["M 2", "T 3"]);
     resize(300 + 192);
-    const narrow = geometry(t.session.view(), "F", 192);
+    const narrow = geometry(t.session.view(), "F", 1, 192);
     expect(narrow.ppd).toBe(6);
     expect(barOf("a").style.left).toBe(`${narrow.x(toDay("2026-12-01"))}px`);
     expect(ticks().every((s) => /^\d+$/.test(s))).toBe(true);
@@ -1256,7 +1257,7 @@ describe("fit zoom", () => {
       fireEvent.click(within(one(".seg-zoom")).getByRole("button", { name: "W" }));
     });
     resize(300 + 900);
-    expect(barOf("a").style.left).toBe(`${geometry(t.session.view(), "W").x(toDay("2026-12-01"))}px`);
+    expect(barOf("a").style.left).toBe(`${geometry(t.session.view(), "W", 1).x(toDay("2026-12-01"))}px`);
   });
 
   it("hides the label of a bar narrower than it, at fit only", async () => {
@@ -1276,9 +1277,9 @@ describe("fit zoom", () => {
   it("scrolls to a week before the first start on switching to fit when the fit's px a day equal the previous zoom's", async () => {
     widths.scroll = 300 + 1140;
     const t = await shown([{ id: "a", name: "A", start: "2026-12-01", dur: 5 }], { today: "2026-11-10" });
-    const g = geometry(t.session.view(), "F", 1140);
+    const g = geometry(t.session.view(), "F", 1, 1140);
     expect(g.ppd).toBe(40);
-    expect(g.ppd).toBe(geometry(t.session.view(), "W").ppd);
+    expect(g.ppd).toBe(geometry(t.session.view(), "W", 1).ppd);
     const el = one(".tl-scroll");
     el.scrollLeft = g.x(FIRST) + 333;
     fireEvent.scroll(el);
@@ -1296,7 +1297,7 @@ describe("fit zoom", () => {
     vi.spyOn(chart, "getBoundingClientRect").mockReturnValue(rect(0));
     vi.spyOn(document, "elementFromPoint").mockReturnValue(chart);
     const chip = one('[data-chip="u"]');
-    const g = geometry(t.session.view(), "F", 640);
+    const g = geometry(t.session.view(), "F", 1, 640);
     expect(g.ppd).toBe(20);
     pointer(chip, "down", 0);
     pointer(chip, "move", 120);
@@ -1391,7 +1392,7 @@ describe("the outline", () => {
       fireEvent.click(within(one(".seg-zoom")).getByRole("button", { name: "F" }));
     });
     const FIRST = toDay("2026-12-01") - 7;
-    const before = geometry(t.session.view(), "F", 640);
+    const before = geometry(t.session.view(), "F", 1, 640);
     expect(barOf("a").style.left).toBe(`${before.x(toDay("2026-12-01"))}px`);
     press(resizer(), "down", 300);
     press(resizer(), "move", 200);
@@ -1399,13 +1400,13 @@ describe("the outline", () => {
     act(() => resized.forEach((cb) => cb()));
     expect(barOf("a").style.left).toBe(`${before.x(toDay("2026-12-01"))}px`);
     press(resizer(), "up", 200);
-    const after = geometry(t.session.view(), "F", 740);
+    const after = geometry(t.session.view(), "F", 1, 740);
     expect(after.ppd).not.toBe(before.ppd);
     expect(barOf("a").style.left).toBe(`${after.x(toDay("2026-12-01"))}px`);
     expect(one(".tl-scroll").scrollLeft).toBe(after.x(FIRST));
     widths.scroll = 300 + 800;
     act(() => resized.forEach((cb) => cb()));
-    expect(barOf("a").style.left).toBe(`${geometry(t.session.view(), "F", 900).x(toDay("2026-12-01"))}px`);
+    expect(barOf("a").style.left).toBe(`${geometry(t.session.view(), "F", 1, 900).x(toDay("2026-12-01"))}px`);
   });
 
   it("group names beside bars when collapsed", async () => {
@@ -1414,7 +1415,7 @@ describe("the outline", () => {
     expect(frame().dataset.outline).toBe("collapsed");
     const labels = all(".bar-label.group-label");
     expect(labels.map((l) => l.textContent)).toEqual(["Optics"]);
-    const g = geometry(t.session.view(), "W");
+    const g = geometry(t.session.view(), "W", 1);
     const end = g.x(toDay("2026-12-18")) + g.ppd;
     expect([labels[0].style.left, labels[0].style.top]).toEqual([`${end + 10}px`, "8px"]);
     act(() => {
@@ -1457,7 +1458,7 @@ describe("the outline", () => {
     expect([uiNow()[0].selected, uiNow()[0].follow, document.activeElement === strip()]).toEqual(["t25", null, true]);
     const top = 26 * 34;
     expect([scroll.scrollTop > 0, scroll.scrollTop <= top, top + 34 <= scroll.scrollTop + 700]).toEqual([true, true, true]);
-    const x0 = geometry(t.session.view(), "W").x(toDay("2027-03-01"));
+    const x0 = geometry(t.session.view(), "W", 1).x(toDay("2027-03-01"));
     expect([scroll.scrollLeft > left, x0 >= scroll.scrollLeft, x0 < scroll.scrollLeft + 1440 - 300]).toEqual([true, true, true]);
     act(() => {
       fireEvent.keyDown(strip(), { key: "k" });

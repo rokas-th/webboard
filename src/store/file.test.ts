@@ -20,7 +20,7 @@ import { framed } from "../test/fixtures/framed";
 import { VALID_WEBBOARD } from "../test/fixtures/webboard";
 import { hold, offeredSettings, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
 import { decodeAction, encodeAction, PlanDoc } from "./doc";
-import { buildImport, decodeWbx, encodeWbx, exportListCsv, exportPlan, importPlan, unframe, type ImportResult } from "./file";
+import { backupFileNames, buildImport, decodeWbx, encodeWbx, exportBackup, exportIcs, exportListCsv, exportPlan, importPlan, unframe, type ImportResult } from "./file";
 import { Registry } from "./registry";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
@@ -370,6 +370,100 @@ describe("export the List as CSV", () => {
       throw { code: "file.io", message: "Could not write /Users/a/MESA 1.0 List.csv: No space left on device." };
     };
     await expect(exportListCsv("MESA 1.0", CSV)).rejects.toMatchObject({ code: "file.io", message: "Could not write /Users/a/MESA 1.0 List.csv: No space left on device." });
+  });
+});
+
+const bodyOf = (c: Call): Uint8Array => {
+  const args = c.args;
+  if (!ArrayBuffer.isView(args)) throw new Error("plan_export carried no bytes");
+  return new Uint8Array(args.buffer, args.byteOffset, args.byteLength);
+};
+
+describe("export milestones as ICS", () => {
+  const ICS = "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n";
+
+  it("sends the text as UTF-8 under the plan's name and Milestones, as ics, and answers the written file name", async () => {
+    fileState.saved = "MESA 1.0 Milestones.ics";
+    const from = tauri.calls.length;
+    expect(await exportIcs("MESA 1.0", ICS)).toBe("MESA 1.0 Milestones.ics");
+    const exports = callsOf(from, "plan_export");
+    expect(exports).toHaveLength(1);
+    expect([xname(exports[0]), xformat(exports[0])]).toEqual([encodeURIComponent("MESA 1.0 Milestones"), "ics"]);
+    expect(new TextDecoder().decode(bodyOf(exports[0]))).toBe(ICS);
+    expect(outsideRust(from)).toEqual([]);
+  });
+
+  it("answers null when the save dialog is cancelled", async () => {
+    fileState.saved = null;
+    expect(await exportIcs("MESA 1.0", ICS)).toBeNull();
+  });
+
+  it("refuses a plan name holding a lone surrogate before asking Rust", async () => {
+    const from = tauri.calls.length;
+    await expect(exportIcs("A\uD800", ICS)).rejects.toMatchObject({
+      code: "file.io",
+      message: "The plan name holds a character that cannot be written to a file name; rename the plan and export again.",
+    });
+    expect(callsOf(from, "plan_export")).toHaveLength(0);
+  });
+});
+
+describe("back up all plans", () => {
+  const WHEN = new Date(2026, 10, 23, 9, 30, 0);
+
+  it("names each plan's file after the plan, turning separators into dashes and trimming trailing dots", () => {
+    expect(backupFileNames(["MESA 1.0", "Q3/Q4 \\ Bridge", "Plan v2...", "Kuppel ü"])).toEqual([
+      "MESA 1.0.webboard",
+      "Q3-Q4 - Bridge.webboard",
+      "Plan v2.webboard",
+      "Kuppel ü.webboard",
+    ]);
+  });
+
+  it("numbers a repeated name, case-insensitively, from (2)", () => {
+    expect(backupFileNames(["Survey", "survey", "SURVEY.", "Survey (2)", "Other"])).toEqual([
+      "Survey.webboard",
+      "survey (2).webboard",
+      "SURVEY (3).webboard",
+      "Survey (2) (2).webboard",
+      "Other.webboard",
+    ]);
+  });
+
+  it("refuses a name with nothing left before the extension, or a lone surrogate", () => {
+    expect(() => backupFileNames(["Fine", "..."])).toThrow(new AppError("file.io", "The plan “...” has no name to back up under; rename it and back up again."));
+    expect(() => backupFileNames(["A\uD800"])).toThrow(
+      new AppError("file.io", "The plan name “A\uD800” holds a character that cannot be written to a file name; rename the plan and back up again."),
+    );
+  });
+
+  it("sends one zip of every plan's .webboard under WebBoard backup and today's date, as zip", async () => {
+    const reg = await registry();
+    const one = await reg.session(await reg.createPlan("MESA 1.0"));
+    const two = await reg.session(await reg.createPlan("Survey"));
+    fileState.saved = "WebBoard backup 2026-11-23.zip";
+    const from = tauri.calls.length;
+    expect(await exportBackup([one, two], "2026-11-23", WHEN)).toEqual({ name: "WebBoard backup 2026-11-23.zip", plans: 2, unreadable: 0 });
+    const exports = callsOf(from, "plan_export");
+    expect(exports).toHaveLength(1);
+    expect([xname(exports[0]), xformat(exports[0])]).toEqual([encodeURIComponent("WebBoard backup 2026-11-23"), "zip"]);
+    const zip = bodyOf(exports[0]);
+    const end = new DataView(zip.buffer, zip.byteOffset + zip.length - 22, 22);
+    expect([end.getUint32(0, true), end.getUint16(8, true)]).toEqual([0x06054b50, 2]);
+    const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+    const nameLength = view.getUint16(26, true);
+    const size = view.getUint32(18, true);
+    expect(new TextDecoder().decode(zip.subarray(30, 30 + nameLength))).toBe("MESA 1.0.webboard");
+    const first = decodeWbx(zip.slice(30 + nameLength, 30 + nameLength + size));
+    expect([first.header.planId, first.header.name]).toEqual([one.view().plan.id, "MESA 1.0"]);
+    expect(outsideRust(from)).toEqual([]);
+  });
+
+  it("answers null when the save dialog is cancelled", async () => {
+    const reg = await registry();
+    const one = await reg.session(await reg.createPlan("MESA 1.0"));
+    fileState.saved = null;
+    expect(await exportBackup([one], "2026-11-23", WHEN)).toBeNull();
   });
 });
 

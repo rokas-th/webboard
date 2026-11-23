@@ -1,5 +1,5 @@
 import type { Calendar, RegionRef } from "../../domain/calendar";
-import type { Weekday } from "../../domain/dates";
+import { weekdaysFrom, type WeekStart, type Weekday } from "../../domain/dates";
 
 const DIVISIONS: Readonly<Record<"england-and-wales" | "scotland" | "northern-ireland", string>> = {
   "england-and-wales": "England and Wales",
@@ -22,15 +22,16 @@ export function regionText(r: RegionRef): string {
   }
 }
 
-export function weekdaysText(w: readonly Weekday[]): string {
-  const days = [...new Set(w)].sort((a, b) => a - b);
-  const run = days.every((d, i) => i === 0 || d === days[i - 1] + 1);
+export function weekdaysText(w: readonly Weekday[], week: WeekStart): string {
+  const order = weekdaysFrom(week);
+  const days = order.filter((d) => w.includes(d));
+  const run = days.every((d, i) => i === 0 || order.indexOf(d) === order.indexOf(days[i - 1]) + 1);
   if (run && days.length > 2) return `${DAYS[days[0]]}–${DAYS[days[days.length - 1]]}`;
   return days.map((d) => DAYS[d]).join(", ");
 }
 
-export function calendarSummary(cal: Calendar): string {
+export function calendarSummary(cal: Calendar, week: WeekStart): string {
   const n = cal.closures.size;
   const closures = n === 0 ? "no closures" : n === 1 ? "1 closure" : `${n} closures`;
-  return `${cal.region ? regionText(cal.region) : "No holiday region"} · ${weekdaysText(cal.workdays)} · ${closures}`;
+  return `${cal.region ? regionText(cal.region) : "No holiday region"} · ${weekdaysText(cal.workdays, week)} · ${closures}`;
 }

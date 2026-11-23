@@ -88,7 +88,7 @@
   color: var(--cyan);
   border-color: var(--cyan-dim);
   background: rgba(var(--cyan-rgb), 0.08);
-  box-shadow: 0 0 10px rgba(var(--cyan-rgb), 0.18);
+  box-shadow: 0 0 calc(10px * var(--glow)) calc(1px - 1px * var(--glow)) rgba(var(--cyan-rgb), 0.18);
 }
 
 .seg-modes button {

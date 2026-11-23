@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ResolveOptions } from "../../actions/resolve";
+import { LOG_STYLE } from "../../domain/dates";
 import type { Choice } from "../../plan/choices";
 import type { PlanSession } from "../../store/session";
 import { testSession, type Clash, type TestSession } from "../../test/session";
@@ -47,7 +48,7 @@ const contentOf = (t: TestSession, c: Choice, label: string): { got: SideContent
   const side = sideKey(c, label);
   const rp = t.session.previewResolve(c.id, { side }, defaults);
   const spy = vi.spyOn(t.session, "previewResolve");
-  const got = sideContent(t.session, c, { side }, defaults);
+  const got = sideContent(t.session, c, { side }, defaults, LOG_STYLE, 1);
   const calls = spy.mock.calls.length;
   spy.mockRestore();
   return { got, rp, calls };

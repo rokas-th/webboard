@@ -38,6 +38,7 @@ export const SCOPE_LABELS: Readonly<Record<ScopeId, string>> = {
   milestones: "Milestones",
   done: "Done",
   all: "All",
+  mine: "Mine",
 };
 
 export const SCOPE_TITLES: Readonly<Record<ScopeId, string | null>> = {
@@ -50,6 +51,7 @@ export const SCOPE_TITLES: Readonly<Record<ScopeId, string | null>> = {
   milestones: null,
   done: null,
   all: "Everything in this plan",
+  mine: null,
 };
 
 export const FIELD_LABELS: Readonly<Record<ChipField, string>> = {

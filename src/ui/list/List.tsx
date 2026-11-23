@@ -20,6 +20,8 @@ import type { Point } from "../common/ContextMenu";
 import { pointBelow, usePickMenu } from "../common/pickMenu";
 import { EMPTY_PLAN } from "../copy";
 import { useDetail } from "../detail/DetailContext";
+import { useDateStyle, useLook, useMe } from "../DeviceProvider";
+import { mineLine, MineNote } from "./MineNote";
 import { useUiValue } from "../state";
 import { isClick } from "../timeline/gesture";
 import { dropIndex, fitWidth, minWidthOn, moveColumn, resizeColumn } from "./columnOps";
@@ -30,7 +32,7 @@ import { ListBar } from "./ListBar";
 import { listModel, planOrder, sortClick, type ListSection } from "./model";
 import { MAX_WIDTH, useListPrefs, writeListPrefs, type ColumnId, type ListPrefs } from "./prefs";
 import { COLUMN_MENU, COLUMNS_TITLE, nothingText, resizeLabel, SORT_DOWN, SORT_TITLE, SORT_UP, sortDirText, sortRankText } from "./text";
-import { listWindow, ROW_PX } from "./window";
+import { listWindow, rowPx } from "./window";
 import { searchMatcher } from "../search/match";
 
 type Entry = { kind: "group"; section: ListSection; count: number } | { kind: "row"; id: ItemId };
@@ -273,21 +275,24 @@ export function List(p: { session: PlanSession }) {
   const os = readPlatform(window).os;
   const ios = os === "ios";
   const session = p.session;
-  const ctx: RowContext = useMemo(() => rowContext(view, (id) => session.note(id).toString()), [view, session, notesSeen]);
+  const style = useDateStyle();
+  const me = useMe(plan);
+  const ctx: RowContext = useMemo(() => rowContext(view, (id) => session.note(id).toString(), me, style), [view, session, notesSeen, me, style]);
   const match = useMemo(() => searchMatcher(ctx, q), [ctx, q]);
   const model = useMemo(() => listModel(ctx, prefs, match), [ctx, prefs, match]);
   const listed = useMemo(() => planOrder(ctx).length, [ctx]);
   const cols: Shown[] = useMemo(
     () =>
       prefs.cols.map((c) => {
-        const min = minWidthOn(c.id, ios);
+        const min = minWidthOn(c.id, ios, style.format);
         return { spec: columnById(c.id), w: Math.max(min, live !== null && live.id === c.id ? live.w : c.w), min };
       }),
-    [prefs, live, ios],
+    [prefs, live, ios, style.format],
   );
   const width = cols.reduce((sum, c) => sum + c.w, 0);
   const entries = useMemo(() => entriesOf(model.sections, ctx.ghosts), [model, ctx]);
-  const win = listWindow(port.top, port.height, entries.length);
+  const rowH = rowPx(useLook().density);
+  const win = listWindow(port.top, port.height, entries.length, rowH);
   const selectedAt = ui.selected === null ? -1 : entries.findIndex((e) => e.kind === "row" && e.id === ui.selected);
 
   useLayoutEffect(() => {
@@ -309,13 +314,13 @@ export function List(p: { session: PlanSession }) {
     const thead = head.current;
     if (thead === null) throw new Error("List: no header");
     const headH = thead.offsetHeight;
-    const top = selectedAt * ROW_PX;
-    const bottom = headH + (selectedAt + 1) * ROW_PX;
+    const top = selectedAt * rowH;
+    const bottom = headH + (selectedAt + 1) * rowH;
     if (top < el.scrollTop) el.scrollTop = top;
     else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
     else return;
     setPort({ top: el.scrollTop, height: el.clientHeight });
-  }, [ui.selected, selectedAt]);
+  }, [ui.selected, selectedAt, rowH]);
 
   useLayoutEffect(() => {
     const id = refocus.current;
@@ -719,7 +724,8 @@ export function List(p: { session: PlanSession }) {
 
   const tableStyle: CSSProperties = { width };
 
-  const empty = listed === 0 ? EMPTY_PLAN : model.order.length === 0 ? nothingText(prefs.scope, prefs.chips.length > 0, q) : null;
+  const mine = mineLine(prefs.scope, ctx.me);
+  const empty = mine !== null ? null : listed === 0 ? EMPTY_PLAN : model.order.length === 0 ? nothingText(prefs.scope, prefs.chips.length > 0, q) : null;
 
   return (
     <>
@@ -740,6 +746,7 @@ export function List(p: { session: PlanSession }) {
             </tbody>
           </table>
           {drop !== null && <div className="th-drop" style={{ left: drop.left, top: drop.top }} />}
+          {mine !== null && <MineNote line={mine} className="note" />}
           {empty !== null && <p className="note">{empty}</p>}
         </div>
         <div className="cols-gutter">

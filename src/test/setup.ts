@@ -5,7 +5,7 @@ import { takeRefusals } from "./tauriMock";
 
 vi.mock("../theme/apply", async (importOriginal) => {
   const real = await importOriginal<typeof import("../theme/apply")>();
-  return { ...real, paintNative: vi.fn(async () => undefined) };
+  return { ...real, paintNative: vi.fn(async () => undefined), zoomNative: vi.fn(async () => undefined) };
 });
 
 class TestPointerEvent extends MouseEvent {
@@ -74,8 +74,12 @@ afterEach(() => {
   const refused = takeRefusals();
   if (refused.length > 0) throw new Error(`the Tauri mock refused UIKit calls the product must never send:\n${refused.join("\n")}`);
   window.localStorage.removeItem("webboard.theme");
+  window.localStorage.removeItem("webboard.device");
   document.documentElement.removeAttribute("style");
   delete document.documentElement.dataset.scheme;
+  delete document.documentElement.dataset.density;
+  delete document.documentElement.dataset.textSize;
+  delete document.documentElement.dataset.glow;
 });
 if (!("isContentEditable" in HTMLElement.prototype)) {
   Object.defineProperty(HTMLElement.prototype, "isContentEditable", {

@@ -23,6 +23,7 @@ import { usePlanFiles, usePlanSelection, type PlanFiles, type PlanMain } from ".
 import { ExampleButton, NewPlanButton } from "../shell/Sidebar";
 import { RemovedBanner } from "../sync/RemovedBanner";
 import { SyncActionButtons, syncMessage } from "../sync/SyncPanes";
+import { useDevice, useMe } from "../DeviceProvider";
 import { UiContext, useUi, useUiValue, type DialogState, type SyncPane } from "../state";
 import { useCanHover } from "../theme/ThemePanel";
 import { Settings, type SettingsCloser } from "../settings/Settings";
@@ -106,11 +107,12 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
   const query = ui.query.trim();
   const notesSeen = useNotes(p.session, view === "list" && query !== "");
   const session = p.session;
+  const me = useMe(planView.plan.id);
   const order = useMemo(() => {
     const notes: NoteText = (id) => session.note(id).toString();
-    const match = view === "list" ? searchMatcher(rowContext(planView, notes), query) : null;
-    return phoneOrder(planView, view, ui.collapsed, listPrefs, notes, match);
-  }, [planView, view, ui.collapsed, listPrefs, session, query, notesSeen]);
+    const match = view === "list" ? searchMatcher(rowContext(planView, notes, me, null), query) : null;
+    return phoneOrder(planView, view, ui.collapsed, listPrefs, notes, me, match);
+  }, [planView, view, ui.collapsed, listPrefs, session, query, notesSeen, me]);
   const follows = view === "timeline";
   const detailApi: DetailApi = {
     order,
@@ -357,16 +359,17 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
           <Settings
             frame="sheet"
             section={ui.settings}
+            row={ui.settingsRow}
+            onRowShown={() => setUi({ settingsRow: null })}
             session={session}
             readOnly={session === null ? false : session.readOnly}
-            device={p.registry.device.name}
             clock={p.clock}
             hover={hover}
             closer={settingsCloser}
             files={files}
             onSection={(s) => setUi({ settings: s })}
             syncPane={ui.syncPane}
-            onClose={() => setUi({ settings: null, syncPane: null })}
+            onClose={() => setUi({ settings: null, settingsRow: null, syncPane: null })}
             onSyncPane={(pane) => setUi({ syncPane: pane })}
             onTrashPlan={trash}
           />
@@ -379,7 +382,8 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
 }
 
 export function PhoneShell(p: { registry: Registry; clock: Clock }) {
-  const [ui, setUi] = useUi();
+  const tab = useDevice().prefs.tab;
+  const [ui, setUi] = useUi(tab);
   const uiValue = useMemo(() => ({ ui, setUi }), [ui, setUi]);
   return (
     <UiContext.Provider value={uiValue}>

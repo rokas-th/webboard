@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { RegionRef, Tuning } from "../../domain/calendar";
-import { fmtShort, isCalendarDate, toDay, yearOf, type IsoDate } from "../../domain/dates";
+import { fmtFull, isCalendarDate, type IsoDate } from "../../domain/dates";
 import { AppError, call } from "../../services/ipc";
 import { toast } from "../common/Toast";
+import { useDateStyle } from "../DeviceProvider";
 import { regionText } from "../panel/calendarText";
 import { messageOf } from "./message";
 
@@ -135,6 +136,7 @@ export function RegionPicker(p: {
   onPick(r: RegionRef | null): void;
   onTune(date: IsoDate, t: Tuning | null): void;
 }) {
+  const style = useDateStyle();
   const [source, setSource] = useState<Source>(p.region === null ? "none" : p.region.src);
   const [country, setCountry] = useState(p.region !== null && p.region.src === "openholidays" ? p.region.country : "");
   const [url, setUrl] = useState(p.region !== null && p.region.src === "ics" ? p.region.url : "");
@@ -276,7 +278,7 @@ export function RegionPicker(p: {
               <li key={`${ev.date} ${ev.name}`}>
                 <label>
                   <input type="checkbox" checked={ticked(consumer, ev.date)} onChange={(e) => tick(consumer, ev.date, e.target.checked)} />
-                  <span className="when">{`${fmtShort(ev.date)} ${yearOf(toDay(ev.date))}`}</span>
+                  <span className="when">{fmtFull(ev.date, style)}</span>
                   <span>{ev.name}</span>
                 </label>
               </li>

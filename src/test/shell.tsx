@@ -27,6 +27,7 @@ const STUBBED = [
   "attachSpace",
   "movePlanToSpace",
   "nameThisDevice",
+  "renameDevice",
   "syncedHeads",
   "setSyncedHeads",
   "setSpaceReadOnly",
@@ -81,6 +82,7 @@ export function testRegistry(t: TestSession, over: Partial<Registry> = {}): Test
     spaceReadOnly: () => false,
     reloading: () => false,
     attachedSpace: () => null,
+    renamedDevice: () => null,
     subscribe: (cb: () => void) => {
       listeners.add(cb);
       return () => {

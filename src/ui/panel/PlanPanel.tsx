@@ -1,10 +1,11 @@
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { fmtShort, toIso } from "../../domain/dates";
+import { fmtShort, toIso, type DateStyle } from "../../domain/dates";
 import { goneSet } from "../../domain/derive";
 import type { Item, ItemId } from "../../domain/model";
 import { childrenOf, trashRoots } from "../../plan/project";
 import type { PlanView } from "../../store/doc";
 import { usePlanView, type PlanSession } from "../../store/session";
+import { useDateStyle, useDevice } from "../DeviceProvider";
 import { useRun } from "../run";
 import { derivedStatus } from "../status";
 import { useUiValue, type SettingsSection } from "../state";
@@ -32,11 +33,11 @@ function Stat(p: { k: string; v: number; tone?: "amber" | "magenta" }) {
   );
 }
 
-function spanText(view: PlanView): string | null {
+function spanText(view: PlanView, style: DateStyle): string | null {
   const starts = [...view.derived.start.values()];
   const ends = [...view.derived.end.values()];
   if (starts.length === 0 || ends.length === 0) return null;
-  return `${fmtShort(toIso(Math.min(...starts)))} – ${fmtShort(toIso(Math.max(...ends)))}`;
+  return `${fmtShort(toIso(Math.min(...starts)), style)} – ${fmtShort(toIso(Math.max(...ends)), style)}`;
 }
 
 function topProgress(view: PlanView, gone: ReadonlySet<ItemId>): number | null {
@@ -84,6 +85,8 @@ export function PlanPanel(p: { session: PlanSession; readOnly: boolean }) {
   const view = usePlanView(p.session);
   const run = useRun(p.session);
   const { setUi } = useUiValue();
+  const style = useDateStyle();
+  const week = useDevice().prefs.week;
   const [asked, setAsked] = useState<SummaryPage>("summary");
   const opener = useRef<SubPage | null>(null);
   const backButton = useRef<HTMLButtonElement>(null);
@@ -132,9 +135,9 @@ export function PlanPanel(p: { session: PlanSession; readOnly: boolean }) {
   const unscheduled = items.filter((i) => i.schedule !== null && i.schedule.start === null).length;
   const late = items.filter((i) => view.derived.late.has(i.id)).length;
   const conflicts = view.derived.conflicts.filter((c) => c.kind !== "dayoff").length;
-  const span = spanText(view);
+  const span = spanText(view, style);
   const progress = topProgress(view, gone);
-  const calendarText = calendarSummary(plan.calendar);
+  const calendarText = calendarSummary(plan.calendar, week);
   return (
     <div ref={panel} className="panel plan-summary" data-summary-page="summary">
       <h2>Plan</h2>

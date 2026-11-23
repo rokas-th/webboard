@@ -55,6 +55,31 @@ const tierMin = (name) => {
 const MEDIUM_MIN = tierMin("MEDIUM_MIN");
 const BOUNDARY_SPARE = 16;
 const ROOMY_MIN = tierMin("ROOMY_MIN");
+const constIn = (file, name, ts, pattern) => {
+  const m = ts.match(new RegExp(`^export const ${name} = (${pattern});$`, "m"));
+  if (m === null) throw new Error(`layout-probe: ${file} has no "export const ${name} = <number>;"`);
+  return Number(m[1]);
+};
+const DEVICE_TS = readFileSync(new URL("../src/ui/device.ts", import.meta.url), "utf8");
+const TEXT_ZOOM = { small: constIn("src/ui/device.ts", "SMALL_TEXT_ZOOM", DEVICE_TS, "\\d+\\.\\d+"), default: 1 };
+const FORM_TS = readFileSync(new URL("../src/ui/shell/formFactor.ts", import.meta.url), "utf8");
+const FULL_MIN_WIDTH = constIn("src/ui/shell/formFactor.ts", "FULL_MIN_WIDTH", FORM_TS, "\\d+");
+const zoomedSize = (w, h, zoom) => ({ width: Math.round(w / zoom), height: Math.round(h / zoom) });
+const formAt = (size, zoom) => (zoom === 1 || size.form === "phone" ? size.form : zoomedSize(size.size[0], size.size[1], zoom).width >= FULL_MIN_WIDTH ? "full" : "compact");
+const sizesIn = (name) => {
+  const m = DEVICE_TS.match(new RegExp(`^export const ${name}: readonly TextSize\\[\\] = \\[((?:"[a-z]+"(?:, )?)+)\\];$`, "m"));
+  if (m === null) throw new Error(`layout-probe: src/ui/device.ts has no "export const ${name}: readonly TextSize[] = [...];"`);
+  return [...m[1].matchAll(/"([a-z]+)"/g)].map((x) => x[1]);
+};
+const TEXT_SIZES_ON = { desk: sizesIn("DESK_TEXT_SIZES"), pad: sizesIn("PAD_TEXT_SIZES"), phone: sizesIn("PHONE_TEXT_SIZES") };
+const zoomOn = (device, platform) => {
+  if (device === null) return 1;
+  const shown = TEXT_SIZES_ON[platform.os === "ios" ? platform.idiom : "desk"];
+  if (shown === undefined) throw new Error(`layout-probe: no text sizes for ${JSON.stringify(platform)}`);
+  const zoom = TEXT_ZOOM[shown.includes(device.text) ? device.text : "default"];
+  if (zoom === undefined) throw new Error(`layout-probe: no text size ${JSON.stringify(device.text)}`);
+  return zoom;
+};
 const padWindow = (w, h) => ({ size: [w, h], screen: [834, 1194], touch: true, form: "compact" });
 const IPAD_TIERS = [padWindow(560, 1000), padWindow(MEDIUM_MIN - 1, 1000), padWindow(MEDIUM_MIN, 1000), padWindow(ROOMY_MIN - 1, 820), padWindow(ROOMY_MIN, 820)];
 const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE, ...IPAD_WINDOWS, ...IPAD_TIERS, ...IPAD_OWNER, ...SHEET_DESK];
@@ -85,6 +110,7 @@ export const CHROME = Object.freeze({
   workflowRows: [".workflow-row button", ".workflow-add"],
   peopleRows: [".people-row button", ".people-add"],
   defaultsRows: [".defaults-row button", ".defaults-row input"],
+  generalRows: [".general-row button", ".general-row input"],
   assignees: [".assignees .chip-x", ".assignees .chip-add"],
   listBar: [".scope-bar button", ".list-status button", ".chip-x", ".th-sort", ".th-edge", ".cols-btn"],
   columnsPop: [".cols-pop .popover-close", ".cols-pop .cols-handle", ".cols-pop .cols-check", ".cols-pop .cols-reset"],
@@ -149,7 +175,8 @@ const unclipped = (selector) => ({ unclipped: selector });
 const noOverhang = (scroller, content, allow) => ({ noOverhang: [scroller, content, allow] });
 const relabel = (selector, text) => ({ relabel: [selector, text] });
 const within_ = (selector, box, n) => ({ within: [selector, box, n] });
-const fitLabels = () => ({ fitLabels: true });
+const fitLabels = (selector, box) => (selector === undefined ? { fitLabels: true } : { fitLabels: [selector, box] });
+const weekStart = (day) => ({ weekStart: day });
 const monthCut = () => ({ monthCut: true });
 const raise = (message) => ({ raise: message });
 const media = (kind) => ({ media: kind });
@@ -160,6 +187,7 @@ const edgeAt = (selector, side, at) => ({ edgeAt: [selector, side, at] });
 const oneLine = (selector, o) => (o !== undefined && o.scrolls === true ? { oneLine: selector, scrolls: true } : { oneLine: selector });
 const spare = (selector, min, below) => ({ spare: [selector, min, below === undefined ? null : below] });
 const focus = (selector) => ({ focus: selector });
+const focusOn = (selector) => ({ focusOn: selector });
 const fill = (selector, text) => ({ fill: [selector, text] });
 const fontMin = (selector, px) => ({ fontMin: [selector, px] });
 const keep = (selector) => ({ keep: selector });
@@ -181,6 +209,9 @@ const VIEWS = [
   ["board", { view: "board", zoom: "W" }, ".card .card-name"],
   ["list", { view: "list", zoom: "W" }, ".list .list-name"],
 ];
+
+const DEVICE_DEFAULTS = { v: 1, tab: "timeline", week: 1, dates: "system", density: "comfortable", text: "default", glow: "full", me: {} };
+const deviceWith = (patch) => ({ ...DEVICE_DEFAULTS, ...patch });
 
 const PANE_OPEN = { open: true, w: null };
 const panesFor = (place, o) => {
@@ -215,6 +246,7 @@ function states() {
       panes: o.panes === undefined ? null : panesFor(o.place === undefined ? { view: "timeline", zoom: "W" } : o.place, o.panes),
       board: o.board ?? null,
       list: o.list ?? null,
+      device: o.device ?? null,
     });
 
   add("empty", "empty", {
@@ -245,6 +277,54 @@ function states() {
     });
   });
   add("fit/labels", "mesa", { place: { view: "timeline", zoom: "F" }, actions: [viewExpect("timeline"), fitLabels(), monthCut()] });
+  const DATE_SAMPLES = { iso: ["2026-11-06", "2026-11-03 – 2026-11-06"], dmy: ["6.11.2026", "3.11.2026 – 6.11.2026"] };
+  Object.entries(DATE_SAMPLES).forEach(([format, [sample, span]]) => {
+    const device = deviceWith({ dates: format });
+    add(`dates/${format}/list`, "mesa", {
+      place: { view: "list", zoom: "W" },
+      device,
+      actions: [viewExpect("list"), expect("table.list tbody tr[data-lrow] td.end:not(.nil)", sample), fitLabels("table.list tbody tr[data-lrow] td.end:not(.nil)", "table.list")],
+    });
+    add(`dates/${format}/board`, "mesa", {
+      place: { view: "board", zoom: "W" },
+      device,
+      actions: [viewExpect("board"), expect(".card .card-meta .when", span), fitLabels(".card .card-meta .when", ".card")],
+    });
+    add(`dates/${format}/timeline`, "mesa", { place: { view: "timeline", zoom: "F" }, device, actions: [viewExpect("timeline"), expect(".tl-chart .bar-label .meta", sample), fitLabels()] });
+  });
+  add("timeline/week-sunday", "mesa", { place: { view: "timeline", zoom: "M" }, device: deviceWith({ week: 7 }), actions: [viewExpect("timeline"), weekStart(0)] });
+  const small = deviceWith({ text: "small" });
+  const smallShown = [viewExpect("timeline"), count('html[data-text-size="small"]', 1)];
+  [
+    ["mac", "mesa"],
+    ["linux", "mesa-linux"],
+  ].forEach(([os, fixture]) => {
+    add(`text-size/small/${os}`, fixture, { sizes: "desk-toolbar", device: small, actions: [...smallShown, oneLine(".toolbar")] });
+    add(`text-size/small/${os}/centred`, fixture, { sizes: "widest", device: small, actions: [...smallShown, centred(".seg-modes")] });
+    add(`text-size/small/${os}/near-centre`, fixture, { sizes: "above-break-and-standard", device: small, actions: [...smallShown, nearCentre(".seg-modes")] });
+  });
+  add("text-size/small-capped/ipad", "mesa-ios-pad", { sizes: "ipad-toolbar", device: small, actions: [viewExpect("timeline"), count('html[data-text-size="default"]', 1), oneLine(".toolbar"), hitChrome("toolbar")] });
+  const compact = deviceWith({ density: "compact" });
+  add("density/compact/list", "mesa", {
+    place: { view: "list", zoom: "W" },
+    device: compact,
+    actions: [viewExpect("list"), count('html[data-density="compact"]', 1), height("table.list tbody tr[data-lrow]", 28, 28), height("table.list thead th", 34, 34), oneLine("table.list thead tr")],
+  });
+  add("density/compact/board", "mesa", {
+    place: { view: "board", zoom: "W" },
+    device: compact,
+    actions: [viewExpect("board"), count('html[data-density="compact"]', 1), style(".card", "padding-top", "5px"), style(".card", "padding-left", "9px")],
+  });
+  add("glow/reduced", "mesa", {
+    device: deviceWith({ glow: "reduced" }),
+    actions: [viewExpect("timeline"), count('html[data-glow="reduced"]', 1), style(".tl-chart .ms", "box-shadow", "rgba(255, 176, 0, 0.45) 0px 0px 0px 1px", "::before")],
+  });
+  add("glow/contrast-more", "mesa", {
+    actions: [viewExpect("timeline"), count('html[data-glow="full"]', 1), contrastMore(), style(".tl-chart .ms", "box-shadow", "rgba(255, 176, 0, 0.45) 0px 0px 0px 1px", "::before")],
+  });
+  add("glow/full", "mesa", {
+    actions: [viewExpect("timeline"), count('html[data-glow="full"]', 1), style(".tl-chart .ms", "box-shadow", "rgba(255, 176, 0, 0.45) 0px 0px 8px 0px", "::before")],
+  });
   add("scale", "scale", { actions: [expect(".tl-row .name", "WS01 task 01"), valued(".plan-head h1 input", "Scale: 1,000 items")] });
   const listPlace = { view: "list", zoom: "W" };
   const LIST_HEADS = [
@@ -325,6 +405,41 @@ function states() {
     sizes: "ipad-11-portrait",
     list: listPrefs({ cols: LIST_HEADS.filter(([id]) => id !== "step" && id !== "assignees").map(([id]) => ({ id, w: ALL_COLUMNS.find(([c]) => c === id)[1] })), sort: [{ id: "start", dir: "asc" }], chips: [{ f: "kind", v: "task" }] }),
     actions: [...scopeBar, expect(".chip-row .filter-chip .chip-text", "Kind is Task"), expect(".list-status .link-button", "Plan order"), hitChrome("listBar")],
+  });
+  const ME_MIRA = deviceWith({ me: { planMesa001: "mira" } });
+  const mineBar = [
+    viewExpect("list"),
+    count('.scope-bar[role="radiogroup"] [role="radio"]', 10),
+    expect('.scope-bar [aria-checked="true"] .scope-label', "Mine"),
+    expect('.scope-bar [data-scope="mine"][title="Open items assigned to Mira Okafor (This is me)"] .scope-n', "1"),
+    count("table.list tbody tr[data-lrow]", 1),
+    count(".mine-note", 0),
+    oneLine(".scope-bar", { scrolls: true }),
+    oneLine(".list-status"),
+  ];
+  add("list/scope-bar/mine/mac", "mesa-people", { place: listPlace, sizes: "smallest", device: ME_MIRA, list: listPrefs({ scope: "mine" }), actions: mineBar });
+  add("list/scope-bar/mine/ipad", "mesa-people-ios-pad", { place: listPlace, sizes: "ipad-11-portrait", device: ME_MIRA, list: listPrefs({ scope: "mine" }), actions: [...mineBar, { hit44: [".scope-bar button", ".list-status button"] }] });
+  add("list/mine-needs-me", "mesa", {
+    place: listPlace,
+    sizes: "smallest",
+    dialog: true,
+    list: listPrefs({ scope: "mine" }),
+    actions: [
+      expect(".list-wrap p.note.mine-note"),
+      count('.scope-bar[role="radiogroup"] [role="radio"]', 10),
+      expect('.scope-bar [aria-checked="true"] .scope-label', "Mine"),
+      count("table.list tbody tr[data-lrow]", 0),
+      count(".list-wrap p.note", 1),
+      expect('.list-wrap p.note.mine-note[role="status"] .mine-note-text', "Mine needs “This is me”. Choose who you are in Settings › General."),
+      expect(".list-wrap p.note.mine-note button.mine-choose", "Choose…"),
+      inWindow(".list-wrap p.note.mine-note"),
+      uncovered(".list-wrap p.note.mine-note button.mine-choose"),
+      click(".list-wrap p.note.mine-note button.mine-choose"),
+      expect(`.modal-settings[data-settings-modal] .modal-head h3`, "General"),
+      expect(`.modal-settings[data-settings-modal] section.settings-section:not([hidden]) [data-settings-row="general.me"] button.settings-pick[data-pick="me"]`, "Nobody"),
+      focusOn(`.modal-settings[data-settings-modal] section.settings-section:not([hidden]) [data-settings-row="general.me"] button.settings-pick[data-pick="me"]`),
+      inWindow(`.modal-settings[data-settings-modal] section.settings-section:not([hidden]) [data-settings-row="general.me"] button.settings-pick[data-pick="me"]`),
+    ],
   });
   add("list/chips", "mesa-people", {
     place: listPlace,
@@ -578,11 +693,26 @@ function states() {
   const SECTION_SLUGS = ["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "defaults", "baselines", "danger"];
   const PLAN_NAME = "MESA 1.0";
   const sectionOn = (label) => [expect(`${SETTINGS_MODAL} .modal-head h3`, label), expect(`${SETTINGS_MODAL} .settings-nav-item[aria-current="page"]`, label), count(`${SETTINGS_MODAL} section.settings-section:not([hidden])`, 1)];
+  const ICS_HINT = `Dated milestones of “${PLAN_NAME}” as all-day events.`;
+  const BACKUP_HINT = "One .zip with every plan as a .webboard file. Unzip it and import a plan to restore it.";
   const sectionChecks = (scope) => [
-    ["general", "General", [expect(`${scope} [data-settings-row="general.device"] .settings-value`), expect(`${scope} [data-settings-row="general.updates"] .update-line .update-status`, "Up to date · checked 09:00"), count(`${scope} img.about-mark`, 1), loaded(`${scope} img.about-mark`), expect(`${scope} .settings-about p`, "Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.")]],
+    ["general", "General", [count(`${scope} [data-settings-row="general.device"] input.settings-device-name[aria-label="Device name"]`, 1), expect(`${scope} [data-settings-row="general.me"] button.settings-pick[data-pick="me"]`, "Nobody"), expect(`${scope} [data-settings-row="general.updates"] .update-line .update-status`, "Up to date · checked 09:00"), count(`${scope} img.about-mark`, 1), loaded(`${scope} img.about-mark`), expect(`${scope} .settings-about p`, "Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.")]],
     ["theme", "Theme", [expect(`${scope} .theme-body`), expect(`${scope} button`, "Save theme")]],
     ["sync", "Sync", [expect(`${scope} .settings-status.cyan`, "Local only"), count(`${scope} .settings-sync .sync-tabs [role="tab"]`, 4), expect(`${scope} .settings-sync [role="tab"][aria-selected="true"]`, "Set up sync"), expect(`${scope} .settings-sync .sync-pane[data-settings-row="sync.setup"] button`, "Create or join space"), count(`${scope} .settings-row[data-settings-row^="sync."] button`, 0)]],
-    ["files", "Import & export", [expect(`${scope} [data-settings-row="files.import"] button`, "Import plan…"), expect(`${scope} [data-settings-row="files.export"] button`, "Export plan…")]],
+    [
+      "files",
+      "Import & export",
+      [
+        expect(`${scope} [data-settings-row="files.import"] button`, "Import plan…"),
+        expect(`${scope} [data-settings-row="files.export"] button`, "Export plan…"),
+        expect(`${scope} [data-settings-row="files.ics"] .settings-label`, "Calendar (ICS)"),
+        expect(`${scope} [data-settings-row="files.ics"] .settings-hint`, ICS_HINT),
+        expect(`${scope} [data-settings-row="files.ics"] button`, "Export milestones…"),
+        expect(`${scope} [data-settings-row="files.backup"] .settings-label`, "Back up all plans"),
+        expect(`${scope} [data-settings-row="files.backup"] .settings-hint`, BACKUP_HINT),
+        expect(`${scope} [data-settings-row="files.backup"] button`, "Back up…"),
+      ],
+    ],
     ["overview", "Overview", [expect(`${scope} [data-settings-row="overview.name"] .settings-label`, "Name"), count(`${scope} [data-settings-row="overview.name"] input.settings-plan-name[aria-label="Plan name"]`, 1), inWindow(`${scope} input.settings-plan-name`)]],
     [
       "people",
@@ -856,6 +986,117 @@ function states() {
       askedExactly([[0, ["Nobody ✓", "Mira Okafor", "Ole Berg", "Ana Ruiz"]]]),
     ],
   });
+  const ME_HINT = `For “${PLAN_NAME}” on this device only. Turns on Mine in the List.`;
+  const DEVICE_HINT = "Shown in History and on your other devices. The sync server keeps the name this device joined with.";
+  const GENERAL_PULLS = [
+    ["tab", ["Timeline ✓", "Board", "List"]],
+    ["week", ["Monday ✓", "Sunday"]],
+    ["dates", ["System ✓", "ISO", "D.M.YYYY"]],
+  ];
+  const generalRows = (scope, device, rows) => [
+    count(`${scope} .general-row`, rows),
+    expect(`${scope} [data-settings-row="general.me"] .settings-label`, "This is me"),
+    expect(`${scope} [data-settings-row="general.me"] .settings-hint`, ME_HINT),
+    count(`${scope} [data-settings-row="general.me"] p.settings-row-status[role="status"][hidden]`, 1),
+    expect(`${scope} [data-settings-row="general.me"] button.settings-pick[data-pick="me"]`, "Mira Okafor"),
+    expect(`${scope} [data-settings-row="general.device"] .settings-label`, "Device name"),
+    expect(`${scope} [data-settings-row="general.device"] .settings-hint`, DEVICE_HINT),
+    valued(`${scope} [data-settings-row="general.device"] input.settings-device-name`, device),
+  ];
+  const generalOpened = [click(SETTINGS_GEAR), ...sectionOn("General"), ...modalFrame(780, 580)];
+  const ME_PICK = `${SETTINGS_SHOWN} button.settings-pick[data-pick="me"]`;
+  add("settings-general/desk", "mesa-people", {
+    sizes: "desktop-and-compact",
+    dialog: true,
+    device: ME_MIRA,
+    actions: [
+      ...generalOpened,
+      ...generalRows(SETTINGS_SHOWN, "Mac", 5),
+      count(`${SETTINGS_SHOWN} [role="radiogroup"]`, 3),
+      inWindow(ME_PICK),
+      unclipped(ME_PICK),
+      inWindow(`${SETTINGS_SHOWN} input.settings-device-name`),
+      click(ME_PICK),
+      count('.context-menu[aria-label="This is me"] [role="menuitemcheckbox"]', 4),
+      expect('.context-menu [role="menuitemcheckbox"][aria-checked="true"]', "Mira Okafor"),
+      expect('.context-menu [role="menuitemcheckbox"][aria-checked="false"]', "Nobody"),
+      inWindow(".context-menu"),
+      meets(".context-menu", "right", ME_PICK, "right"),
+      uncovered('.context-menu [role="menuitemcheckbox"]'),
+    ],
+  });
+  add("settings-general/pad-landscape", "mesa-people-ios-pad", {
+    sizes: "ipad-11-landscape",
+    dialog: true,
+    device: ME_MIRA,
+    actions: [
+      ...generalOpened,
+      ...generalRows(SETTINGS_SHOWN, "iPad", 5),
+      count(`${SETTINGS_SHOWN} [role="radiogroup"]`, 0),
+      height(ME_PICK, 44, 60),
+      height(`${SETTINGS_SHOWN} input.settings-device-name`, 44, 60),
+      ...GENERAL_PULLS.map(([field]) => height(`${SETTINGS_SHOWN} button.settings-pick[data-pick="${field}"]`, 44, 60)),
+      hitChrome("dialogHead", "generalRows"),
+      click(ME_PICK),
+      count(".context-menu", 0),
+      askedExactly([[0, ["Nobody", "Mira Okafor ✓", "Ole Berg", "Ana Ruiz"]]]),
+      ...GENERAL_PULLS.flatMap(([field, rows]) => [click(`${SETTINGS_SHOWN} button.settings-pick[data-pick="${field}"]`), count(".context-menu", 0), askedExactly([[0, rows]])]),
+    ],
+  });
+  const FILES_ROWS = ["import", "export", "ics", "backup"].map((row) => `${SETTINGS_SHOWN} [data-settings-row="files.${row}"]`);
+  add("settings-files/desk", "mesa", {
+    sizes: "desktop-and-compact",
+    dialog: true,
+    actions: [
+      click(SETTINGS_GEAR),
+      click(`${SETTINGS_MODAL} .settings-nav-item`, "Import & export"),
+      ...sectionOn("Import & export"),
+      ...modalFrame(780, 580),
+      count(`${SETTINGS_SHOWN} .settings-row`, 4),
+      ...sectionChecks(SETTINGS_SHOWN)[SECTION_SLUGS.indexOf("files")][2],
+      ...FILES_ROWS.map((row) => within_(row, SETTINGS_MODAL, 1)),
+      ...["ics", "backup"].flatMap((row) => [
+        inWindow(`${SETTINGS_SHOWN} [data-settings-row="files.${row}"] button`),
+        unclipped(`${SETTINGS_SHOWN} [data-settings-row="files.${row}"] button`),
+        height(`${SETTINGS_SHOWN} [data-settings-row="files.${row}"] button`, 24, 36),
+        within_(`${SETTINGS_SHOWN} [data-settings-row="files.${row}"] .settings-hint`, `${SETTINGS_SHOWN} [data-settings-row="files.${row}"]`, 1),
+      ]),
+      uncovered(`${SETTINGS_SHOWN} [data-settings-row="files.backup"] button`),
+    ],
+  });
+  const themeOpened = [click(SETTINGS_GEAR), click(`${SETTINGS_MODAL} .settings-nav-item`, "Theme"), ...sectionOn("Theme"), ...modalFrame(780, 580)];
+  const SWITCHES = `${SETTINGS_SHOWN} button.switch[role="switch"]`;
+  add("settings-theme-look/desk", "mesa", {
+    sizes: "desktop-and-compact",
+    dialog: true,
+    actions: [
+      ...themeOpened,
+      count(`${SETTINGS_SHOWN} .general-row`, 3),
+      count(SWITCHES, 2),
+      reveal(`${SETTINGS_SHOWN} [data-settings-row="theme.glow"]`),
+      ...[`${SETTINGS_SHOWN} [data-general="density"]`, `${SETTINGS_SHOWN} [data-general="text-size"]`, `${SETTINGS_SHOWN} [data-settings-row="theme.glow"] button.switch`].flatMap((sel) => [inWindow(sel), unclipped(sel)]),
+      count(`${SETTINGS_SHOWN} [data-general="text-size"] [role="radio"]`, 2),
+      width(`${SETTINGS_SHOWN} [data-settings-row="theme.glow"] .switch-track`, 34, 34),
+      height(`${SETTINGS_SHOWN} [data-settings-row="theme.glow"] .switch-track`, 20, 20),
+      uncovered(`${SETTINGS_SHOWN} [data-settings-row="theme.glow"] button.switch`),
+    ],
+  });
+  add("settings-theme-look/pad-landscape", "mesa-ios-pad", {
+    sizes: "ipad-11-landscape",
+    dialog: true,
+    actions: [
+      ...themeOpened,
+      count(`${SETTINGS_SHOWN} .general-row`, 1),
+      count(`${SETTINGS_SHOWN} [data-general]`, 0),
+      count(SWITCHES, 2),
+      reveal(`${SETTINGS_SHOWN} [data-settings-row="theme.glow"]`),
+      inWindow(`${SETTINGS_SHOWN} [data-settings-row="theme.glow"] button.switch`),
+      unclipped(`${SETTINGS_SHOWN} [data-settings-row="theme.glow"] button.switch`),
+      width(SWITCHES, 44, 60),
+      height(SWITCHES, 44, 60),
+      { hit44: [SWITCHES] },
+    ],
+  });
   add("settings-sheet/phone", "mesa", {
     sizes: "phone",
     dialog: true,
@@ -940,6 +1181,34 @@ function states() {
       width(`${PHONE_PEOPLE} li.people-row[data-person="ole"] button.people-grip`, 44, 44),
       height(`${PHONE_PEOPLE} li.people-row[data-person="ole"] button.people-avatar`, 44, 44),
       hitChrome("peopleRows"),
+    ],
+  });
+  const PHONE_GENERAL = `${SETTINGS_SHEET} section.settings-group[data-section="general"]`;
+  add("phone-settings/general-rows", "mesa-people-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    device: ME_MIRA,
+    actions: [
+      click(".phone-head button", "Plans"),
+      click(".plans-sheet button.plans-settings-row", "Settings…"),
+      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+      reveal(`${PHONE_GENERAL} > h2.settings-group-title`, "General"),
+      ...generalRows(PHONE_GENERAL, "iPhone", 4),
+      count(`${PHONE_GENERAL} [data-settings-row="general.tab"]`, 0),
+      count(`${PHONE_GENERAL} [role="radiogroup"]`, 0),
+      ...GENERAL_PULLS.filter(([field]) => field !== "tab").flatMap(([field, rows]) => [
+        reveal(`${PHONE_GENERAL} button.settings-pick[data-pick="${field}"]`),
+        height(`${PHONE_GENERAL} button.settings-pick[data-pick="${field}"]`, 44, 60),
+        click(`${PHONE_GENERAL} button.settings-pick[data-pick="${field}"]`),
+        count(".context-menu", 0),
+        askedExactly([[0, rows]]),
+      ]),
+      reveal(`${PHONE_GENERAL} [data-settings-row="general.me"]`),
+      height(`${PHONE_GENERAL} button.settings-pick[data-pick="me"]`, 44, 60),
+      { hit44: [CHROME.generalRows[0]] },
+      reveal(`${PHONE_GENERAL} [data-settings-row="general.device"]`),
+      height(`${PHONE_GENERAL} input.settings-device-name`, 44, 60),
+      { hit44: [CHROME.generalRows[1]] },
     ],
   });
   const PHONE_DEFAULTS = `${SETTINGS_SHEET} section.settings-group[data-section="defaults"]`;
@@ -2343,7 +2612,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.unclipped === undefined && last.noOverhang === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.aligned === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.unclipped === undefined && last.noOverhang === undefined && last.within === undefined && last.fitLabels === undefined && last.weekStart === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.aligned === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -2407,6 +2676,8 @@ const SIZES = {
   "panes-1440": ["1440x920"],
   "ipad-700": namesOf([IPAD_WINDOWS[0]]),
   "mac-compact": namesOf([...PORTRAIT, ...SHEET_DESK]),
+  "desk-toolbar": namesOf([...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK]),
+  "ipad-toolbar": namesOf([...PORTRAIT, ...LANDSCAPE, ...IPAD_11, ...IPAD_WINDOWS, ...IPAD_TIERS, ...IPAD_OWNER]),
 };
 
 const sizesOf = (s) => {
@@ -2425,6 +2696,7 @@ const SHIM = String.raw`
   if (P.panes !== null) localStorage.setItem("webboard.panes", JSON.stringify(P.panes));
   if (P.board !== null) localStorage.setItem("webboard.board.planMesa001", JSON.stringify(P.board));
   if (P.list !== null) localStorage.setItem("webboard.list.planMesa001", JSON.stringify(P.list));
+  if (P.device !== null) localStorage.setItem("webboard.device", JSON.stringify(P.device));
   window.__PROBE_MISSING__ = [];
   window.__PROBE_TICKETS__ = {};
   window.__PROBE_MENUS__ = [];
@@ -3612,6 +3884,11 @@ window.__probeAct = function (a) {
     if (document.activeElement !== focused) return { fail: a.focus + " did not take focus" };
     return { ok: true };
   }
+  if (a.focusOn !== undefined) {
+    var holder = document.activeElement;
+    if (!(holder instanceof Element) || !holder.matches(a.focusOn)) return { fail: "focus is on " + (holder instanceof Element ? holder.outerHTML.slice(0, 120) : "nothing") + ", not " + a.focusOn };
+    return { ok: true };
+  }
   if (a.edgeAt !== undefined) {
     var edged = Array.prototype.slice.call(document.querySelectorAll(a.edgeAt[0])).filter(onScreen)[0];
     if (edged === undefined) return { fail: "no " + a.edgeAt[0] + " on screen to measure" };
@@ -3856,6 +4133,31 @@ window.__probeAct = function (a) {
     if (!fields.some(function (f) { return f.value === a.valued[1]; })) {
       return { fail: "no " + a.valued[0] + " holding " + JSON.stringify(a.valued[1]) + " (have: " + fields.slice(0, 6).map(function (f) { return JSON.stringify(String(f.value).slice(0, 40)); }).join(" | ") + ")" };
     }
+    return { ok: true };
+  }
+  if (a.fitLabels !== undefined && a.fitLabels !== true) {
+    var labelled = Array.prototype.slice.call(document.querySelectorAll(a.fitLabels[0])).filter(onScreen);
+    if (labelled.length === 0) return { fail: "no " + a.fitLabels[0] + " on screen to check its dates fit" };
+    var cutLabels = labelled.filter(function (el) { return el.scrollWidth > el.clientWidth + 0.5; });
+    if (cutLabels.length > 0) return { fail: cutLabels.length + " " + a.fitLabels[0] + " cut their text, first " + JSON.stringify(cutLabels[0].textContent) + " (" + cutLabels[0].scrollWidth + " > " + cutLabels[0].clientWidth + " px)" };
+    var spilled = labelled.filter(function (el) {
+      var holder = el.closest(a.fitLabels[1]);
+      if (holder === null) return true;
+      var r = el.getBoundingClientRect();
+      var b = holder.getBoundingClientRect();
+      return r.left < b.left - 0.5 || r.right > b.right + 0.5;
+    });
+    if (spilled.length > 0) return { fail: spilled.length + " " + a.fitLabels[0] + " spill past their " + a.fitLabels[1] + ", first " + JSON.stringify(spilled[0].textContent) };
+    return { ok: true };
+  }
+  if (a.weekStart !== undefined) {
+    var weekTicks = Array.prototype.slice.call(document.querySelectorAll(".tl-scale .tl-tick[data-day]"));
+    if (weekTicks.length < 3) return { fail: "the scale shows " + weekTicks.length + " week ticks, not at least 3" };
+    var offDay = weekTicks.filter(function (t) { return new Date(t.getAttribute("data-day") + "T00:00:00Z").getUTCDay() !== a.weekStart; });
+    if (offDay.length > 0) return { fail: offDay.length + " week ticks start on another day, first " + offDay[0].getAttribute("data-day") };
+    var scaleBox = document.querySelector(".tl-scale").getBoundingClientRect();
+    var firstTick = weekTicks[0].getBoundingClientRect();
+    if (Math.abs(firstTick.left - scaleBox.left) > 0.5) return { fail: "the first week tick sits " + (firstTick.left - scaleBox.left) + " px into the scale, so the Timeline does not start on the week's first day" };
     return { ok: true };
   }
   if (a.fitLabels !== undefined) {
@@ -4351,9 +4653,9 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
   return { reading, errors: seen(), notFound: [...traffic.current.notFound] };
 }
 
-function judge(state, viewport, r, errors, notFound) {
+function judge(state, viewport, r, errors, notFound, form) {
   const problems = [];
-  if (r.form !== viewport.form) problems.push(`html[data-form] is ${JSON.stringify(r.form)}, not ${JSON.stringify(viewport.form)}`);
+  if (r.form !== form) problems.push(`html[data-form] is ${JSON.stringify(r.form)}, not ${JSON.stringify(form)}`);
   if (r.stamp.os !== r.stamp.want.os) problems.push(`html[data-os] is ${JSON.stringify(r.stamp.os)}, not the fixture's ${JSON.stringify(r.stamp.want.os)}`);
   if (r.stamp.idiom !== r.stamp.want.idiom) problems.push(`html[data-idiom] is ${JSON.stringify(r.stamp.idiom)}, not the fixture's ${JSON.stringify(r.stamp.want.idiom)}`);
   if (r.doc.overY > 1) problems.push(`document scrolls ${r.doc.overY}px vertically`);
@@ -4502,14 +4804,21 @@ async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffi
     const [sw, sh] = size.screen;
     const blank = await cdp.send("Page.navigate", { url: "about:blank" }, sessionId);
     if (typeof blank.errorText === "string" && blank.errorText !== "") throw new Error(`layout-probe: could not clear the page before ${nameOf(size)}: ${blank.errorText}`);
-    await cdp.send(
-      "Emulation.setDeviceMetricsOverride",
-      { width: w, height: h, deviceScaleFactor: 1, mobile: size.touch, screenWidth: sw, screenHeight: sh },
-      sessionId,
-    );
+    const metricsAt = (zoom) =>
+      cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { ...zoomedSize(w, h, zoom), deviceScaleFactor: zoom, mobile: size.touch, screenWidth: sw, screenHeight: sh },
+        sessionId,
+      );
+    await metricsAt(1);
+    let zoomNow = 1;
     await cdp.send("Emulation.setTouchEmulationEnabled", size.touch ? { enabled: true, maxTouchPoints: 5 } : { enabled: false }, sessionId);
     for (const state of picked.filter((s) => sizesOf(s).includes(nameOf(size)))) {
       const viewport = nameOf(size);
+      if (state.zoom !== zoomNow) {
+        await metricsAt(state.zoom);
+        zoomNow = state.zoom;
+      }
       const run = await runState(cdp, sessionId, origin, state, errors, traffic);
       if (run.unreached !== undefined) {
         rows.push({ state: state.name, viewport, ok: false, unreached: run.unreached, errors: run.errors });
@@ -4531,7 +4840,7 @@ async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffi
         reportUnreached(state.name, viewport, why, run.errors);
         continue;
       }
-      const verdict = judge(state, size, r, run.errors, run.notFound);
+      const verdict = judge(state, size, r, run.errors, run.notFound, formAt(size, state.zoom));
       rows.push({ state: state.name, viewport, ...verdict, reading: r });
       if (verbose || !verdict.ok) report(state.name, viewport, verdict, r);
       if (shotDir !== null) {
@@ -4575,6 +4884,11 @@ async function main() {
   }
   if (shotDir !== null) await mkdir(shotDir, { recursive: true });
   const built = buildFixtures();
+  const zoomed = picked.map((s) => {
+    const f = built[s.fixture];
+    if (f === undefined) throw new Error(`layout-probe: no fixture ${s.fixture}`);
+    return { ...s, zoom: zoomOn(s.device, f.platform) };
+  });
   const fixtures = new Map(
     [...new Set(picked.map((s) => s.fixture))].map((name) => {
       const f = built[name];
@@ -4592,6 +4906,7 @@ async function main() {
       panes: state.panes,
       board: state.board,
       list: state.list,
+      device: state.device,
       fixture: fixtures.get(state.fixture),
       clip: state.clip,
       clipIn: state.clipIn,
@@ -4642,7 +4957,7 @@ async function main() {
     const lost = (what) => cdp.fail(new Error(`${what} (chrome-headless-shell ${exited(child) ? exitOf(child) : "still running"}); its stderr:\n${tailOf(stderr)}`));
     child.once("exit", () => lost("chrome-headless-shell exited mid-run"));
     cdp.watch((what) => waitExit(child, 1000).then(() => lost(what)));
-    const measured = await measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffic);
+    const measured = await measureAll(cdp, origin, zoomed, oneSize, verbose, shotDir, traffic);
     cdp.close();
     return measured;
   }, cleanup);

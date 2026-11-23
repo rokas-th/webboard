@@ -1,6 +1,6 @@
 import { generateNKeysBetween } from "fractional-indexing";
 import { closureTooLong, regionKey, workCalendar, type Calendar, type Closure, type Tuning, type WorkCalendar } from "../domain/calendar";
-import { FIRST_PLAN_DATE, fmtNear, inPlanWindow, LAST_PLAN_DATE, isCalendarDate, toDay, toIso, type Day, type IsoDate } from "../domain/dates";
+import { FIRST_PLAN_DATE, fmtNear, inPlanWindow, LAST_PLAN_DATE, isCalendarDate, LOG_STYLE, toDay, toIso, type Day, type IsoDate } from "../domain/dates";
 import { derive, goneSet, lockOf, schedView, type Derived } from "../domain/derive";
 import { stepModeOf } from "../domain/steps";
 import { linkKey, MAX_LAG, MAX_TASK_DUR, type Item, type ItemId, type Link, type Place, type PlanState, type Schedule } from "../domain/model";
@@ -198,7 +198,7 @@ const snapDraft = (ctx: Ctx, it: Item): Draft => {
     own: [schedWrite(it.id, { ...scheduleOf(it), start })],
     roots: [it.id],
     newNotes: [],
-    ...withPush(ctx, label.snapped(it.name, fmtNear(start, ctx.view.today))),
+    ...withPush(ctx, label.snapped(it.name, fmtNear(start, ctx.view.today, LOG_STYLE))),
   };
 };
 
@@ -230,7 +230,7 @@ const fixDraft = (ctx: Ctx, conflict: Conflict, how: "push" | "shorten" | "remov
       own: [schedWrite(succ.id, { ...scheduleOf(succ), start })],
       roots: [succ.id],
       newNotes: [],
-      ...withPush(ctx, label.earliest(succ.name, fmtNear(start, ctx.view.today))),
+      ...withPush(ctx, label.earliest(succ.name, fmtNear(start, ctx.view.today, LOG_STYLE))),
     };
   }
   const view = schedView(plan, ctx.view.held);
@@ -326,7 +326,7 @@ const scheduleDraft = (ctx: Ctx, id: ItemId, set: Partial<Schedule>): Draft => {
     switch (fields[0]) {
       case "start": {
         const stored = storedStart(d, it.id);
-        return stored === null ? label.unscheduled(it.name) : label.scheduled(it.name, fmtNear(stored, ctx.view.today));
+        return stored === null ? label.unscheduled(it.name) : label.scheduled(it.name, fmtNear(stored, ctx.view.today, LOG_STYLE));
       }
       case "dur":
         return label.resized(it.name, next.dur);

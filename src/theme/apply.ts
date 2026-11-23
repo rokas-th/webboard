@@ -1,5 +1,6 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { Look } from "../ui/device";
 import { channels, type Hex } from "./colour";
 import { HEX_TOKENS, type Tokens } from "./derive";
 
@@ -14,4 +15,14 @@ export function applyTokens(root: HTMLElement, t: Tokens): void {
 
 export async function paintNative(ground: Hex): Promise<void> {
   await Promise.all([getCurrentWindow().setBackgroundColor(ground), getCurrentWebview().setBackgroundColor(ground)]);
+}
+
+export function applyLook(root: HTMLElement, look: Look): void {
+  root.dataset.density = look.density;
+  root.dataset.textSize = look.text;
+  root.dataset.glow = look.glow;
+}
+
+export async function zoomNative(factor: number): Promise<void> {
+  await getCurrentWebview().setZoom(factor);
 }

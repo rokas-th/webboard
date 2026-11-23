@@ -2,5 +2,5 @@
   "identifier": "ios",
   "platforms": ["iOS"],
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:webview:allow-set-webview-zoom"]
 }

@@ -8,6 +8,7 @@ import { fs, testSession, type SeedItem } from "../../test/session";
 import { columnById, rowContext, type RowContext } from "./columns";
 import { csvCell, listCsv } from "./csv";
 import { DEFAULT_LIST_PREFS, type ColumnId, type ListPrefs } from "./prefs";
+import { LOG_STYLE } from "../../domain/dates";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
@@ -41,6 +42,7 @@ const prefs = (over: Partial<ListPrefs> = {}): ListPrefs => ({
 interface Made {
   ctx: RowContext;
   ids: Readonly<Record<string, PersonId>>;
+  as(me: PersonId | null): RowContext;
 }
 
 const made = async (): Promise<Made> => {
@@ -75,7 +77,8 @@ const made = async (): Promise<Made> => {
     t.session.apply({ t: "step", op: "delete", step: qa.id, to: null });
     phone.sync();
   });
-  return { ctx: rowContext(t.session.view(), (id) => t.session.note(id).toString()), ids };
+  const as = (me: PersonId | null): RowContext => rowContext(t.session.view(), (id) => t.session.note(id).toString(), me, LOG_STYLE);
+  return { ctx: as(null), ids, as };
 };
 
 const lines = (text: string): string[] => {
@@ -139,6 +142,15 @@ describe("listCsv", () => {
     expect(lines(grouped.text).slice(1).map((l) => l.split(",")[0])).toEqual(["'=SUM(A1)", "Pour the pier", "Dome set", "Bolt the dome", "'-2 spare bolts"]);
   });
 
+  it("writes Mine as the List shows it: the open items of a live me, and nothing for any other me", async () => {
+    const { ids, as } = await made();
+    const cols = [{ id: "name" as const, w: 300 }];
+    const mine = (me: PersonId | null) => listCsv(as(me), prefs({ cols, scope: "mine" }));
+    expect([mine(ids.AR).rows, lines(mine(ids.AR).text)]).toEqual([1, ["Name", "Pour the pier"]]);
+    expect([mine(null).rows, mine(ids.DL).rows, mine("nobody").rows]).toEqual([0, 0, 0]);
+    expect(lines(mine(null).text)).toEqual(["Name"]);
+  });
+
   it("writes the header alone and counts no rows when nothing is in scope", async () => {
     const { ctx } = await made();
     const none = listCsv(ctx, prefs({ scope: "done", chips: [{ f: "kind", v: "milestone" }] }));
@@ -157,7 +169,7 @@ describe("listCsv", () => {
     t.session.apply({ t: "trash", items: ["S"] });
     p.session.apply({ t: "rename", item: "r", name: "Review 2" });
     p.sync();
-    const ctx = rowContext(t.session.view(), (id) => t.session.note(id).toString());
+    const ctx = rowContext(t.session.view(), (id) => t.session.note(id).toString(), null, LOG_STYLE);
     expect(ctx.ghosts.has("r")).toBe(true);
     const out = listCsv(ctx, prefs({ cols: [{ id: "name", w: 300 }] }));
     expect([out.rows, lines(out.text)]).toEqual([1, ["Name", "Other"]]);

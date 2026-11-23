@@ -1,6 +1,6 @@
 import { workingDays } from "../../actions/copy";
 import type { OutcomeRow, ResolvePreview } from "../../actions/resolve";
-import type { Day } from "../../domain/dates";
+import type { DateStyle, Day } from "../../domain/dates";
 import type { ItemId, PlanState } from "../../domain/model";
 import { childrenOf } from "../../plan/project";
 import { planGroupPath } from "../list/groups";
@@ -24,14 +24,14 @@ export function sideSummary(rp: ResolvePreview): string {
   return k > 0 ? `moves ${moves} · ${k} ${k === 1 ? "conflict" : "conflicts"}` : `moves ${moves}`;
 }
 
-const startText = (s: Span): string => (s === null ? "unscheduled" : dayLabel(s.start));
+const startText = (s: Span, style: DateStyle): string => (s === null ? "unscheduled" : dayLabel(s.start, style));
 
 const shiftText = (shift: number): string => (shift === 0 ? "unchanged" : `${shift < 0 ? "−" : "+"}${workingDays(Math.abs(shift))}`);
 
-export function outcomeLine(row: OutcomeRow, plan: PlanState): string {
+export function outcomeLine(row: OutcomeRow, plan: PlanState, style: DateStyle): string {
   const it = plan.items.get(row.item);
   if (it === undefined) throw new Error(`No item ${row.item}`);
-  const dates = `${it.name}  ${startText(row.before)} → ${startText(row.after)}`;
+  const dates = `${it.name}  ${startText(row.before, style)} → ${startText(row.after, style)}`;
   return row.before === null || row.after === null ? dates : `${dates} · ${shiftText(row.shift)}`;
 }
 

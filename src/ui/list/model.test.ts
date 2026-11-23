@@ -1,5 +1,6 @@
 import { act } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { meOf } from "../../domain/me";
 import type { ItemId, PersonId } from "../../domain/model";
 import { peopleOf } from "../../domain/people";
 import { stepsOf } from "../../domain/steps";
@@ -9,6 +10,7 @@ import { columnById, rowContext, type RowContext } from "./columns";
 import { listModel, sortClick, sortRows, toggleChip, type ListModel } from "./model";
 import { DEFAULT_LIST_PREFS, SCOPE_IDS, type ListPrefs, type ScopeId } from "./prefs";
 import { searchMatcher } from "../search/match";
+import { LOG_STYLE } from "../../domain/dates";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
@@ -30,7 +32,7 @@ const SEED: readonly SeedItem[] = [
 const ctxOf = async (seed: readonly SeedItem[] = SEED): Promise<RowContext> => {
   const t = await testSession(seed);
   sessions.push(t.session);
-  return rowContext(t.session.view(), (id) => t.session.note(id).toString());
+  return rowContext(t.session.view(), (id) => t.session.note(id).toString(), null, LOG_STYLE);
 };
 
 const prefs = (over: Partial<ListPrefs>): ListPrefs => ({ ...DEFAULT_LIST_PREFS, ...over });
@@ -105,7 +107,7 @@ describe("listModel", () => {
       ["outline:none", null],
     ]);
     expect([m.order, m.scoped, m.shown]).toEqual([["c", "a", "b", "e"], 4, 4]);
-    expect(m.scopeCounts).toEqual({ open: 4, soon: 3, late: 0, blocked: 0, unscheduled: 1, unassigned: 5, milestones: 0, done: 1, all: 5 });
+    expect(m.scopeCounts).toEqual({ open: 4, soon: 3, late: 0, blocked: 0, unscheduled: 1, unassigned: 5, milestones: 0, done: 1, all: 5, mine: 0 });
   });
 
   it("sorts inside each section and hides an emptied section", async () => {
@@ -154,6 +156,7 @@ const CREW_SEED: readonly SeedItem[] = [
 interface Crew {
   ctx: RowContext;
   ids: Readonly<Record<string, PersonId>>;
+  session: PlanSession;
 }
 
 const CREW: readonly (readonly [string, string])[] = [
@@ -205,15 +208,16 @@ const crewOf = async (): Promise<Crew> => {
     phone.sync();
   });
   return {
-    ctx: rowContext(t.session.view(), (id) => t.session.note(id).toString()),
+    ctx: rowContext(t.session.view(), (id) => t.session.note(id).toString(), null, LOG_STYLE),
     ids,
+    session: t.session,
   };
 };
 
 const rowsOf = (m: ListModel): ItemId[] => m.sections.flatMap((s) => s.rows);
 
 describe("scopes", () => {
-  it("counts and filters each of the nine scopes", async () => {
+  it("counts and filters each of the ten scopes, Mine empty without a me", async () => {
     const { ctx } = await crewOf();
     expect(listModel(ctx, prefs({ scope: "all", group: "none" }), null).scopeCounts).toEqual({
       open: 5,
@@ -225,6 +229,7 @@ describe("scopes", () => {
       milestones: 1,
       done: 1,
       all: 6,
+      mine: 0,
     });
     const shown = (scope: ScopeId): ItemId[] => rowsOf(listModel(ctx, prefs({ scope, group: "none" }), null));
     expect(Object.fromEntries(SCOPE_IDS.map((s) => [s, shown(s)]))).toEqual({
@@ -237,7 +242,25 @@ describe("scopes", () => {
       milestones: ["m"],
       done: ["c"],
       all: ["a", "b", "c", "m", "u", "x"],
+      mine: [],
     });
+  });
+
+  it("lists open items whose live assignees include a live me under Mine, and nothing for any other me", async () => {
+    const { ids, session } = await crewOf();
+    act(() => {
+      session.apply({ t: "assign", items: ["c", "u"], person: ids.AR });
+    });
+    const mine = (me: PersonId | null): [ItemId[], number] => {
+      const m = listModel(rowContext(session.view(), (id) => session.note(id).toString(), me, LOG_STYLE), prefs({ scope: "mine", group: "none" }), null);
+      return [rowsOf(m), m.scopeCounts.mine];
+    };
+    expect(mine(ids.AR)).toEqual([["a", "b", "u"], 3]);
+    expect(mine(ids.MO)).toEqual([["b"], 1]);
+    expect(mine(null)).toEqual([[], 0]);
+    expect(mine(ids.DL)).toEqual([[], 0]);
+    expect(mine("nobody")).toEqual([[], 0]);
+    expect([meOf(session.view(), ids.DL).kind, meOf(session.view(), "nobody").kind]).toEqual(["removed", "missing"]);
   });
 
   it("counts a former-only item as Unassigned", async () => {
@@ -271,7 +294,7 @@ describe("scopes", () => {
       },
     });
     sessions.push(t.session);
-    const closed = rowContext(t.session.view(), (id) => t.session.note(id).toString());
+    const closed = rowContext(t.session.view(), (id) => t.session.note(id).toString(), null, LOG_STYLE);
     expect(rowsOf(listModel(closed, prefs({ scope: "soon", group: "none" }), null))).toEqual(["today", "wed", "thu", "fri"]);
   });
 
@@ -294,7 +317,7 @@ describe("scopes", () => {
     t.session.apply({ t: "trash", items: ["S"] });
     p.session.apply({ t: "rename", item: "r", name: "Review 2" });
     p.sync();
-    const ctx = rowContext(t.session.view(), (id) => t.session.note(id).toString());
+    const ctx = rowContext(t.session.view(), (id) => t.session.note(id).toString(), null, LOG_STYLE);
     expect(ctx.ghosts.has("r")).toBe(true);
     const m = listModel(
       ctx,
@@ -307,6 +330,27 @@ describe("scopes", () => {
     );
     expect([rowsOf(m), m.scoped, m.shown, m.scopeCounts.done, m.scopeCounts.all]).toEqual([["r"], 0, 0, 0, 0]);
     expect(listModel(ctx, prefs({ scope: "done", group: "none" }), null).scopeCounts).toMatchObject({ done: 1, all: 1, open: 0 });
+  });
+
+  it("lets a ghost pass Mine only while a live me is set, since Mine without a live me lists nothing", async () => {
+    const t = await testSession([
+      { id: "S", name: "Sprint 4", kind: "group" },
+      { id: "r", name: "Review", parent: "S", start: "2026-11-10", dur: 3 },
+    ]);
+    sessions.push(t.session);
+    t.session.apply({ t: "person", op: "add", name: "Mira Okafor", initials: "MO", colour: "sky", after: null });
+    const mira = peopleOf(t.session.view().plan)[0].id;
+    const p = await t.peer("iphone");
+    sessions.push(p.session);
+    t.session.apply({ t: "trash", items: ["S"] });
+    p.session.apply({ t: "rename", item: "r", name: "Review 2" });
+    p.sync();
+    const mine = (me: PersonId | null): ItemId[] => {
+      const ctx = rowContext(t.session.view(), (id) => t.session.note(id).toString(), me, LOG_STYLE);
+      expect(ctx.ghosts.has("r")).toBe(true);
+      return rowsOf(listModel(ctx, prefs({ scope: "mine", group: "none" }), null));
+    };
+    expect([mine(mira), mine(null), mine("nobody")]).toEqual([["r"], [], []]);
   });
 });
 

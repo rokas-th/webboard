@@ -1,6 +1,6 @@
 import { q, workingDays } from "../../actions/copy";
 import { regionKey } from "../../domain/calendar";
-import { fmtShort } from "../../domain/dates";
+import { fmtShort, type DateStyle, type WeekStart } from "../../domain/dates";
 import { followGroup, NO_NAMES } from "../../domain/defaults";
 import type { DefaultsValue, ItemId, PlanState, StepId } from "../../domain/model";
 import { peopleOf } from "../../domain/people";
@@ -27,13 +27,14 @@ const andList = (parts: readonly string[]): string => (parts.length < 2 ? parts.
 
 const STATUS_TAIL: Readonly<Record<"todo" | "doing" | "done", string>> = { todo: "", doing: " · in progress", done: " · done" };
 
-function closureText(from: string, to: string, name: string): string {
-  const span =
-    from === to
-      ? fmtShort(from)
-      : from.slice(0, 7) === to.slice(0, 7)
-        ? `${Number(from.slice(8, 10))}–${fmtShort(to)}`
-        : `${fmtShort(from)}–${fmtShort(to)}`;
+function spanText(from: string, to: string, style: DateStyle): string {
+  if (from === to) return fmtShort(from, style);
+  if (style.format !== "system" || from.slice(0, 7) !== to.slice(0, 7)) return `${fmtShort(from, style)}–${fmtShort(to, style)}`;
+  return style.order === "dm" ? `${Number(from.slice(8, 10))}–${fmtShort(to, style)}` : `${fmtShort(from, style)}–${Number(to.slice(8, 10))}`;
+}
+
+function closureText(from: string, to: string, name: string, style: DateStyle): string {
+  const span = spanText(from, to, style);
   return `closure ${span} ${q(name)}`;
 }
 
@@ -48,7 +49,7 @@ function sourceText(region: string, plan: PlanState): string {
   throw new Error(`Unknown holiday region ${region}`);
 }
 
-export function describeUnit(u: UnitKey, v: unknown, plan: PlanState, labels: ReadonlyMap<ActionId, string>): string {
+export function describeUnit(u: UnitKey, v: unknown, plan: PlanState, labels: ReadonlyMap<ActionId, string>, style: DateStyle, week: WeekStart): string {
   const k = parseKey(u);
   switch (k.kind) {
     case "pn":
@@ -58,7 +59,7 @@ export function describeUnit(u: UnitKey, v: unknown, plan: PlanState, labels: Re
       return decodeAs("existence", u, v).t ? "in the Trash" : "in the plan";
     case "s": {
       const s = decodeAs("sched", u, v);
-      const start = s.start === null ? "unscheduled" : `starts ${fmtShort(s.start)}`;
+      const start = s.start === null ? "unscheduled" : `starts ${fmtShort(s.start, style)}`;
       const dur = s.dur === 0 ? "" : ` · ${workingDays(s.dur)}`;
       return `${start}${dur}${STATUS_TAIL[s.status]}`;
     }
@@ -80,10 +81,10 @@ export function describeUnit(u: UnitKey, v: unknown, plan: PlanState, labels: Re
       return r === null ? "no holiday region" : `holiday region ${regionText(r)}`;
     }
     case "cw":
-      return weekdaysText(decodeAs("weekdays", u, v));
+      return weekdaysText(decodeAs("weekdays", u, v), week);
     case "cc": {
       const c = decodeAs("closure", u, v);
-      return c === null ? "no closure" : closureText(c.from, c.to, c.name);
+      return c === null ? "no closure" : closureText(c.from, c.to, c.name, style);
     }
     case "ct": {
       const t = decodeAs("tuning", u, v);

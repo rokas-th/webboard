@@ -1,6 +1,6 @@
 import type { Built, Intent } from "../../actions/intents";
 import { newItemIntent } from "../../actions/newItem";
-import type { Item, ItemId, ItemKind, PlanId } from "../../domain/model";
+import type { Item, ItemId, ItemKind, PersonId, PlanId } from "../../domain/model";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
 import { childrenOf } from "../../plan/project";
@@ -67,6 +67,7 @@ export interface CommandCtx {
   updates: Updates | null;
   theme: ThemeApi;
   detail: DetailCommands | null;
+  me: PersonId | null;
 }
 
 export const NEW_NAME: Readonly<Record<ItemKind, string>> = { task: "New task", milestone: "New milestone", group: "New group" };
@@ -279,7 +280,7 @@ function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
       const view = session.view();
       const plan = view.plan.id;
       const notes = (item: ItemId): string => session.note(item).toString();
-      const order = tabOrder(view, ctx.ui, readBoardPrefs(window.localStorage, plan), readListPrefs(window.localStorage, plan), notes, planMatcher(view, notes, ctx.ui.query));
+      const order = tabOrder(view, ctx.ui, readBoardPrefs(window.localStorage, plan), readListPrefs(window.localStorage, plan), notes, ctx.me, planMatcher(view, notes, ctx.ui.query));
       const patch = stepPatch(order, ctx.ui.selected, by, ctx.ui.view === "timeline");
       if (patch !== null) ctx.setUi(patch);
     },

@@ -1,6 +1,6 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { toDay } from "../../domain/dates";
+import { LOG_STYLE, toDay } from "../../domain/dates";
 import { peopleOf } from "../../domain/people";
 import { stepsOf } from "../../domain/steps";
 import type { PlanSession } from "../../store/session";
@@ -66,7 +66,7 @@ const made = async (): Promise<TestSession> => {
   return t;
 };
 
-const ctxOf = (t: TestSession): RowContext => rowContext(t.session.view(), (id) => t.session.note(id).toString());
+const ctxOf = (t: TestSession): RowContext => rowContext(t.session.view(), (id) => t.session.note(id).toString(), null, LOG_STYLE);
 
 const cell = (ctx: RowContext, col: ColumnId, id: string): [string, number | string | null] => {
   const spec = columnById(col);
@@ -91,6 +91,15 @@ describe("columns", () => {
       ["kind", "Kind", 80, 90, "start", false],
       ["note", "Note", 140, 240, "start", false],
     ]);
+  });
+
+  it("throws instead of showing a date through a context that carries no date style, and still sorts and writes CSV through it", async () => {
+    const t = await made();
+    const bare = rowContext(t.session.view(), (id) => t.session.note(id).toString(), null, null);
+    const styled = rowContext(t.session.view(), (id) => t.session.note(id).toString(), null, { format: "iso", order: "dm" });
+    expect(() => columnById("start").value(bare, "a")).toThrow("List: this row context orders and filters only, so it has no date style to show a date in");
+    expect(() => columnById("end").value(bare, "a")).toThrow("no date style");
+    expect([columnById("start").value(styled, "a"), columnById("start").csv(bare, "a"), columnById("name").value(bare, "a")]).toEqual(["2026-11-02", "2026-11-02", "Pour footings"]);
   });
 
   it("throws for a column that is not registered", () => {
