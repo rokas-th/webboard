@@ -1405,7 +1405,8 @@ html[data-os="ios"] .search-input {
   min-height: 44px;
 }
 
-html[data-os="ios"] .toolbar .icon-button[data-tb="search"] {
+html[data-os="ios"] .toolbar .icon-button[data-tb="search"],
+html[data-os="ios"] .toolbar .icon-button[data-tb="display"] {
   min-width: 44px;
 }
 

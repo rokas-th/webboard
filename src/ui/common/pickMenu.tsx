@@ -7,6 +7,7 @@ export interface PickMenu {
   open(key: string, anchor: HTMLElement, at: Point, sections: readonly PickSection[], onChosen: (id: string) => void): void;
   openFor: string | null;
   node: ReactNode;
+  close(): void;
 }
 
 interface Shown {
@@ -24,7 +25,7 @@ export const pointBelow = (el: HTMLElement): Point => {
 
 export function usePickMenu(name: string): PickMenu {
   const native = useNativeMenu(name);
-  const { show } = native;
+  const { show, dismiss } = native;
   const [shown, setShown] = useState<Shown | null>(null);
   const [nativeKey, setNativeKey] = useState<string | null>(null);
   const current = useRef<Shown | null>(shown);
@@ -54,7 +55,11 @@ export function usePickMenu(name: string): PickMenu {
     current.current = null;
     setShown(null);
   }, []);
+  const closeAny = useCallback(() => {
+    close();
+    dismiss();
+  }, [close, dismiss]);
   const node = shown === null ? null : <ContextMenu label={name} at={shown.at} anchor={shown.anchor} sections={shown.sections} onChosen={shown.onChosen} onClose={close} />;
   const openFor = usesNativeMenu() ? (native.open ? nativeKey : null) : shown === null ? null : shown.key;
-  return { open, openFor, node };
+  return { open, openFor, node, close: closeAny };
 }

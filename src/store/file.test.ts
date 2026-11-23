@@ -20,7 +20,7 @@ import { framed } from "../test/fixtures/framed";
 import { VALID_WEBBOARD } from "../test/fixtures/webboard";
 import { hold, offeredSettings, resetTauri, tauri, type Answer, type Call } from "../test/tauriMock";
 import { decodeAction, encodeAction, PlanDoc } from "./doc";
-import { buildImport, decodeWbx, encodeWbx, exportPlan, importPlan, unframe, type ImportResult } from "./file";
+import { buildImport, decodeWbx, encodeWbx, exportListCsv, exportPlan, importPlan, unframe, type ImportResult } from "./file";
 import { Registry } from "./registry";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
@@ -132,6 +132,7 @@ const idsOf = (plan: PlanState): Set<string> =>
 const unreviewed = (report: GanttReport): Promise<void> => Promise.reject(new Error(`no report expected, got one for ${report.fileName}`));
 
 const xname = (c: Call): string | null => new Headers(c.options?.headers).get("x-name");
+const xformat = (c: Call): string | null => new Headers(c.options?.headers).get("x-format");
 const xdoc = (c: Call): string | null => new Headers(c.options?.headers).get("x-doc");
 const callsOf = (from: number, cmd: string): Call[] => tauri.calls.slice(from).filter((c) => c.cmd === cmd);
 const appendsAfter = (from: number): Call[] => callsOf(from, "store_append");
@@ -220,6 +221,7 @@ describe("export", () => {
     const exports = callsOf(from, "plan_export");
     expect(exports).toHaveLength(1);
     expect(xname(exports[0])).toBe(encodeURIComponent("Bridge"));
+    expect(xformat(exports[0])).toBe("webboard");
     expect(outsideRust(from)).toEqual([]);
     const body = exports[0].args;
     if (!(body instanceof Uint8Array)) throw new Error("plan_export carried no bytes");
@@ -318,6 +320,55 @@ describe("export", () => {
     await expect(failed).rejects.toBeInstanceOf(AppError);
     expect(outsideRust(from)).toEqual([]);
     await expect(failed).rejects.toMatchObject({ code: "file.io", message: "Could not write /Users/a/Bridge.webboard: No space left on device." });
+  });
+});
+
+describe("export the List as CSV", () => {
+  const CSV = "\uFEFFName,Start\r\nDome set,2026-11-06\r\n";
+
+  it("sends the text as UTF-8 bytes under the plan's name and List, as csv, and answers the written file name", async () => {
+    fileState.saved = "MESA 1.0 List.csv";
+    const from = tauri.calls.length;
+    expect(await exportListCsv("MESA 1.0", CSV)).toBe("MESA 1.0 List.csv");
+    const exports = callsOf(from, "plan_export");
+    expect(exports).toHaveLength(1);
+    expect([xname(exports[0]), xformat(exports[0])]).toEqual([encodeURIComponent("MESA 1.0 List"), "csv"]);
+    const args = exports[0].args;
+    if (!ArrayBuffer.isView(args)) throw new Error("plan_export carried no bytes");
+    const body = new Uint8Array(args.buffer, args.byteOffset, args.byteLength);
+    expect([...body.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(new TextDecoder("utf-8", { ignoreBOM: true }).decode(body)).toBe(CSV);
+    expect(outsideRust(from)).toEqual([]);
+  });
+
+  it("leaves separators in the name to Rust", async () => {
+    fileState.saved = "Q3-Bridge ü List.csv";
+    const from = tauri.calls.length;
+    expect(await exportListCsv("Q3/Bridge ü", CSV)).toBe("Q3-Bridge ü List.csv");
+    expect(xname(callsOf(from, "plan_export")[0])).toBe(encodeURIComponent("Q3/Bridge ü List"));
+  });
+
+  it("answers null when the save dialog is cancelled", async () => {
+    fileState.saved = null;
+    expect(await exportListCsv("MESA 1.0", CSV)).toBeNull();
+  });
+
+  it("refuses a plan name holding a lone surrogate before asking Rust", async () => {
+    fileState.saved = "A List.csv";
+    const from = tauri.calls.length;
+    const failed = exportListCsv("A\uD800", CSV);
+    await expect(failed).rejects.toMatchObject({
+      code: "file.io",
+      message: "The plan name holds a character that cannot be written to a file name; rename the plan and export again.",
+    });
+    expect(callsOf(from, "plan_export")).toHaveLength(0);
+  });
+
+  it("rejects with Rust's error when the file cannot be written", async () => {
+    tauri.answers.plan_export = () => {
+      throw { code: "file.io", message: "Could not write /Users/a/MESA 1.0 List.csv: No space left on device." };
+    };
+    await expect(exportListCsv("MESA 1.0", CSV)).rejects.toMatchObject({ code: "file.io", message: "Could not write /Users/a/MESA 1.0 List.csv: No space left on device." });
   });
 });
 

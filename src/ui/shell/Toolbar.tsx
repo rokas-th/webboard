@@ -1,8 +1,10 @@
-import { useLayoutEffect, useRef, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import type { PlanSession } from "../../store/session";
+import { pointBelow, usePickMenu } from "../common/pickMenu";
 import { useRun } from "../run";
 import type { UiState, ViewKind, Zoom } from "../state";
 import { NewItemMenu } from "../common/NewItemMenu";
+import { DISPLAY_OPTIONS, useDisplayMenu, type DisplayMenu } from "./display";
 import { MoreMenu } from "./MoreMenu";
 import type { ToolbarTier } from "./planListMode";
 import { INSPECTOR_ID, PLAN_LIST_ID } from "./Sidebar";
@@ -33,6 +35,55 @@ function SettingsButton(p: { open: boolean; onToggle(): void; button: RefObject<
         ))}
       </svg>
     </button>
+  );
+}
+
+const SLIDERS: readonly { y: number; x: number }[] = [
+  { y: 4, x: 10.5 },
+  { y: 8, x: 5.5 },
+  { y: 12, x: 9 },
+];
+
+function DisplayButton(p: { display: DisplayMenu }) {
+  const menu = usePickMenu("Display");
+  const latest = useRef(p.display);
+  useLayoutEffect(() => {
+    latest.current = p.display;
+  });
+  const rowSet = p.display.sections.flatMap((s) => s.rows.map((r) => r.id)).join(" ");
+  const seenRows = useRef(rowSet);
+  const { close } = menu;
+  useEffect(() => {
+    if (seenRows.current === rowSet) return;
+    seenRows.current = rowSet;
+    close();
+  }, [rowSet, close]);
+  return (
+    <>
+      <button
+        type="button"
+        className="icon-button"
+        data-tb="display"
+        aria-label={DISPLAY_OPTIONS}
+        title={DISPLAY_OPTIONS}
+        aria-haspopup="menu"
+        aria-expanded={menu.openFor !== null}
+        onClick={(e) => {
+          const anchor = e.currentTarget;
+          menu.open("display", anchor, pointBelow(anchor), p.display.sections, (id) => latest.current.run(id));
+        }}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor">
+          {SLIDERS.map((s) => (
+            <g key={s.y}>
+              <line x1="1.5" y1={s.y} x2="14.5" y2={s.y} strokeWidth="1.4" />
+              <circle cx={s.x} cy={s.y} r="1.9" fill="currentColor" stroke="none" />
+            </g>
+          ))}
+        </svg>
+      </button>
+      {menu.node}
+    </>
   );
 }
 
@@ -195,6 +246,7 @@ export function Toolbar(p: ToolbarProps) {
   const trimmed = tier !== null;
   const folded = tier === "medium" || tier === "narrow";
   const search = p.search;
+  const display = useDisplayMenu(p.session, p.ui.view);
   const field = useSearchField(bar, search !== null && !folded && !tight);
   const moreAnchor = (): HTMLElement => {
     const header = bar.current;
@@ -238,7 +290,7 @@ export function Toolbar(p: ToolbarProps) {
         {p.session !== null && (
           <PlanControls session={p.session} readOnly={p.readOnly} zoom={inline ? zoom : null} onZoom={zoomTo} onToday={inline ? goToday : null} glyphs={trimmed} />
         )}
-        {!trimmed && (
+        {!trimmed && display === null && (
           <button type="button" className="kbd-button" title="Command palette" onClick={() => p.onCommand("palette")}>
             {p.command ? "⌘K" : "Ctrl K"}
           </button>
@@ -247,6 +299,7 @@ export function Toolbar(p: ToolbarProps) {
         {p.session !== null && (
           <NewItemMenu label="+ New" className="button-primary" disabled={p.readOnly} onPick={(kind) => p.onCommand(`new-${kind}`)} />
         )}
+        {!folded && display !== null && <DisplayButton display={display} />}
         {!folded && <SettingsButton open={p.ui.settings !== null} onToggle={toggleSettings} button={settingsButton} />}
         {!folded && onPlan !== null && (
           <button type="button" onClick={onPlan}>
@@ -261,6 +314,7 @@ export function Toolbar(p: ToolbarProps) {
             onSettings={toggleSettings}
             onPlan={onPlan}
             onSearch={search === null ? null : () => onCommand("find")}
+            display={display}
             onFocusDropped={() => {
               moreDroppedFocus.current = true;
             }}

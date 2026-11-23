@@ -3,7 +3,7 @@ import type { ItemId, PlanId } from "../../domain/model";
 import { usesNativeAlert } from "../../services/alert";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
-import { usePlanView, type PlanSession } from "../../store/session";
+import { useNotes, usePlanView, type PlanSession } from "../../store/session";
 import type { SyncState } from "../../sync/manager";
 import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
@@ -11,6 +11,9 @@ import { toast, Toasts } from "../common/Toast";
 import { DetailContext, type DetailApi } from "../detail/DetailContext";
 import { phoneOrder, stepPatch } from "../detail/order";
 import { ghostIds } from "../ghosts";
+import { rowContext, type NoteText } from "../list/columns";
+import { useListPrefs } from "../list/prefs";
+import { searchMatcher } from "../search/match";
 import { OpenChoice } from "../run";
 import { ConvertedReport } from "../shell/ConvertedReport";
 import { moveAllToSpace } from "../shell/moving";
@@ -99,7 +102,15 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
   const closeDialog = useCallback(() => setUi({ dialog: null }), [setUi]);
   const named = useCallback(() => setUi({ naming: null }), [setUi]);
   const planView = usePlanView(p.session);
-  const order = phoneOrder(planView, view, ui.collapsed);
+  const listPrefs = useListPrefs(planView.plan.id);
+  const query = ui.query.trim();
+  const notesSeen = useNotes(p.session, view === "list" && query !== "");
+  const session = p.session;
+  const order = useMemo(() => {
+    const notes: NoteText = (id) => session.note(id).toString();
+    const match = view === "list" ? searchMatcher(rowContext(planView, notes), query) : null;
+    return phoneOrder(planView, view, ui.collapsed, listPrefs, notes, match);
+  }, [planView, view, ui.collapsed, listPrefs, session, query, notesSeen]);
   const follows = view === "timeline";
   const detailApi: DetailApi = {
     order,
@@ -130,7 +141,10 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
             aria-selected={view === v}
             aria-controls={panelId}
             className={view === v ? "active" : undefined}
-            onClick={() => setView(v)}
+            onClick={() => {
+              setView(v);
+              if (v !== "list") setUi({ query: "" });
+            }}
           >
             {label}
           </button>

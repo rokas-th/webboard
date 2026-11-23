@@ -66,6 +66,7 @@ const UI: UiState = {
   sidebarWidth: null,
   query: "",
   searchAsk: 0,
+  columnsAsk: 0,
 };
 
 const made = async (seed: readonly SeedItem[]): Promise<TestSession> => {

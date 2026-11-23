@@ -60,7 +60,7 @@ export async function probeHolidays(): Promise<ProbeEntry> {
 
 export async function probeSave(): Promise<ProbeEntry> {
   try {
-    const name = await callName("plan_export", PROBE_BYTES, { headers: { "x-name": PROBE_DOC } });
+    const name = await callName("plan_export", PROBE_BYTES, { headers: { "x-name": PROBE_DOC, "x-format": "webboard" } });
     return ["files", { saved: name }];
   } catch (e) {
     return ["files", failure(e)];

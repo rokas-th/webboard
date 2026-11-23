@@ -3,6 +3,7 @@ import { readPlatform } from "../../platform";
 import { usesNativeMenu, type NativeMenuRow, type NativeMenuSection } from "../../services/nativeMenu";
 import type { Zoom } from "../state";
 import { useNativeMenu } from "../common/menu";
+import type { DisplayMenu } from "./display";
 import { ZOOMS } from "./zooms";
 import { SEARCH_ROW } from "../search/text";
 
@@ -13,10 +14,13 @@ type Props = {
   onSettings(): void;
   onPlan: (() => void) | null;
   onSearch: (() => void) | null;
+  display: DisplayMenu | null;
   onFocusDropped(): void;
 };
 
 const ZOOM_ID = "zoom-";
+
+const DISPLAY_ID = "display:";
 
 function useFocusReport(box: RefObject<HTMLElement | null>, p: Props): void {
   const onFocusDropped = useRef(p.onFocusDropped);
@@ -33,7 +37,8 @@ function useFocusReport(box: RefObject<HTMLElement | null>, p: Props): void {
 }
 
 function useRowSetChange(p: Props, open: boolean, close: () => void): void {
-  const rowSet = [p.zoom !== null, p.onToday !== null, p.onPlan !== null, p.onSearch !== null].join(" ");
+  const displayRows = p.display === null ? "" : p.display.sections.flatMap((s) => s.rows.map((r) => r.id)).join(",");
+  const rowSet = [p.zoom !== null, p.onToday !== null, p.onPlan !== null, p.onSearch !== null, displayRows].join(" ");
   const seenRows = useRef(rowSet);
   useEffect(() => {
     if (seenRows.current === rowSet) return;
@@ -49,7 +54,9 @@ function moreSections(p: Props): NativeMenuSection[] {
   const zooms: NativeMenuSection[] = zoom === null ? [] : [{ title: "Zoom", rows: ZOOMS.map((z) => row(`${ZOOM_ID}${z.zoom}`, z.row, z.zoom === zoom)) }];
   const rest = [...(p.onToday === null ? [] : [row("today", "Go to today")]), row("settings", "Settings"), ...(p.onPlan === null ? [] : [row("plan", "Plan")])];
   const search: NativeMenuSection[] = p.onSearch === null ? [] : [{ title: null, rows: [row("search", SEARCH_ROW)] }];
-  return [...search, ...zooms, { title: null, rows: rest }];
+  const display: NativeMenuSection[] =
+    p.display === null ? [] : p.display.sections.map((s) => ({ title: s.title, rows: s.rows.map((r) => row(`${DISPLAY_ID}${r.id}`, r.title, r.checked)) }));
+  return [...search, ...display, ...zooms, { title: null, rows: rest }];
 }
 
 const present = <T,>(run: T | null, id: string): T => {
@@ -61,6 +68,10 @@ function runRow(p: Props, id: string): void {
   const zoom = ZOOMS.find((z) => `${ZOOM_ID}${z.zoom}` === id);
   if (zoom !== undefined) {
     p.onZoom(zoom.zoom);
+    return;
+  }
+  if (id.startsWith(DISPLAY_ID)) {
+    present(p.display, id).run(id.slice(DISPLAY_ID.length));
     return;
   }
   if (id === "today") present(p.onToday, id)();

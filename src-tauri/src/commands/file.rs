@@ -12,6 +12,38 @@ const CODE: &str = "file.io";
 const EXTENSION: &str = "webboard";
 const IMPORT_FILTER: &str = "WebBoard or GanttProject plan";
 const EXPORT_FILTER: &str = "WebBoard plan";
+const CSV_EXTENSION: &str = "csv";
+const CSV_FILTER: &str = "CSV table";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Format {
+    Webboard,
+    Csv,
+}
+
+impl Format {
+    fn parse(value: &str) -> Result<Format> {
+        match value {
+            "webboard" => Ok(Format::Webboard),
+            "csv" => Ok(Format::Csv),
+            other => Err(io(format!("x-format is \"{other}\", not webboard or csv"))),
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            Format::Webboard => EXTENSION,
+            Format::Csv => CSV_EXTENSION,
+        }
+    }
+
+    fn filter(self) -> &'static str {
+        match self {
+            Format::Webboard => EXPORT_FILTER,
+            Format::Csv => CSV_FILTER,
+        }
+    }
+}
 
 fn io(message: impl Into<String>) -> CommandError {
     CommandError::new(CODE, message)
@@ -60,17 +92,35 @@ fn read_file(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).map_err(|e| io(format!("Could not read {}: {e}.", path.display())))
 }
 
-fn export_name(plan: &str) -> Result<String> {
+fn export_name(plan: &str, format: Format) -> Result<String> {
     let name = plan.replace(['/', '\\'], "-");
     let stem = name.trim_end_matches('.');
     if stem.is_empty() {
         return Err(io("The plan has no name to export under."));
     }
-    Ok(format!("{stem}.{EXTENSION}"))
+    Ok(format!("{stem}.{}", format.extension()))
+}
+
+struct ExportRequest {
+    name: String,
+    format: Format,
+    bytes: Vec<u8>,
+}
+
+fn export_request(request: &Request<'_>) -> Result<ExportRequest> {
+    let plan = header(request, "x-name")?;
+    let format = Format::parse(&header(request, "x-format")?)?;
+    let bytes = raw_body(request, "plan_export")?;
+    let name = export_name(&plan, format)?;
+    Ok(ExportRequest {
+        name,
+        format,
+        bytes,
+    })
 }
 
 #[cfg(any(desktop, test))]
-fn with_extension(path: PathBuf) -> Result<PathBuf> {
+fn with_extension(path: PathBuf, format: Format) -> Result<PathBuf> {
     let stem = path
         .file_name()
         .map(|n| {
@@ -87,12 +137,12 @@ fn with_extension(path: PathBuf) -> Result<PathBuf> {
     let has = trimmed
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION));
+        .is_some_and(|e| e.eq_ignore_ascii_case(format.extension()));
     if has {
         return Ok(trimmed);
     }
     let mut text = trimmed.into_os_string();
-    text.push(format!(".{EXTENSION}"));
+    text.push(format!(".{}", format.extension()));
     Ok(PathBuf::from(text))
 }
 
@@ -120,6 +170,7 @@ fn utf8_name(path: &Path) -> Result<String> {
 #[cfg(any(desktop, test))]
 fn export_with(
     name: &str,
+    format: Format,
     bytes: &[u8],
     dialog: impl FnOnce(&str) -> Option<FilePath>,
     confirm: impl FnOnce(&str) -> bool,
@@ -128,7 +179,7 @@ fn export_with(
         return Ok(None);
     };
     let picked = picked_path(picked)?;
-    let path = with_extension(picked.clone())?;
+    let path = with_extension(picked.clone(), format)?;
     let file = utf8_name(&path)?;
     let taken = path != picked
         && path
@@ -185,18 +236,21 @@ pub async fn plan_export<R: Runtime>(
     window: WebviewWindow<R>,
     request: Request<'_>,
 ) -> Result<Option<String>> {
-    let plan = header(&request, "x-name")?;
-    let bytes = raw_body(&request, "plan_export")?;
-    let name = export_name(&plan)?;
+    let ExportRequest {
+        name,
+        format,
+        bytes,
+    } = export_request(&request)?;
     super::blocking("plan_export", CODE, move || {
         export_with(
             &name,
+            format,
             &bytes,
             |name| {
                 window
                     .dialog()
                     .file()
-                    .add_filter(EXPORT_FILTER, &[EXTENSION])
+                    .add_filter(format.filter(), &[format.extension()])
                     .set_file_name(name)
                     .set_parent(&window)
                     .blocking_save_file()
@@ -221,16 +275,18 @@ pub async fn plan_export<R: Runtime>(
     staging: tauri::State<'_, super::Started<Staging>>,
     request: Request<'_>,
 ) -> Result<Option<String>> {
-    let plan = header(&request, "x-name")?;
-    let bytes = raw_body(&request, "plan_export")?;
-    let name = export_name(&plan)?;
+    let ExportRequest {
+        name,
+        format,
+        bytes,
+    } = export_request(&request)?;
     let dir = staging.get()?.0.clone();
     super::blocking("plan_export", CODE, move || {
         export_staged(&dir, &name, &bytes, |name| {
             window
                 .dialog()
                 .file()
-                .add_filter(EXPORT_FILTER, &[EXTENSION])
+                .add_filter(format.filter(), &[format.extension()])
                 .set_file_name(name)
                 .blocking_save_file()
         })
@@ -302,12 +358,12 @@ mod tests {
         h: &Harness,
         cmd: &str,
         body: InvokeBody,
-        header: Option<(&'static str, &str)>,
+        sent: &[(&'static str, &str)],
     ) -> std::result::Result<InvokeResponseBody, Value> {
         let mut headers = tauri::http::HeaderMap::new();
-        if let Some((name, value)) = header {
-            headers.insert(name, value.parse().unwrap());
-        }
+        sent.iter().for_each(|(name, value)| {
+            headers.insert(*name, value.parse().unwrap());
+        });
         get_ipc_response(
             &h.webview,
             InvokeRequest {
@@ -346,10 +402,13 @@ mod tests {
     #[test]
     fn export_name_turns_separators_into_dashes_and_adds_the_extension() {
         assert_eq!(
-            export_name("Q3/Q4 \\ Bridge").unwrap(),
+            export_name("Q3/Q4 \\ Bridge", Format::Webboard).unwrap(),
             "Q3-Q4 - Bridge.webboard"
         );
-        assert_eq!(export_name("Bridge ü").unwrap(), "Bridge ü.webboard");
+        assert_eq!(
+            export_name("Bridge ü", Format::Webboard).unwrap(),
+            "Bridge ü.webboard"
+        );
     }
 
     #[test]
@@ -362,9 +421,15 @@ mod tests {
             ("v1.2", "v1.2.webboard"),
         ]
         .iter()
-        .for_each(|(plan, offered)| assert_eq!(export_name(plan).unwrap(), *offered, "{plan}"));
+        .for_each(|(plan, offered)| {
+            assert_eq!(
+                export_name(plan, Format::Webboard).unwrap(),
+                *offered,
+                "{plan}"
+            )
+        });
         assert_eq!(
-            export_name("...").unwrap_err(),
+            export_name("...", Format::Webboard).unwrap_err(),
             CommandError::new("file.io", "The plan has no name to export under.")
         );
     }
@@ -372,7 +437,7 @@ mod tests {
     #[test]
     fn export_name_refuses_an_empty_name() {
         assert_eq!(
-            export_name("").unwrap_err(),
+            export_name("", Format::Webboard).unwrap_err(),
             CommandError::new("file.io", "The plan has no name to export under.")
         );
     }
@@ -393,7 +458,7 @@ mod tests {
         .iter()
         .for_each(|(picked, written)| {
             assert_eq!(
-                with_extension(PathBuf::from(picked)).unwrap(),
+                with_extension(PathBuf::from(picked), Format::Webboard).unwrap(),
                 PathBuf::from(written),
                 "{picked}"
             )
@@ -404,7 +469,7 @@ mod tests {
     fn a_name_of_only_dots_is_refused() {
         ["/x/...", "/x/.....", "/x/.."].iter().for_each(|picked| {
             assert_eq!(
-                with_extension(PathBuf::from(picked)).unwrap_err(),
+                with_extension(PathBuf::from(picked), Format::Webboard).unwrap_err(),
                 CommandError::new(
                     "file.io",
                     "The chosen file name has no name before the extension."
@@ -419,6 +484,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let answer = export_with(
             "Bridge.webboard",
+            Format::Webboard,
             b"WBX1 plan",
             |_| Some(in_dir(tmp.path(), "...")),
             never_asked,
@@ -439,6 +505,7 @@ mod tests {
         let mut offered = String::new();
         let answer = export_with(
             "Bridge.webboard",
+            Format::Webboard,
             b"WBX1 plan",
             |name| {
                 offered = name.to_string();
@@ -462,6 +529,7 @@ mod tests {
         let mut asked = Vec::new();
         let answer = export_with(
             "Plan.webboard",
+            Format::Webboard,
             b"new plan",
             |_| Some(in_dir(tmp.path(), "Plan.")),
             |name| {
@@ -482,7 +550,13 @@ mod tests {
     fn export_on_cancel_writes_nothing() {
         let tmp = TempDir::new().unwrap();
         assert_eq!(
-            export_with("Bridge.webboard", b"WBX1", |_| None, never_asked),
+            export_with(
+                "Bridge.webboard",
+                Format::Webboard,
+                b"WBX1",
+                |_| None,
+                never_asked
+            ),
             Ok(None)
         );
         assert_eq!(names(tmp.path()), Vec::<String>::new());
@@ -494,6 +568,7 @@ mod tests {
         fs::write(tmp.path().join("Bridge.webboard"), b"old plan").unwrap();
         let answer = export_with(
             "Bridge.webboard",
+            Format::Webboard,
             b"new plan",
             |_| Some(in_dir(tmp.path(), "Bridge.webboard")),
             never_asked,
@@ -512,6 +587,7 @@ mod tests {
         let mut asked = Vec::new();
         let answer = export_with(
             "Bridge.webboard",
+            Format::Webboard,
             b"new plan",
             |_| Some(in_dir(tmp.path(), "Bridge")),
             |name| {
@@ -534,6 +610,7 @@ mod tests {
         fs::write(tmp.path().join("Bridge.webboard"), b"old plan").unwrap();
         let answer = export_with(
             "Bridge.webboard",
+            Format::Webboard,
             b"new plan",
             |_| Some(in_dir(tmp.path(), "Bridge")),
             |_| false,
@@ -554,6 +631,7 @@ mod tests {
         fs::create_dir(tmp.path().join("Plan.webboard.tmp")).unwrap();
         let e = export_with(
             "Plan.webboard",
+            Format::Webboard,
             b"new plan",
             |_| Some(in_dir(tmp.path(), "Plan.webboard")),
             never_asked,
@@ -709,7 +787,7 @@ mod tests {
     fn plan_export_checks_its_request_before_any_dialog() {
         let h = harness();
         assert_eq!(
-            invoke_with(&h, "plan_export", InvokeBody::Raw(b"WBX1".to_vec()), None).unwrap_err(),
+            invoke_with(&h, "plan_export", InvokeBody::Raw(b"WBX1".to_vec()), &[]).unwrap_err(),
             json!({ "code": "file.io", "message": "missing x-name header" })
         );
         assert_eq!(
@@ -717,7 +795,7 @@ mod tests {
                 &h,
                 "plan_export",
                 InvokeBody::Json(json!({})),
-                Some(("x-name", &encode("Bridge")))
+                &[("x-name", &encode("Bridge")), ("x-format", "webboard")]
             )
             .unwrap_err(),
             json!({ "code": "file.io", "message": "plan_export expects raw bytes" })
@@ -727,10 +805,96 @@ mod tests {
                 &h,
                 "plan_export",
                 InvokeBody::Raw(b"WBX1".to_vec()),
-                Some(("x-name", ""))
+                &[("x-name", ""), ("x-format", "webboard")]
             )
             .unwrap_err(),
             json!({ "code": "file.io", "message": "The plan has no name to export under." })
+        );
+    }
+
+    #[test]
+    fn plan_export_refuses_a_missing_or_unknown_format_before_any_dialog() {
+        let h = harness();
+        let bridge = encode("Bridge");
+        assert_eq!(
+            invoke_with(
+                &h,
+                "plan_export",
+                InvokeBody::Raw(b"WBX1".to_vec()),
+                &[("x-name", &bridge)]
+            )
+            .unwrap_err(),
+            json!({ "code": "file.io", "message": "missing x-format header" })
+        );
+        ["pdf", "CSV", ""].iter().for_each(|format| {
+            assert_eq!(
+                invoke_with(
+                    &h,
+                    "plan_export",
+                    InvokeBody::Raw(b"WBX1".to_vec()),
+                    &[("x-name", &bridge), ("x-format", format)]
+                )
+                .unwrap_err(),
+                json!({
+                    "code": "file.io",
+                    "message": format!("x-format is \"{format}\", not webboard or csv")
+                }),
+                "{format}"
+            )
+        });
+    }
+
+    #[test]
+    fn a_format_names_its_extension_and_filter() {
+        assert_eq!(Format::parse("webboard"), Ok(Format::Webboard));
+        assert_eq!(Format::parse("csv"), Ok(Format::Csv));
+        assert_eq!(
+            [Format::Webboard, Format::Csv].map(|f| (f.extension(), f.filter())),
+            [("webboard", "WebBoard plan"), ("csv", "CSV table")]
+        );
+    }
+
+    #[test]
+    fn a_csv_export_is_named_and_corrected_to_csv() {
+        assert_eq!(
+            export_name("MESA 1.0 List", Format::Csv).unwrap(),
+            "MESA 1.0 List.csv"
+        );
+        assert_eq!(
+            export_name("Q3/Q4 List", Format::Csv).unwrap(),
+            "Q3-Q4 List.csv"
+        );
+        [
+            ("/x/Plan List", "/x/Plan List.csv"),
+            ("/x/Plan List.CSV", "/x/Plan List.CSV"),
+            ("/x/Plan List.csv.", "/x/Plan List.csv"),
+            ("/x/Plan List.webboard", "/x/Plan List.webboard.csv"),
+        ]
+        .iter()
+        .for_each(|(picked, written)| {
+            assert_eq!(
+                with_extension(PathBuf::from(picked), Format::Csv).unwrap(),
+                PathBuf::from(written),
+                "{picked}"
+            )
+        });
+    }
+
+    #[test]
+    fn a_csv_export_writes_under_the_csv_name() {
+        let tmp = TempDir::new().unwrap();
+        let answer = export_with(
+            "MESA 1.0 List.csv",
+            Format::Csv,
+            b"\xEF\xBB\xBFName\r\n",
+            |_| Some(in_dir(tmp.path(), "MESA 1.0 List")),
+            never_asked,
+        );
+        assert_eq!(answer, Ok(Some("MESA 1.0 List.csv".to_string())));
+        assert_eq!(names(tmp.path()), ["MESA 1.0 List.csv"]);
+        assert_eq!(
+            fs::read(tmp.path().join("MESA 1.0 List.csv")).unwrap(),
+            b"\xEF\xBB\xBFName\r\n"
         );
     }
 }

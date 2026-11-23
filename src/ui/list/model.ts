@@ -13,6 +13,7 @@ export interface ListSection {
   key: string;
   title: string;
   swatch: StepColour | null;
+  group: ItemId | null;
   rows: readonly ItemId[];
 }
 
@@ -135,18 +136,19 @@ interface Bucket {
   key: string;
   title: string;
   swatch: StepColour | null;
+  group: ItemId | null;
   test(id: ItemId): boolean;
 }
 
 const outlineBuckets = (ctx: RowContext): Bucket[] =>
   listGroups(ctx.view).map((s) => {
     const members = new Set(s.items);
-    return { key: s.group === null ? "outline:none" : `outline:${s.group}`, title: s.name, swatch: null, test: (id: ItemId) => members.has(id) };
+    return { key: s.group === null ? "outline:none" : `outline:${s.group}`, title: s.name, swatch: null, group: s.group, test: (id: ItemId) => members.has(id) };
   });
 
 const stepBuckets = (ctx: RowContext): Bucket[] => [
-  { key: "step:none", title: NO_STEP, swatch: null, test: (id: ItemId) => stepOf(ctx, id) === null },
-  ...ctx.board.steps.map((s) => ({ key: `step:${s.id}`, title: s.name, swatch: s.colour, test: (id: ItemId) => stepOf(ctx, id)?.id === s.id })),
+  { key: "step:none", title: NO_STEP, swatch: null, group: null, test: (id: ItemId) => stepOf(ctx, id) === null },
+  ...ctx.board.steps.map((s) => ({ key: `step:${s.id}`, title: s.name, swatch: s.colour, group: null, test: (id: ItemId) => stepOf(ctx, id)?.id === s.id })),
 ];
 
 const personBuckets = (ctx: RowContext, rows: readonly ItemId[]): Bucket[] => {
@@ -164,17 +166,18 @@ const personBuckets = (ctx: RowContext, rows: readonly ItemId[]): Bucket[] => {
     ),
   ];
   return [
-    ...ctx.view.people.people.map((p) => ({ key: `person:${p.id}`, title: p.name, swatch: p.colour, test: (id: ItemId) => firstLive(id) === p.id })),
+    ...ctx.view.people.people.map((p) => ({ key: `person:${p.id}`, title: p.name, swatch: p.colour, group: null, test: (id: ItemId) => firstLive(id) === p.id })),
     ...formers.map(([fid, name]) => ({
       key: `former:${fid}`,
       title: formerText(name),
       swatch: null,
+      group: null,
       test: (id: ItemId) => {
         const f = formerOf(id);
         return f !== null && f.kind === "former" && f.id === fid;
       },
     })),
-    { key: "unassigned", title: UNASSIGNED, swatch: null, test: (id: ItemId) => (ctx.view.people.assignees.get(id) ?? []).length === 0 },
+    { key: "unassigned", title: UNASSIGNED, swatch: null, group: null, test: (id: ItemId) => (ctx.view.people.assignees.get(id) ?? []).length === 0 },
   ];
 };
 
@@ -182,7 +185,7 @@ const bucketsOf = (ctx: RowContext, prefs: ListPrefs, rows: readonly ItemId[]): 
   if (prefs.group === "outline") return outlineBuckets(ctx);
   if (prefs.group === "step") return stepBuckets(ctx);
   if (prefs.group === "assignee") return personBuckets(ctx, rows);
-  return [{ key: "all", title: "", swatch: null, test: () => true }];
+  return [{ key: "all", title: "", swatch: null, group: null, test: () => true }];
 };
 
 export function listModel(ctx: RowContext, prefs: ListPrefs, match: Matcher | null): ListModel {
@@ -192,7 +195,7 @@ export function listModel(ctx: RowContext, prefs: ListPrefs, match: Matcher | nu
   const found = match === null ? rows : rows.filter(match);
   const sorted = sortRows(ctx, prefs.sort, found);
   const sections = bucketsOf(ctx, prefs, sorted)
-    .map((b) => ({ key: b.key, title: b.title, swatch: b.swatch, rows: sorted.filter((id) => b.test(id)) }))
+    .map((b) => ({ key: b.key, title: b.title, swatch: b.swatch, group: b.group, rows: sorted.filter((id) => b.test(id)) }))
     .filter((s) => s.rows.length > 0);
   const placed = sections.flatMap((s) => s.rows);
   if (placed.length !== sorted.length) throw new Error(`listModel: ${sorted.length} rows but ${placed.length} placed by ${prefs.group}`);

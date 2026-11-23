@@ -271,12 +271,27 @@ function snapshot(session: PlanSession): { body: Uint8Array; unreadable: number 
   };
 }
 
-export async function exportPlan(session: PlanSession): Promise<Exported> {
-  const name = session.view().plan.name;
+type ExportFormat = "webboard" | "csv";
+
+const LIST_SUFFIX = " List";
+
+function checkedName(name: string): string {
   if (/\p{Cs}/u.test(name)) throw new AppError("file.io", "The plan name holds a character that cannot be written to a file name; rename the plan and export again.");
+  return name;
+}
+
+const exportHeaders = (name: string, format: ExportFormat): Record<string, string> => ({ "x-name": encodeURIComponent(name), "x-format": format });
+
+export async function exportPlan(session: PlanSession): Promise<Exported> {
+  const name = checkedName(session.view().plan.name);
   const { body, unreadable } = snapshot(session);
-  const written = await callName("plan_export", body, { headers: { "x-name": encodeURIComponent(name) } });
+  const written = await callName("plan_export", body, { headers: exportHeaders(name, "webboard") });
   return written === null ? null : { name: written, unreadable };
+}
+
+export async function exportListCsv(planName: string, text: string): Promise<string | null> {
+  const name = `${checkedName(planName)}${LIST_SUFFIX}`;
+  return callName("plan_export", new TextEncoder().encode(text), { headers: exportHeaders(name, "csv") });
 }
 
 export function unframe(b: Uint8Array): { name: string; bytes: Uint8Array } {

@@ -2,19 +2,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PlanId } from "../../domain/model";
 import { AppError } from "../../services/ipc";
 import { encodeAction } from "../../store/doc";
-import { exportPlan, importPlan } from "../../store/file";
+import { exportListCsv, exportPlan, importPlan } from "../../store/file";
 import type { PlanSession } from "../../store/session";
 import { fs, testSession, type SeedItem, type TestSession, type TestSessionOpts } from "../../test/session";
 import { testRegistry } from "../../test/shell";
 import { hold, tauri } from "../../test/tauriMock";
 import { clearToasts, toast } from "../common/Toast";
 import { closeConverted, showConverted, shownConverted } from "./ConvertedReport";
-import { exportFlow, importFlow } from "./fileFlows";
+import { listKey } from "../list/prefs";
+import { exportFlow, exportListCsvFlow, importFlow } from "./fileFlows";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../../store/file", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../store/file")>();
-  return { ...m, exportPlan: vi.fn(m.exportPlan), importPlan: vi.fn(m.importPlan) };
+  return { ...m, exportPlan: vi.fn(m.exportPlan), exportListCsv: vi.fn(m.exportListCsv), importPlan: vi.fn(m.importPlan) };
 });
 vi.mock("../common/Toast", async (importOriginal) => {
   const m = await importOriginal<typeof import("../common/Toast")>();
@@ -26,7 +27,9 @@ const sessions: PlanSession[] = [];
 afterEach(async () => {
   clearToasts();
   vi.mocked(exportPlan).mockClear();
+  vi.mocked(exportListCsv).mockClear();
   vi.mocked(importPlan).mockClear();
+  window.localStorage.clear();
   vi.mocked(toast).mockClear();
   vi.restoreAllMocks();
   await Promise.all(sessions.splice(0).map((s) => s.close()));
@@ -163,6 +166,106 @@ describe("exportFlow", () => {
     await exportFlow(t.session);
     expect(exports() - from).toBe(3);
     expect(toasts()).toEqual([]);
+  });
+});
+
+describe("exportListCsvFlow", () => {
+  const OPEN_TWO: readonly SeedItem[] = [
+    { id: "a", name: "Pour", start: "2026-11-10", dur: 2 },
+    { id: "b", name: "Bolt", start: "2026-11-12", dur: 1 },
+    { id: "c", name: "Survey", start: "2026-11-02", dur: 1, status: "done", progress: 100 },
+  ];
+  const EMPTY = "The List shows no items, so there is nothing to export.";
+
+  it("writes the List's rows under the plan's name and toasts the count and the file", async () => {
+    const t = await made(OPEN_TWO);
+    vi.mocked(exportListCsv).mockResolvedValueOnce("Plan List.csv");
+    await exportListCsvFlow(t.session);
+    expect(vi.mocked(exportListCsv).mock.calls).toEqual([["Plan", "\uFEFFName,Step,Assignees,Start,End,Status\r\nPour,Now,,2026-11-10,2026-11-11,not started\r\nBolt,Now,,2026-11-12,2026-11-12,not started\r\n"]]);
+    expect(toasts()).toEqual([["Exported 2 rows to Plan List.csv"]]);
+  });
+
+  it("reads the List settings this device keeps for the plan", async () => {
+    const t = await made(OPEN_TWO);
+    window.localStorage.setItem(listKey(t.session.view().plan.id), JSON.stringify({ v: 1, cols: [{ id: "name", w: 300 }], sort: [], scope: "done", chips: [], group: "outline" }));
+    vi.mocked(exportListCsv).mockResolvedValueOnce("Plan List.csv");
+    await exportListCsvFlow(t.session);
+    expect(vi.mocked(exportListCsv).mock.calls).toEqual([["Plan", "\uFEFFName\r\nSurvey\r\n"]]);
+    expect(toasts()).toEqual([["Exported 1 row to Plan List.csv"]]);
+  });
+
+  it("refuses with one error, writes no file and keeps the record when the saved List settings are unreadable", async () => {
+    const t = await made(OPEN_TWO);
+    const key = listKey(t.session.view().plan.id);
+    window.localStorage.setItem(key, "{nope");
+    const from = tauri.calls.length;
+    await exportListCsvFlow(t.session);
+    expect(vi.mocked(exportListCsv)).not.toHaveBeenCalled();
+    expect(tauri.calls.slice(from)).toEqual([]);
+    expect(toasts()).toHaveLength(1);
+    expect(toasts()[0].slice(0, 2)).toEqual(["Saved List settings for this plan could not be read, so nothing was exported. Open the List to reset them.", "bad"]);
+    expect(String(toasts()[0][2])).toContain("The record was: {nope");
+    expect(window.localStorage.getItem(key)).toBe("{nope");
+  });
+
+  it("opens no dialog and says so when the List shows no items", async () => {
+    const t = await made([{ name: "Survey", start: "2026-11-02", dur: 1, status: "done", progress: 100 }]);
+    const from = tauri.calls.length;
+    await exportListCsvFlow(t.session);
+    expect(vi.mocked(exportListCsv)).not.toHaveBeenCalled();
+    expect(tauri.calls.slice(from)).toEqual([]);
+    expect(toasts()).toEqual([[EMPTY]]);
+  });
+
+  it("does nothing when the save dialog is cancelled", async () => {
+    const t = await made(OPEN_TWO);
+    vi.mocked(exportListCsv).mockResolvedValueOnce(null);
+    await exportListCsvFlow(t.session);
+    expect(toasts()).toEqual([]);
+  });
+
+  it("shows a failed write as one bad toast", async () => {
+    const t = await made(OPEN_TWO);
+    const message = "Could not write /Users/x/Plan List.csv: Permission denied.";
+    vi.mocked(exportListCsv).mockRejectedValueOnce(new AppError("file.io", message));
+    await exportListCsvFlow(t.session);
+    expect(toasts()).toEqual([[message, "bad"]]);
+  });
+
+  it("lets an error that is not an AppError propagate, with no toast", async () => {
+    const t = await made(OPEN_TWO);
+    const bug = new Error("exportListCsv broke");
+    vi.mocked(exportListCsv).mockRejectedValueOnce(bug);
+    await expect(exportListCsvFlow(t.session)).rejects.toBe(bug);
+    expect(toasts()).toEqual([]);
+  });
+
+  it("writes through plan_export as csv", async () => {
+    const t = await named(OPEN_TWO);
+    tauri.answers.plan_export = () => "MESA 2027 List.csv";
+    const from = tauri.calls.length;
+    await exportListCsvFlow(t.session);
+    const calls = tauri.calls.slice(from);
+    expect(calls.map((c) => [c.cmd, new Headers(c.options?.headers).get("x-format"), new Headers(c.options?.headers).get("x-name")])).toEqual([["plan_export", "csv", encodeURIComponent("MESA 2027 List")]]);
+    expect(toasts()).toEqual([["Exported 2 rows to MESA 2027 List.csv"]]);
+  });
+
+  it("calls plan_export once for two exports of a session at once, and again once it settles", async () => {
+    const t = await made(OPEN_TWO);
+    const pick = deferred<string | null>();
+    const answers: Promise<string | null>[] = [pick.promise, Promise.resolve(null)];
+    tauri.answers.plan_export = () => answers.shift();
+    const exports = (): number => tauri.calls.filter((c) => c.cmd === "plan_export").length;
+    const from = exports();
+    const first = exportListCsvFlow(t.session);
+    const second = exportListCsvFlow(t.session);
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(second).toBe(first);
+    expect(exports() - from).toBe(1);
+    pick.resolve(null);
+    await Promise.all([first, second]);
+    await exportListCsvFlow(t.session);
+    expect(exports() - from).toBe(2);
   });
 });
 

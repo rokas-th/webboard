@@ -76,3 +76,18 @@ describe("the search query", () => {
     expect([result.current[0].query, result.current[0].searchAsk]).toEqual(["", 2]);
   });
 });
+
+describe("the Columns ask", () => {
+  it("starts at 0 and is neither saved with the place nor a reason to save it", () => {
+    const { result } = renderHook(() => useUi());
+    expect(result.current[0].columnsAsk).toBe(0);
+    act(() => result.current[1]({ plan: "p1", columnsAsk: 1 }));
+    expect([result.current[0].columnsAsk, JSON.parse(window.localStorage.getItem(PLACE_KEY) ?? "null")]).toEqual([
+      1,
+      { plan: "p1", view: "timeline", zoom: "W", collapsed: [], sidebarOpen: true, sidebarWidth: null },
+    ]);
+    window.localStorage.setItem(PLACE_KEY, "untouched");
+    act(() => result.current[1]({ columnsAsk: 2 }));
+    expect([result.current[0].columnsAsk, window.localStorage.getItem(PLACE_KEY)]).toEqual([2, "untouched"]);
+  });
+});

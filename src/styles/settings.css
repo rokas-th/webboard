@@ -205,6 +205,24 @@ html[data-os="ios"] .settings-nav {
   margin: 0;
 }
 
+.settings-export {
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: end;
+}
+
+.settings-export .actions {
+  justify-content: flex-end;
+}
+
+.settings-export p {
+  margin: 0;
+}
+
+html[data-os="ios"] .settings-export .actions button {
+  min-height: 44px;
+}
+
 .settings-status {
   margin: 0;
   max-width: 100%;

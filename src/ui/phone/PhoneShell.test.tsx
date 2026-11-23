@@ -20,6 +20,7 @@ import { clearToasts } from "../common/Toast";
 import { OpenChoice } from "../run";
 import { closeConverted, CONVERTED_TITLE, OPEN_PLAN, shownConverted } from "../shell/ConvertedReport";
 import { exportFlow, importFlow } from "../shell/fileFlows";
+import { DEFAULT_LIST_PREFS, writeListPrefs } from "../list/prefs";
 import { PLACE_KEY, useUi, type UiState } from "../state";
 import { PhoneShell } from "./PhoneShell";
 import { orderedSides } from "../choices/order";
@@ -198,6 +199,21 @@ describe('PhoneShell, data-form="phone"', () => {
     expect(panel().querySelector(".tl-scroll")).not.toBeNull();
   });
 
+  it("switching from the List to the Timeline clears the search, so no row is left dimmed", async () => {
+    const t = await made();
+    await shown(t);
+    const field = (): HTMLElement => screen.getByRole("searchbox", { name: "Search this plan" });
+    fireEvent.change(field(), { target: { value: "rev" } });
+    expect([field().getAttribute("value"), lastUi().query]).toEqual(["rev", "rev"]);
+    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    expect(document.querySelectorAll(".tl-row")).not.toHaveLength(0);
+    expect(document.querySelectorAll(".dimmed")).toHaveLength(0);
+    expect(lastUi().query).toBe("");
+    fireEvent.click(within(views()).getByRole("tab", { name: "List" }));
+    expect([field().getAttribute("value"), lastUi().query]).toEqual(["", ""]);
+    expect(document.querySelectorAll(".phone-list .prow")).toHaveLength(2);
+  });
+
   it("opens an item's sheet from the List and closes it", async () => {
     const t = await made();
     await shown(t);
@@ -207,6 +223,33 @@ describe('PhoneShell, data-form="phone"', () => {
     fireEvent.click(within(screen.getByRole("dialog", { name: "Ship" })).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(lastUi().selected).toBeNull();
+  });
+
+  it("the item sheet's Next and Previous follow the List's sort and search", async () => {
+    const t = await made();
+    await shown(t);
+    const step = (by: 1 | -1): string | null => {
+      const sheet = screen.getByRole("dialog");
+      const button = sheet.querySelector(by > 0 ? ".detail-next" : ".detail-prev");
+      if (!(button instanceof HTMLButtonElement)) throw new Error("no step button");
+      fireEvent.click(button);
+      return lastUi().selected;
+    };
+    fireEvent.click(rowOf("Review"));
+    expect(step(1)).toBe("Ship");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+    act(() => {
+      writeListPrefs(window.localStorage, t.session.view().plan.id, { ...DEFAULT_LIST_PREFS, sort: [{ id: "name", dir: "desc" }] });
+    });
+    fireEvent.click(rowOf("Review"));
+    expect(step(-1)).toBe("Ship");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search this plan" }), { target: { value: "rev" } });
+    const rows = [...document.querySelectorAll(".phone-list .prow")];
+    expect(rows.map((r) => r.querySelector(".prow-name")?.textContent)).toEqual(["Review"]);
+    fireEvent.click(rows[0]);
+    const sheet = screen.getByRole("dialog", { name: "Review" });
+    expect([".detail-prev", ".detail-next"].map((s) => sheet.querySelector(s)?.hasAttribute("disabled"))).toEqual([true, true]);
   });
 
   it("open choice context: the sheet's useRun finds the provider, and a child opens a choice", async () => {
@@ -472,6 +515,20 @@ describe("PhoneShell plans (Step 1)", () => {
     await settle();
     expect(session).toHaveBeenLastCalledWith(s.ids[1]);
     listShows("Beta");
+  });
+
+  it("a plan switch clears the List's search", async () => {
+    await seededStore(["Alpha", "Beta"]);
+    const r = await indexOpen();
+    await showIndex(r);
+    listShows("Alpha");
+    const field = (): HTMLElement => screen.getByRole("searchbox", { name: "Search this plan" });
+    fireEvent.change(field(), { target: { value: "dome" } });
+    expect([field().getAttribute("value"), lastUi().query]).toEqual(["dome", "dome"]);
+    fireEvent.click(within(openPlans()).getByRole("button", { name: "Beta" }));
+    await settle();
+    listShows("Beta");
+    expect([field().getAttribute("value"), lastUi().query]).toEqual(["", ""]);
   });
 
   it("New plan creates the named plan and refuses an empty name", async () => {

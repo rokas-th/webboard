@@ -234,6 +234,61 @@ describe("Shell on testSession(MESA_SEED)", () => {
     expect([undo.hasAttribute("disabled"), redo.hasAttribute("disabled")]).toEqual([true, true]);
   });
 
+  it("swaps the ⌘K hint for the Display button on the Board and the List, after + New and before Settings", async () => {
+    const t = await made(MESA_SEED);
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const bar = document.querySelector("header.toolbar");
+    if (!(bar instanceof HTMLElement)) throw new Error("no toolbar");
+    const shown = (): [boolean, boolean] => [within(bar).queryByRole("button", { name: "⌘K" }) !== null, within(bar).queryByRole("button", { name: "Display options" }) !== null];
+    expect(shown()).toEqual([true, false]);
+    fireEvent.click(within(bar).getByRole("tab", { name: "Board" }));
+    expect(shown()).toEqual([false, true]);
+    fireEvent.click(within(bar).getByRole("tab", { name: "List" }));
+    expect(shown()).toEqual([false, true]);
+    const display = within(bar).getByRole("button", { name: "Display options" });
+    expect([display.getAttribute("title"), display.getAttribute("aria-haspopup"), display.getAttribute("aria-expanded"), display.dataset["tb"]]).toEqual(["Display options", "menu", "false", "display"]);
+    const order = Array.from(bar.querySelectorAll<HTMLElement>(".toolbar-end > button, .toolbar-end > .plan-menu > button")).map((b) => b.getAttribute("aria-label") ?? b.textContent);
+    expect(order.slice(order.indexOf("+ New"), order.indexOf("Settings") + 1)).toEqual(["+ New", "Display options", "Settings"]);
+    fireEvent.click(within(bar).getByRole("tab", { name: "Timeline" }));
+    expect(shown()).toEqual([true, false]);
+  });
+
+  it("closes an open Display menu when its rows change under it", async () => {
+    const t = await made(MESA_SEED);
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, view: "board", zoom: "W" }));
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const display = screen.getByRole("button", { name: "Display options" });
+    fireEvent.click(display);
+    expect(screen.getByRole("menu", { name: "Display" })).toBeTruthy();
+    act(() => {
+      t.session.apply({ t: "step", op: "add", name: "Review", colour: "amber", after: "next" });
+    });
+    expect([screen.queryByRole("menu", { name: "Display" }), display.getAttribute("aria-expanded")]).toEqual([null, "false"]);
+    fireEvent.click(display);
+    expect(within(screen.getByRole("menu", { name: "Display" })).getByRole("menuitemcheckbox", { name: "Review" })).toBeTruthy();
+  });
+
+  it("groups the List from the Display menu and opens the Columns popover from it", async () => {
+    const t = await made(MESA_SEED);
+    window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, view: "list", zoom: "W" }));
+    render(withSync(shellFor(t).ui));
+    await settle();
+    const display = screen.getByRole("button", { name: "Display options" });
+    fireEvent.click(display);
+    expect(display.getAttribute("aria-expanded")).toBe("true");
+    const menu = screen.getByRole("menu", { name: "Display" });
+    expect(Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"], [role="menuitem"]')).map((r) => r.textContent)).toEqual(["Plan outline", "Step", "Assignee", "None", "Columns…", "Reset columns"]);
+    fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "Step" }));
+    expect(JSON.parse(window.localStorage.getItem(listKey(t.session.view().plan.id)) ?? "null").group).toBe("step");
+    expect(screen.queryByRole("menu", { name: "Display" })).toBeNull();
+    fireEvent.click(display);
+    fireEvent.click(within(screen.getByRole("menu", { name: "Display" })).getByRole("menuitem", { name: "Columns…" }));
+    await settle();
+    expect(screen.getByRole("dialog", { name: "Columns" })).toBeTruthy();
+  });
+
   it("lists Export plan…, Import plan… and Print… under ⋯, all enabled while read-only, and runs each flow", async () => {
     const t = await made(MESA_SEED);
     t.session.setReadOnly(true);

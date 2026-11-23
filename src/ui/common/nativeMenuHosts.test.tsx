@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPlatform } from "../../platform";
 import { fixedClock } from "../../services/clock";
@@ -12,7 +12,9 @@ import { rowContext, type RowContext } from "../list/columns";
 import { ListBar } from "../list/ListBar";
 import { listModel } from "../list/model";
 import { DEFAULT_LIST_PREFS, type ListPrefs } from "../list/prefs";
+import { PhoneList } from "../phone/PhoneList";
 import { MoreMenu } from "../shell/MoreMenu";
+import { UiContext, useUi } from "../state";
 import { PlanMenu } from "../shell/PlanMenu";
 import { NewItemMenu } from "./NewItemMenu";
 import { clearToasts, Toasts } from "./Toast";
@@ -108,6 +110,7 @@ const zoomProps = () => ({
   onSettings: vi.fn(),
   onPlan: vi.fn(),
   onSearch: vi.fn(),
+  display: null,
   onFocusDropped: vi.fn(),
 });
 
@@ -508,7 +511,7 @@ describe("the List's Filter and Group by on iOS", () => {
     const { session } = await planned();
     const ctx = rowContext(session.view(), (id) => session.note(id).toString());
     const picked: ListPrefs[] = [];
-    render(<ListBar ctx={ctx} prefs={prefs} model={listModel(ctx, prefs, null)} searching={false} onPrefs={(next) => picked.push(next)} />);
+    render(<ListBar ctx={ctx} prefs={prefs} model={listModel(ctx, prefs, null)} searching={false} tools onPrefs={(next) => picked.push(next)} />);
     return { ctx, picked };
   };
 
@@ -561,6 +564,59 @@ describe("the List's Filter and Group by on iOS", () => {
     choose("step");
     await settle();
     expect(picked.map((p) => p.group)).toEqual(["step"]);
+  });
+});
+
+describe("the iPhone List's Sort and group", () => {
+  function Phone(p: { session: PlanSession }) {
+    const [ui, setUi] = useUi();
+    const value = useMemo(() => ({ ui, setUi }), [ui, setUi]);
+    return (
+      <UiContext.Provider value={value}>
+        <PhoneList session={p.session} onOpen={() => undefined} />
+      </UiContext.Provider>
+    );
+  }
+
+  it("sends Sort by and Group by as one native pull-down, Plan order and the grouping ticked, and sorts by the chosen column", async () => {
+    setPlatform(IPHONE);
+    const { session } = await planned();
+    render(<Phone session={session} />);
+    fireEvent.click(button("Sort and group"));
+    await settle();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(rowsOf(lastAsk())).toEqual([
+      [
+        "Sort by",
+        [
+          ["order", "Plan order", true],
+          ["sort:name", "Name", false],
+          ["sort:step", "Step", false],
+          ["sort:assignees", "Assignees", false],
+          ["sort:start", "Start", false],
+          ["sort:end", "End", false],
+          ["sort:status", "Status", false],
+        ],
+      ],
+      [
+        "Group by",
+        [
+          ["outline", "Plan outline", true],
+          ["step", "Step", false],
+          ["assignee", "Assignee", false],
+          ["none", "None", false],
+        ],
+      ],
+    ]);
+    choose("sort:start");
+    await settle();
+    expect(document.querySelector(".list-status .sort-summary")?.textContent).toBe("Sorted by Start ↑Plan order");
+    fireEvent.click(button("Sort and group"));
+    await settle();
+    expect(rowsOf(lastAsk())[0][1].filter(([, , checked]) => checked)).toEqual([["sort:start", "Start ↑", true]]);
+    choose("none");
+    await settle();
+    expect(document.querySelectorAll(".psec-title")).toHaveLength(0);
   });
 });
 

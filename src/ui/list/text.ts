@@ -107,5 +107,45 @@ export const lateText = (days: number): string => `${days} d`;
 
 export const progressText = (pct: number): string => `${pct}%`;
 
+export const COLUMN_MENU = "Column";
+
+export const SORT_ASCENDING = "Sort ascending";
+
+export const SORT_DESCENDING = "Sort descending";
+
+export const ADD_SECOND_KEY = "Add as second sort key";
+
+export const ADD_THIRD_KEY = "Add as third sort key";
+
+export const REMOVE_FROM_SORT = "Remove from sort";
+
+export const HIDE_COLUMN = "Hide column";
+
+export const SIZE_TO_FIT = "Size to fit";
+
+export const COLUMNS_MORE = "Columns…";
+
+export const RESET_COLUMNS = "Reset columns";
+
+export const resizeLabel = (title: string): string => `Resize ${title}`;
+
+export const COLUMNS_TITLE = "Columns";
+
+export const moveLabel = (title: string): string => `Move ${title}`;
+
+export const handleTitle = (command: boolean): string => `Drag to reorder · ${command ? "⌥↑ ⌥↓" : "Alt ↑ Alt ↓"}`;
+
+export const PINNED = "pinned";
+
+export const SORT_AND_GROUP = "Sort and group";
+
+export const SORT_BY = "Sort by";
+
+export const NO_DATES = "No dates";
+
+export const META_SEP = " · ";
+
+export const spanText = (start: string, end: string): string => `${start} – ${end}`;
+
 export const recordText = (reason: string, raw: string, shown: number): string =>
   `${reason}. The record was: ${raw.length > shown ? `${raw.slice(0, shown)}… (${raw.length} characters)` : raw}`;

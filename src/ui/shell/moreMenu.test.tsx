@@ -153,7 +153,7 @@ describe("the iPad toolbar tiers", () => {
 
   it("leaves out the zoom rows off the timeline, as the toolbar leaves out the zoom", async () => {
     await at(760, { place: { view: "board" } });
-    expect(rows(await opened())).toEqual(["Search…", "Go to today", "Settings"]);
+    expect(rows(await opened())).toEqual(["Search…", "Expand the Done column", "group Steps", "Now", "Next", "Later", "Done", "Go to today", "Settings"]);
   });
 
   it("leaves out the plan rows with no plan open", async () => {
@@ -185,6 +185,63 @@ describe("the iPad toolbar tiers", () => {
     await settle();
     expect(within(bar()).queryByRole("button", { name: "More" })).toBeNull();
     expect(tab(BOARD).textContent).toBe(BOARD);
+  });
+});
+
+describe("the Display rows in More", () => {
+  it("follow Search on the List in the medium and narrow tiers, with no Display button", async () => {
+    await at(ROOMY_MIN - 1, { place: { view: "list" } });
+    expect(within(bar()).queryByRole("button", { name: "Display options" })).toBeNull();
+    expect(rows(await opened())).toEqual(["Search…", "group Group by", "Plan outline", "Step", "Assignee", "None", "Columns…", "Reset columns", "Settings"]);
+    cleanup();
+    await at(MEDIUM_MIN - 1, { place: { view: "list" } });
+    expect(rows(await opened())).toEqual(["Search…", "group Group by", "Plan outline", "Step", "Assignee", "None", "Columns…", "Reset columns", "Go to today", "Settings"]);
+  });
+
+  it("carry the display: prefix and run the Display menu's rows", async () => {
+    const t = await at(ROOMY_MIN - 1, { place: { view: "list" } });
+    const m = await opened();
+    expect(m.sections.flatMap((s) => s.rows).filter((r) => r.id.startsWith("display:")).map((r) => [r.id, r.checked])).toEqual([
+      ["display:group:outline", true],
+      ["display:group:step", false],
+      ["display:group:assignee", false],
+      ["display:group:none", false],
+      ["display:columns", false],
+      ["display:reset-columns", false],
+    ]);
+    choose(m, "Step");
+    gone();
+    expect(JSON.parse(window.localStorage.getItem(`webboard.list.${t.session.view().plan.id}`) ?? "null").group).toBe("step");
+    const again = await opened();
+    expect(again.sections.find((s) => s.title === "Group by")?.rows.map((r) => [r.title, r.checked])).toEqual([
+      ["Plan outline", false],
+      ["Step", true],
+      ["Assignee", false],
+      ["None", false],
+    ]);
+  });
+
+  it("toggle a Board step from More", async () => {
+    const t = await at(MEDIUM_MIN - 1, { place: { view: "board" } });
+    choose(await opened(), "Later");
+    gone();
+    expect(JSON.parse(window.localStorage.getItem(`webboard.board.${t.session.view().plan.id}`) ?? "null")).toEqual({ v: 1, hidden: ["later"], doneOpen: false });
+  });
+
+  it("are absent on the Timeline", async () => {
+    await at(ROOMY_MIN - 1);
+    expect(rows(await opened())).toEqual(["Search…", "Settings"]);
+  });
+
+  it("give way to the Display button in the roomy tier, which asks for a native menu", async () => {
+    await at(ROOMY_MIN, { place: { view: "board" } });
+    expect(inline()).toEqual(["Plan list", "Local only", "[Views]", "Today", "Undo", "Redo", "Search", "+ New", "Display options", "Settings", "Inspector"]);
+    const display = within(bar()).getByRole("button", { name: "Display options" });
+    fireEvent.click(display);
+    await settle();
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(rows(lastAsk())).toEqual(["Expand the Done column", "group Steps", "Now", "Next", "Later", "Done"]);
+    expect(display.getAttribute("aria-expanded")).toBe("true");
   });
 });
 

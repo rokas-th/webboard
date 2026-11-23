@@ -4,7 +4,6 @@ import { boardLayout, cardOrder, filterLayout } from "../board/layout";
 import type { BoardPrefs } from "../board/prefs";
 import { projectBoard } from "../../domain/steps";
 import { rowContext, type NoteText } from "../list/columns";
-import { listGroups } from "../list/groups";
 import { listModel } from "../list/model";
 import type { ListPrefs } from "../list/prefs";
 import { searchCount, type SearchCount } from "../search/count";
@@ -13,8 +12,6 @@ import type { UiState } from "../state";
 import { timelineRows } from "../timeline/rows";
 
 export type PhoneTab = "list" | "timeline";
-
-const listOrder = (view: PlanView): ItemId[] => listGroups(view).flatMap((s) => s.items);
 
 const rowOrder = (view: PlanView, collapsed: ReadonlySet<ItemId>): ItemId[] => timelineRows(view, collapsed).map((r) => r.id);
 
@@ -46,8 +43,8 @@ export function firstMatch(found: TabSearch): ItemId | null {
   return (match === null ? found.order[0] : found.order.find(match)) ?? null;
 }
 
-export function phoneOrder(view: PlanView, tab: PhoneTab, collapsed: ReadonlySet<ItemId>): readonly ItemId[] {
-  return tab === "list" ? listOrder(view) : rowOrder(view, collapsed);
+export function phoneOrder(view: PlanView, tab: PhoneTab, collapsed: ReadonlySet<ItemId>, listPrefs: ListPrefs, notes: NoteText, match: Matcher | null): readonly ItemId[] {
+  return tab === "list" ? listModel(rowContext(view, notes), listPrefs, match).order : rowOrder(view, collapsed);
 }
 
 export function stepFrom(order: readonly ItemId[], selected: ItemId | null, by: 1 | -1): ItemId | null {

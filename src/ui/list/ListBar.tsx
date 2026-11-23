@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { formerText } from "../../actions/copy";
 import { goneSet } from "../../domain/derive";
 import type { Item, ItemId } from "../../domain/model";
@@ -51,11 +51,21 @@ const chipOfRow = (row: string): Chip => {
   return { f, v: v === "" ? null : v };
 };
 
-const groupOfRow = (row: string): GroupBy => {
+export const groupOfRow = (row: string): GroupBy => {
   const g = GROUPINGS.find((x) => x === row);
   if (g === undefined) throw new Error(`List: the Group by row ${JSON.stringify(row)} names no grouping`);
   return g;
 };
+
+export const groupSection = (prefs: ListPrefs): PickSection => ({
+  title: GROUP_BY,
+  rows: GROUPINGS.map((g) => ({
+    id: g,
+    title: GROUP_LABELS[g],
+    checked: prefs.group === g,
+    checkable: true,
+  })),
+});
 
 interface Value {
   v: string | null;
@@ -120,13 +130,44 @@ const deadLabel = (ctx: RowContext, c: Chip): string => {
 
 const chipLabel = (ctx: RowContext, c: Chip): string => chipText(c.f, valuesOf(ctx, c.f).find((x) => x.v === c.v)?.label ?? deadLabel(ctx, c));
 
+interface Fade {
+  start: boolean;
+  end: boolean;
+}
+
+const FADE_SLACK = 1;
+
+const fadeOf = (el: HTMLElement): Fade => ({
+  start: el.scrollLeft > FADE_SLACK,
+  end: el.scrollLeft + el.clientWidth < el.scrollWidth - FADE_SLACK,
+});
+
+const refade = (el: HTMLElement, set: Dispatch<SetStateAction<Fade>>): void => {
+  const next = fadeOf(el);
+  set((was) => (was.start === next.start && was.end === next.end ? was : next));
+};
+
 function ScopeBar(p: { prefs: ListPrefs; counts: Readonly<Record<ScopeId, number>>; onScope(s: ScopeId): void }) {
   const bar = useRef<HTMLDivElement>(null);
+  const [fade, setFade] = useState<Fade>({ start: false, end: false });
   useLayoutEffect(() => {
     const el = bar.current;
     if (el === null) throw new Error("List: the scope bar is not mounted");
     revealScope(el);
+    refade(el, setFade);
   }, [p.prefs.scope]);
+  useLayoutEffect(() => {
+    const el = bar.current;
+    if (el === null) throw new Error("List: the scope bar is not mounted");
+    refade(el, setFade);
+  }, [p.counts]);
+  useLayoutEffect(() => {
+    const el = bar.current;
+    if (el === null) throw new Error("List: the scope bar is not mounted");
+    const observer = new ResizeObserver(() => refade(el, setFade));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const onKey = (e: ReactKeyboardEvent<HTMLButtonElement>, from: ScopeId): void => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
@@ -140,7 +181,15 @@ function ScopeBar(p: { prefs: ListPrefs; counts: Readonly<Record<ScopeId, number
     target.focus();
   };
   return (
-    <div ref={bar} className="scope-bar" role="radiogroup" aria-label={SCOPE}>
+    <div
+      ref={bar}
+      className="scope-bar"
+      role="radiogroup"
+      aria-label={SCOPE}
+      data-fade-start={String(fade.start)}
+      data-fade-end={String(fade.end)}
+      onScroll={(e) => refade(e.currentTarget, setFade)}
+    >
       {SCOPE_IDS.map((s) => {
         const on = p.prefs.scope === s;
         const title = SCOPE_TITLES[s];
@@ -167,7 +216,7 @@ function ScopeBar(p: { prefs: ListPrefs; counts: Readonly<Record<ScopeId, number
   );
 }
 
-export function ListBar(p: { ctx: RowContext; prefs: ListPrefs; model: ListModel; searching: boolean; onPrefs(next: ListPrefs): void }) {
+export function ListBar(p: { ctx: RowContext; prefs: ListPrefs; model: ListModel; searching: boolean; tools: boolean; onPrefs(next: ListPrefs): void }) {
   const filter = usePickMenu(FILTER);
   const grouping = usePickMenu(GROUP_BY);
   const { ctx, prefs, model } = p;
@@ -188,18 +237,7 @@ export function ListBar(p: { ctx: RowContext; prefs: ListPrefs; model: ListModel
 
   const openGroup = (e: ReactMouseEvent<HTMLButtonElement>): void => {
     const anchor = e.currentTarget;
-    const sections: PickSection[] = [
-      {
-        title: GROUP_BY,
-        rows: GROUPINGS.map((g) => ({
-          id: g,
-          title: GROUP_LABELS[g],
-          checked: prefs.group === g,
-          checkable: true,
-        })),
-      },
-    ];
-    grouping.open("group", anchor, pointBelow(anchor), sections, (row) => p.onPrefs({ ...prefs, group: groupOfRow(row) }));
+    grouping.open("group", anchor, pointBelow(anchor), [groupSection(prefs)], (row) => p.onPrefs({ ...prefs, group: groupOfRow(row) }));
   };
 
   const sortKeys = prefs.sort.map((s) => ({
@@ -244,28 +282,30 @@ export function ListBar(p: { ctx: RowContext; prefs: ListPrefs; model: ListModel
           </span>
         )}
         <span className="list-count">{p.searching ? countText(model.shown, model.scoped) : itemsText(model.scoped)}</span>
-        <span className="list-tools">
-          <button
-            type="button"
-            className="tool-btn"
-            data-list="filter"
-            aria-label={filterLabel(prefs.chips.length)}
-            aria-haspopup="menu"
-            aria-expanded={filter.openFor !== null}
-            onClick={openFilter}
-          >
-            <FilterGlyph />
-            {FILTER}
-            {prefs.chips.length > 0 && <span className="tool-n">{prefs.chips.length}</span>}
-          </button>
-          <button type="button" className="tool-btn" data-list="group" aria-haspopup="menu" aria-expanded={grouping.openFor !== null} onClick={openGroup}>
-            {GROUP_PREFIX}
-            <span className="tool-val">{GROUP_LABELS[prefs.group]}</span>
-            <span className="pull-caret" aria-hidden="true">
-              {` ${PULL_CARET}`}
-            </span>
-          </button>
-        </span>
+        {p.tools && (
+          <span className="list-tools">
+            <button
+              type="button"
+              className="tool-btn"
+              data-list="filter"
+              aria-label={filterLabel(prefs.chips.length)}
+              aria-haspopup="menu"
+              aria-expanded={filter.openFor !== null}
+              onClick={openFilter}
+            >
+              <FilterGlyph />
+              {FILTER}
+              {prefs.chips.length > 0 && <span className="tool-n">{prefs.chips.length}</span>}
+            </button>
+            <button type="button" className="tool-btn" data-list="group" aria-haspopup="menu" aria-expanded={grouping.openFor !== null} onClick={openGroup}>
+              {GROUP_PREFIX}
+              <span className="tool-val">{GROUP_LABELS[prefs.group]}</span>
+              <span className="pull-caret" aria-hidden="true">
+                {` ${PULL_CARET}`}
+              </span>
+            </button>
+          </span>
+        )}
       </div>
       {filter.node}
       {grouping.node}

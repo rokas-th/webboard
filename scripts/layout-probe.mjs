@@ -84,7 +84,9 @@ export const CHROME = Object.freeze({
   workflowRows: [".workflow-row button", ".workflow-add"],
   peopleRows: [".people-row button", ".people-add"],
   assignees: [".assignees .chip-x", ".assignees .chip-add"],
-  listBar: [".scope-bar button", ".list-status button", ".chip-x", ".th-sort"],
+  listBar: [".scope-bar button", ".list-status button", ".chip-x", ".th-sort", ".th-edge", ".cols-btn"],
+  columnsPop: [".cols-pop .popover-close", ".cols-pop .cols-handle", ".cols-pop .cols-check", ".cols-pop .cols-reset"],
+  phoneList: [`.plist-top ${CONTROL}`, ".plist-top input", ".phone-list .scope-bar button", ".phone-list .psec:first-of-type .prow", ".phone-list .psec:first-of-type button.psec-title"],
 });
 const hitChrome = (...groups) => ({ hit44: groups.flatMap((g) => CHROME[g]) });
 const READY_MS = 5000;
@@ -97,6 +99,9 @@ const FONTS = [
 ];
 
 const PHONE_NAME_MIN = 90;
+const IOS_EDGE_HALF = 22;
+const PHONE_DOME_ROWS = 2;
+const PHONE_DOME_COUNT = "2 of 20";
 const TOAST_TEXT_MIN = 240;
 const UNCAUGHT = "Holiday warm for plan p failed: the holiday service did not answer in time";
 const LISTED = ["WebBoard would show different dates than the .gantt file:", ...Array.from({ length: 40 }, (_, i) => `- Task ${i + 2} Step ${i + 2}: source 2026-09-07 → 2026-09-10, WebBoard 2026-09-07 → 2026-09-11`)].join("\n");
@@ -120,6 +125,7 @@ const context = (selector, text) => ({ context: text === undefined ? [selector] 
 const contrastMore = () => ({ contrastMore: true });
 const swipe = (selector, dx, dy) => ({ swipe: [selector, dx, dy] });
 const doubleClick = (selector, text, dx) => ({ doubleClick: [selector, text ?? null, dx ?? 0] });
+const nativeDoubleClick = (selector) => ({ nativeDoubleClick: [selector, null, 0] });
 const doubleTap = (selector, text) => ({ doubleTap: [selector, text ?? null] });
 const none = (selector, text) => ({ none: [selector, text] });
 const key = (k, code, modifiers) => ({ key: { key: k, code, modifiers } });
@@ -137,6 +143,8 @@ const aligned = () => ({ aligned: true });
 const style = (selector, prop, value, pseudo) => ({ style: pseudo === undefined ? [selector, prop, value] : [selector, prop, value, pseudo] });
 const valued = (selector, text) => ({ valued: [selector, text] });
 const ellipsed = (selector) => ({ ellipsed: selector });
+const unclipped = (selector) => ({ unclipped: selector });
+const noOverhang = (scroller, content, allow) => ({ noOverhang: [scroller, content, allow] });
 const relabel = (selector, text) => ({ relabel: [selector, text] });
 const within_ = (selector, box, n) => ({ within: [selector, box, n] });
 const fitLabels = () => ({ fitLabels: true });
@@ -361,6 +369,103 @@ function states() {
       height("table.list tbody tr.grp", 34, 34),
     ],
   });
+  const RESIZED = [
+    ["name", 360],
+    ["step", 120],
+    ["assignees", 150],
+    ["start", 100],
+    ["end", 96],
+    ["status", 130],
+  ];
+  add("list/resized", "mesa-people", {
+    place: listPlace,
+    list: listPrefs({ cols: RESIZED.map(([id, w]) => ({ id, w })) }),
+    actions: [
+      viewExpect("list"),
+      ...RESIZED.map(([id, w]) => width(`table.list thead th[data-col="${id}"]`, w, w)),
+      width("table.list", 956, 956),
+      count("table.list thead .th-edge", RESIZED.length),
+      width('table.list thead .th-edge[data-col="start"]', 9, 9),
+      oneLine("table.list thead tr"),
+    ],
+  });
+  const WIDE = [
+    ["name", 640],
+    ["step", 400],
+    ["assignees", 400],
+    ["start", 400],
+    ["end", 400],
+    ["status", 400],
+  ];
+  const wide = (allow) => [viewExpect("list"), width("table.list", 2640, 2640), oneLine("table.list thead tr"), noOverhang(".list-wrap", "table.list", allow)];
+  add("list/wide", "mesa", { place: listPlace, sizes: "standard", list: listPrefs({ cols: WIDE.map(([id, w]) => ({ id, w })) }), actions: wide(0) });
+  add("list/wide/ipad", "mesa-ios-pad", { place: listPlace, sizes: "ipad-11-portrait", list: listPrefs({ cols: WIDE.map(([id, w]) => ({ id, w })) }), actions: wide(IOS_EDGE_HALF) });
+  const allDefault = { v: 1, cols: ALL_COLUMNS.map(([id, w]) => ({ id, w })), scope: "all", chips: [], group: "outline" };
+  const NARROW = [
+    ["name", 180],
+    ["days", 64],
+    ["late", 84],
+    ["start", 88],
+    ["end", 88],
+    ["kind", 90],
+  ];
+  const narrowDefault = { ...allDefault, cols: NARROW.map(([id, w]) => ({ id, w })) };
+  const headsIpad = [viewExpect("list"), count("table.list thead th", NARROW.length), ...NARROW.slice(1).map(([id]) => width(`table.list thead th[data-col="${id}"]`, 96, 96)), unclipped("table.list thead .th-sort"), { hit44: ["table.list thead .th-sort", "table.list thead .th-edge", ".cols-btn"] }];
+  add("list/heads/ipad", "mesa-ios-pad", { place: listPlace, sizes: "ipad-11-portrait", list: { ...narrowDefault, sort: [] }, actions: headsIpad });
+  add("list/heads/ipad/sorted", "mesa-ios-pad", { place: listPlace, sizes: "ipad-11-portrait", list: { ...narrowDefault, sort: [{ id: "start", dir: "asc" }, { id: "days", dir: "desc" }, { id: "late", dir: "asc" }] }, actions: headsIpad });
+  add("list/heads/mac/sorted", "mesa", {
+    place: listPlace,
+    sizes: "standard",
+    list: { ...allDefault, sort: [{ id: "late", dir: "asc" }] },
+    actions: [viewExpect("list"), count("table.list thead th", ALL_COLUMNS.length), unclipped("table.list thead .th-sort"), unclipped("table.list thead .th-in")],
+  });
+  add("list/fit", "mesa", {
+    place: listPlace,
+    sizes: "standard",
+    list: listPrefs({ cols: [{ id: "name", w: 300 }, { id: "start", w: 88 }, { id: "deps", w: 120 }], scope: "all" }),
+    actions: [viewExpect("list"), width('table.list thead th[data-col="deps"]', 120, 120), nativeDoubleClick('table.list thead .th-edge[data-col="deps"]'), width('table.list thead th[data-col="deps"]', 121, 640)],
+  });
+  add("list/head-menu", "mesa", {
+    place: listPlace,
+    sizes: "standard",
+    list: listPrefs({ sort: [{ id: "name", dir: "asc" }] }),
+    actions: [
+      viewExpect("list"),
+      context('table.list thead th[data-col="start"]'),
+      count('.context-menu[role="menu"][aria-label="Column"]', 1),
+      expect('.context-menu [role^="menuitem"]', "Sort ascending"),
+      expect('.context-menu [role^="menuitem"]', "Add as second sort key"),
+      expect('.context-menu [role^="menuitem"]', "Hide column"),
+      expect('.context-menu [role^="menuitem"]', "Reset columns"),
+      count('.context-menu [role="separator"]', 2),
+      inWindow(".context-menu"),
+    ],
+  });
+  const FADE_END = "linear-gradient(to left, rgba(0, 0, 0, 0), rgb(10, 10, 20) 40px)";
+  const FADE_START = "linear-gradient(to right, rgba(0, 0, 0, 0), rgb(10, 10, 20) 40px)";
+  const fadeEnd = [viewExpect("list"), count('.scope-bar[data-fade-start="false"][data-fade-end="true"]', 1), style(".scope-bar", "mask-image", FADE_END)];
+  const fadeStart = [viewExpect("list"), count('.scope-bar[data-fade-start="true"][data-fade-end="false"]', 1), style(".scope-bar", "mask-image", FADE_START)];
+  add("list/scope-fade/end/mac", "mesa", { place: listPlace, sizes: "smallest", actions: fadeEnd });
+  add("list/scope-fade/end/linux", "mesa-linux", { place: listPlace, sizes: "panes-1024", actions: fadeEnd });
+  add("list/scope-fade/start/mac", "mesa", { place: listPlace, sizes: "smallest", list: listPrefs({ scope: "all" }), actions: fadeStart });
+  add("list/scope-fade/start/linux", "mesa-linux", { place: listPlace, sizes: "panes-1024", list: listPrefs({ scope: "all" }), actions: fadeStart });
+  add("list/scope-fade/none", "mesa", {
+    place: listPlace,
+    sizes: "widest",
+    actions: [viewExpect("list"), count('.scope-bar[data-fade-start="false"][data-fade-end="false"]', 1), style(".scope-bar", "mask-image", "none")],
+  });
+  const columnsPopover = [
+    viewExpect("list"),
+    click(".list-body .cols-gutter .cols-btn"),
+    count('.popover.cols-pop[role="dialog"][aria-label="Columns"]', 1),
+    count(".cols-pop .cols-list > li.cols-row", 14),
+    count(".cols-pop .cols-list > li.cols-row:not(.off)", 6),
+    count(".cols-pop .popover-close", 1),
+    expect(".cols-pop .cols-reset", "Reset columns"),
+    inWindow(".popover.cols-pop"),
+  ];
+  add("list/columns-popover", "mesa", { place: listPlace, sizes: "standard", dialog: true, actions: columnsPopover });
+  add("list/columns-popover/ipad", "mesa-ios-pad", { place: listPlace, sizes: "ipad-11-portrait", dialog: true, actions: [...columnsPopover, hitChrome("columnsPop")] });
   add("print/scale", "scale-print", {
     sizes: "standard",
     shotMedia: "print",
@@ -1078,7 +1183,22 @@ function states() {
   const planSheet = [click(".toolbar button", "Plan"), expect('.sheet[role="dialog"] .sheet-title', "Plan"), expect(".sheet .panel h2", "Plan")];
   add("phone/list", "mesa", {
     sizes: "phone",
-    actions: [count(".sidebar", 0), expect('.phone-views [role="tab"][aria-selected="true"]', "List"), expect(".phone-list .prow .prow-name")],
+    actions: [count(".sidebar", 0), expect('.phone-views [role="tab"][aria-selected="true"]', "List"), expect(".phone-list .prow .prow-name"), expect(".phone-list .prow .prow-meta")],
+  });
+  add("phone/list-rows", "mesa", {
+    sizes: "phone",
+    actions: [
+      expect(".phone-list .plist-top .search-field input"),
+      expect('.phone-list .plist-top button[data-list="sort"]'),
+      count(".phone-list .scope-bar", 1),
+      height(".phone-list .prow", 56, 56),
+      style(".phone-list .prow-name", "text-overflow", "ellipsis"),
+      style(".phone-list .prow-meta", "text-overflow", "ellipsis"),
+    ],
+  });
+  add("phone/list-search", "mesa", {
+    sizes: "phone",
+    actions: [fill(".phone-list .plist-top input", "dome"), count(".phone-list .prow", PHONE_DOME_ROWS), expect(".phone-list .list-status .list-count", PHONE_DOME_COUNT)],
   });
   add("phone-plans", "phone-plans", {
     place: { plan: PLAN_IDS.long, view: "timeline", zoom: "W" },
@@ -1446,6 +1566,7 @@ function states() {
   const INSPECTOR_DRAWER = '.inspector-overlay[role="dialog"][aria-label="Inspector"]';
   const padItem = [click(".tl-row .name", PICKED), still(), expect(`${INSPECTOR_DRAWER} .panel .kind`, "TASK"), count(".sheet", 0)];
   add("ios44/phone/plan", "mesa-ios-phone", { sizes: "phone", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
+  add("ios44/phone/list", "mesa-ios-phone", { sizes: "phone", actions: [expect(".phone-list .prow .prow-meta"), hitChrome("phoneBars", "phoneList")] });
   add("ios44/phone/plans", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [click(".phone-head button", "Plans"), expect('.sheet[role="dialog"] .sheet-title', "Plans"), hitChrome("sheetHead", "planList")] });
   add("ios44/phone/item", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal('.sheet .detail-body [data-detail-field="group"]'), expect(".sheet .detail-body .actions button", "Move up"), hitChrome("sheetHead", "panelActions")] });
   add("ios44/phone/item-end", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneItemSheet, reveal(".sheet .detail-body > .actions button", "Delete"), hitChrome("sheetHead", "panelActions")] });
@@ -1759,6 +1880,52 @@ function states() {
   add("ipad-toolbar/more-open", "mesa-ios-pad", {
     sizes: "ipad-more-open",
     actions: [viewExpect("timeline"), click(MORE), askedExactly(MORE_ROWS)],
+  });
+  const DISPLAY = '.toolbar button[data-tb="display"]';
+  const DISPLAY_MENU = '.context-menu[role="menu"][aria-label="Display"]';
+  const displayShown = (view) => [viewExpect(view), count(DISPLAY, 1), count(`${DISPLAY}[aria-label="Display options"][aria-haspopup="menu"]`, 1), count(".toolbar .kbd-button", 0), oneLine(".toolbar")];
+  const displayDesk = {
+    list: [
+      ...displayShown("list"),
+      click(DISPLAY),
+      count(DISPLAY_MENU, 1),
+      count(`${DISPLAY_MENU} [role="group"][aria-label="Group by"] [role="menuitemcheckbox"]`, 4),
+      expect(`${DISPLAY_MENU} [role="menuitemcheckbox"][aria-checked="true"]`, "Plan outline"),
+      expect(`${DISPLAY_MENU} [role="menuitem"]`, "Columns…"),
+      expect(`${DISPLAY_MENU} [role="menuitem"]`, "Reset columns"),
+      count(`${DISPLAY_MENU} [role^="menuitem"]`, 6),
+      inWindow(DISPLAY_MENU),
+    ],
+    board: [
+      ...displayShown("board"),
+      click(DISPLAY),
+      count(DISPLAY_MENU, 1),
+      expect(`${DISPLAY_MENU} [role="menuitemcheckbox"]`, "Expand the Done column"),
+      expect(`${DISPLAY_MENU} [role="menuitemcheckbox"][aria-checked="true"]`, "Now"),
+      expect(`${DISPLAY_MENU} [role="menuitemcheckbox"]`, "Done"),
+      inWindow(DISPLAY_MENU),
+    ],
+  };
+  [
+    ["mac", "mesa"],
+    ["linux", "mesa-linux"],
+  ].forEach(([os, fixture]) =>
+    Object.entries(displayDesk).forEach(([view, actions]) => add(`display/${view}/${os}`, fixture, { place: { view, zoom: "W" }, sizes: "display-desk", actions })),
+  );
+  add("display/ipad-roomy", "mesa-ios-pad", {
+    place: listPlace,
+    sizes: "ipad-roomy-min",
+    actions: [...displayShown("list"), count(MORE, 0), spare(".toolbar", 16), hitChrome("toolbar"), click(DISPLAY), asked(["group Group by", "Plan outline ✓", "Step", "Assignee", "None", "Columns…", "Reset columns"])],
+  });
+  add("display/ipad-roomy/board", "mesa-ios-pad", {
+    place: boardPlace,
+    sizes: "ipad-roomy-min",
+    actions: [...displayShown("board"), count(MORE, 0), spare(".toolbar", 16), hitChrome("toolbar"), click(DISPLAY), asked(["Expand the Done column", "group Steps", "Now ✓"])],
+  });
+  add("display/ipad-more", "mesa-ios-pad", {
+    place: listPlace,
+    sizes: "ipad-medium-and-narrow",
+    actions: [viewExpect("list"), count(DISPLAY, 0), count(MORE, 1), oneLine(".toolbar"), click(MORE), asked(["Search…", "group Group by", "Plan outline ✓", "Columns…", "Reset columns", "Settings"])],
   });
   const SEARCH_GLASS = '.toolbar [data-tb="search"]';
   const SEARCH_FIELD = ".toolbar .search-field";
@@ -2089,7 +2256,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.aligned === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.unclipped === undefined && last.noOverhang === undefined && last.within === undefined && last.fitLabels === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.aligned === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -2141,6 +2308,8 @@ const SIZES = {
   "ipad-narrow": namesOf([IPAD_TIERS[0], IPAD_WINDOWS[1], IPAD_WINDOWS[0], IPAD_TIERS[1], IPAD_11[0]]),
   "mac-834": namesOf(MAC_834),
   "standard-only": ["1440x920"],
+  "display-desk": ["1180x760", "1920x1080"],
+  "ipad-medium-and-narrow": namesOf([IPAD_TIERS[2], IPAD_TIERS[3], IPAD_TIERS[0], IPAD_TIERS[1], IPAD_11[0]]),
   "search-glass-desk": ["1024x700", "1100x760", "1180x760"],
   "search-glass-ipad": namesOf([IPAD_TIERS[4], IPAD_OWNER[0]]),
   "search-in-more": namesOf([IPAD_TIERS[3], IPAD_TIERS[2], IPAD_11[0], IPAD_TIERS[0]]),
@@ -2672,7 +2841,7 @@ const MEASURE = String.raw`
     return out.slice(0, 12);
   }
 
-  var POPUPS = ".overlay, .popover, .popover-scrim, .plan-menu-list, .plan-overlay-layer, .inspector-overlay-layer";
+  var POPUPS = ".overlay, .popover, .context-menu, .popover-scrim, .plan-menu-list, .plan-overlay-layer, .inspector-overlay-layer";
   var ON_TOP = [".tl-head", ".tl-corner", "table.list th", ".col-head"];
   function coveredUp() {
     var out = [];
@@ -2689,11 +2858,20 @@ const MEASURE = String.raw`
       var hits = document.elementsFromPoint(x, y);
       var front = hits.length > 0 ? hits[0] : null;
       if (front !== null && (front === el || el.contains(front))) continue;
+      if (front !== null && el.matches("table.list th") && front.matches("table.list th > .th-edge") && front.parentElement === el.previousElementSibling) {
+        var bandEnd = front.getBoundingClientRect().right;
+        if (ink.right <= bandEnd + 0.5) continue;
+        var past = document.elementFromPoint((bandEnd + ink.right) / 2, y);
+        if (past !== null && (past === el || el.contains(past))) continue;
+      }
       var solid = hits.filter(function (h) { return h.closest("[data-pane-divider]") === null; })[0];
       if (solid !== undefined && solid !== el && solid.closest(".tl-corner, .outline-strip") !== null && el.closest(".tl-scale") !== null) continue;
       var popup = front === null ? null : front.closest(POPUPS);
       if (popup !== null && !popup.contains(el)) continue;
+      var edgeOf = front !== null && front.matches("table.list th > .th-edge") ? front.getBoundingClientRect() : null;
+      var own = el.getBoundingClientRect();
       out.push({ path: path(el), at: one(x) + "," + one(y), on: front === null ? "nothing at all" : path(front),
+                 sizes: edgeOf === null ? null : "th " + one(own.left) + "-" + one(own.right) + ", ink " + one(ink.left) + "-" + one(ink.right) + ", edge " + one(edgeOf.left) + "-" + one(edgeOf.right) + ", edge col " + front.getAttribute("data-col") + ", th col " + el.getAttribute("data-col"),
                  stack: hits.slice(0, 4).map(sel) });
     }
     return out;
@@ -2959,8 +3137,8 @@ window.__probeAct = function (a) {
     }
     return { context: [cxx, cxy] };
   }
-  if (a.doubleClick !== undefined || a.doubleTap !== undefined) {
-    var dd = a.doubleClick !== undefined ? a.doubleClick : a.doubleTap;
+  if (a.doubleClick !== undefined || a.nativeDoubleClick !== undefined || a.doubleTap !== undefined) {
+    var dd = a.doubleClick !== undefined ? a.doubleClick : a.nativeDoubleClick !== undefined ? a.nativeDoubleClick : a.doubleTap;
     var dm = matching(dd[0], dd[1] === null ? undefined : dd[1]);
     if (dm.hit === undefined) return { fail: missed(dd[0], dd[1] === null ? undefined : dd[1], dm.nodes) };
     dm.hit.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -2972,6 +3150,7 @@ window.__probeAct = function (a) {
       return { fail: dd[0] + " " + JSON.stringify(dd[1]) + " is covered at " + Math.round(ddx) + "," + Math.round(ddy) +
         " by " + (dfront === null ? "nothing" : dfront.tagName.toLowerCase() + "." + String(dfront.className)) };
     }
+    if (a.nativeDoubleClick !== undefined) return { nativeDouble: [ddx, ddy] };
     return a.doubleClick !== undefined ? { doubleClick: [ddx, ddy, dd[2]] } : { doubleTap: [ddx, ddy] };
   }
   if (a.swipe !== undefined) {
@@ -3629,6 +3808,22 @@ window.__probeAct = function (a) {
     if (plainCut.length > 0) return { fail: plainCut.length + " cut month labels end without an ellipsis, first " + JSON.stringify(plainCut[0].textContent) };
     return { ok: true };
   }
+  if (a.unclipped !== undefined) {
+    var whole = Array.prototype.slice.call(document.querySelectorAll(a.unclipped)).filter(onScreen);
+    if (whole.length === 0) return { fail: "no " + a.unclipped + " on screen to check for clipping" };
+    var clipped = whole.filter(function (el) { return el.scrollWidth > el.clientWidth; });
+    if (clipped.length > 0) return { fail: clipped.length + " of " + whole.length + " " + a.unclipped + " are clipped: " + clipped.slice(0, 6).map(function (el) { return JSON.stringify(el.textContent.trim()) + " " + el.scrollWidth + " of " + el.clientWidth + " px"; }).join(", ") };
+    return { ok: true };
+  }
+  if (a.noOverhang !== undefined) {
+    var hangBox = document.querySelector(a.noOverhang[0]);
+    var hangIn = document.querySelector(a.noOverhang[1]);
+    if (hangBox === null || hangIn === null) return { fail: "no " + (hangBox === null ? a.noOverhang[0] : a.noOverhang[1]) + " to measure an overhang on" };
+    var hangReach = Math.ceil(hangIn.getBoundingClientRect().width);
+    if (hangReach <= hangBox.clientWidth) return { fail: a.noOverhang[1] + " fits " + a.noOverhang[0] + " (" + hangReach + " of " + hangBox.clientWidth + " px), so an overhang is not tested" };
+    if (hangBox.scrollWidth - hangReach !== a.noOverhang[2]) return { fail: a.noOverhang[0] + " scrolls " + hangBox.scrollWidth + " px wide, " + (hangBox.scrollWidth - hangReach) + " px past " + a.noOverhang[1] + " (" + hangReach + " px), where " + a.noOverhang[2] + " is allowed" };
+    return { ok: true };
+  }
   if (a.ellipsed !== undefined) {
     var cut = document.querySelector(a.ellipsed);
     if (cut === null) return { fail: "no " + a.ellipsed + " to check for an ellipsis" };
@@ -3999,6 +4194,14 @@ async function mouseDouble(cdp, sessionId, [x, y, dx]) {
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x + dx, y, button: "left", buttons: 0, clickCount: 1 }, sessionId);
 }
 
+async function nativeDouble(cdp, sessionId, [x, y]) {
+  await pointer(cdp, sessionId, [x, y]);
+  await sleep(PAIR_GAP_MS);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, sessionId);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 2 }, sessionId);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 2 }, sessionId);
+}
+
 async function touchDouble(cdp, sessionId, [x, y]) {
   const once = async () => {
     await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y, id: 1 }] }, sessionId);
@@ -4049,6 +4252,7 @@ async function runState(cdp, sessionId, origin, state, errors, traffic) {
       if (got.context !== undefined) await rightClick(cdp, sessionId, got.context);
       if (got.swipe !== undefined) await touchSwipe(cdp, sessionId, got.swipe);
       if (got.doubleClick !== undefined) await mouseDouble(cdp, sessionId, got.doubleClick);
+      if (got.nativeDouble !== undefined) await nativeDouble(cdp, sessionId, got.nativeDouble);
       if (got.doubleTap !== undefined) await touchDouble(cdp, sessionId, got.doubleTap);
     }
     const after = unsettled(await settle(cdp, sessionId));
@@ -4085,7 +4289,7 @@ function judge(state, viewport, r, errors, notFound) {
     const by = o.by.map((b) => `${b.path} (bottom ${b.bottom}, ${b.spill}px past its box, ${b.covers}px onto it)`).join("; ");
     problems.push(`${o.a} paints ${o.overY}x${o.overX}px over ${o.b}, both children of ${o.parent} — by ${by}`);
   });
-  r.covered.forEach((c) => problems.push(`${c.path} is not the topmost thing at its own centre (${c.at}): ${c.on} is, over ${c.stack.join(" / ")}`));
+  r.covered.forEach((c) => problems.push(`${c.path} is not the topmost thing at its own centre (${c.at}): ${c.on} is, over ${c.stack.join(" / ")}${c.sizes === null ? "" : ` (${c.sizes})`}`));
   if (TOOLBAR.includes(viewport)) {
     if (!r.toolbar.found) problems.push("this viewport renders no .toolbar, so nothing was checked for overlap");
     if (r.toolbar.found && r.toolbar.controls.length < 2) problems.push(`the toolbar shows ${r.toolbar.controls.length} control, so nothing was checked for overlap`);

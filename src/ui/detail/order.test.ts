@@ -74,10 +74,13 @@ describe("tabOrder", () => {
 });
 
 describe("phoneOrder", () => {
-  it("is the list's rows on the list tab, whatever the bucket, and the rows on the timeline tab", async () => {
-    const { v } = await made();
-    expect(phoneOrder(v, "list", new Set(["g"]))).toEqual(["a", "b", "n", "u", "d"]);
-    expect(phoneOrder(v, "timeline", new Set(["g"]))).toEqual(["g", "n", "d"]);
+  it("is the list's rows on the list tab, in its scope, sort and search, and the rows on the timeline tab", async () => {
+    const { v, notes } = await made();
+    expect(phoneOrder(v, "list", new Set(["g"]), DEFAULT_LIST_PREFS, notes, null)).toEqual(["a", "b", "n", "u"]);
+    const prefs: ListPrefs = { ...DEFAULT_LIST_PREFS, scope: "all", group: "none", sort: [{ id: "start", dir: "desc" }] };
+    expect(phoneOrder(v, "list", new Set(), prefs, notes, null)).toEqual(["b", "n", "a", "d", "u"]);
+    expect(phoneOrder(v, "list", new Set(), DEFAULT_LIST_PREFS, notes, planMatcher(v, notes, "g"))).toEqual(["a", "b"]);
+    expect(phoneOrder(v, "timeline", new Set(["g"]), prefs, notes, null)).toEqual(["g", "n", "d"]);
   });
 });
 

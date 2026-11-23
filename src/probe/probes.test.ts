@@ -108,7 +108,7 @@ describe("files", () => {
     expect(tauri.calls.map((c) => c.cmd)).toEqual(["plan_export"]);
     expect(tauri.calls[0].args).toEqual(PROBE_BYTES);
     expect(PROBE_BYTES.length).toBe(16);
-    expect(tauri.calls[0].options).toEqual({ headers: { "x-name": "probe" } });
+    expect(tauri.calls[0].options).toEqual({ headers: { "x-name": "probe", "x-format": "webboard" } });
   });
 
   it("reports a cancelled save", async () => {

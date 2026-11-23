@@ -35,6 +35,7 @@ export interface ColumnSpec {
   id: ColumnId;
   title: string;
   value(ctx: RowContext, id: ItemId): string;
+  csv(ctx: RowContext, id: ItemId): string;
   sortKey(ctx: RowContext, id: ItemId): SortValue;
   render(ctx: RowContext, id: ItemId, q: string): ReactNode;
   minWidth: number;
@@ -171,8 +172,11 @@ const fmtDay = (d: Day | null): string => (d === null ? "" : fmtShort(toIso(d)))
 
 const numText = (n: number | null): string => (n === null ? "" : String(n));
 
+const isoDay = (d: Day | null): string => (d === null ? "" : toIso(d));
+
 interface Body {
   value(ctx: RowContext, id: ItemId): string;
+  csv?(ctx: RowContext, id: ItemId): string;
   sortKey(ctx: RowContext, id: ItemId): SortValue;
   render?(ctx: RowContext, id: ItemId, q: string): ReactNode;
 }
@@ -190,6 +194,7 @@ interface Shape {
 const column = (shape: Shape, body: Body): ColumnSpec => {
   const shown = (ctx: RowContext, id: ItemId): boolean => shape.ghost === true || !ctx.ghosts.has(id);
   const draw = body.render ?? ((ctx: RowContext, id: ItemId): ReactNode => body.value(ctx, id));
+  const csv = body.csv ?? body.value;
   return {
     id: shape.id,
     title: shape.title,
@@ -198,6 +203,7 @@ const column = (shape: Shape, body: Body): ColumnSpec => {
     align: shape.align ?? "start",
     pinned: shape.pinned ?? false,
     value: (ctx, id) => (shown(ctx, id) ? body.value(ctx, id) : ""),
+    csv: (ctx, id) => (shown(ctx, id) ? csv(ctx, id) : ""),
     sortKey: (ctx, id) => (shown(ctx, id) ? body.sortKey(ctx, id) : null),
     render: (ctx, id, q) => (shown(ctx, id) ? draw(ctx, id, q) : null),
   };
@@ -240,6 +246,7 @@ export const COLUMNS: readonly ColumnSpec[] = [
     { id: "step", title: "Step", minWidth: 90, defaultWidth: 140 },
     {
       value: (ctx, id) => stepOf(ctx, id)?.name ?? NO_STEP,
+      csv: (ctx, id) => stepOf(ctx, id)?.name ?? "",
       sortKey: (ctx, id) => {
         const step = stepOf(ctx, id);
         return step === null ? -1 : stepRankOf(ctx, step);
@@ -271,17 +278,18 @@ export const COLUMNS: readonly ColumnSpec[] = [
     { id: "assignees", title: "Assignees", minWidth: 110, defaultWidth: 170 },
     {
       value: (ctx, id) => assigneesOf(ctx, id).map(assigneeName).join(", "),
+      csv: (ctx, id) => assigneesOf(ctx, id).map(assigneeName).join("; "),
       sortKey: personKey,
       render: (ctx, id) => <AssigneesCell ctx={ctx} id={id} />,
     },
   ),
   column(
     { id: "start", title: "Start", minWidth: 72, defaultWidth: 88, align: "end" },
-    { value: (ctx, id) => fmtDay(startOf(ctx, id)), sortKey: startOf },
+    { value: (ctx, id) => fmtDay(startOf(ctx, id)), csv: (ctx, id) => isoDay(startOf(ctx, id)), sortKey: startOf },
   ),
   column(
     { id: "end", title: "End", minWidth: 72, defaultWidth: 88, align: "end" },
-    { value: (ctx, id) => fmtDay(endOf(ctx, id)), sortKey: endOf },
+    { value: (ctx, id) => fmtDay(endOf(ctx, id)), csv: (ctx, id) => isoDay(endOf(ctx, id)), sortKey: endOf },
   ),
   column(
     { id: "days", title: "Days", minWidth: 56, defaultWidth: 64, align: "end" },
@@ -294,6 +302,7 @@ export const COLUMNS: readonly ColumnSpec[] = [
         const p = progressOf(ctx, id);
         return p === null ? "" : progressText(p);
       },
+      csv: (ctx, id) => numText(progressOf(ctx, id)),
       sortKey: progressOf,
     },
   ),
@@ -304,6 +313,7 @@ export const COLUMNS: readonly ColumnSpec[] = [
         const days = lateOf(ctx, id);
         return days === null ? "" : lateText(days);
       },
+      csv: (ctx, id) => numText(lateOf(ctx, id)),
       sortKey: lateOf,
       render: (ctx, id) => {
         const days = lateOf(ctx, id);
@@ -343,6 +353,7 @@ export const COLUMNS: readonly ColumnSpec[] = [
     { id: "note", title: "Note", minWidth: 140, defaultWidth: 240 },
     {
       value: (ctx, id) => firstLine(ctx.notes(id)),
+      csv: (ctx, id) => ctx.notes(id),
       sortKey: (ctx, id) => textKey(firstLine(ctx.notes(id))),
       render: (ctx, id, q) => (
         <span className="cell-note">

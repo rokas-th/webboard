@@ -38,6 +38,7 @@ const UI: UiState = {
   sidebarWidth: null,
   query: "",
   searchAsk: 0,
+  columnsAsk: 0,
 };
 
 const SEED: readonly SeedItem[] = [

@@ -17,7 +17,7 @@ import type { CloseReason } from "../common/dismiss";
 import { toast } from "../common/Toast";
 import { refusal } from "../../actions/copy";
 import { OpenChoice } from "../run";
-import { exportFlow } from "../shell/fileFlows";
+import { exportFlow, exportListCsvFlow } from "../shell/fileFlows";
 import type { PlanFiles } from "../shell/selection";
 import { UiContext, useUi, type SettingsSection, type SyncPane, type UiState } from "../state";
 import { DISCARDED } from "../theme/ThemePanel";
@@ -30,6 +30,7 @@ vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../common/Toast", () => ({ toast: vi.fn() }));
 vi.mock("../shell/fileFlows", () => ({
   exportFlow: vi.fn(async () => undefined),
+  exportListCsvFlow: vi.fn(async () => undefined),
   importFlow: vi.fn(async () => undefined),
 }));
 
@@ -42,6 +43,7 @@ afterEach(() => {
   window.localStorage.clear();
   vi.mocked(toast).mockClear();
   vi.mocked(exportFlow).mockClear();
+  vi.mocked(exportListCsvFlow).mockClear();
 });
 
 const CYBERDECK_VOID = "#0A0A14";
@@ -475,6 +477,20 @@ describe("Settings in the modal frame", () => {
       }),
     );
     expect(vi.mocked(exportFlow).mock.calls).toEqual([[t.session]]);
+    await t.session.close();
+  });
+
+  it("exports the open plan's List as CSV, and says what the CSV holds", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ section: "files" });
+    expect(within(sectionEl(m.root(), "files")).queryByRole("button", { name: "Export List as CSV…" })).toBeNull();
+    m.plan(t.session);
+    const row = m.root().querySelector<HTMLElement>('[data-settings-row="files.export"]');
+    if (row === null) throw new Error("no export row");
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Export plan…", "Export List as CSV…"]);
+    expect(within(row).getByText("CSV holds the List's columns, sort, scope and filters on this device.")).toBeTruthy();
+    fireEvent.click(within(row).getByRole("button", { name: "Export List as CSV…" }));
+    expect([vi.mocked(exportListCsvFlow).mock.calls, vi.mocked(exportFlow).mock.calls]).toEqual([[[t.session]], []]);
     await t.session.close();
   });
 

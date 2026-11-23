@@ -21,7 +21,7 @@ import { commitPlanName } from "../panel/planName";
 import { TextField } from "../panel/TextField";
 import { ImportButton } from "../phone/PlansSheet";
 import { useRun } from "../run";
-import { exportFlow } from "../shell/fileFlows";
+import { exportFlow, exportListCsvFlow } from "../shell/fileFlows";
 import type { PlanFiles } from "../shell/selection";
 import { syncTone } from "../shell/SyncChip";
 import { UpdateLine, useUpdates } from "../shell/UpdateLine";
@@ -375,13 +375,21 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
             <Row section="files" row="import" label="Import">
               <ImportButton files={p.files} />
             </Row>
-            <Row section="files" row="export" label="Export">
+            <Row section="files" row="export" label="Export" className={session === null ? undefined : "settings-export"}>
               {session === null ? (
                 <span className="settings-value dim">Open a plan to export it.</span>
               ) : (
-                <button type="button" onClick={() => void exportFlow(session)}>
-                  Export plan…
-                </button>
+                <>
+                  <div className="actions">
+                    <button type="button" onClick={() => void exportFlow(session)}>
+                      Export plan…
+                    </button>
+                    <button type="button" onClick={() => void exportListCsvFlow(session)}>
+                      Export List as CSV…
+                    </button>
+                  </div>
+                  <p className="settings-value dim">CSV holds the List&apos;s columns, sort, scope and filters on this device.</p>
+                </>
               )}
             </Row>
           </>

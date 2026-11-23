@@ -214,6 +214,13 @@ const subscribe = (cb: () => void): (() => void) => {
   };
 };
 
+export function readSavedListPrefs(storage: Storage, plan: PlanId): { ok: true; value: ListPrefs } | { ok: false; detail: string } {
+  const raw = storage.getItem(listKey(plan));
+  if (raw === null) return { ok: true, value: DEFAULT_LIST_PREFS };
+  const read = readListPrefsRecord(raw);
+  return read.ok ? read : { ok: false, detail: recordText(read.reason, raw, SHOWN_RAW) };
+}
+
 export function readListPrefs(storage: Storage, plan: PlanId): ListPrefs {
   const raw = storage.getItem(listKey(plan));
   if (raw === null) return DEFAULT_LIST_PREFS;

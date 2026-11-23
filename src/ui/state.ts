@@ -34,6 +34,7 @@ export interface UiState {
   sidebarWidth: number | null;
   query: string;
   searchAsk: number;
+  columnsAsk: number;
 }
 
 export const PLACE_KEY = "webboard.place";
@@ -65,6 +66,7 @@ const DEFAULTS: UiState = {
   sidebarWidth: null,
   query: "",
   searchAsk: 0,
+  columnsAsk: 0,
 };
 
 type Place = Pick<UiState, "plan" | "view" | "zoom" | "collapsed" | "sidebarOpen" | "sidebarWidth">;

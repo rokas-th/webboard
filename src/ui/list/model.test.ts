@@ -100,6 +100,10 @@ describe("listModel", () => {
       ["G", ["c", "a"]],
       ["Not in a group", ["b", "e"]],
     ]);
+    expect(m.sections.map((s) => [s.key, s.group])).toEqual([
+      ["outline:g", "g"],
+      ["outline:none", null],
+    ]);
     expect([m.order, m.scoped, m.shown]).toEqual([["c", "a", "b", "e"], 4, 4]);
     expect(m.scopeCounts).toEqual({ open: 4, soon: 3, late: 0, blocked: 0, unscheduled: 1, unassigned: 5, milestones: 0, done: 1, all: 5 });
   });
@@ -407,6 +411,7 @@ describe("grouping", () => {
       key: "step:none",
       title: "No step",
       swatch: null,
+      group: null,
       rows: ["x"],
     });
     expect(keys.slice(1)).toEqual(ctx.board.steps.map((s) => `step:${s.id}`).filter((k) => keys.includes(k)));

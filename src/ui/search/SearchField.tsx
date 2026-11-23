@@ -113,7 +113,7 @@ function useAsked(ask: number, onAsk: () => void): void {
   }, [ask]);
 }
 
-function SearchBox(p: SearchProps) {
+export function SearchBox(p: SearchProps) {
   const input = useRef<HTMLInputElement>(null);
   useAsked(p.ask, () => {
     const el = input.current;
