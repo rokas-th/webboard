@@ -580,6 +580,7 @@ const UIKIT_ANSWERS = {
   haptic: { __byArg: "kind", map: { selection: null, light: null, medium: null, success: null, warning: null, error: null } },
   menu_show: null,
   menu_dismiss: null,
+  alert_ask: "cancel",
 };
 const onIosPhone = (f) => ({ ...f, platform: { os: "ios", idiom: "phone" }, ipc: { ...f.ipc, device_info: { deviceId: "iphone", platform: "ios" }, ...UIKIT_ANSWERS } });
 const onIosPad = (f) => ({ ...f, platform: { os: "ios", idiom: "pad" }, ipc: { ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" }, ...UIKIT_ANSWERS } });
@@ -745,6 +746,7 @@ export function buildFixtures() {
     mesa: mesaOnMac,
     "mesa-linux": onLinux(mesaOnMac),
     "mesa-ios-phone": onIosPhone(mesaOnMac),
+    "mesa-discard-ios-phone": withUpdate(onIosPhone(mesaOnMac), { alert_ask: "confirm" }),
     "mesa-ios-pad": onIosPad(mesaOnMac),
     "mesa-steps": mesaSteps,
     "mesa-steps-ios-pad": onIosPad(mesaSteps),

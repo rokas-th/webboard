@@ -37,6 +37,7 @@ const UIKIT = {
   haptic: { __byArg: "kind", map: { selection: null, light: null, medium: null, success: null, warning: null, error: null } },
   menu_show: null,
   menu_dismiss: null,
+  alert_ask: "cancel",
 };
 
 const fixture = (name: string): Fixture => {
@@ -145,7 +146,7 @@ function decoded(f: Fixture, doc: string) {
   return { ydoc, actions, log, plan, cs, held: heldItems(cs, plan) };
 }
 
-const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "mesa-steps-ios-phone": "iPhone", "mesa-people-ios-pad": "iPad", "mesa-people-ios-phone": "iPhone", "mesa-defaults-ios-pad": "iPad", "mesa-defaults-ios-phone": "iPhone", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
+const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-discard-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "mesa-steps-ios-phone": "iPhone", "mesa-people-ios-pad": "iPad", "mesa-people-ios-phone": "iPhone", "mesa-defaults-ios-pad": "iPad", "mesa-defaults-ios-phone": "iPhone", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
 
 const openRegistries: Registry[] = [];
 
@@ -218,6 +219,7 @@ describe("layout fixtures", () => {
       "mesa-defaults",
       "mesa-defaults-ios-pad",
       "mesa-defaults-ios-phone",
+      "mesa-discard-ios-phone",
       "mesa-ios-pad",
       "mesa-ios-phone",
       "mesa-linux",
@@ -396,12 +398,19 @@ describe("layout fixtures", () => {
     expect(fixture("phone-status-ios").platform).toEqual({ os: "ios", idiom: "phone" });
   });
 
-  it("exactly the iOS fixtures answer appearance_set, haptic, menu_show and menu_dismiss, so a desktop state that sends any is unreached", () => {
+  it("mesa-discard-ios-phone is mesa on the iPhone, with UIKit answering Discard to the discard ask", () => {
+    expect(fixture("mesa-discard-ios-phone").docs).toEqual(fixture("mesa-ios-phone").docs);
+    expect(fixture("mesa-discard-ios-phone").platform).toEqual({ os: "ios", idiom: "phone" });
+    expect(fixture("mesa-discard-ios-phone").ipc).toEqual({ ...fixture("mesa-ios-phone").ipc, alert_ask: "confirm" });
+    expect(fixture("mesa-ios-phone").ipc.alert_ask).toBe("cancel");
+  });
+
+  it("exactly the iOS fixtures answer appearance_set, haptic, menu_show, menu_dismiss and alert_ask, so a desktop state that sends any is unreached", () => {
     Object.entries(FIXTURES).forEach(([name, f]) => {
       const answered = Object.keys(f.ipc).filter((cmd) => cmd in UIKIT);
       expect([name, answered]).toEqual([name, f.platform.os === "ios" ? Object.keys(UIKIT) : []]);
     });
-    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(14);
+    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(15);
   });
 
   it("every fixture carries a platform global its device_info agrees with", () => {

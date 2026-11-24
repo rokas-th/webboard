@@ -36,6 +36,6 @@ describe("the Settings… row", () => {
     act(() => {
       fireEvent.click(screen.getByRole("button", { name: "Settings…" }));
     });
-    expect([seen.current?.settings, onClose.mock.calls.length, screen.getByRole("button", { name: "Settings…" }).className]).toEqual([opened, 1, "choice-row plans-settings-row"]);
+    expect([seen.current?.settings, seen.current?.settingsRoot, onClose.mock.calls.length, screen.getByRole("button", { name: "Settings…" }).className]).toEqual([opened, true, 1, "choice-row plans-settings-row"]);
   });
 });

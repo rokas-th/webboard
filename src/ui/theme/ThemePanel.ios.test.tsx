@@ -36,6 +36,8 @@ const panel = (): HTMLElement =>
         <SettingsView
           frame="modal"
           section="theme"
+          root={false}
+          onRoot={vi.fn()}
           row={null}
           onRowShown={vi.fn()}
           session={null}

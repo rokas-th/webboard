@@ -28,6 +28,16 @@ export const PEOPLE_FOOT = "Order here is the order of avatars on cards. Up to 8
 
 export const ADD_PERSON = "+ Add person";
 
+export const ADD_PERSON_ROW = "Add person";
+
+export const PEOPLE_LIST_FOOT = "Tap Edit to reorder or remove people.";
+
+export const PEOPLE_EDIT_FOOT = "Drag a handle to reorder, tap the red minus to remove. Tap Done when finished.";
+
+export const PERSON_TITLE = "Person";
+
+export const PERSON_GONE = "This person is no longer in this plan.";
+
 export const NEW_PERSON_PLACEHOLDER = "Name";
 
 export const NEW_PERSON_LABEL = "Name of the new person";

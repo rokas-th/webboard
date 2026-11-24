@@ -3,7 +3,8 @@ import { useRef, useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IPAD, IPHONE, LINUX, MAC, setPlatform } from "../../test/platform";
 import { resetTauri, tauri } from "../../test/tauriMock";
-import { ASK_WAIT_MS, closeTopOverlay, commitFocus, requestCloseOf, useCloseGuard, useOverlayEntry, useRequestClose, useScrimPress, type CloseReason, type DraftGuard } from "./dismiss";
+import { ASK_WAIT_MS, closeTopOverlay, commitFocus, GuardContext, pendingGuard, requestCloseOf, UNSAVED_TITLE, useCloseGuard, useOverlayEntry, useRequestClose, useScrimPress, type CloseReason, type DraftGuard, type GuardSlot } from "./dismiss";
+import { Sheet } from "./Sheet";
 import { clearToasts, Toasts } from "./Toast";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -194,6 +195,23 @@ describe("the overlay stack", () => {
 
 const GUARD: DraftGuard = { title: "Discard calendar changes?", message: "Your calendar changes are not applied yet." };
 
+const OTHER: DraftGuard = { title: "Discard theme changes?", message: "Your colour changes are not saved yet." };
+
+describe("pendingGuard", () => {
+  it("is null with no guard set, the one guard when one is set, and one combined ask for several", () => {
+    expect([pendingGuard([]), pendingGuard([null, null]), pendingGuard([null, OTHER]), pendingGuard([GUARD, null, OTHER])]).toEqual([
+      null,
+      null,
+      OTHER,
+      { title: UNSAVED_TITLE, message: `${GUARD.message} ${OTHER.message}` },
+    ]);
+  });
+
+  it("names its combined title", () => {
+    expect(UNSAVED_TITLE).toBe("Discard unsaved changes?");
+  });
+});
+
 function Guard(p: { guard: DraftGuard | null }) {
   useCloseGuard(p.guard);
   return null;
@@ -250,26 +268,110 @@ describe("useCloseGuard", () => {
     }
   });
 
-  it("throws when a second guard joins one Dialog or Sheet", () => {
-    const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    try {
-      expect(() =>
-        render(
-          <Host
-            guard={null}
-            onClose={vi.fn()}
-            body={
-              <>
-                <Guard guard={GUARD} />
-                <Guard guard={null} />
-              </>
-            }
-          />,
-        ),
-      ).toThrow("useCloseGuard: a second guard under one Dialog or Sheet");
-    } finally {
-      quiet.mockRestore();
-    }
+  it("two guards under one Sheet ask once, naming both", async () => {
+    const onClose = vi.fn();
+    const both = (
+      <Sheet open title="Settings" onClose={onClose}>
+        <Guard guard={GUARD} />
+        <Guard guard={OTHER} />
+      </Sheet>
+    );
+    setPlatform(MAC);
+    const first = render(both);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const box = ask();
+    if (box === null) throw new Error("no discard ask");
+    expect([box.querySelector("h4")?.textContent, box.querySelector("p")?.textContent, screen.queryAllByRole("alertdialog").length, onClose.mock.calls.length]).toEqual([
+      UNSAVED_TITLE,
+      `${GUARD.message} ${OTHER.message}`,
+      1,
+      0,
+    ]);
+    first.unmount();
+    setPlatform(IPHONE);
+    resetTauri({ alert_ask: () => "confirm" });
+    render(both);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await settle();
+    expect([tauri.calls.map((c) => c.args), onClose.mock.calls.length]).toEqual([
+      [{ ask: { title: UNSAVED_TITLE, message: `${GUARD.message} ${OTHER.message}`, confirm: { label: "Discard", destructive: true }, cancel: "Keep editing" } }],
+      1,
+    ]);
+  });
+
+  it("one set guard of two asks alone", () => {
+    setPlatform(MAC);
+    const onClose = vi.fn();
+    render(
+      <Sheet open title="Settings" onClose={onClose}>
+        <Guard guard={null} />
+        <Guard guard={OTHER} />
+      </Sheet>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const box = ask();
+    if (box === null) throw new Error("no discard ask");
+    expect([box.querySelector("h4")?.textContent, box.querySelector("p")?.textContent, onClose.mock.calls.length]).toEqual([OTHER.title, OTHER.message, 0]);
+  });
+
+  it("closes at once when every guard of several is clear", () => {
+    setPlatform(MAC);
+    const onClose = vi.fn();
+    render(
+      <Sheet open title="Settings" onClose={onClose}>
+        <Guard guard={null} />
+        <Guard guard={null} />
+      </Sheet>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect([onClose.mock.calls.length, ask()]).toEqual([1, null]);
+  });
+
+  it("keeps asking for the guard that stays when another unmounts", () => {
+    setPlatform(MAC);
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <Sheet open title="Settings" onClose={onClose}>
+        <Guard key="a" guard={GUARD} />
+        <Guard key="b" guard={OTHER} />
+      </Sheet>,
+    );
+    rerender(
+      <Sheet open title="Settings" onClose={onClose}>
+        <Guard key="b" guard={OTHER} />
+      </Sheet>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const box = ask();
+    if (box === null) throw new Error("no discard ask");
+    expect([box.querySelector("h4")?.textContent, onClose.mock.calls.length]).toEqual([OTHER.title, 0]);
+  });
+
+  it("throws when a guard writes an entry it does not hold, and when it leaves a slot it never joined", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const slot: GuardSlot = { current: [] };
+    const held = (guard: DraftGuard | null) => (
+      <GuardContext.Provider value={slot}>
+        <Guard guard={guard} />
+      </GuardContext.Provider>
+    );
+    const view = render(held(null));
+    expect(slot.current.map((h) => h.guard)).toEqual([null]);
+    slot.current = [];
+    const thrown = (run: () => void): string[] => {
+      try {
+        run();
+      } catch (e) {
+        const all: unknown[] = typeof e === "object" && e !== null && "errors" in e && Array.isArray(e.errors) ? e.errors : [e];
+        return all.map((x) => (x instanceof Error ? x.message : String(x)));
+      }
+      return [];
+    };
+    expect(thrown(() => view.rerender(held(GUARD)))).toEqual(["useCloseGuard set a guard it does not hold", "useCloseGuard: a guard left a Dialog or Sheet it never joined"]);
+    const again = render(held(null));
+    slot.current = [];
+    expect(thrown(() => again.unmount())).toEqual(["useCloseGuard: a guard left a Dialog or Sheet it never joined"]);
+    error.mockRestore();
   });
 
   it("reads a guard that the field's blur commit turned on, so the close asks", () => {

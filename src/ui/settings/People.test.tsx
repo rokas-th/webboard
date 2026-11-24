@@ -18,7 +18,7 @@ import { STALE_CONFIRM } from "../common/NativeConfirm";
 import { toast } from "../common/Toast";
 import { OpenChoice } from "../run";
 import { UiContext, type UiState } from "../state";
-import { People } from "./People";
+import { People, type PeopleForm } from "./People";
 import { SettingsView } from "./Settings";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -85,11 +85,11 @@ const crewed = async (): Promise<{ t: TestSession; ids: Record<string, string> }
   return { t, ids };
 };
 
-const mount = (session: PlanSession, readOnly = false, onHostKey = vi.fn()): HTMLElement => {
+const mount = (session: PlanSession, readOnly = false, onHostKey = vi.fn(), form: PeopleForm = { kind: "table" }): HTMLElement => {
   const view = render(
     <OpenChoice.Provider value={vi.fn()}>
       <div className="host" onKeyDown={onHostKey}>
-        <People session={session} readOnly={readOnly} />
+        <People session={session} readOnly={readOnly} form={form} />
       </div>
     </OpenChoice.Provider>,
   );
@@ -573,6 +573,186 @@ describe("Settings > People", () => {
   });
 });
 
+describe("Settings > People in the list form", () => {
+  const listed = (t: TestSession, editing: boolean, readOnly = false): { root: HTMLElement; onOpen: ReturnType<typeof vi.fn<(id: string, focus: "initials" | null) => void>> } => {
+    const onOpen = vi.fn<(id: string, focus: "initials" | null) => void>();
+    const root = mount(t.session, readOnly, vi.fn(), { kind: "list", editing, onOpen });
+    return { root, onOpen };
+  };
+  const iosRow = (id: string): HTMLElement => one(`ul.ios-list[data-list="people"] > li.ios-row[data-person="${id}"]`);
+  const iosIds = (root: HTMLElement): (string | undefined)[] => [...root.querySelectorAll<HTMLElement>("ul.ios-list > li.ios-row[data-person]")].map((r) => r.dataset.person);
+  const foot = (root: HTMLElement): string | null => one("p.settings-foot", root).textContent;
+
+  it("lists each person as a row with avatar, name, untrashed item count and a chevron; a tap opens the person", async () => {
+    const { t, ids } = await crewed();
+    const { root, onOpen } = listed(t, false);
+    expect(iosIds(root)).toEqual([ids.MO, ids.OB, ids.AR]);
+    const shape = [ids.MO, ids.OB, ids.AR].map((id) => {
+      const r = iosRow(id);
+      const main = one("button.ios-row-main", r);
+      return [
+        main.hasAttribute("disabled"),
+        one(".avatar", main).textContent,
+        one("span.ios-row-name", main).textContent,
+        one("span.ios-row-count", main).textContent,
+        one("span.settings-chev", main).getAttribute("aria-hidden"),
+        r.querySelector("button.ios-minus"),
+        r.querySelector("button.ios-grip"),
+      ];
+    });
+    expect(shape).toEqual([
+      [false, "MO", "Mira Okafor", "1 item", "true", null, null],
+      [false, "OB", "Ole Berg", "1 item", "true", null, null],
+      [false, "AR", "Ana Ruiz", "1 item", "true", null, null],
+    ]);
+    const add = one("ul.ios-list > li:last-child button.ios-add", root);
+    expect([
+      add.textContent,
+      one("span.ios-plus", add).getAttribute("aria-hidden"),
+      add.closest("li")?.getAttribute("data-settings-row"),
+      one('[data-settings-row="people.people"] ul.ios-list', root) !== null,
+      foot(root),
+      one("p.people-line", root).getAttribute("role"),
+      root.querySelector(".people-foot, .people-head, li.people-row, input"),
+    ]).toEqual(["+Add person", "true", "people.add", true, "Tap Edit to reorder or remove people.", "status", null]);
+    fireEvent.click(one("button.ios-row-main", iosRow(ids.OB)));
+    expect(onOpen.mock.calls).toEqual([[ids.OB, null]]);
+  });
+
+  it("says so when the plan has no people and keeps the Add row", async () => {
+    const t = await made();
+    const { root } = listed(t, false);
+    expect([one("p.settings-line.people-empty", root).textContent, iosIds(root), one("button.ios-add", root).textContent]).toEqual([
+      "No people yet. Add someone to assign tasks and milestones.",
+      [],
+      "+Add person",
+    ]);
+  });
+
+  it("in Edit shows a red minus and a grip on each row, disables the row, drops the chevron and keeps Add", async () => {
+    const { t, ids } = await crewed();
+    const { root, onOpen } = listed(t, true);
+    const r = iosRow(ids.MO);
+    const kids = [...r.children].map((c) => c.className);
+    expect([
+      kids,
+      one("button.ios-minus", r).getAttribute("aria-label"),
+      one("button.ios-grip", r).getAttribute("aria-label"),
+      one("button.ios-row-main", r).hasAttribute("disabled"),
+      r.querySelector(".settings-chev"),
+      one("button.ios-add", root).hasAttribute("disabled"),
+      foot(root),
+    ]).toEqual([["ios-minus", "ios-row-main", "ios-grip"], "Remove Mira Okafor", "Reorder Mira Okafor", true, null, false, "Drag a handle to reorder, tap the red minus to remove. Tap Done when finished."]);
+    fireEvent.click(one("button.ios-row-main", r));
+    expect(onOpen.mock.calls).toEqual([]);
+  });
+
+  it("asks before a minus removes a person, and moves the focus to the next row's minus, then to Add", async () => {
+    const { t, ids } = await crewed();
+    act(() => {
+      t.session.apply({ t: "unassign", items: ["m"], person: ids.OB });
+    });
+    const { root } = listed(t, true);
+    const apply = vi.spyOn(t.session, "apply");
+    fireEvent.click(one("button.ios-minus", iosRow(ids.OB)));
+    const ask = within(root).getByRole("dialog", { name: "Remove person" });
+    expect([one(".remove-person-text", ask).textContent, apply.mock.calls]).toEqual(["Remove “Ole Berg” from this plan? No item is assigned to them.", []]);
+    fireEvent.click(within(ask).getByRole("button", { name: "Remove" }));
+    expect([apply.mock.calls, iosIds(root), document.activeElement]).toEqual([[[{ t: "person", op: "remove", person: ids.OB, to: null }]], [ids.MO, ids.AR], one("button.ios-minus", iosRow(ids.AR))]);
+    fireEvent.click(one("button.ios-minus", iosRow(ids.AR)));
+    fireEvent.click(input(`[data-pick="none"] input`, within(root).getByRole("dialog", { name: "Remove person" })));
+    fireEvent.click(within(within(root).getByRole("dialog", { name: "Remove person" })).getByRole("button", { name: "Remove" }));
+    expect([iosIds(root), document.activeElement]).toEqual([[ids.MO], one("button.ios-add", root)]);
+  });
+
+  it("reorders by dragging a grip onto another row and with ⌥↓ on the grip", async () => {
+    const { t, ids } = await crewed();
+    const { root } = listed(t, true);
+    const apply = vi.spyOn(t.session, "apply");
+    const grip = (id: string): HTMLElement => one("button.ios-grip", iosRow(id));
+    const target = iosRow(ids.MO);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => target });
+    try {
+      fireEvent.pointerDown(grip(ids.AR), { button: 0, clientX: 5, clientY: 5, pointerId: 1 });
+      expect(iosRow(ids.AR).classList.contains("dragging")).toBe(true);
+      fireEvent.pointerMove(document, { clientX: 5, clientY: 80, pointerId: 1 });
+      expect(target.classList.contains("drop-over")).toBe(true);
+      fireEvent.pointerUp(document, { clientX: 5, clientY: 80, pointerId: 1 });
+    } finally {
+      Reflect.deleteProperty(document, "elementFromPoint");
+    }
+    expect([apply.mock.calls, iosIds(root), root.querySelectorAll(".drop-over, .dragging").length]).toEqual([[[{ t: "person", op: "reorder", person: ids.AR, after: null }]], [ids.AR, ids.MO, ids.OB], 0]);
+    act(() => {
+      grip(ids.AR).focus();
+    });
+    fireEvent.keyDown(grip(ids.AR), { key: "ArrowDown", altKey: true });
+    expect([last(apply.mock.calls), iosIds(root), document.activeElement]).toEqual([[{ t: "person", op: "reorder", person: ids.AR, after: ids.MO }], [ids.MO, ids.AR, ids.OB], grip(ids.AR)]);
+  });
+
+  it("adds from the Draft row and opens the new person with Initials focused", async () => {
+    const { t, ids } = await crewed();
+    const { root, onOpen } = listed(t, false);
+    const apply = vi.spyOn(t.session, "apply");
+    fireEvent.click(one("button.ios-add", root));
+    const draft = input("ul.ios-list > li.ios-row.ios-draft input.people-draft-name", root);
+    expect([document.activeElement, draft.getAttribute("aria-label"), one("ul.ios-list > li:last-child", root).querySelector("button.ios-add") !== null]).toEqual([draft, "Name of the new person", true]);
+    fireEvent.change(draft, { target: { value: "Dana Lee" } });
+    fireEvent.keyDown(draft, { key: "Enter" });
+    const dana = peopleOf(t.session.view().plan).find((p) => p.name === "Dana Lee");
+    if (dana === undefined) throw new Error("no Dana Lee");
+    expect([apply.mock.calls, onOpen.mock.calls, iosIds(root), root.querySelector(".ios-draft")]).toEqual([
+      [[{ t: "person", op: "add", name: "Dana Lee", initials: "DL", colour: "cyan", after: ids.AR }]],
+      [[dana.id, "initials"]],
+      [ids.MO, ids.OB, ids.AR, dana.id],
+      null,
+    ]);
+  });
+
+  it("adds from a Draft that loses focus to a tap on another row, and opens only the row that was tapped", async () => {
+    const { t, ids } = await crewed();
+    const { root, onOpen } = listed(t, false);
+    fireEvent.click(one("button.ios-add", root));
+    const draft = input("ul.ios-list > li.ios-row.ios-draft input.people-draft-name", root);
+    fireEvent.change(draft, { target: { value: "Dana Lee" } });
+    const tapped = one("button.ios-row-main", iosRow(ids.OB));
+    fireEvent.pointerDown(tapped);
+    fireEvent.blur(draft);
+    fireEvent.click(tapped);
+    const dana = peopleOf(t.session.view().plan).find((p) => p.name === "Dana Lee");
+    if (dana === undefined) throw new Error("no Dana Lee");
+    expect([onOpen.mock.calls, iosIds(root), root.querySelector(".ios-draft")]).toEqual([[[ids.OB, null]], [ids.MO, ids.OB, ids.AR, dana.id], null]);
+  });
+
+  it("disables Add when the plan is read-only and still opens a person to read", async () => {
+    const { t, ids } = await crewed();
+    const { root, onOpen } = listed(t, false, true);
+    expect(one("button.ios-add", root).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(one("button.ios-row-main", iosRow(ids.MO)));
+    expect(onOpen.mock.calls).toEqual([[ids.MO, null]]);
+  });
+});
+
+describe("Settings > People in the list form on iPad", () => {
+  it("asks a minus removal through the native alert", async () => {
+    resetTauri({});
+    setPlatform(IPAD);
+    const unstub = stubVisualViewport();
+    try {
+      const { t, ids } = await crewed();
+      act(() => {
+        t.session.apply({ t: "unassign", items: ["m"], person: ids.OB });
+      });
+      const root = mount(t.session, false, vi.fn(), { kind: "list", editing: true, onOpen: vi.fn() });
+      tauri.answers.alert_ask = () => "confirm";
+      fireEvent.click(one(`li.ios-row[data-person="${ids.OB}"] button.ios-minus`, root));
+      await settle();
+      expect([tauri.calls.filter((c) => c.cmd === "alert_ask").length, [...root.querySelectorAll<HTMLElement>("li.ios-row[data-person]")].map((r) => r.dataset.person)]).toEqual([1, [ids.MO, ids.AR]]);
+    } finally {
+      unstub();
+    }
+  });
+});
+
 describe("Settings > People on iPad", () => {
   it("confirms a plain remove with a native alert and a destructive Remove", async () => {
     resetTauri({});
@@ -682,6 +862,7 @@ describe("People in the phone Settings sheet", () => {
     naming: null,
     settings: null,
     settingsRow: null,
+    settingsRoot: false,
     syncPane: null,
     sidebarOpen: true,
     sidebarWidth: null,
@@ -690,7 +871,7 @@ describe("People in the phone Settings sheet", () => {
     columnsAsk: 0,
   };
 
-  it("lists the people rows in the grouped list after Overview", async () => {
+  it("lists the people in the list form on the People page it opens on, with Edit in the bar", async () => {
     const { t, ids } = await crewed();
     const closer = createRef<((r: CloseReason) => boolean) | null>();
     render(
@@ -701,6 +882,8 @@ describe("People in the phone Settings sheet", () => {
               <SettingsView
                 frame="sheet"
                 section="people"
+                root={false}
+                onRoot={vi.fn()}
                 row={null}
                 onRowShown={vi.fn()}
                 session={t.session}
@@ -729,12 +912,14 @@ describe("People in the phone Settings sheet", () => {
         { registry: testRegistry(t) },
       ),
     );
-    const group = one('.sheet section.settings-group[data-section="people"]');
+    const group = one('.sheet section.settings-page[data-section="people"]');
     expect([
-      one("h2.settings-group-title", group).textContent,
-      group.previousElementSibling?.getAttribute("data-section"),
-      [...group.querySelectorAll<HTMLElement>("li.people-row")].map((r) => r.dataset.person),
-      one("button.people-add", group).textContent,
-    ]).toEqual(["People", "overview", [ids.MO, ids.OB, ids.AR], "+ Add person"]);
+      one(".sheet .sheet-head .sheet-title").textContent,
+      group.hidden,
+      [...group.querySelectorAll<HTMLElement>("ul.ios-list li.ios-row[data-person]")].map((r) => r.dataset.person),
+      one("button.ios-add", group).textContent,
+      group.querySelectorAll("li.people-row").length,
+      one(".sheet .sheet-head .sheet-actions button.sheet-edit").textContent,
+    ]).toEqual(["People", false, [ids.MO, ids.OB, ids.AR], "+Add person", 0, "Edit"]);
   });
 });

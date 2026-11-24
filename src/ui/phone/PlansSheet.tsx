@@ -30,7 +30,7 @@ export function SettingsRow(p: { hasPlan: boolean; onClose(): void }) {
       type="button"
       className="choice-row plans-settings-row"
       onClick={() => {
-        setUi({ settings: lastSection(window.localStorage, p.hasPlan) });
+        setUi({ settings: lastSection(window.localStorage, p.hasPlan), settingsRoot: true });
         p.onClose();
       }}
     >

@@ -616,14 +616,96 @@ describe("a swipe down from the sheet head on iOS", () => {
         <p>Body</p>
       </Sheet>,
     );
-    expect([[...head().children].map((k) => k.className), within(head()).getByRole("button", { name: "Done" }).parentElement?.className, dialog().dataset.detent]).toEqual([
-      ["sheet-close", "sheet-title", "sheet-actions"],
+    expect([head().className, [...head().children].map((k) => k.className), within(head()).getByRole("button", { name: "Done" }).parentElement?.className, dialog().dataset.detent]).toEqual([
+      "sheet-head sheet-head-bar",
+      ["sheet-start", "sheet-title", "sheet-actions"],
       "sheet-actions",
       undefined,
     ]);
     measured();
     swipe(-200, 100);
     expect(dialog().style.transform).toBe("");
+  });
+
+  it("keeps its label while the bar title changes", () => {
+    setPlatform(IPHONE);
+    const shown = (title: string) => (
+      <Sheet open title={title} label="Settings" onClose={() => undefined}>
+        <p>Body</p>
+      </Sheet>
+    );
+    const view = render(shown("Settings"));
+    expect([dialog().getAttribute("aria-label"), head().querySelector(".sheet-title")?.textContent]).toEqual(["Settings", "Settings"]);
+    view.rerender(shown("People"));
+    expect([screen.getByRole("dialog", { name: "Settings" }) === dialog(), head().querySelector(".sheet-title")?.textContent]).toEqual([true, "People"]);
+  });
+
+  it("names its kind in data-sheet, apart from its label, and leaves it off without one", () => {
+    const view = render(
+      <Sheet open title="People" label="Réglages" kind="settings" onClose={() => undefined}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    expect([dialog().getAttribute("data-sheet"), dialog().getAttribute("aria-label")]).toEqual(["settings", "Réglages"]);
+    view.rerender(
+      <Sheet open title="People" onClose={() => undefined}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    expect(dialog().hasAttribute("data-sheet")).toBe(false);
+  });
+
+  it("puts the lead after the X in the bar head, before the title and the end", () => {
+    setPlatform(IPHONE);
+    const onClose = vi.fn();
+    const onBack = vi.fn();
+    render(
+      <Sheet
+        open
+        title="People"
+        label="Settings"
+        lead={
+          <button type="button" aria-label="Back to Settings" onClick={onBack}>
+            ‹
+          </button>
+        }
+        onClose={onClose}
+      >
+        <p>Body</p>
+      </Sheet>,
+    );
+    const start = head().querySelector(".sheet-start");
+    if (!(start instanceof HTMLElement)) throw new Error("no sheet start");
+    expect([
+      head().className,
+      [...head().children].map((k) => [k.tagName, k.className]),
+      [...start.children].map((k) => k.className),
+      start.querySelector(".sheet-lead")?.firstElementChild?.getAttribute("aria-label"),
+      head().querySelector(".sheet-head-end")?.getAttribute("aria-hidden"),
+    ]).toEqual([
+      "sheet-head sheet-head-bar",
+      [
+        ["SPAN", "sheet-start"],
+        ["H3", "sheet-title"],
+        ["SPAN", "sheet-head-end"],
+      ],
+      ["sheet-close", "sheet-lead"],
+      "Back to Settings",
+      "true",
+    ]);
+    fireEvent.click(within(head()).getByRole("button", { name: "Back to Settings" }));
+    expect([onBack.mock.calls.length, onClose.mock.calls.length]).toEqual([1, 0]);
+    fireEvent.click(within(head()).getByRole("button", { name: "Close" }));
+    expect(onClose.mock.calls.length).toBe(1);
+  });
+
+  it("keeps the plain head without a lead or actions", () => {
+    render(
+      <Sheet open title="Plans" onClose={() => undefined}>
+        <p>Body</p>
+      </Sheet>,
+    );
+    expect([head().className, [...head().children].map((k) => k.className), dialog().getAttribute("aria-label")]).toEqual(["sheet-head", ["sheet-close", "sheet-title", "sheet-head-end"], "Plans"]);
   });
 
   it("a kept guarded swipe snaps back", async () => {

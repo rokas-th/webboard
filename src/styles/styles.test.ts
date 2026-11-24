@@ -364,6 +364,83 @@ describe("the Cyberdeck look", () => {
     expect([decls(".sheet-actions")["display"], decls(".sheet-actions")["flex"]]).toEqual(["flex", "none"]);
   });
 
+  it("lays a sheet bar out as start, a centred title that can shrink, and end", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect([
+      decls(".sheet-head-bar")["display"],
+      decls(".sheet-head-bar")["grid-template-columns"],
+      decls(".sheet-start")["justify-self"],
+      decls(".sheet-head-bar .sheet-title")["text-align"],
+      decls(".sheet-title")["text-overflow"],
+      decls(".sheet-back")["width"],
+      decls(".sheet-back")["height"],
+      decls(".sheet-back")["color"],
+    ]).toEqual(["grid", "minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr)", "start", "center", "ellipsis", "44px", "44px", "var(--cyan)"]);
+  });
+
+  it("draws the Settings root as grouped cards on the void, with dim display titles", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect([
+      decls('.sheet[data-sheet="settings"] .sheet-body')["background"],
+      decls(".settings-pushed")["padding"],
+      decls(".settings-root")["gap"],
+      decls(".settings-root-title")["font-family"],
+      decls(".settings-root-title")["font-size"],
+      decls(".settings-root-title")["color"],
+      decls(".settings-root-card")["border"],
+      decls(".settings-root-card")["border-radius"],
+      decls(".settings-root-card")["background"],
+      decls(".settings-root-row")["min-height"],
+      decls(".settings-root-row")["border-bottom"],
+      decls(".settings-root-name")["text-overflow"],
+    ]).toEqual(["var(--void)", "8px 16px 32px", "24px", "var(--display)", "10.5px", "var(--dim)", "1px solid var(--line)", "12px", "var(--panel)", "46px", "1px solid var(--line)", "ellipsis"]);
+    expect(decls('.sheet[data-sheet="settings"]')["height"]).toBe("100%");
+  });
+
+  it("keys no rule on an accessible name, and has no rule for the People table inside a pushed page, which only shows the list form", () => {
+    expect(sheet.rules.map((r) => r.selector).filter((s) => s.includes("aria-label=") || s.includes(".settings-page .people-"))).toEqual([]);
+  });
+
+  it("draws the People list form as an inset card: 44 pt minus and grip, a magenta minus and a lime plus, cyan Add and Edit", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect([
+      decls(".ios-list")["border"],
+      decls(".ios-list")["border-radius"],
+      decls(".ios-list")["background"],
+      decls(".ios-row")["min-height"],
+      decls(".ios-row")["border-bottom"],
+      decls(".ios-row-name")["text-overflow"],
+      decls(".ios-minus")["width"],
+      decls(".ios-grip")["height"],
+      decls(".ios-minus .danger-disc")["width"],
+      decls(".ios-minus .danger-disc")["background"],
+      decls(".ios-grip")["touch-action"],
+      decls(".ios-plus")["background"],
+      decls(".ios-add")["color"],
+      decls(".ios-add")["font-size"],
+      decls(".sheet-edit")["color"],
+      decls(".settings-detail-danger")["color"],
+      decls(".settings-detail-danger")["border"],
+    ]).toEqual(["1px solid var(--line)", "12px", "var(--panel)", "50px", "1px solid var(--line)", "ellipsis", "44px", "44px", "22px", "var(--magenta)", "none", "var(--s-lime)", "var(--cyan)", "16px", "var(--cyan)", "var(--magenta)", "1px solid rgba(var(--magenta-rgb), 0.4)"]);
+  });
+
+  it("draws the Workflow list form with a 12 px swatch, a dim display flag, an amber over-limit count, and 44 pt step-page controls", () => {
+    const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    expect([
+      decls(".ios-row-main .swatch")["width"],
+      decls(".ios-flag")["font-family"],
+      decls(".ios-flag")["font-size"],
+      decls(".ios-flag")["color"],
+      decls(".ios-flag")["border"],
+      decls(".ios-row-count.over")["color"],
+      decls(".settings-detail-value.over")["color"],
+      decls(".settings-detail-control .workflow-swatch")["width"],
+      decls(".settings-detail-control .workflow-swatch")["height"],
+      decls(".settings-detail-control .workflow-name")["min-height"],
+      decls(".settings-detail-control .workflow-limit")["font-size"],
+    ]).toEqual(["12px", "var(--display)", "9.5px", "var(--dim)", "1px solid var(--line)", "var(--amber)", "var(--amber)", "44px", "44px", "44px", "16px"]);
+  });
+
   it("lines the summary rows with 1 px --line, 44 pt on iOS", () => {
     const decls = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
     expect([decls(".summary-row")["border-bottom"], decls(".summary-rows")["border-top"], decls(`${IOS} .summary-row`)["min-height"]]).toEqual([

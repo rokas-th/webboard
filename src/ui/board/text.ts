@@ -124,6 +124,14 @@ export const COMPLETES_COLUMN = "Completes";
 export const COMPLETES_GROUP = "Step that completes items";
 export const WORKFLOW_HEAD: readonly string[] = ["", "", "Name", "Items", "Limit", COMPLETES_COLUMN, ""];
 export const ADD_STEP = "+ Add step";
+export const ADD_STEP_ROW = "Add step";
+export const WORKFLOW_LIST_FOOT = "Tap Edit to reorder or delete steps.";
+export const WORKFLOW_EDIT_FOOT = "Drag a handle to reorder, tap the red minus to delete. Tap Done when finished.";
+export const COMPLETES_FLAG = "completes";
+export const STEP_TITLE = "Step";
+export const STEP_GONE = "This step is no longer in this plan.";
+
+export const deleteStepLabel = (name: string): string => `Delete ${name}`;
 
 export const reorderLabel = (name: string): string => `Reorder ${name}`;
 

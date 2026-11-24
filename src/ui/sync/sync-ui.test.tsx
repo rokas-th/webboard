@@ -2129,6 +2129,7 @@ describe("sync on the phone", () => {
     expect([uiNow()[0].dialog, uiNow()[0].settings, uiNow()[0].syncPane]).toEqual([null, "sync", null]);
     expect(screen.queryByRole("dialog", { name: "Plan" })).toBeNull();
     expect(syncSheet().classList.contains("sheet")).toBe(true);
+    expect([uiNow()[0].settingsRoot, syncSheet().querySelector(".sheet-head .sheet-title")?.textContent, within(syncSheet()).getAllByRole("button", { name: "Back to Settings" }).length, syncSheet().querySelector(".settings-root")?.hasAttribute("hidden")]).toEqual([false, "Sync", 1, true]);
     expect(selectedTab()).toBe("Devices");
     expect(within(syncSheet()).getAllByRole("button", { name: "Close" })).toHaveLength(1);
     await click(within(syncSheet()).getByRole("button", { name: "Close" }));

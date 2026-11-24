@@ -50,6 +50,7 @@ const UI: UiState = {
   naming: null,
   settings: null,
   settingsRow: null,
+  settingsRoot: false,
   syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,
@@ -302,7 +303,7 @@ describe("commands()", () => {
     find(ctx, "settings").run();
     find(ctx, "theme").run();
     window.localStorage.removeItem("webboard.settings");
-    expect(h.setUi.mock.calls).toEqual([[{ settings: "general" }], [{ settings: "sync" }], [{ settings: "theme" }]]);
+    expect(h.setUi.mock.calls).toEqual([[{ settings: "general", settingsRoot: true }], [{ settings: "sync", settingsRoot: true }], [{ settings: "theme" }]]);
     expect(h.preview.mock.calls).toEqual([[null], [null], [null]]);
     expect(h.useCyberdeck).not.toHaveBeenCalled();
     find(ctx, "theme-cyberdeck").run();

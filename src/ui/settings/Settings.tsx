@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useReducer, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import type { RegionRef } from "../../domain/calendar";
-import type { PlanId } from "../../domain/model";
+import type { PersonId, PlanId, StepId } from "../../domain/model";
 import { readPlatform } from "../../platform";
+import { usesNativeAlert } from "../../services/alert";
 import { AppError } from "../../services/ipc";
 import type { PlanListing } from "../../store/registry";
 import type { Clock } from "../../services/clock";
+import { stepsOf } from "../../domain/steps";
 import { usePlanView, type PlanSession } from "../../store/session";
 import type { Updates } from "../../store/updates";
 import { chipText, type SyncState } from "../../sync/manager";
 import { docName, useSyncRegistry, useSyncState } from "../../sync/SyncProvider";
 import { DISCARDED, useTheme, type ThemeApi } from "../../theme/ThemeContext";
+import { STEP_TITLE } from "../board/text";
 import { CalendarBody, type CalendarStash } from "../calendar/CalendarDialog";
 import { messageOf } from "../calendar/message";
 import { Dialog, focusables } from "../common/Dialog";
-import { requestCloseOf, type AfterClose, type CloseReason } from "../common/dismiss";
+import { PERSON_TITLE } from "../people/text";
+import { requestCloseOf, useCloseGuard, type AfterClose, type CloseReason, type DraftGuard } from "../common/dismiss";
 import { Sheet } from "../common/Sheet";
 import { toast } from "../common/Toast";
 import { Baselines } from "../panel/Baselines";
@@ -34,19 +38,30 @@ import { General } from "./General";
 import { Look } from "./Look";
 import { saveSection } from "./lastSection";
 import { People } from "./People";
+import { PersonPage } from "./PersonPage";
 import { Row, rowKey } from "./Row";
+import { BACK_TO_PEOPLE, BACK_TO_SETTINGS, BACK_TO_WORKFLOW, SettingsRoot, SheetBack, SheetEdit } from "./SettingsPages";
 import { filterSections, isPlanSection, sectionTitle, SETTINGS_SECTIONS, shownSections, type RowSpec, type SectionMatch, type SectionSpec } from "./sections";
+import { StepPage } from "./StepPage";
 import { Workflow } from "./Workflow";
 
 export const SETTINGS_TITLE = "Settings";
 
-export function closeSettings(api: ThemeApi, onClose: () => void): void {
+export const THEME_DRAFT: DraftGuard = { title: "Discard theme changes?", message: "Your colour changes are not saved yet." };
+
+export function closeSettings(api: ThemeApi, onClose: () => void, asked = false): void {
   api.preview(null);
   if (api.draft !== null) {
     api.setDraft(null);
-    toast(DISCARDED);
+    if (!asked) toast(DISCARDED);
   }
   onClose();
+}
+
+function ThemeDraftGuard() {
+  const api = useTheme();
+  useCloseGuard(api.draft === null ? null : THEME_DRAFT);
+  return null;
 }
 
 export type SettingsCloser = (reason: CloseReason, then?: AfterClose) => boolean;
@@ -54,6 +69,8 @@ export type SettingsCloser = (reason: CloseReason, then?: AfterClose) => boolean
 export interface SettingsProps {
   frame: SettingsFrame;
   section: SettingsSection;
+  root: boolean;
+  onRoot(root: boolean): void;
   row: string | null;
   onRowShown(): void;
   session: PlanSession | null;
@@ -83,6 +100,31 @@ export interface SettingsWorld {
 interface Jump {
   section: SettingsSection;
   row: RowSpec | null;
+}
+
+interface Return {
+  section: SettingsSection;
+  scroll: number;
+}
+
+type Detail = { kind: "person"; id: PersonId; focus: "initials" | null } | { kind: "step"; id: StepId; select: boolean };
+
+type DetailRef = { kind: "person"; id: PersonId } | { kind: "step"; id: StepId };
+
+type Editing = "people" | "workflow";
+
+const detailSection = (d: DetailRef): Editing => (d.kind === "person" ? "people" : "workflow");
+
+interface DetailReturn {
+  section: Editing;
+  to: DetailRef | null;
+  scroll: number;
+}
+
+function nameIn(session: PlanSession, ref: DetailRef): string | null {
+  const view = session.view();
+  const found = ref.kind === "person" ? view.people.people.find((x) => x.id === ref.id) : stepsOf(view.plan).find((s) => s.id === ref.id);
+  return found === undefined ? null : found.name;
 }
 
 interface Group {
@@ -195,6 +237,12 @@ function usePlanName(session: PlanSession | null): string | null {
   return useSyncExternalStore(subscribe, snapshot);
 }
 
+function useDetailName(session: PlanSession | null, detail: DetailRef | null): string | null {
+  const subscribe = useCallback((cb: () => void) => (session === null ? () => undefined : session.subscribe(cb)), [session]);
+  const snapshot = useCallback(() => (session === null || detail === null ? null : nameIn(session, detail)), [session, detail]);
+  return useSyncExternalStore(subscribe, snapshot);
+}
+
 export function trashLocked(plans: readonly PlanListing[], planId: PlanId | null, spaceReadOnly: boolean): boolean {
   if (planId === null) return false;
   const listing = plans.find((l) => l.id === planId);
@@ -237,8 +285,9 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
   const ownerNow = fresh && isPlanSection(p.section) ? planId : owner;
   const listed = list.some((s) => s.id === p.section);
   const shown: SettingsSection = !listed || (isPlanSection(p.section) && ownerNow !== planId) ? "general" : p.section;
-  const [visited, setVisited] = useState<ReadonlySet<SettingsSection>>(() => new Set([shown]));
-  if (!visited.has(shown)) setVisited(new Set([...visited, shown]));
+  const atRoot = p.frame === "sheet" && p.root;
+  const [visited, setVisited] = useState<ReadonlySet<SettingsSection>>(() => new Set(atRoot ? [] : [shown]));
+  if (!atRoot && !visited.has(shown)) setVisited(new Set([...visited, shown]));
   const [query, setQuery] = useState("");
   const body = useRef<HTMLDivElement>(null);
   const main = useRef<HTMLDivElement>(null);
@@ -250,6 +299,21 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
   const previewed = useRef<SettingsSection>(shown);
   const calendarStash = useRef<CalendarStash | null>(null);
   const navRef = useRef<HTMLElement>(null);
+  const backRef = useRef<HTMLButtonElement>(null);
+  const pushing = useRef(false);
+  const returning = useRef<Return | null>(null);
+  const rootScroll = useRef(0);
+  const sheetJumped = useRef<Jump | null>(null);
+  const [held, setDetail] = useState<Detail | null>(null);
+  const detail = held !== null && !atRoot && p.session !== null && shown === detailSection(held) ? held : null;
+  if (held !== null && detail === null) setDetail(null);
+  const [heldEdit, setEdit] = useState<Editing | null>(null);
+  const edit = heldEdit !== null && !atRoot && shown === heldEdit && !p.readOnly ? heldEdit : null;
+  if (heldEdit !== null && edit === null) setEdit(null);
+  const detailPushed = useRef(false);
+  const detailReturn = useRef<DetailReturn | null>(null);
+  const pageScroll = useRef(0);
+  const detailName = useDetailName(p.session, detail);
   const groupId = useId();
   const latest = useRef(p);
   useLayoutEffect(() => {
@@ -280,10 +344,10 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
     }
     if (corrected.current === shown) return;
     corrected.current = null;
-    if (saved.current === shown) return;
+    if (atRoot || saved.current === shown) return;
     saved.current = shown;
     saveSection(window.localStorage, shown);
-  }, [shown, section]);
+  }, [shown, section, atRoot]);
 
   useLayoutEffect(() => {
     if (previewed.current === shown) return;
@@ -296,19 +360,93 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
   useLayoutEffect(() => {
     if (askedRow === null) return;
     setJump({ section: shown, row: askedRow });
-    latest.current.onRowShown();
+    const now = latest.current;
+    now.onRowShown();
+    if (now.frame !== "sheet" || !now.root) return;
+    pushing.current = true;
+    now.onRoot(false);
   }, [askedRow, shown]);
 
+  const scrollerOf = (el: HTMLElement): HTMLElement => {
+    const scroller = el.closest<HTMLElement>(".sheet-body");
+    if (scroller === null) throw new Error("Settings: the sheet pages are outside the sheet body");
+    return scroller;
+  };
+
   useLayoutEffect(() => {
-    if (frame !== "sheet" || jump === null || jump.row === null) return;
-    const sheet = body.current;
-    if (sheet === null) throw new Error("Settings: the sheet has no list to scroll to a row");
-    const key = rowKey(jump.section, jump.row.id);
-    const row = sheet.querySelector<HTMLElement>(`[data-settings-row="${key}"]`);
-    if (row === null) throw new Error(`Settings: the ${key} row is not in the sheet`);
-    row.scrollIntoView({ block: "nearest" });
-    focusables(row)[0]?.focus();
-  }, [frame, jump]);
+    if (frame !== "sheet") return;
+    const pages = body.current;
+    if (pages === null) throw new Error("Settings: the sheet rendered without its pages");
+    const scroller = scrollerOf(pages);
+    if (atRoot) {
+      const from = returning.current;
+      if (from === null) return;
+      returning.current = null;
+      scroller.scrollTop = from.scroll;
+      const row = pages.querySelector<HTMLElement>(`button.settings-root-row[data-section="${from.section}"]`);
+      if (row === null) throw new Error(`Settings: the root has no ${from.section} row to return to`);
+      row.focus();
+      return;
+    }
+    const pushed = pushing.current;
+    pushing.current = false;
+    if (pushed) scroller.scrollTop = 0;
+    const target = jump;
+    if (target !== null && target.row !== null && target !== sheetJumped.current && target.section === shown) {
+      sheetJumped.current = target;
+      const key = rowKey(target.section, target.row.id);
+      const row = pages.querySelector<HTMLElement>(`section.settings-page[data-section="${target.section}"] [data-settings-row="${key}"]`);
+      if (row === null) throw new Error(`Settings: the ${key} row is not on its page`);
+      row.scrollIntoView({ block: "nearest" });
+      const first = focusables(row)[0] ?? backRef.current;
+      if (first === null) throw new Error(`Settings: the ${key} row and the bar have nothing to focus`);
+      first.focus();
+      return;
+    }
+    if (!pushed) return;
+    const backButton = backRef.current;
+    if (backButton === null) throw new Error("Settings: a page was pushed without its Back");
+    backButton.focus();
+  }, [frame, atRoot, shown, jump]);
+
+  useLayoutEffect(() => {
+    if (frame !== "sheet") return;
+    const pages = body.current;
+    if (pages === null) throw new Error("Settings: the sheet rendered without its pages");
+    const scroller = scrollerOf(pages);
+    if (detail !== null) {
+      if (!detailPushed.current) return;
+      detailPushed.current = false;
+      scroller.scrollTop = 0;
+      if (detail.kind === "person" ? detail.focus !== null : detail.select) return;
+      const backButton = backRef.current;
+      if (backButton === null) throw new Error(`Settings: a ${detail.kind} was pushed without its Back`);
+      backButton.focus();
+      return;
+    }
+    const from = detailReturn.current;
+    if (from === null) return;
+    scroller.scrollTop = from.scroll;
+  }, [frame, detail]);
+
+  useEffect(() => {
+    if (frame !== "sheet" || detail !== null) return;
+    const from = detailReturn.current;
+    if (from === null) return;
+    detailReturn.current = null;
+    const pages = body.current;
+    if (pages === null) throw new Error("Settings: the sheet rendered without its pages");
+    const page = pages.querySelector<HTMLElement>(`section.settings-page[data-section="${from.section}"]`);
+    if (page === null) throw new Error(`Settings: returned to ${from.section} without its page`);
+    const to = from.to;
+    const row = to === null ? null : page.querySelector<HTMLElement>(`li[data-${to.kind}="${to.id}"]`);
+    const session = latest.current.session;
+    if (to !== null && row === null && session !== null && nameIn(session, to) !== null) throw new Error(`Settings: ${from.section} has no row for ${to.kind} ${to.id}, which is still in the plan`);
+    const add = page.querySelector<HTMLButtonElement>("button.ios-add:not(:disabled)");
+    const target = (row === null ? undefined : focusables(row)[0]) ?? add ?? backRef.current;
+    if (target === null) throw new Error(`Settings: nothing to focus on ${from.section} after ${JSON.stringify(from)}`);
+    target.focus();
+  }, [frame, detail]);
 
   useLayoutEffect(() => {
     if (frame !== "modal") return;
@@ -332,16 +470,6 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
     focusables(row)[0]?.focus();
   }, [frame, shown, jump]);
 
-  const opened = useRef(shown);
-  useLayoutEffect(() => {
-    if (frame !== "sheet") return;
-    const list = body.current;
-    if (list === null) throw new Error("Settings: the sheet rendered without its list");
-    const heading = list.querySelector<HTMLElement>(`section.settings-group[data-section="${opened.current}"] h2`);
-    if (heading === null) throw new Error(`Settings: the sheet has no ${opened.current} heading to scroll to`);
-    heading.scrollIntoView({ block: "start" });
-  }, [frame]);
-
   const go = (s: SettingsSection, row: RowSpec | null = null): void => {
     setJump({ section: s, row });
     setOwner(planId);
@@ -350,19 +478,37 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
     saveSection(window.localStorage, s);
     if (s === "sync" && row !== null && isSyncPane(row.id)) p.onSyncPane(row.id);
     p.onSection(s);
+    if (frame === "modal" && p.root) p.onRoot(false);
+  };
+  const push = (s: SettingsSection, row: RowSpec | null = null): void => {
+    const pages = body.current;
+    if (pages === null) throw new Error(`Settings: asked to push ${s} without the sheet pages`);
+    if (atRoot) rootScroll.current = scrollerOf(pages).scrollTop;
+    pushing.current = true;
+    go(s, row);
+    p.onRoot(false);
+  };
+  const goBack = (): void => {
+    returning.current = { section: shown, scroll: rootScroll.current };
+    setEdit(null);
+    p.onRoot(true);
+  };
+  const openDetail = (next: Detail): void => {
+    const pages = body.current;
+    if (pages === null) throw new Error(`Settings: asked to open ${next.kind} ${next.id} without the sheet pages`);
+    pageScroll.current = scrollerOf(pages).scrollTop;
+    detailPushed.current = true;
+    setDetail(next);
+  };
+  const leaveDetail = (from: Detail, to: DetailRef | null): void => {
+    detailReturn.current = { section: detailSection(from), to, scroll: pageScroll.current };
+    setDetail(null);
   };
   const toPeople = (): void => {
-    if (frame === "sheet") {
-      const list = body.current;
-      if (list === null) throw new Error("Settings: the sheet has no list to scroll to People");
-      const heading = list.querySelector<HTMLElement>('section.settings-group[data-section="people"] h2');
-      if (heading === null) throw new Error("Settings: the sheet has no People heading to scroll to");
-      heading.scrollIntoView({ block: "start" });
-      return;
-    }
     const add = SETTINGS_SECTIONS.flatMap((s) => (s.id === "people" ? s.rows : [])).find((r) => r.id === "add");
     if (add === undefined) throw new Error("Settings: People has no Add person row");
-    go("people", add);
+    if (frame === "sheet") push("people", add);
+    else go("people", add);
   };
   const close = (): void => closeSettings(api, p.onClose);
   const planSession = (id: SettingsSection): PlanSession => {
@@ -403,9 +549,21 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
       case "overview":
         return <OverviewSection session={planSession(s.id)} readOnly={p.readOnly} />;
       case "people":
-        return <People session={planSession(s.id)} readOnly={p.readOnly} />;
+        return (
+          <People
+            session={planSession(s.id)}
+            readOnly={p.readOnly}
+            form={p.frame === "sheet" ? { kind: "list", editing: edit === "people", onOpen: (id, focus) => openDetail({ kind: "person", id, focus }) } : { kind: "table" }}
+          />
+        );
       case "workflow":
-        return <Workflow session={planSession(s.id)} readOnly={p.readOnly} />;
+        return (
+          <Workflow
+            session={planSession(s.id)}
+            readOnly={p.readOnly}
+            form={p.frame === "sheet" ? { kind: "list", editing: edit === "workflow", onOpen: (id, select) => openDetail({ kind: "step", id, select }) } : { kind: "table" }}
+          />
+        );
       case "baselines":
         return <BaselinesSection session={planSession(s.id)} readOnly={p.readOnly} />;
       case "danger":
@@ -420,21 +578,33 @@ export function SettingsView(p: SettingsProps & SettingsWorld) {
   const sectionKey = (s: SectionSpec): string => (s.plan ? `${s.id}:${planId ?? ""}` : s.id);
 
   if (p.frame === "sheet") {
-    const groups = groupsOf(filterSections(list, ""), planName);
+    const back = atRoot ? undefined : detail !== null ? <SheetBack ref={backRef} label={detail.kind === "person" ? BACK_TO_PEOPLE : BACK_TO_WORKFLOW} onBack={() => leaveDetail(detail, detail)} /> : <SheetBack ref={backRef} label={BACK_TO_SETTINGS} onBack={goBack} />;
+    const editable: Editing | null = atRoot || detail !== null ? null : shown === "people" || shown === "workflow" ? shown : null;
+    const editButton = editable === null ? undefined : <SheetEdit editing={edit === editable} disabled={p.readOnly} onToggle={() => setEdit(edit === null ? editable : null)} />;
+    const detailTitle = detailName ?? (detail !== null && detail.kind === "step" ? STEP_TITLE : PERSON_TITLE);
+    const title = atRoot ? SETTINGS_TITLE : detail !== null ? detailTitle : sectionTitle(shown);
+    const native = usesNativeAlert();
     return (
-      <Sheet open title={SETTINGS_TITLE} onClose={close}>
-        <div ref={body} className="settings-list">
-          {groups.map((g) => (
-            <div key={g.key} className="settings-list-group">
-              {g.key === "plan" && <p className="settings-list-plan">{g.title}</p>}
-              {g.matches.map(({ section: s }) => (
-                <section key={sectionKey(s)} className="settings-group" data-section={s.id} aria-label={s.title}>
-                  <h2 className="settings-group-title">{s.title}</h2>
-                  {content(s)}
-                </section>
-              ))}
-            </div>
-          ))}
+      <Sheet open title={title} label={SETTINGS_TITLE} kind="settings" lead={back} actions={editButton} onClose={() => closeSettings(api, p.onClose, native)}>
+        {native && <ThemeDraftGuard />}
+        <div ref={body} className="settings-pushed">
+          <SettingsRoot sections={list} planName={planName} hidden={!atRoot} onOpen={(s) => push(s)} />
+          {list
+            .filter((s) => visited.has(s.id) || (!atRoot && s.id === shown))
+            .map((s) => (
+              <section key={sectionKey(s)} className="settings-page" data-section={s.id} aria-label={s.title} hidden={atRoot || s.id !== shown || detail !== null}>
+                {content(s)}
+              </section>
+            ))}
+          {detail !== null && (
+            <section key={`${detail.kind}:${detail.id}`} className="settings-page" data-detail={detail.kind} aria-label={detailTitle}>
+              {detail.kind === "person" ? (
+                <PersonPage session={planSession("people")} readOnly={p.readOnly} person={detail.id} focus={detail.focus} onRemoved={(next) => leaveDetail(detail, next === null ? null : { kind: "person", id: next })} />
+              ) : (
+                <StepPage session={planSession("workflow")} readOnly={p.readOnly} step={detail.id} select={detail.select} />
+              )}
+            </section>
+          )}
         </div>
       </Sheet>
     );

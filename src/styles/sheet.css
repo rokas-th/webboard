@@ -33,6 +33,32 @@
   width: 28px;
 }
 
+.sheet-head-bar {
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr);
+}
+
+.sheet-start {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+}
+
+.sheet-lead {
+  display: flex;
+  align-items: center;
+}
+
+.sheet-head-bar .sheet-title {
+  text-align: center;
+}
+
+.sheet-head-bar .sheet-actions,
+.sheet-head-bar .sheet-head-end {
+  justify-self: end;
+}
+
 .sheet-actions {
   display: flex;
   align-items: center;

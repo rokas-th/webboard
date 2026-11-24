@@ -4,11 +4,12 @@ import { refusal } from "../../actions/copy";
 import { STALE_CONFIRM } from "../common/NativeConfirm";
 import { stepModeOf, stepsOf } from "../../domain/steps";
 import type { PlanSession } from "../../store/session";
-import { MAC, setPlatform } from "../../test/platform";
+import { IPAD, MAC, setPlatform, stubVisualViewport } from "../../test/platform";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
+import { resetTauri, tauri } from "../../test/tauriMock";
 import { toast } from "../common/Toast";
 import { OpenChoice } from "../run";
-import { Workflow } from "./Workflow";
+import { Workflow, type WorkflowForm } from "./Workflow";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 vi.mock("../common/Toast", () => ({ toast: vi.fn() }));
@@ -42,11 +43,11 @@ const made = async (seed: readonly SeedItem[] = SEED): Promise<TestSession> => {
   return t;
 };
 
-const mount = (session: PlanSession, readOnly = false): HTMLElement => {
+const mount = (session: PlanSession, readOnly = false, form: WorkflowForm = { kind: "table" }): HTMLElement => {
   const view = render(
     <OpenChoice.Provider value={vi.fn()}>
       <div className="host">
-        <Workflow session={session} readOnly={readOnly} />
+        <Workflow session={session} readOnly={readOnly} form={form} />
       </div>
     </OpenChoice.Provider>,
   );
@@ -425,5 +426,218 @@ describe("Settings > Workflow", () => {
     fireEvent.keyDown(radios[4], { key: "ArrowLeft" });
     expect(document.activeElement).toBe(radios[3]);
     expect(apply).not.toHaveBeenCalled();
+  });
+});
+
+type OnOpen = (id: string, select: boolean) => void;
+
+const listed = (t: TestSession, editing: boolean, readOnly = false): { root: HTMLElement; onOpen: ReturnType<typeof vi.fn<OnOpen>> } => {
+  const onOpen = vi.fn<OnOpen>();
+  const root = mount(t.session, readOnly, { kind: "list", editing, onOpen });
+  return { root, onOpen };
+};
+
+const iosRow = (id: string): HTMLElement => one(`ul.ios-list[data-list="workflow"] > li.ios-row[data-step="${id}"]`);
+
+const iosIds = (root: HTMLElement): (string | undefined)[] => [...root.querySelectorAll<HTMLElement>("ul.ios-list > li.ios-row[data-step]")].map((r) => r.dataset.step);
+
+const settle = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise<void>((r) => setTimeout(r, 0));
+    await new Promise<void>((r) => setTimeout(r, 0));
+  });
+};
+
+describe("Settings > Workflow in the list form", () => {
+  it("lists each step with its swatch, name, completes flag, count and a chevron; a tap opens the step", async () => {
+    const t = await made();
+    const { root, onOpen } = listed(t, false);
+    expect(iosIds(root)).toEqual(["now", "next", "later", "done"]);
+    const shape = ["now", "next", "later", "done"].map((id) => {
+      const r = iosRow(id);
+      const main = one("button.ios-row-main", r);
+      return [
+        r.style.getPropertyValue("--step"),
+        main.hasAttribute("disabled"),
+        main.querySelectorAll("span.swatch").length,
+        one("span.ios-row-name", main).textContent,
+        main.querySelector("span.ios-flag")?.textContent ?? null,
+        one("span.ios-row-count", main).textContent,
+        one("span.ios-row-count", main).className,
+        one("span.settings-chev", main).getAttribute("aria-hidden"),
+        r.querySelector("button.ios-minus"),
+        r.querySelector("button.ios-grip"),
+      ];
+    });
+    expect(shape).toEqual([
+      ["var(--s-cyan)", false, 1, "Now", null, "1", "ios-row-count", "true", null, null],
+      ["var(--s-violet)", false, 1, "Next", null, "2", "ios-row-count", "true", null, null],
+      ["var(--s-slate)", false, 1, "Later", null, "1", "ios-row-count", "true", null, null],
+      ["var(--s-lime)", false, 1, "Done", "completes", "1", "ios-row-count", "true", null, null],
+    ]);
+    const add = one("ul.ios-list > li:last-child button.ios-add", root);
+    expect([
+      add.textContent,
+      one("span.ios-plus", add).getAttribute("aria-hidden"),
+      add.closest("li")?.getAttribute("data-settings-row"),
+      one('[data-settings-row="workflow.steps"] ul.ios-list', root) !== null,
+      one("p.settings-foot", root).textContent,
+      one(".workflow-line[role=status] [data-by-dates]", root).textContent,
+      one('[data-settings-row="workflow.new-items"] .workflow-new', root).textContent,
+      root.querySelector(".workflow-head, li.workflow-row, .workflow-radios, .workflow-add, input"),
+    ]).toEqual([
+      "+Add step",
+      "true",
+      "workflow.add",
+      true,
+      "Tap Edit to reorder or delete steps.",
+      "Columns follow dates. Edit a step or drag a card to use your own steps.",
+      "New undated items go to “Later” until this plan uses steps.",
+      null,
+    ]);
+    fireEvent.click(one("button.ios-row-main", iosRow("next")));
+    expect(onOpen.mock.calls).toEqual([["next", false]]);
+  });
+
+  it("shows the count against a limit, amber with its title once over", async () => {
+    const t = await made();
+    act(() => {
+      t.session.apply({ t: "step", op: "limit", step: "next", limit: 1 });
+      t.session.apply({ t: "step", op: "limit", step: "now", limit: 3 });
+    });
+    listed(t, false);
+    const count = (id: string): HTMLElement => one("span.ios-row-count", iosRow(id));
+    expect([count("next").textContent, count("next").className, count("next").title, count("now").textContent, count("now").className, count("now").hasAttribute("title")]).toEqual([
+      "2/1",
+      "ios-row-count over",
+      "Over the limit of 1",
+      "1/3",
+      "ios-row-count",
+      false,
+    ]);
+  });
+
+  it("in Edit shows a red minus and a grip on each row, disables the row, drops the chevron and keeps Add", async () => {
+    const t = await made();
+    const { root, onOpen } = listed(t, true);
+    const r = iosRow("now");
+    expect([
+      [...r.children].map((c) => c.className),
+      one("button.ios-minus", r).getAttribute("aria-label"),
+      one("button.ios-minus", iosRow("done")).hasAttribute("disabled"),
+      one("button.ios-grip", r).getAttribute("aria-label"),
+      one("button.ios-row-main", r).hasAttribute("disabled"),
+      r.querySelector(".settings-chev"),
+      one("button.ios-add", root).hasAttribute("disabled"),
+      one("p.settings-foot", root).textContent,
+    ]).toEqual([["ios-minus", "ios-row-main", "ios-grip"], "Delete Now", false, "Reorder Now", true, null, false, "Drag a handle to reorder, tap the red minus to delete. Tap Done when finished."]);
+    fireEvent.click(one("button.ios-row-main", r));
+    expect(onOpen.mock.calls).toEqual([]);
+  });
+
+  it("asks before a minus deletes a step: items ask where they go, an empty step asks to confirm, the last open step toasts", async () => {
+    const t = await made();
+    act(() => {
+      t.session.apply({ t: "step", op: "add", name: "Spare", colour: "sky", after: "done" });
+    });
+    const spare = stepId(t, "Spare");
+    const { root } = listed(t, true);
+    const apply = vi.spyOn(t.session, "apply");
+    fireEvent.click(one("button.ios-minus", iosRow("later")));
+    const move = within(root).getByRole("dialog", { name: "Move 2 items from Later to…" });
+    fireEvent.click(within(move).getByRole("button", { name: "Cancel" }));
+    expect([apply.mock.calls, within(root).queryByRole("dialog")]).toEqual([[], null]);
+    fireEvent.click(one("button.ios-minus", iosRow(spare)));
+    const ask = within(root).getByRole("dialog", { name: "Delete step" });
+    expect(one(".delete-step-text", ask).textContent).toBe("Delete the step “Spare”? It holds no items.");
+    fireEvent.click(within(ask).getByRole("button", { name: "Delete" }));
+    expect([apply.mock.calls, iosIds(root)]).toEqual([[[{ t: "step", op: "delete", step: spare, to: null }]], ["now", "next", "later", "done"]]);
+    const only = await made([{ name: "a", horizon: "now" }]);
+    act(() => {
+      only.session.apply({ t: "step", op: "delete", step: "next", to: null });
+      only.session.apply({ t: "step", op: "delete", step: "later", to: null });
+    });
+    cleanup();
+    listed(only, true);
+    fireEvent.click(one("button.ios-minus", iosRow("now")));
+    expect([last(vi.mocked(toast).mock.calls), document.querySelector('[role="dialog"]')]).toEqual([[refusal.lastOpenStep, "bad"], null]);
+  });
+
+  it("reorders by dragging a grip onto another row and with ⌥↓ on the grip", async () => {
+    const t = await made();
+    const { root } = listed(t, true);
+    const apply = vi.spyOn(t.session, "apply");
+    const grip = (id: string): HTMLElement => one("button.ios-grip", iosRow(id));
+    const target = one("span.ios-row-name", iosRow("now"));
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => target });
+    try {
+      fireEvent.pointerDown(grip("done"), { button: 0, clientX: 5, clientY: 5, pointerId: 1 });
+      expect(iosRow("done").classList.contains("dragging")).toBe(true);
+      fireEvent.pointerMove(document, { clientX: 5, clientY: 80, pointerId: 1 });
+      expect(iosRow("now").classList.contains("drop-over")).toBe(true);
+      fireEvent.pointerUp(document, { clientX: 5, clientY: 80, pointerId: 1 });
+    } finally {
+      Reflect.deleteProperty(document, "elementFromPoint");
+    }
+    expect([apply.mock.calls, iosIds(root), root.querySelectorAll(".drop-over, .dragging").length]).toEqual([[[{ t: "step", op: "reorder", step: "done", after: null }]], ["done", "now", "next", "later"], 0]);
+    act(() => {
+      grip("done").focus();
+    });
+    fireEvent.keyDown(grip("done"), { key: "ArrowDown", altKey: true });
+    expect([last(apply.mock.calls), iosIds(root), document.activeElement]).toEqual([[{ t: "step", op: "reorder", step: "done", after: "now" }], ["now", "done", "next", "later"], grip("done")]);
+  });
+
+  it("adds a step after the last one and opens it with the name selected", async () => {
+    const t = await made();
+    const { root, onOpen } = listed(t, false);
+    const apply = vi.spyOn(t.session, "apply");
+    fireEvent.click(one("button.ios-add", root));
+    const id = stepId(t, "New step");
+    expect([apply.mock.calls, onOpen.mock.calls, iosIds(root), one("span.ios-row-count", iosRow(id)).textContent]).toEqual([
+      [[{ t: "step", op: "add", name: "New step", colour: "magenta", after: "done" }]],
+      [[id, true]],
+      ["now", "next", "later", "done", id],
+      "0",
+    ]);
+  });
+
+  it("disables Add when the plan is read-only and still opens a step to read", async () => {
+    const t = await made();
+    const { root, onOpen } = listed(t, false, true);
+    expect([one("button.ios-add", root).hasAttribute("disabled"), root.querySelectorAll("button.ios-minus, button.ios-grip").length]).toEqual([true, 0]);
+    fireEvent.click(one("button.ios-row-main", iosRow("later")));
+    expect(onOpen.mock.calls).toEqual([["later", false]]);
+  });
+
+  it("shows no Edit controls when read-only even if Edit was on", async () => {
+    const t = await made();
+    const { root } = listed(t, true, true);
+    expect([root.querySelectorAll("button.ios-minus, button.ios-grip").length, one("button.ios-row-main", iosRow("now")).hasAttribute("disabled"), one("p.settings-foot", root).textContent]).toEqual([
+      0,
+      false,
+      "Tap Edit to reorder or delete steps.",
+    ]);
+  });
+});
+
+describe("Settings > Workflow in the list form on iPad", () => {
+  it("asks a minus delete of an empty step through the native alert", async () => {
+    resetTauri({});
+    setPlatform(IPAD);
+    const unstub = stubVisualViewport();
+    try {
+      const t = await made();
+      act(() => {
+        t.session.apply({ t: "step", op: "add", name: "Spare", colour: "sky", after: "done" });
+      });
+      const spare = stepId(t, "Spare");
+      const { root } = listed(t, true);
+      tauri.answers.alert_ask = () => "confirm";
+      fireEvent.click(one("button.ios-minus", iosRow(spare)));
+      await settle();
+      expect([tauri.calls.filter((c) => c.cmd === "alert_ask").length, within(root).queryByRole("dialog"), iosIds(root)]).toEqual([1, null, ["now", "next", "later", "done"]]);
+    } finally {
+      unstub();
+    }
   });
 });

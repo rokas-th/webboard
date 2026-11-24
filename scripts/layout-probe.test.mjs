@@ -5,7 +5,7 @@ import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ACT, Cdp, devtoolsUrl, evaluate, findShell, stopChild } from "./layout-probe.mjs";
+import { ACT, Cdp, devtoolsUrl, evaluate, findShell, stopChild, unexpectedAlerts } from "./layout-probe.mjs";
 
 const page = {};
 
@@ -312,6 +312,24 @@ test("centredIn passes a centred box and fails one 2 px off", async () => {
   assert.equal((await act(box(102), { centredIn: ".s" })).fail, ".s sits 2 px across and 0 px down from the window's centre");
 });
 
+test("centredAcross passes a title centred in its bar and fails one 2 px off, outside the bar or missing", async () => {
+  const bar = (left) => `<div class="bar" style="position: absolute; left: 50px; top: 10px; width: 300px; height: 44px"><h3 class="t" style="position: absolute; left: ${left}px; top: 0; width: 100px; margin: 0">T</h3></div>`;
+  assert.deepEqual(await act(bar(100), { centredAcross: [".t", ".bar"] }), { ok: true });
+  assert.equal((await act(bar(102), { centredAcross: [".t", ".bar"] })).fail, ".t sits 2 px across from the centre of its .bar");
+  assert.equal((await act('<h3 class="t">T</h3>', { centredAcross: [".t", ".bar"] })).fail, ".t is not inside a .bar");
+  assert.equal((await act("<p>x</p>", { centredAcross: [".t", ".bar"] })).fail, "no .t on screen to measure");
+});
+
+test("alerted passes the exact native discard asks sent and fails any other list, naming what was sent", async () => {
+  const sent = (asks) => `<script>window.__PROBE_ALERTS__ = ${JSON.stringify(asks)};</script>`;
+  const ask = { title: "Discard theme changes?", message: "Your colour changes are not saved yet.", confirm: { label: "Discard", destructive: true }, cancel: "Keep editing" };
+  const want = [["Discard theme changes?", "Your colour changes are not saved yet."]];
+  assert.deepEqual(await act(sent([ask]), { alerted: want }), { ok: true });
+  assert.equal((await act(sent([]), { alerted: want })).fail, 'alert_ask sent [], not exactly [["Discard theme changes?","Your colour changes are not saved yet."]]');
+  assert.equal((await act(sent([ask, ask]), { alerted: want })).fail, `alert_ask sent ${JSON.stringify([...want, ...want])}, not exactly ${JSON.stringify(want)}`);
+  assert.equal((await act("<script>delete window.__PROBE_ALERTS__;</script>", { alerted: want })).fail, "the probe recorded no alert_ask list");
+});
+
 test("corner passes a control near its box's corner and fails one past the gap, out of the box or in no box", async () => {
   const body = (left, top) =>
     `<div class="m" style="position: absolute; left: 100px; top: 50px; width: 200px; height: 120px"><button class="x" style="position: absolute; left: ${left}px; top: ${top}px; width: 24px; height: 24px; margin: 0">X</button></div>`;
@@ -399,4 +417,12 @@ test("aligned passes outline rows level with their chart rows and fails a row or
     ).fail,
     "none of the 1 rows has a bar to align",
   );
+});
+
+test("unexpectedAlerts: a native ask fails a state unless the state asserts its alerts", () => {
+  const plain = { actions: [{ click: ["button"] }] };
+  const asserting = { actions: [{ click: ["button"] }, { alerted: ["Discard theme changes?"] }] };
+  assert.equal(unexpectedAlerts(plain, []), null);
+  assert.equal(unexpectedAlerts(asserting, ["Discard theme changes?"]), null);
+  assert.equal(unexpectedAlerts(plain, ["Remove person", "Delete step"]), 'the app asked alert_ask ["Remove person","Delete step"], and the state asserts no alert');
 });

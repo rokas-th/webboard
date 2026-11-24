@@ -1958,7 +1958,7 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     expect(within(planSheet()).getByText(calendarSummary(t.session.view().plan.calendar, 1))).toBeTruthy();
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Change calendar…" }));
     expect([screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label")), lastUi().settings]).toEqual([["Settings"], "working-time"]);
-    expect(screen.getByRole("dialog", { name: "Settings" }).querySelector('section.settings-group[data-section="working-time"] .cal-body')).not.toBeNull();
+    expect(screen.getByRole("dialog", { name: "Settings" }).querySelector('section.settings-page[data-section="working-time"]:not([hidden]) .cal-body')).not.toBeNull();
     fireEvent.click(onlyClose("Settings"));
     expect([screen.queryAllByRole("dialog"), lastUi().settings]).toEqual([[], null]);
   });
@@ -2000,9 +2000,13 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Settings…" }));
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
     const settings = screen.getByRole("dialog", { name: "Settings" });
-    expect(lastUi().settings).toBe("general");
-    const about = settings.querySelector<HTMLElement>('section.settings-group[data-section="general"] [data-settings-row="general.about"]');
-    if (about === null) throw new Error("no About row in the General group");
+    expect([lastUi().settings, lastUi().settingsRoot]).toEqual(["general", true]);
+    const general = settings.querySelector<HTMLElement>('button.settings-root-row[data-section="general"]');
+    if (general === null) throw new Error("no General row on the Settings root");
+    fireEvent.click(general);
+    expect([lastUi().settingsRoot, settings.querySelector(".sheet-head .sheet-title")?.textContent]).toEqual([false, "General"]);
+    const about = settings.querySelector<HTMLElement>('section.settings-page[data-section="general"]:not([hidden]) [data-settings-row="general.about"]');
+    if (about === null) throw new Error("no About row on the General page");
     expect(about.textContent).toContain(`WebBoard ${version}`);
     expect(about.textContent).toContain(HOLIDAY_ATTRIBUTION);
     expect(HOLIDAY_ATTRIBUTION).toBe("Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.");
@@ -2020,6 +2024,7 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     expect(within(plansSheet()).queryByRole("button", { name: "About WebBoard" })).toBeNull();
     fireEvent.click(within(plansSheet()).getByRole("button", { name: "Settings…" }));
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
+    expect(screen.getByRole("dialog", { name: "Settings" }).querySelector("div.settings-root:not([hidden])")).not.toBeNull();
   });
 
   it("baselines on the phone", async () => {
@@ -2112,8 +2117,8 @@ describe("PhoneShell read-only plan sheet (Task 5.8 Step 3b)", () => {
     expect(within(sheet).queryByRole("button", { name: "Remove" })).toBeNull();
     fireEvent.click(within(sheet).getByRole("button", { name: "Change calendar…" }));
     const settings = screen.getByRole("dialog", { name: "Settings" });
-    const working = settings.querySelector<HTMLElement>('section.settings-group[data-section="working-time"]');
-    if (working === null) throw new Error("no Working time group");
+    const working = settings.querySelector<HTMLElement>('section.settings-page[data-section="working-time"]:not([hidden])');
+    if (working === null) throw new Error("no Working time page");
     const reviewButton = within(working).getByRole("button", { name: "Review changes…" });
     expect([within(working).queryByRole("button", { name: "Apply" }), reviewButton instanceof HTMLButtonElement && reviewButton.disabled]).toEqual([null, true]);
     fireEvent.click(onlyClose("Settings"));
@@ -2664,33 +2669,41 @@ describe("the settings sheet on the phone", () => {
   };
   const dialogs = (): (string | null)[] => screen.queryAllByRole("dialog").map((d) => d.getAttribute("aria-label"));
 
-  const groups = (sheet: HTMLElement): (string | undefined)[] => [...sheet.querySelectorAll<HTMLElement>("section.settings-group")].map((g) => g.dataset["section"]);
+  const groups = (sheet: HTMLElement): (string | undefined)[] => [...sheet.querySelectorAll<HTMLElement>("div.settings-root button.settings-root-row")].map((g) => g.dataset["section"]);
 
-  it("opens the Settings sheet at the last section from the Plans sheet, General by default, closing it", async () => {
+  const pushPage = (sheet: HTMLElement, id: string): HTMLElement => {
+    const row = sheet.querySelector<HTMLElement>(`div.settings-root button.settings-root-row[data-section="${id}"]`);
+    if (row === null) throw new Error(`no ${id} row on the Settings root`);
+    fireEvent.click(row);
+    const page = sheet.querySelector<HTMLElement>(`section.settings-page[data-section="${id}"]:not([hidden])`);
+    if (page === null) throw new Error(`no ${id} page shown`);
+    return page;
+  };
+
+  it("opens the Settings sheet on its root from the Plans sheet, General saved by default, closing it", async () => {
     await shown(await made());
     fireEvent.click(themeRow(openPlans()));
     expect(dialogs()).toEqual(["Settings"]);
-    expect(lastUi().settings).toBe("general");
+    expect([lastUi().settings, lastUi().settingsRoot]).toEqual(["general", true]);
     const sheet = screen.getByRole("dialog", { name: "Settings" });
     expect([...sheet.querySelectorAll('[role="tab"]')].filter((tab) => tab.closest(".sync-tabs") === null)).toEqual([]);
     expect(groups(sheet)).toEqual(["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "defaults", "baselines", "danger"]);
-    expect([...sheet.querySelectorAll("h2.settings-group-title")].map((h) => h.textContent)).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "People", "Workflow", "Working time", "Defaults", "Baselines", "Danger zone"]);
+    expect([...sheet.querySelectorAll("div.settings-root .settings-root-name")].map((h) => h.textContent)).toEqual(["General", "Theme", "Sync", "Import & export", "Overview", "People", "Workflow", "Working time", "Defaults", "Baselines", "Danger zone"]);
     fireEvent.click(within(sheet).getAllByRole("button", { name: "Close" })[0]);
     expect(dialogs()).toEqual([]);
-    expect(lastUi().settings).toBeNull();
+    expect([lastUi().settings, lastUi().settingsRoot]).toEqual([null, false]);
   });
 
-  it("shows the sync panes inside the Settings sheet's Sync group, never a second sheet", async () => {
+  it("shows the sync panes on the Settings sheet's Sync page, never a second sheet", async () => {
     await shown(await made());
     fireEvent.click(themeRow(openPlans()));
     const sheet = screen.getByRole("dialog", { name: "Settings" });
-    const group = sheet.querySelector<HTMLElement>('section.settings-group[data-section="sync"]');
-    if (group === null) throw new Error("no Sync group");
+    const group = pushPage(sheet, "sync");
     expect(within(group).getByRole("tab", { name: "Set up sync" }).getAttribute("aria-selected")).toBe("true");
     act(() => {
       fireEvent.click(within(group).getByRole("tab", { name: "Join with a code" }));
     });
-    expect([lastUi().settings, lastUi().syncPane, lastUi().dialog]).toEqual(["general", "join", null]);
+    expect([lastUi().settings, lastUi().settingsRoot, lastUi().syncPane, lastUi().dialog]).toEqual(["sync", false, "join", null]);
     expect(within(group).getByRole("tabpanel", { name: "Join with a code" })).toBeTruthy();
     expect(dialogs()).toEqual(["Settings"]);
   });
@@ -2738,7 +2751,8 @@ describe("the settings sheet on the phone", () => {
   };
 
   const choosePaper = async (): Promise<void> => {
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Settings" })).getByRole("button", { name: /^Paper/ }));
+    const page = pushPage(screen.getByRole("dialog", { name: "Settings" }), "theme");
+    fireEvent.click(within(page).getByRole("button", { name: /^Paper/ }));
     await settle();
   };
 

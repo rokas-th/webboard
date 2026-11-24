@@ -35,6 +35,8 @@ const settings = (frame: SettingsFrame, hover: boolean, onClose: () => void) =>
     <SettingsView
       frame={frame}
       section="theme"
+      root={false}
+      onRoot={vi.fn()}
       row={null}
       onRowShown={vi.fn()}
       session={null}

@@ -30,6 +30,7 @@ export interface UiState {
   naming: ItemId | null;
   settings: SettingsSection | null;
   settingsRow: string | null;
+  settingsRoot: boolean;
   syncPane: SyncPane | null;
   sidebarOpen: boolean;
   sidebarWidth: number | null;
@@ -63,6 +64,7 @@ const DEFAULTS: UiState = {
   naming: null,
   settings: null,
   settingsRow: null,
+  settingsRoot: false,
   syncPane: null,
   sidebarOpen: true,
   sidebarWidth: null,

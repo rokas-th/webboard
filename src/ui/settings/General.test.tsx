@@ -299,6 +299,8 @@ describe("the iPhone settings sheet", () => {
           <SettingsView
             frame="sheet"
             section="general"
+            root={false}
+            onRoot={vi.fn()}
             row={null}
             onRowShown={vi.fn()}
             session={null}
@@ -325,7 +327,7 @@ describe("the iPhone settings sheet", () => {
         { registry: shellFor(t).registry },
       ),
     );
-    const section = one('section.settings-group[data-section="general"]');
+    const section = one('section.settings-page[data-section="general"]');
     expect(all(".settings-row", section).map((r) => r.dataset["settingsRow"])).toEqual(["general.tab", "general.week", "general.dates", "general.me", "general.device", "general.about"]);
     expect(one('[data-settings-row="general.me"] .settings-value.dim', section).textContent).toBe(NO_PLAN_ME);
     expect(deviceField().value).toBe("Rokas’s iPhone");

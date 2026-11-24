@@ -229,6 +229,11 @@ function settingsAt(ctx: CommandCtx, section: SettingsSection): void {
   ctx.setUi({ settings: section });
 }
 
+function settingsRootAt(ctx: CommandCtx, section: SettingsSection): void {
+  ctx.theme.preview(null);
+  ctx.setUi({ settings: section, settingsRoot: true });
+}
+
 function planCommands(ctx: CommandCtx, session: PlanSession): Command[] {
   const run = ctx.run;
   const undo = ctx.undo;
@@ -397,7 +402,7 @@ export function commands(ctx: CommandCtx): Command[] {
     ...openPlans,
     ...sidebarCommand,
     ...paneCommands,
-    { id: "settings", group: "View", label: "Settings…", keys: ctx.command ? "⌘," : "Ctrl ,", run: () => settingsAt(ctx, lastSection(window.localStorage, session !== null)) },
+    { id: "settings", group: "View", label: "Settings…", keys: ctx.command ? "⌘," : "Ctrl ,", run: () => settingsRootAt(ctx, lastSection(window.localStorage, session !== null)) },
     ...planSettingsCommand,
     { id: "theme", group: "View", label: "Theme…", run: () => settingsAt(ctx, "theme") },
     { id: "theme-cyberdeck", group: "View", label: "Use Cyberdeck theme", run: () => ctx.theme.useCyberdeck() },

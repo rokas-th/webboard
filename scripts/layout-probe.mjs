@@ -103,6 +103,9 @@ export const CHROME = Object.freeze({
   settingsNavApp: [`.settings-nav-group[data-group="app"] ${CONTROL}`],
   settingsNavPlan: [`.settings-nav-group[data-group="plan"] ${CONTROL}`],
   settingsRows: [".settings-row .settings-control button"],
+  settingsRoot: [".settings-root-row"],
+  sheetBar: [".sheet-back, .sheet-edit"],
+  iosRows: [".ios-row button", ".ios-add"],
   sync: [`.sync-tabs ${CONTROL}`, `.sync-buttons ${CONTROL}`],
   banners: [`.banner ${CONTROL}`],
   choiceBanners: [`.choice-banner ${CONTROL}`],
@@ -196,6 +199,7 @@ const keep = (selector) => ({ keep: selector });
 const kept = (selector) => ({ kept: selector });
 const meets = (selector, side, other, otherSide) => ({ meets: [selector, side, other, otherSide] });
 const centredIn = (selector) => ({ centredIn: selector });
+const centredAcross = (selector, box) => ({ centredAcross: [selector, box] });
 const corner = (selector, box, at, gap) => ({ corner: [selector, box, at, gap] });
 const inWindow = (selector) => ({ inWindow: selector });
 const uncovered = (selector) => ({ uncovered: selector });
@@ -204,6 +208,7 @@ const paged = (page, o) => ({ paged: [page, o !== undefined && o.barMoved === tr
 const asked = (titles) => ({ nativeMenu: titles });
 const askedExactly = (byWidth) => ({ nativeMenu: [], byWidth });
 const chooseNative = (title) => ({ choose: title });
+const alerted = (asks) => ({ alerted: asks });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -689,6 +694,14 @@ function states() {
   const SETTINGS_MODAL = ".modal-settings[data-settings-modal]";
   const SETTINGS_SHOWN = `${SETTINGS_MODAL} section.settings-section:not([hidden])`;
   const SETTINGS_SHEET = '.sheet[role="dialog"][aria-label="Settings"]';
+  const SHEET_TITLE = `${SETTINGS_SHEET} .sheet-head .sheet-title`;
+  const SHEET_BACK = `${SETTINGS_SHEET} .sheet-head .sheet-start .sheet-lead button.sheet-back`;
+  const ROOT_SHOWN = `${SETTINGS_SHEET} .settings-root:not([hidden])`;
+  const sheetPage = (slug) => `${SETTINGS_SHEET} section.settings-page[data-section="${slug}"]:not([hidden])`;
+  const pushPage = (label) => [click(`${ROOT_SHOWN} button.settings-root-row .settings-root-name`, label), expect(SHEET_TITLE, label), count(ROOT_SHOWN, 0), expect(`${SHEET_BACK}[aria-label="Back to Settings"]`), focusOn(SHEET_BACK)];
+  const backToRoot = (slug) => [click(SHEET_BACK), focusOn(`${SETTINGS_SHEET} button.settings-root-row[data-section="${slug}"]`), expect(SHEET_TITLE, "Settings"), count(ROOT_SHOWN, 1), count(SHEET_BACK, 0), count(`${SETTINGS_SHEET} section.settings-page[data-section="${slug}"][hidden]`, 1)];
+  const rootOpened = (opener) => [...opener, expect(SHEET_TITLE, "Settings"), count(ROOT_SHOWN, 1), count(`${SETTINGS_SHEET} section.settings-page`, 0)];
+  const fromPlans = [click(".phone-head button", "Plans"), click(".plans-sheet button.plans-settings-row", "Settings…")];
   const SETTINGS_GEAR = '.toolbar button[aria-label="Settings"]';
   const APP_LABELS = ["General", "Theme", "Sync", "Import & export"];
   const PLAN_LABELS = ["Overview", "People", "Workflow", "Working time", "Defaults", "Baselines", "Danger zone"];
@@ -698,7 +711,53 @@ function states() {
   const sectionOn = (label) => [expect(`${SETTINGS_MODAL} .modal-head h3`, label), expect(`${SETTINGS_MODAL} .settings-nav-item[aria-current="page"]`, label), count(`${SETTINGS_MODAL} section.settings-section:not([hidden])`, 1)];
   const ICS_HINT = `Dated milestones of “${PLAN_NAME}” as all-day events.`;
   const BACKUP_HINT = "One .zip with every plan as a .webboard file. Unzip it and import a plan to restore it.";
-  const sectionChecks = (scope) => [
+  const PEOPLE_EMPTY_LINE = "No people yet. Add someone to assign tasks and milestones.";
+  const peopleTable = (scope) => [
+    expect(`${scope} [data-settings-row="people.people"] .settings-label`, "People"),
+    expect(`${scope} [data-settings-row="people.people"] p.settings-line.people-empty`, PEOPLE_EMPTY_LINE),
+    count(`${scope} p.people-line[role="status"]:empty`, 1),
+    style(`${scope} p.people-line`, "display", "none"),
+    count(`${scope} li.people-row`, 0),
+    count(`${scope} .people-head`, 0),
+    expect(`${scope} [data-settings-row="people.people"] .people-foot`, "Order here is the order of avatars on cards. Up to 8 people per item."),
+    expect(`${scope} [data-settings-row="people.add"] button.people-add`, "+ Add person"),
+  ];
+  const peopleList = (scope) => [
+    expect(`${SETTINGS_SHEET} .sheet-head .sheet-actions button.sheet-edit:not([aria-pressed])`, "Edit"),
+    expect(`${scope} [data-settings-row="people.people"] p.settings-line.people-empty`, PEOPLE_EMPTY_LINE),
+    count(`${scope} p.people-line[role="status"]:empty`, 1),
+    style(`${scope} p.people-line`, "display", "none"),
+    count(`${scope} ul.ios-list[data-list="people"] > li.ios-row[data-person]`, 0),
+    count(`${scope} li.people-row`, 0),
+    count(`${scope} .people-head`, 0),
+    expect(`${scope} ul.ios-list[data-list="people"] > li:last-child[data-settings-row="people.add"] button.ios-add`, "+Add person"),
+    count(`${scope} button.ios-add .ios-plus[aria-hidden="true"]`, 1),
+    height(`${scope} button.ios-add`, 44, 60),
+    expect(`${scope} p.settings-foot`, "Tap Edit to reorder or remove people."),
+  ];
+  const BY_DATES_LINE = "Columns follow dates. Edit a step or drag a card to use your own steps.";
+  const workflowList = (scope) => [
+    expect(`${SETTINGS_SHEET} .sheet-head .sheet-actions button.sheet-edit:not([aria-pressed])`, "Edit"),
+    expect(`${scope} [data-settings-row="workflow.steps"] .workflow-line[role="status"] [data-by-dates]`, BY_DATES_LINE),
+    count(`${scope} .workflow-line .board-problem`, 0),
+    count(`${scope} ul.ios-list[data-list="workflow"] > li.ios-row[data-step]`, 4),
+    count(`${scope} li.workflow-row`, 0),
+    count(`${scope} .workflow-head`, 0),
+    count(`${scope} [role="radiogroup"]`, 0),
+    expect(`${scope} li.ios-row[data-step="now"] button.ios-row-main .ios-row-name`, "Now"),
+    count(`${scope} li.ios-row[data-step] button.ios-row-main .swatch`, 4),
+    expect(`${scope} li.ios-row[data-step="done"] button.ios-row-main .ios-flag`, "completes"),
+    count(`${scope} .ios-flag`, 1),
+    count(`${scope} button.ios-row-main .ios-row-count`, 4),
+    count(`${scope} button.ios-row-main .settings-chev[aria-hidden="true"]`, 4),
+    count(`${scope} button.ios-minus, ${scope} button.ios-grip`, 0),
+    height(`${scope} li.ios-row[data-step="now"] button.ios-row-main`, 44, 60),
+    expect(`${scope} ul.ios-list[data-list="workflow"] > li:last-child[data-settings-row="workflow.add"] button.ios-add`, "+Add step"),
+    height(`${scope} button.ios-add`, 44, 60),
+    expect(`${scope} p.settings-foot`, "Tap Edit to reorder or delete steps."),
+    expect(`${scope} [data-settings-row="workflow.new-items"] .workflow-new`, "New undated items go to “Later” until this plan uses steps."),
+  ];
+  const sectionChecks = (scope, form = "table") => [
     ["general", "General", [count(`${scope} [data-settings-row="general.device"] input.settings-device-name[aria-label="Device name"]`, 1), expect(`${scope} [data-settings-row="general.me"] button.settings-pick[data-pick="me"]`, "Nobody"), expect(`${scope} [data-settings-row="general.updates"] .update-line .update-status`, "Up to date · checked 09:00"), count(`${scope} img.about-mark`, 1), loaded(`${scope} img.about-mark`), expect(`${scope} .settings-about p`, "Holiday data: OpenHolidays API (openholidaysapi.org), ODbL.")]],
     ["theme", "Theme", [expect(`${scope} .theme-body`), expect(`${scope} button`, "Save theme")]],
     ["sync", "Sync", [expect(`${scope} .settings-status.cyan`, "Local only"), count(`${scope} .settings-sync .sync-tabs [role="tab"]`, 4), expect(`${scope} .settings-sync [role="tab"][aria-selected="true"]`, "Set up sync"), expect(`${scope} .settings-sync .sync-pane[data-settings-row="sync.setup"] button`, "Create or join space"), count(`${scope} .settings-row[data-settings-row^="sync."] button`, 0)]],
@@ -717,24 +776,11 @@ function states() {
       ],
     ],
     ["overview", "Overview", [expect(`${scope} [data-settings-row="overview.name"] .settings-label`, "Name"), count(`${scope} [data-settings-row="overview.name"] input.settings-plan-name[aria-label="Plan name"]`, 1), inWindow(`${scope} input.settings-plan-name`)]],
-    [
-      "people",
-      "People",
-      [
-        expect(`${scope} [data-settings-row="people.people"] .settings-label`, "People"),
-        expect(`${scope} [data-settings-row="people.people"] p.settings-line.people-empty`, "No people yet. Add someone to assign tasks and milestones."),
-        count(`${scope} p.people-line[role="status"]:empty`, 1),
-        style(`${scope} p.people-line`, "display", "none"),
-        count(`${scope} li.people-row`, 0),
-        count(`${scope} .people-head`, 0),
-        expect(`${scope} [data-settings-row="people.people"] .people-foot`, "Order here is the order of avatars on cards. Up to 8 people per item."),
-        expect(`${scope} [data-settings-row="people.add"] button.people-add`, "+ Add person"),
-      ],
-    ],
+    ["people", "People", form === "list" ? peopleList(scope) : peopleTable(scope)],
     [
       "workflow",
       "Workflow",
-      [
+      form === "list" ? workflowList(scope) : [
         expect(`${scope} [data-settings-row="workflow.steps"] .settings-label`, "Steps"),
         expect(`${scope} .workflow-line[role="status"] [data-by-dates]`, "Columns follow dates. Edit a step or drag a card to use your own steps."),
         count(`${scope} .workflow-line .board-problem`, 0),
@@ -859,6 +905,7 @@ function states() {
       click(SETTINGS_GEAR),
       ...sectionOn("General"),
       ...modalFrame(780, 580),
+      count(".settings-root", 0),
       ...navHit(),
       click(`${SETTINGS_MODAL} .settings-nav-item`, "Import & export"),
       ...sectionOn("Import & export"),
@@ -1108,13 +1155,21 @@ function states() {
       style(".plans-sheet button.plans-settings-row", "padding-left", "12px"),
       style(".plans-sheet button.plans-settings-row", "border-bottom-width", "0px"),
       click(".plans-sheet button.plans-settings-row", "Settings…"),
-      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+      expect(SHEET_TITLE, "Settings"),
       count(".modal-settings", 0),
-      ...APP_LABELS.map((label, i) => expect(`${SETTINGS_SHEET} .settings-list-group:nth-of-type(1) > section.settings-group:nth-of-type(${i + 1}) > h2.settings-group-title`, label)),
-      expect(`${SETTINGS_SHEET} .settings-list-group:nth-of-type(2) > p.settings-list-plan:first-child`, PLAN_NAME),
-      ...PLAN_LABELS.map((label, i) => expect(`${SETTINGS_SHEET} .settings-list-group:nth-of-type(2) > section.settings-group:nth-of-type(${i + 1}) > h2.settings-group-title`, label)),
-      count(`${SETTINGS_SHEET} section.settings-group`, SECTION_LABELS.length),
+      count(`${SETTINGS_SHEET} .sheet-back`, 0),
+      count(`${SETTINGS_SHEET} input[type="search"]`, 0),
+      count(`${SETTINGS_SHEET} section.settings-page`, 0),
+      count(`${ROOT_SHOWN} > .settings-root-group:nth-child(1)[data-group="app"][aria-label="App"]`, 1),
+      count(`${ROOT_SHOWN} > .settings-root-group[data-group="app"] .settings-root-title`, 0),
+      count(`${ROOT_SHOWN} > .settings-root-group:nth-child(2)[data-group="plan"]`, 1),
+      ...APP_LABELS.map((label, i) => expect(`${ROOT_SHOWN} > .settings-root-group[data-group="app"] .settings-root-row:nth-child(${i + 1}) .settings-root-name`, label)),
+      expect(`${ROOT_SHOWN} > .settings-root-group[data-group="plan"] > h2.settings-root-title:first-child`, PLAN_NAME),
+      ...PLAN_LABELS.map((label, i) => expect(`${ROOT_SHOWN} > .settings-root-group[data-group="plan"] .settings-root-row:nth-child(${i + 1}) .settings-root-name`, label)),
+      count(`${ROOT_SHOWN} button.settings-root-row`, SECTION_LABELS.length),
+      count(`${ROOT_SHOWN} button.settings-root-row .settings-chev[aria-hidden="true"]`, SECTION_LABELS.length),
       inWindow(SETTINGS_SHEET),
+      hitChrome("settingsRoot"),
     ],
   });
   sectionChecks(SETTINGS_SHOWN).forEach(([slug, label, shownSection]) => {
@@ -1156,46 +1211,232 @@ function states() {
   });
   SECTION_LABELS.forEach((label, i) => {
     const slug = SECTION_SLUGS[i];
-    const group = `${SETTINGS_SHEET} section.settings-group[data-section="${slug}"]`;
     add(`phone-settings/${slug}`, "mesa", {
       sizes: "phone",
       dialog: true,
       actions: [
-        click(".phone-head button", "Plans"),
-        click(".plans-sheet button.plans-settings-row", "Settings…"),
-        expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
-        reveal(`${group} > h2.settings-group-title`, label),
-        ...sectionChecks(group)[i][2],
+        ...rootOpened(fromPlans),
+        ...pushPage(label),
+        width(SHEET_BACK, 44, 44),
+        height(SHEET_BACK, 44, 44),
+        count(`${SETTINGS_SHEET} section.settings-page:not([hidden])`, 1),
+        ...sectionChecks(sheetPage(slug), "list")[i][2],
+        ...backToRoot(slug),
       ],
     });
   });
-  const PHONE_PEOPLE = `${SETTINGS_SHEET} section.settings-group[data-section="people"]`;
-  add("phone-settings/people-rows", "mesa-people-ios-phone", {
+  const PHONE_PEOPLE = sheetPage("people");
+  const IOS_PERSON = (id) => `${PHONE_PEOPLE} ul.ios-list[data-list="people"] > li.ios-row[data-person="${id}"]`;
+  const SHEET_EDIT = `${SETTINGS_SHEET} .sheet-head .sheet-actions button.sheet-edit`;
+  const peopleListed = [
+    ...rootOpened(fromPlans),
+    ...pushPage("People"),
+    count(`${PHONE_PEOPLE} ul.ios-list[data-list="people"] > li.ios-row[data-person]`, 3),
+    count(`${PHONE_PEOPLE} li.ios-row[data-person="dana"]`, 0),
+    count(`${PHONE_PEOPLE} li.people-row`, 0),
+    expect(`${IOS_PERSON("mira")} button.ios-row-main .avatar`, "MO"),
+    expect(`${IOS_PERSON("mira")} button.ios-row-main .ios-row-name`, "Mira Okafor"),
+    expect(`${IOS_PERSON("ole")} button.ios-row-main .ios-row-count`, "1 item"),
+    count(`${PHONE_PEOPLE} button.ios-row-main .settings-chev[aria-hidden="true"]`, 3),
+    expect(SHEET_EDIT, "Edit"),
+  ];
+  add("phone-settings/people-edit", "mesa-people-ios-phone", {
     sizes: "phone",
     dialog: true,
     actions: [
-      click(".phone-head button", "Plans"),
-      click(".plans-sheet button.plans-settings-row", "Settings…"),
-      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
-      reveal(`${PHONE_PEOPLE} > h2.settings-group-title`, "People"),
-      count(`${PHONE_PEOPLE} li.people-row`, 3),
-      expect(`${PHONE_PEOPLE} li.people-row[data-person="mira"] button.people-avatar .avatar`, "MO"),
-      reveal(`${PHONE_PEOPLE} li.people-row[data-person="ole"]`),
-      width(`${PHONE_PEOPLE} li.people-row[data-person="ole"] button.people-grip`, 44, 44),
-      height(`${PHONE_PEOPLE} li.people-row[data-person="ole"] button.people-avatar`, 44, 44),
-      hitChrome("peopleRows"),
+      ...peopleListed,
+      count(`${PHONE_PEOPLE} button.ios-minus`, 0),
+      count(`${PHONE_PEOPLE} button.ios-grip`, 0),
+      height(`${IOS_PERSON("ole")} button.ios-row-main`, 44, 60),
+      hitChrome("sheetHead", "sheetBar", "iosRows"),
+      click(SHEET_EDIT, "Edit"),
+      expect(`${SHEET_EDIT}:not([aria-pressed])`, "Done"),
+      width(SHEET_EDIT, 44, 80),
+      height(SHEET_EDIT, 44, 44),
+      count(`${PHONE_PEOPLE} button.ios-minus[aria-label^="Remove "]`, 3),
+      count(`${PHONE_PEOPLE} button.ios-grip[aria-label^="Reorder "]`, 3),
+      count(`${PHONE_PEOPLE} button.ios-row-main:disabled`, 3),
+      count(`${PHONE_PEOPLE} button.ios-row-main .settings-chev`, 0),
+      expect(`${IOS_PERSON("ole")} button.ios-minus[aria-label="Remove Ole Berg"]`),
+      width(`${IOS_PERSON("ole")} button.ios-minus`, 44, 44),
+      height(`${IOS_PERSON("ole")} button.ios-minus`, 44, 44),
+      width(`${IOS_PERSON("ole")} button.ios-grip`, 44, 44),
+      style(`${IOS_PERSON("ole")} button.ios-grip`, "touch-action", "none"),
+      style(`${IOS_PERSON("ole")} button.ios-minus .danger-disc`, "width", "22px"),
+      within_(`${IOS_PERSON("ole")} button.ios-minus`, `${PHONE_PEOPLE} ul.ios-list`, 1),
+      within_(`${IOS_PERSON("ole")} button.ios-grip`, `${PHONE_PEOPLE} ul.ios-list`, 1),
+      expect(`${PHONE_PEOPLE} button.ios-add`, "+Add person"),
+      expect(`${PHONE_PEOPLE} p.settings-foot`, "Drag a handle to reorder, tap the red minus to remove. Tap Done when finished."),
+      inWindow(`${PHONE_PEOPLE} ul.ios-list`),
+      hitChrome("sheetHead", "sheetBar", "iosRows"),
+      click(SHEET_EDIT, "Done"),
+      expect(`${SHEET_EDIT}:not([aria-pressed])`, "Edit"),
+      count(`${PHONE_PEOPLE} button.ios-minus`, 0),
+      click(`${PHONE_PEOPLE} button.ios-add`),
+      expect(`${PHONE_PEOPLE} li.ios-row.ios-draft input.people-draft-name`),
+      fontMin(`${PHONE_PEOPLE} li.ios-draft input`, 16),
     ],
   });
-  const PHONE_GENERAL = `${SETTINGS_SHEET} section.settings-group[data-section="general"]`;
+  const PERSON_PAGE = `${SETTINGS_SHEET} section.settings-page[data-detail="person"]:not([hidden])`;
+  add("phone-settings/person-page", "mesa-people-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      ...peopleListed,
+      click(`${IOS_PERSON("ole")} button.ios-row-main`),
+      expect(SHEET_TITLE, "Ole Berg"),
+      centredAcross(SHEET_TITLE, `${SETTINGS_SHEET} .sheet-head`),
+      fontMin(`${PERSON_PAGE} input`, 16),
+      expect(`${SHEET_BACK}[aria-label="Back to People"]`),
+      focusOn(SHEET_BACK),
+      count(SHEET_EDIT, 0),
+      count(`${SETTINGS_SHEET} section.settings-page:not([hidden])`, 1),
+      count(`${SETTINGS_SHEET} section.settings-page[data-section="people"][hidden]`, 1),
+      expect(`${PERSON_PAGE} .settings-detail-row .settings-detail-label`, "Name"),
+      valued(`${PERSON_PAGE} input.people-name`, "Ole Berg"),
+      valued(`${PERSON_PAGE} input.people-initials`, "OB"),
+      expect(`${PERSON_PAGE} button.people-avatar[aria-label="Colour of Ole Berg"] .avatar`, "OB"),
+      expect(`${PERSON_PAGE} .settings-detail-value`, "1 item"),
+      expect(`${PERSON_PAGE} button.settings-detail-danger`, "Remove person"),
+      height(`${PERSON_PAGE} .settings-detail-row`, 44, 60),
+      width(`${PERSON_PAGE} button.people-avatar`, 44, 44),
+      height(`${PERSON_PAGE} button.settings-detail-danger`, 44, 60),
+      inWindow(`${PERSON_PAGE} button.settings-detail-danger`),
+      hitChrome("sheetHead", "sheetBar"),
+      { hit44: [`${PERSON_PAGE} button`, `${PERSON_PAGE} input`] },
+      click(SHEET_BACK),
+      expect(SHEET_TITLE, "People"),
+      count(PERSON_PAGE, 0),
+      focusOn(`${IOS_PERSON("ole")} button.ios-row-main`),
+      expect(SHEET_EDIT, "Edit"),
+    ],
+  });
+  const PHONE_WORKFLOW = sheetPage("workflow");
+  const IOS_STEP = (id) => `${PHONE_WORKFLOW} ul.ios-list[data-list="workflow"] > li.ios-row[data-step="${id}"]`;
+  const workflowListed = [
+    ...rootOpened(fromPlans),
+    ...pushPage("Workflow"),
+    count(`${PHONE_WORKFLOW} ul.ios-list[data-list="workflow"] > li.ios-row[data-step]`, 5),
+    count(`${PHONE_WORKFLOW} li.workflow-row`, 0),
+    expect(`${IOS_STEP("next")} button.ios-row-main .ios-row-name`, "Review"),
+    expect(`${IOS_STEP("next")} button.ios-row-main .ios-row-count.over[title="Over the limit of 2"]`, "3/2"),
+    expect(`${IOS_STEP(STEP_QA)} button.ios-row-main .ios-row-name`, "QA"),
+    expect(`${IOS_STEP("done")} button.ios-row-main .ios-flag`, "completes"),
+    count(`${PHONE_WORKFLOW} button.ios-row-main .settings-chev[aria-hidden="true"]`, 5),
+    expect(SHEET_EDIT, "Edit"),
+  ];
+  add("phone-settings/workflow-edit", "mesa-steps-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      ...workflowListed,
+      count(`${PHONE_WORKFLOW} button.ios-minus`, 0),
+      count(`${PHONE_WORKFLOW} button.ios-grip`, 0),
+      height(`${IOS_STEP("next")} button.ios-row-main`, 44, 60),
+      hitChrome("sheetHead", "sheetBar", "iosRows"),
+      click(SHEET_EDIT, "Edit"),
+      expect(`${SHEET_EDIT}:not([aria-pressed])`, "Done"),
+      width(SHEET_EDIT, 44, 80),
+      height(SHEET_EDIT, 44, 44),
+      count(`${PHONE_WORKFLOW} button.ios-minus[aria-label^="Delete "]`, 5),
+      count(`${PHONE_WORKFLOW} button.ios-grip[aria-label^="Reorder "]`, 5),
+      count(`${PHONE_WORKFLOW} button.ios-row-main:disabled`, 5),
+      count(`${PHONE_WORKFLOW} button.ios-row-main .settings-chev`, 0),
+      expect(`${IOS_STEP("next")} button.ios-minus[aria-label="Delete Review"]`),
+      expect(`${IOS_STEP("next")} button.ios-grip[aria-label="Reorder Review"]`),
+      width(`${IOS_STEP("next")} button.ios-minus`, 44, 44),
+      height(`${IOS_STEP("next")} button.ios-minus`, 44, 44),
+      width(`${IOS_STEP("next")} button.ios-grip`, 44, 44),
+      style(`${IOS_STEP("next")} button.ios-grip`, "touch-action", "none"),
+      style(`${IOS_STEP("next")} button.ios-minus .danger-disc`, "width", "22px"),
+      within_(`${IOS_STEP("next")} button.ios-minus`, `${PHONE_WORKFLOW} ul.ios-list`, 1),
+      within_(`${IOS_STEP("next")} button.ios-grip`, `${PHONE_WORKFLOW} ul.ios-list`, 1),
+      expect(`${PHONE_WORKFLOW} button.ios-add`, "+Add step"),
+      expect(`${PHONE_WORKFLOW} p.settings-foot`, "Drag a handle to reorder, tap the red minus to delete. Tap Done when finished."),
+      inWindow(`${PHONE_WORKFLOW} ul.ios-list`),
+      hitChrome("sheetHead", "sheetBar", "iosRows"),
+      click(SHEET_EDIT, "Done"),
+      expect(`${SHEET_EDIT}:not([aria-pressed])`, "Edit"),
+      count(`${PHONE_WORKFLOW} button.ios-minus`, 0),
+    ],
+  });
+  const STEP_PAGE = `${SETTINGS_SHEET} section.settings-page[data-detail="step"]:not([hidden])`;
+  add("phone-settings/step-page", "mesa-steps-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      ...workflowListed,
+      click(`${IOS_STEP("next")} button.ios-row-main`),
+      expect(SHEET_TITLE, "Review"),
+      centredAcross(SHEET_TITLE, `${SETTINGS_SHEET} .sheet-head`),
+      fontMin(`${STEP_PAGE} input`, 16),
+      expect(`${SHEET_BACK}[aria-label="Back to Workflow"]`),
+      focusOn(SHEET_BACK),
+      count(SHEET_EDIT, 0),
+      count(`${SETTINGS_SHEET} section.settings-page:not([hidden])`, 1),
+      count(`${SETTINGS_SHEET} section.settings-page[data-section="workflow"][hidden]`, 1),
+      expect(`${STEP_PAGE} .settings-detail-row .settings-detail-label`, "Name"),
+      expect(`${STEP_PAGE} .settings-detail-row .settings-detail-label`, "Completes items"),
+      count(`${STEP_PAGE} .settings-detail-row`, 5),
+      valued(`${STEP_PAGE} input.workflow-name`, "Review"),
+      expect(`${STEP_PAGE} button.workflow-swatch[aria-label="Colour · Review"] .swatch`),
+      valued(`${STEP_PAGE} input.workflow-limit`, "2"),
+      expect(`${STEP_PAGE} button.switch[role="switch"][aria-checked="false"][aria-label="Review completes items"]`),
+      expect(`${STEP_PAGE} .settings-detail-value.over[title="Over the limit of 2"]`, "3 items"),
+      expect(`${STEP_PAGE} button.settings-detail-danger`, "Delete step"),
+      height(`${STEP_PAGE} .settings-detail-row`, 44, 60),
+      width(`${STEP_PAGE} button.workflow-swatch`, 44, 44),
+      height(`${STEP_PAGE} button.workflow-swatch`, 44, 44),
+      width(`${STEP_PAGE} button.switch`, 44, 60),
+      height(`${STEP_PAGE} button.switch`, 44, 44),
+      height(`${STEP_PAGE} input.workflow-limit`, 44, 60),
+      height(`${STEP_PAGE} button.settings-detail-danger`, 44, 60),
+      inWindow(`${STEP_PAGE} button.settings-detail-danger`),
+      hitChrome("sheetHead", "sheetBar"),
+      { hit44: [`${STEP_PAGE} button`, `${STEP_PAGE} input`] },
+      click(SHEET_BACK),
+      expect(SHEET_TITLE, "Workflow"),
+      count(STEP_PAGE, 0),
+      focusOn(`${IOS_STEP("next")} button.ios-row-main`),
+      expect(SHEET_EDIT, "Edit"),
+    ],
+  });
+  const LONG_STEP = "Spectrograph calibration and dome seeing measurements, parts";
+  const LONGEST_STEP_NAME = "Wavefront measurements on mirror";
+  add("phone-settings/step-long-name", "mesa-steps-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [
+      ...workflowListed,
+      click(`${IOS_STEP(STEP_QA)} button.ios-row-main`),
+      expect(SHEET_TITLE, "QA"),
+      fill(`${STEP_PAGE} input.workflow-name`, LONGEST_STEP_NAME),
+      key("Enter", "Enter"),
+      valued(`${STEP_PAGE} input.workflow-name`, LONGEST_STEP_NAME),
+      expect(SHEET_TITLE, LONGEST_STEP_NAME),
+      relabel(SHEET_TITLE, LONG_STEP),
+      ellipsed(SHEET_TITLE),
+      inWindow(SHEET_TITLE),
+      inWindow(`${STEP_PAGE} input.workflow-name`),
+      hitChrome("sheetHead", "sheetBar"),
+      click(SHEET_BACK),
+      expect(SHEET_TITLE, "Workflow"),
+      expect(`${IOS_STEP(STEP_QA)} button.ios-row-main .ios-row-name`, LONGEST_STEP_NAME),
+      relabel(`${IOS_STEP(STEP_QA)} button.ios-row-main .ios-row-name`, LONG_STEP),
+      ellipsed(`${IOS_STEP(STEP_QA)} button.ios-row-main .ios-row-name`),
+      inWindow(`${IOS_STEP(STEP_QA)} button.ios-row-main .ios-row-count`),
+      inWindow(`${IOS_STEP(STEP_QA)} button.ios-row-main .settings-chev`),
+      hitChrome("sheetHead", "sheetBar", "iosRows"),
+    ],
+  });
+  const PHONE_GENERAL = sheetPage("general");
   add("phone-settings/general-rows", "mesa-people-ios-phone", {
     sizes: "phone",
     dialog: true,
     device: ME_MIRA,
     actions: [
-      click(".phone-head button", "Plans"),
-      click(".plans-sheet button.plans-settings-row", "Settings…"),
-      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
-      reveal(`${PHONE_GENERAL} > h2.settings-group-title`, "General"),
+      ...rootOpened(fromPlans),
+      ...pushPage("General"),
       ...generalRows(PHONE_GENERAL, "iPhone", 5),
       count(`${PHONE_GENERAL} [data-settings-row="general.tab"]`, 1),
       count(`${PHONE_GENERAL} [role="radiogroup"]`, 0),
@@ -1214,15 +1455,32 @@ function states() {
       { hit44: [CHROME.generalRows[1]] },
     ],
   });
-  const PHONE_DEFAULTS = `${SETTINGS_SHEET} section.settings-group[data-section="defaults"]`;
+  const THEME_HEX = `${sheetPage("theme")} input.theme-hex[aria-label="Background hex"]`;
+  const THEME_DRAFT_ASK = [["Discard theme changes?", "Your colour changes are not saved yet."]];
+  const themeDrafted = [
+    ...rootOpened(fromPlans),
+    ...pushPage("Theme"),
+    fill(THEME_HEX, "#222222"),
+    expect(`${sheetPage("theme")} .theme-tag`, "Unsaved"),
+    click(`${SETTINGS_SHEET} .sheet-head button.sheet-close`),
+    alerted(THEME_DRAFT_ASK),
+  ];
+  add("phone-settings/theme-draft-keep", "mesa-ios-phone", {
+    sizes: "phone",
+    dialog: true,
+    actions: [...themeDrafted, count(SETTINGS_SHEET, 1), expect(SHEET_TITLE, "Theme"), count(`${SETTINGS_SHEET} section.settings-page:not([hidden])`, 1), valued(THEME_HEX, "#222222"), expect(`${sheetPage("theme")} .theme-tag`, "Unsaved"), count(".discard-ask", 0), count(".toasts .toast", 0)],
+  });
+  add("phone-settings/theme-draft-discard", "mesa-discard-ios-phone", {
+    sizes: "phone",
+    actions: [...themeDrafted, count('[role="dialog"]', 0), count(".sheet", 0), expect(".phone-head button", "Plans"), count(".discard-ask", 0), count(".toasts .toast", 0)],
+  });
+  const PHONE_DEFAULTS = sheetPage("defaults");
   add("phone-settings/defaults-rows", "mesa-defaults-ios-phone", {
     sizes: "phone",
     dialog: true,
     actions: [
-      click(".phone-head button", "Plans"),
-      click(".plans-sheet button.plans-settings-row", "Settings…"),
-      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
-      reveal(`${PHONE_DEFAULTS} > h2.settings-group-title`, "Defaults"),
+      ...rootOpened(fromPlans),
+      ...pushPage("Defaults"),
       ...defaultsRows(PHONE_DEFAULTS),
       reveal(`${PHONE_DEFAULTS} [data-settings-row="defaults.group"]`),
       width(`${PHONE_DEFAULTS} .stepper button.step-btn`, 44, 44),
@@ -1604,22 +1862,15 @@ function states() {
   add("phone-theme", "mesa", {
     sizes: "phone",
     dialog: true,
-    actions: [
-      click(".phone-head button", "Plans"),
-      click(".plans-sheet button.plans-settings-row", "Settings…"),
-      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
-      reveal(`${SETTINGS_SHEET} section.settings-group[data-section="theme"] > h2.settings-group-title`, "Theme"),
-      expect(`${SETTINGS_SHEET} section.settings-group[data-section="theme"] .theme-body`),
-    ],
+    actions: [...rootOpened(fromPlans), ...pushPage("Theme"), expect(`${sheetPage("theme")} .theme-body`)],
   });
   add("phone-about", "mesa", {
     sizes: "phone",
     dialog: true,
     actions: [
-      click(".phone-head button.phone-more", "⋯"),
-      click(".plan-sheet button.plans-settings-row", "Settings…"),
-      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
-      reveal(`${SETTINGS_SHEET} section.settings-group[data-section="general"] [data-settings-row="general.about"]`),
+      ...rootOpened([click(".phone-head button.phone-more", "⋯"), click(".plan-sheet button.plans-settings-row", "Settings…")]),
+      ...pushPage("General"),
+      reveal(`${sheetPage("general")} [data-settings-row="general.about"]`),
       count(`${SETTINGS_SHEET} img.about-mark`, 1),
       loaded(`${SETTINGS_SHEET} img.about-mark`),
       expect(`${SETTINGS_SHEET} .settings-about p`, "Holiday data: OpenHolidays API (openholidaysapi.org), ODbL."),
@@ -1735,10 +1986,11 @@ function states() {
     actions: [
       click(".phone-head button", "Plans"),
       click(".plans-sync button", "Set up sync"),
-      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
+      expect(SHEET_TITLE, "Sync"),
+      count(ROOT_SHOWN, 0),
       count('[role="dialog"]', 1),
-      expect(`${SETTINGS_SHEET} section.settings-group[data-section="sync"] [role="tab"][aria-selected="true"]`, "Set up sync"),
-      expect(`${SETTINGS_SHEET} section.settings-group[data-section="sync"] .sync-pane button`, "Create or join space"),
+      expect(`${sheetPage("sync")} [role="tab"][aria-selected="true"]`, "Set up sync"),
+      expect(`${sheetPage("sync")} .sync-pane button`, "Create or join space"),
       inWindow(SETTINGS_SHEET),
     ],
   });
@@ -1921,9 +2173,18 @@ function states() {
   add("platform/iphone-landscape", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), ...stamped("ios", "phone")] });
   const FIELDS = '.sheet input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), .sheet select, .sheet textarea';
   const phoneItemSheet = [click(".phone-list .prow"), expect('.sheet[role="dialog"] [data-detail="sheet"] .detail-body')];
-  const phoneSettings = [click(".phone-head button", "Plans"), click(".plans-sheet button.plans-settings-row", "Settings…"), expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"), expect(`${SETTINGS_SHEET} section.settings-group[data-section="theme"] .theme-body`)];
+  const pageFields = (slug) => ['input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"])', "select", "textarea"].map((s) => `${sheetPage(slug)} ${s}`).join(", ");
+  const FIELD_PAGES = [
+    ["General", "general"],
+    ["Theme", "theme"],
+    ["Sync", "sync"],
+    ["Overview", "overview"],
+    ["Working time", "working-time"],
+    ["Defaults", "defaults"],
+  ];
+  const phoneSettingsFields = [...rootOpened(fromPlans), ...FIELD_PAGES.flatMap(([label, slug]) => [...pushPage(label), fontMin(pageFields(slug), 16), ...backToRoot(slug)])];
   add("ios-fields/phone-item", "mesa-ios-phone", { place: listPlace, sizes: "phone", dialog: true, actions: [...phoneItemSheet, fontMin(FIELDS, 16)] });
-  add("ios-fields/phone-settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, fontMin(FIELDS, 16)] });
+  add("ios-fields/phone-settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: phoneSettingsFields });
   const settingsFromMore = [click('.toolbar button[aria-label="More"]'), chooseNative("Settings")];
   const NEW_ROWS = ["New task", "New milestone", "New group"];
   const PLAN_ROWS = ["Export plan…", "Import plan…"];
@@ -1948,7 +2209,6 @@ function states() {
   });
   const phoneBoardPlace = { view: "board", zoom: "W" };
   const PHONE_BY_DATES = "Pages follow dates. Move a card or add one to use your own steps.";
-  const LONG_STEP = "Spectrograph calibration and dome seeing measurements, parts";
   const pageOf = (key) => `.board-page[data-page="${key}"]`;
   const tabOf = (key) => `.step-bar .step-tab[data-page="${key}"]`;
   const pageTo = (key) => [click(tabOf(key)), still(), paged(key)];
@@ -2073,17 +2333,18 @@ function states() {
     sizes: "phone",
     actions: [expect(".phone-board .step-bar .step-tab"), boardHit(PB_HEAD, PB_CARDS)],
   });
-  const filesRows = [reveal(`${SETTINGS_SHEET} section.settings-group[data-section="files"] > h2.settings-group-title`, "Import & export"), expect(`${SETTINGS_SHEET} [data-settings-row="files.import"] button`, "Import plan…"), expect(`${SETTINGS_SHEET} [data-settings-row="files.export"] button`, "Export plan…")];
-  add("ios44/phone/settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...phoneSettings, ...filesRows, hitChrome("sheetHead", "settingsRows")] });
+  const filesRows = [...pushPage("Import & export"), expect(`${sheetPage("files")} [data-settings-row="files.import"] button`, "Import plan…"), expect(`${sheetPage("files")} [data-settings-row="files.export"] button`, "Export plan…")];
+  add("ios44/phone/settings", "mesa-ios-phone", { sizes: "phone", dialog: true, actions: [...rootOpened(fromPlans), hitChrome("sheetHead", "settingsRoot"), ...filesRows, hitChrome("sheetHead", "sheetBar", "settingsRows")] });
   add("ios44/phone/sync", "mesa-ios-phone", {
     sizes: "phone",
     dialog: true,
     actions: [
       click(".phone-head button", "Plans"),
       click(".plans-sync button", "Set up sync"),
-      expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"),
-      expect(`${SETTINGS_SHEET} section.settings-group[data-section="sync"] [role="tab"][aria-selected="true"]`, "Set up sync"),
-      hitChrome("sheetHead", "sync"),
+      expect(SHEET_TITLE, "Sync"),
+      count(ROOT_SHOWN, 0),
+      expect(`${sheetPage("sync")} [role="tab"][aria-selected="true"]`, "Set up sync"),
+      hitChrome("sheetHead", "sheetBar", "sync"),
     ],
   });
   add("ios44/phone/new-menu", "mesa-ios-phone", {
@@ -2292,7 +2553,7 @@ function states() {
   add("ipad-form-sheet/settings", "mesa-ios-pad", {
     sizes: "ipad-more-open",
     dialog: true,
-    actions: [viewExpect("timeline"), ...settingsFromMore, ...sectionOn("General"), count(".sheet", 0), width(SETTINGS_MODAL, 600, 780), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL)],
+    actions: [viewExpect("timeline"), ...settingsFromMore, ...sectionOn("General"), count(".sheet", 0), count(".settings-root", 0), width(SETTINGS_MODAL, 600, 780), inWindow(SETTINGS_MODAL), centredIn(SETTINGS_MODAL)],
   });
   add("ipad-form-sheet/settings-owner-portrait", "mesa-ios-pad", {
     sizes: "ipad-owner-portrait",
@@ -2302,7 +2563,34 @@ function states() {
   add("ipad-form-sheet/settings-below-700", "mesa-ios-pad", {
     sizes: "ipad-699",
     dialog: true,
-    actions: [viewExpect("timeline"), ...settingsFromMore, expect(`${SETTINGS_SHEET} .sheet-title`, "Settings"), count(".modal-settings", 0), count(`${SETTINGS_SHEET} section.settings-group`, SECTION_LABELS.length), style(".sheet", "border-bottom-width", "0px"), edgeAt(".sheet", "bottom", 1000), hitChrome("sheetHead"), ...filesRows, hitChrome("sheetHead", "settingsRows")],
+    actions: [
+      viewExpect("timeline"),
+      ...rootOpened(settingsFromMore),
+      count(".modal-settings", 0),
+      count(`${ROOT_SHOWN} button.settings-root-row`, SECTION_LABELS.length),
+      style(".sheet", "border-bottom-width", "0px"),
+      edgeAt(".sheet", "bottom", 1000),
+      hitChrome("sheetHead", "settingsRoot"),
+      ...filesRows,
+      hitChrome("sheetHead", "sheetBar", "settingsRows"),
+    ],
+  });
+  add("ipad-form-sheet/settings-below-700-page", "mesa-ios-pad", {
+    sizes: "ipad-699",
+    dialog: true,
+    actions: [
+      viewExpect("timeline"),
+      ...rootOpened(settingsFromMore),
+      ...pushPage("Workflow"),
+      count(".modal-settings", 0),
+      count(`${sheetPage("workflow")} ul.ios-list[data-list="workflow"] > li.ios-row[data-step]`, 4),
+      count(`${sheetPage("workflow")} li.workflow-row`, 0),
+      centredAcross(SHEET_TITLE, `${SETTINGS_SHEET} .sheet-head`),
+      width(SHEET_BACK, 44, 44),
+      height(SHEET_BACK, 44, 44),
+      hitChrome("sheetHead", "sheetBar"),
+      ...backToRoot("workflow"),
+    ],
   });
   add("ipad-form-sheet/item", "mesa-ios-pad", {
     sizes: "ipad-portraits",
@@ -2752,7 +3040,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.unclipped === undefined && last.noOverhang === undefined && last.within === undefined && last.fitLabels === undefined && last.weekStart === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.aligned === undefined && last.paged === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.unclipped === undefined && last.noOverhang === undefined && last.within === undefined && last.fitLabels === undefined && last.weekStart === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.centredAcross === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.alerted === undefined && last.aligned === undefined && last.paged === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -2840,6 +3128,7 @@ const SHIM = String.raw`
   window.__PROBE_MISSING__ = [];
   window.__PROBE_TICKETS__ = {};
   window.__PROBE_MENUS__ = [];
+  window.__PROBE_ALERTS__ = [];
   window.__PROBE_LISTENERS__ = {};
   var RealDate = Date;
   var pin = new RealDate(2026, 10, 9, 9, 0, 0, 0).getTime();
@@ -2882,6 +3171,7 @@ const SHIM = String.raw`
       window.__PROBE_LISTENERS__[args.event] = heard;
     }
     if (cmd === "menu_show") window.__PROBE_MENUS__.push(JSON.parse(JSON.stringify(args.menu)));
+    if (cmd === "alert_ask") window.__PROBE_ALERTS__.push(JSON.parse(JSON.stringify(args.ask)));
     if (cmd === "sync_ticket") {
       var ticketDoc = String(args ? args.doc : undefined);
       var asked = (window.__PROBE_TICKETS__[ticketDoc] || 0) + 1;
@@ -3586,6 +3876,7 @@ const MEASURE = String.raw`
     dialogs: dialogs(),
     text: (app === null ? "" : app.textContent.trim()).length,
     missing: window.__PROBE_MISSING__.slice(),
+    alerts: window.__PROBE_ALERTS__.map(function (ask) { return ask.title; }),
     tickets: Object.assign({}, window.__PROBE_TICKETS__),
   };
 })()
@@ -3864,6 +4155,13 @@ window.__probeAct = function (a) {
     });
     return out;
   }
+  if (a.alerted !== undefined) {
+    var alertsSent = window.__PROBE_ALERTS__;
+    if (!Array.isArray(alertsSent)) return { fail: "the probe recorded no alert_ask list" };
+    var alertLines = alertsSent.map(function (x) { return [x.title, x.message]; });
+    if (JSON.stringify(alertLines) !== JSON.stringify(a.alerted)) return { fail: "alert_ask sent " + JSON.stringify(alertLines) + ", not exactly " + JSON.stringify(a.alerted) };
+    return { ok: true };
+  }
   if (a.nativeMenu !== undefined) {
     var nm = lastMenu();
     if (nm === null) return { fail: "no menu_show was sent, so no native menu asked for " + JSON.stringify(a.nativeMenu) };
@@ -4141,6 +4439,17 @@ window.__probeAct = function (a) {
     var offY = (cb.top + cb.bottom) / 2 - window.innerHeight / 2;
     if (Math.abs(offX) > 1 || Math.abs(offY) > 1) return { fail: a.centredIn + " sits " + tenth(offX) + " px across and " + tenth(offY) + " px down from the window's centre" };
     if (cb.left < -0.5 || cb.top < -0.5 || cb.right > window.innerWidth + 0.5 || cb.bottom > window.innerHeight + 0.5) return { fail: a.centredIn + " runs out of the window" };
+    return { ok: true };
+  }
+  if (a.centredAcross !== undefined) {
+    var acEl = firstShown(a.centredAcross[0]);
+    if (acEl === undefined) return { fail: "no " + a.centredAcross[0] + " on screen to measure" };
+    var acBox = acEl.parentElement === null ? null : acEl.parentElement.closest(a.centredAcross[1]);
+    if (acBox === null) return { fail: a.centredAcross[0] + " is not inside a " + a.centredAcross[1] };
+    var acIn = acEl.getBoundingClientRect();
+    var acOut = acBox.getBoundingClientRect();
+    var acOff = (acIn.left + acIn.right) / 2 - (acOut.left + acOut.right) / 2;
+    if (Math.abs(acOff) > 1) return { fail: a.centredAcross[0] + " sits " + tenth(acOff) + " px across from the centre of its " + a.centredAcross[1] };
     return { ok: true };
   }
   if (a.inWindow !== undefined) {
@@ -4918,6 +5227,11 @@ function printTable(rows) {
 
 const base64 = (bytes) => Buffer.from(bytes).toString("base64");
 
+export function unexpectedAlerts(state, alerts) {
+  if (alerts.length === 0 || state.actions.some((a) => a.alerted !== undefined)) return null;
+  return `the app asked alert_ask ${JSON.stringify(alerts)}, and the state asserts no alert`;
+}
+
 export async function stopChild(child) {
   if (child.pid === undefined || exited(child)) return;
   await new Promise((resolve) => {
@@ -5006,11 +5320,14 @@ async function measureAll(cdp, origin, picked, oneSize, verbose, shotDir, traffi
       const r = run.reading;
       const tickets = Object.entries(r.tickets);
       if (tickets.length > 0) process.stdout.write(`tickets ${state.name} @ ${viewport}: ${tickets.map(([doc, n]) => `${doc} ${n}`).join(", ")}\n`);
-      const why = !r.scope.found
+      const alertWhy = unexpectedAlerts(state, r.alerts);
+      const why =!r.scope.found
         ? `measures 3-8 are scoped to ${r.scope.name}, and the page has none`
         : r.missing.length > 0
           ? `the app asked for what no fixture answers: ${r.missing.join(", ")}`
-          : r.text === 0
+          : alertWhy !== null
+            ? alertWhy
+            : r.text === 0
             ? "the app painted no text"
             : null;
       if (why !== null) {

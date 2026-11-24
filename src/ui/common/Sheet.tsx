@@ -106,7 +106,20 @@ function useSwipeDown(ref: { current: HTMLDivElement | null }, close: (reason: C
   };
 }
 
-type SheetProps = { title: string; onClose: () => void; actions?: ReactNode; onKeyDown?(e: ReactKeyboardEvent<HTMLDivElement>): void; children: ReactNode } & DetentProps;
+type SheetProps = {
+  title: string;
+  label?: string;
+  kind?: string;
+  lead?: ReactNode;
+  onClose: () => void;
+  actions?: ReactNode;
+  onKeyDown?(e: ReactKeyboardEvent<HTMLDivElement>): void;
+  children: ReactNode;
+} & DetentProps;
+
+function SheetEnd(p: { actions: ReactNode }) {
+  return p.actions === undefined ? <span className="sheet-head-end" aria-hidden="true" /> : <span className="sheet-actions">{p.actions}</span>;
+}
 
 function OpenSheet(p: SheetProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -116,6 +129,8 @@ function OpenSheet(p: SheetProps) {
   useOverlayEntry(ref, close);
   const scrim = useScrimPress(() => close("scrim"));
   const swipe = useSwipeDown(ref, close, p.detent === undefined ? {} : { detent: p.detent, onDetent: p.onDetent });
+  const bar = p.lead !== undefined || p.actions !== undefined;
+  const closeButton = <CloseButton className="sheet-close" onPress={() => close("x")} />;
   return (
     <div className="overlay sheet-overlay" {...scrim}>
       <div
@@ -123,7 +138,8 @@ function OpenSheet(p: SheetProps) {
         className="sheet"
         role="dialog"
         aria-modal="true"
-        aria-label={p.title}
+        aria-label={p.label ?? p.title}
+        data-sheet={p.kind}
         tabIndex={-1}
         data-detent={p.detent}
         onKeyDown={(e) => {
@@ -132,10 +148,17 @@ function OpenSheet(p: SheetProps) {
         }}
       >
         {ios && <span className="sheet-grabber" aria-hidden="true" />}
-        <div className="sheet-head" {...swipe}>
-          <CloseButton className="sheet-close" onPress={() => close("x")} />
+        <div className={bar ? "sheet-head sheet-head-bar" : "sheet-head"} {...swipe}>
+          {bar ? (
+            <span className="sheet-start">
+              {closeButton}
+              {p.lead !== undefined && <span className="sheet-lead">{p.lead}</span>}
+            </span>
+          ) : (
+            closeButton
+          )}
           <h3 className="sheet-title">{p.title}</h3>
-          {p.actions === undefined ? <span className="sheet-head-end" aria-hidden="true" /> : <span className="sheet-actions">{p.actions}</span>}
+          <SheetEnd actions={p.actions} />
         </div>
         <div className="sheet-body">{scope(p.children)}</div>
       </div>
@@ -147,7 +170,7 @@ export function Sheet(p: { open: boolean } & SheetProps) {
   if (!p.open) return null;
   const detents: DetentProps = p.detent === undefined ? {} : { detent: p.detent, onDetent: p.onDetent };
   return (
-    <OpenSheet title={p.title} onClose={p.onClose} actions={p.actions} onKeyDown={p.onKeyDown} {...detents}>
+    <OpenSheet title={p.title} label={p.label} kind={p.kind} lead={p.lead} onClose={p.onClose} actions={p.actions} onKeyDown={p.onKeyDown} {...detents}>
       {p.children}
     </OpenSheet>
   );

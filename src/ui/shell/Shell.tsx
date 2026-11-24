@@ -353,7 +353,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
     const modal = document.querySelector<HTMLElement>("[data-item-modal]");
     if (modal === null) throw new Error("Shell: Settings opened over the item modal, but the modal is not in the page");
     if (!commitFocus(modal, "The item modal")) {
-      setUi({ settings: null, settingsRow: null });
+      setUi({ settings: null, settingsRow: null, settingsRoot: false });
       return;
     }
     setUi({ dialog: null });
@@ -458,7 +458,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
       closeSettingsFirst();
       return;
     }
-    setUi({ settings: lastSection(window.localStorage, session !== null) });
+    setUi({ settings: lastSection(window.localStorage, session !== null), settingsRoot: true });
   };
   const promote = (id: ItemId): void => {
     if (session === null || !session.view().plan.items.has(id)) throw new Error(`Shell: no item ${id} to open as a modal`);
@@ -960,6 +960,8 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
           <Settings
             frame={settingsFrame(readPlatform(window).os, listMode)}
             section={ui.settings}
+            root={ui.settingsRoot}
+            onRoot={(r) => setUi({ settingsRoot: r })}
             row={ui.settingsRow}
             onRowShown={() => setUi({ settingsRow: null })}
             session={session}
@@ -970,7 +972,7 @@ function WideBody(p: ShellProps & { listMode: WideMode; tier: ToolbarTier | null
             files={files}
             onSection={(s) => setUi({ settings: s })}
             syncPane={ui.syncPane}
-            onClose={() => setUi({ settings: null, settingsRow: null, syncPane: null })}
+            onClose={() => setUi({ settings: null, settingsRow: null, settingsRoot: false, syncPane: null })}
             onSyncPane={(pane) => setUi({ syncPane: pane })}
             onTrashPlan={(id) => void trashOwn(id)}
           />

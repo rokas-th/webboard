@@ -566,10 +566,12 @@ describe("Settings on a compact window", () => {
     const t = await made();
     render(withSync(shellFor(t, { device: { deviceId: "ipad", name: "iPad", platform: "ios" } }).ui));
     await settle();
-    act(() => lastUi()[1]({ settings: "sync" }));
+    act(() => lastUi()[1]({ settings: "sync", settingsRoot: true }));
     const sheet = screen.getByRole("dialog", { name: "Settings" });
     expect([sheet.classList.contains("sheet"), sheet.hasAttribute("data-settings-modal")]).toEqual([true, false]);
-    expect([...sheet.querySelectorAll<HTMLElement>("section.settings-group")].map((s) => s.dataset["section"])).toEqual(["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "defaults", "baselines", "danger"]);
+    expect([...sheet.querySelectorAll<HTMLElement>("div.settings-root button.settings-root-row")].map((s) => s.dataset["section"])).toEqual(["general", "theme", "sync", "files", "overview", "people", "workflow", "working-time", "defaults", "baselines", "danger"]);
+    act(() => lastUi()[1]({ settingsRoot: false }));
+    expect([sheet.querySelector(".sheet-head .sheet-title")?.textContent, [...sheet.querySelectorAll<HTMLElement>("section.settings-page:not([hidden])")].map((s) => s.dataset["section"])]).toEqual(["Sync", ["sync"]]);
   });
 });
 

@@ -102,31 +102,42 @@ export function commitFocus(root: HTMLElement, what: string): boolean {
   return !failed;
 }
 
-interface HeldGuard {
+export const UNSAVED_TITLE = "Discard unsaved changes?";
+
+export function pendingGuard(guards: readonly (DraftGuard | null)[]): DraftGuard | null {
+  const set = guards.filter((g): g is DraftGuard => g !== null);
+  if (set.length === 0) return null;
+  const [only] = set;
+  if (set.length === 1 && only !== undefined) return only;
+  return { title: UNSAVED_TITLE, message: set.map((g) => g.message).join(" ") };
+}
+
+export interface HeldGuard {
   owner: symbol;
   guard: DraftGuard | null;
 }
 
-interface GuardSlot {
-  current: HeldGuard | null;
+export interface GuardSlot {
+  current: readonly HeldGuard[];
 }
 
-const GuardContext = createContext<GuardSlot | null>(null);
+export const GuardContext = createContext<GuardSlot | null>(null);
 
 export function useCloseGuard(guard: DraftGuard | null): void {
   const slot = useContext(GuardContext);
   if (slot === null) throw new Error("useCloseGuard needs a Dialog or Sheet around it");
   const [owner] = useState(() => Symbol("close guard"));
   useLayoutEffect(() => {
-    if (slot.current !== null && slot.current.owner !== owner) throw new Error("useCloseGuard: a second guard under one Dialog or Sheet");
-    slot.current = { owner, guard: null };
+    if (slot.current.some((h) => h.owner === owner)) throw new Error("useCloseGuard: one guard joined its Dialog or Sheet twice");
+    slot.current = [...slot.current, { owner, guard: null }];
     return () => {
-      if (slot.current !== null && slot.current.owner === owner) slot.current = null;
+      if (!slot.current.some((h) => h.owner === owner)) throw new Error("useCloseGuard: a guard left a Dialog or Sheet it never joined");
+      slot.current = slot.current.filter((h) => h.owner !== owner);
     };
   }, [slot, owner]);
   useLayoutEffect(() => {
-    const held = slot.current;
-    if (held === null || held.owner !== owner) throw new Error("useCloseGuard set a guard it does not hold");
+    const held = slot.current.find((h) => h.owner === owner);
+    if (held === undefined) throw new Error("useCloseGuard set a guard it does not hold");
     held.guard = guard;
   });
 }
@@ -144,7 +155,7 @@ interface NativeAsk {
 }
 
 export function useRequestClose(ref: RefObject<HTMLElement | null>, onClose: () => void, what: string): CloseRequest {
-  const slot = useRef<HeldGuard | null>(null);
+  const slot = useRef<readonly HeldGuard[]>([]);
   const native = useRef<NativeAsk | null>(null);
   const inline = useRef(false);
   const mounted = useRef(false);
@@ -174,8 +185,7 @@ export function useRequestClose(ref: RefObject<HTMLElement | null>, onClose: () 
       if (root === null) throw new Error(`${what} closed without its element`);
       const was = document.activeElement;
       if (reason !== "escape" && !flushSync(() => commitFocus(root, what))) return false;
-      const held = slot.current;
-      const guard = held === null ? null : held.guard;
+      const guard = pendingGuard(slot.current.map((h) => h.guard));
       if (guard === null) {
         latest.current();
         then?.();

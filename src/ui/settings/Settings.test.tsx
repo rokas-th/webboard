@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, within } from "@testing-library/react"
 import { createRef, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { version } from "../../../package.json";
+import { stepsOf } from "../../domain/steps";
 import type { PlanSession } from "../../store/session";
 import type { UpdateState, Updates } from "../../store/updates";
 import type { SyncState } from "../../sync/manager";
@@ -10,11 +11,13 @@ import { MESA_SEED, testSession, type TestSession } from "../../test/session";
 import { testRegistry } from "../../test/shell";
 import { deviced } from "../../test/theme";
 import { withSync } from "../../test/withSync";
-import { IPAD, MAC, setPlatform } from "../../test/platform";
+import { IPAD, IPHONE, MAC, setPlatform } from "../../test/platform";
+import { resetTauri, tauri } from "../../test/tauriMock";
 import { DEFAULT_STORE } from "../../theme/store";
 import { ThemeProvider } from "../../theme/ThemeContext";
 import { HOLIDAY_ATTRIBUTION } from "../common/About";
-import type { CloseReason } from "../common/dismiss";
+import { UNSAVED_TITLE, type CloseReason } from "../common/dismiss";
+import { CALENDAR_DRAFT } from "../calendar/CalendarDialog";
 import { toast } from "../common/Toast";
 import { refusal } from "../../actions/copy";
 import { DEFAULT_DEVICE, DEVICE_KEY } from "../device";
@@ -25,7 +28,7 @@ import { UiContext, useUi, type SettingsSection, type SyncPane, type UiState } f
 import { DISCARDED } from "../theme/ThemePanel";
 import type { SettingsFrame } from "./frame";
 import { SETTINGS_KEY } from "./lastSection";
-import { SETTINGS_TITLE, SettingsView, trashLocked } from "./Settings";
+import { SETTINGS_TITLE, SettingsView, THEME_DRAFT, trashLocked } from "./Settings";
 import type { PlanListing } from "../../store/registry";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -85,6 +88,7 @@ interface Opts {
   readOnly?: boolean;
   planLocked?: boolean;
   row?: string;
+  root?: boolean;
 }
 
 function UiHost(p: { seen: { current: UiState | null }; children: ReactNode }) {
@@ -98,6 +102,7 @@ function mount(o: Opts = {}) {
   const onClose = vi.fn<() => void>();
   const onSyncPane = vi.fn<(pane: SyncPane) => void>();
   const onTrashPlan = vi.fn<(id: string) => void>();
+  const onRoot = vi.fn<(root: boolean) => void>();
   const openChoice = vi.fn();
   const seen: { current: UiState | null } = { current: null };
   const closer = createRef<((r: CloseReason) => boolean) | null>();
@@ -120,7 +125,7 @@ function mount(o: Opts = {}) {
   onRowShown.mockImplementation(() => {
     row = null;
   });
-  const ui = (section: SettingsSection, session: PlanSession | null, pane: SyncPane | null, frameNow: SettingsFrame) => synced(
+  const ui = (section: SettingsSection, session: PlanSession | null, pane: SyncPane | null, frameNow: SettingsFrame, rootNow: boolean, roNow: boolean) => synced(
     <OpenChoice.Provider value={openChoice}>
       <UiHost seen={seen}>
         <ThemeProvider storage={window.localStorage} initial={{ store: DEFAULT_STORE, unreadable: null }}>
@@ -128,10 +133,12 @@ function mount(o: Opts = {}) {
             <SettingsView
               frame={frameNow}
               section={section}
+              root={rootNow}
+              onRoot={onRoot}
               row={row}
               onRowShown={onRowShown}
               session={session}
-              readOnly={o.readOnly ?? false}
+              readOnly={roNow}
               device="Rokas’s Mac"
               renameDevice={vi.fn()}
               backup={backup}
@@ -159,8 +166,10 @@ function mount(o: Opts = {}) {
   let session = o.session ?? o.t?.session ?? null;
   let pane: SyncPane | null = null;
   let frame = o.frame ?? "modal";
-  const again = (): void => view.rerender(ui(section, session, pane, frame));
-  const view = render(ui(section, session, pane, frame));
+  let root = o.root ?? false;
+  let ro = o.readOnly ?? false;
+  const again = (): void => view.rerender(ui(section, session, pane, frame, root, ro));
+  const view = render(ui(section, session, pane, frame, root, ro));
   onSection.mockImplementation((s) => {
     section = s;
     again();
@@ -169,9 +178,14 @@ function mount(o: Opts = {}) {
     pane = k;
     again();
   });
+  onRoot.mockImplementation((r) => {
+    root = r;
+    again();
+  });
   return {
     view,
     onSection,
+    onRoot,
     onRowShown,
     onClose,
     onSyncPane,
@@ -195,6 +209,14 @@ function mount(o: Opts = {}) {
     },
     reframe(f: SettingsFrame): void {
       frame = f;
+      again();
+    },
+    rooted(r: boolean): void {
+      root = r;
+      again();
+    },
+    lock(r: boolean): void {
+      ro = r;
       again();
     },
   };
@@ -222,6 +244,40 @@ const typeSearch = (root: HTMLElement, value: string): void => {
 const sectionEl = (root: HTMLElement, id: SettingsSection): HTMLElement => {
   const el = root.querySelector<HTMLElement>(`section.settings-section[data-section="${id}"]`);
   if (el === null) throw new Error(`no ${id} section`);
+  return el;
+};
+
+const rootList = (sheet: HTMLElement): HTMLElement => {
+  const el = sheet.querySelector<HTMLElement>("div.settings-root");
+  if (el === null) throw new Error("no Settings root");
+  return el;
+};
+
+const rootRow = (sheet: HTMLElement, id: SettingsSection): HTMLElement => {
+  const el = rootList(sheet).querySelector<HTMLElement>(`button.settings-root-row[data-section="${id}"]`);
+  if (el === null) throw new Error(`no ${id} root row`);
+  return el;
+};
+
+const pageEl = (sheet: HTMLElement, id: SettingsSection): HTMLElement => {
+  const el = sheet.querySelector<HTMLElement>(`section.settings-page[data-section="${id}"]`);
+  if (el === null) throw new Error(`no ${id} page`);
+  return el;
+};
+
+const shownPages = (sheet: HTMLElement): string[] => [...sheet.querySelectorAll<HTMLElement>("section.settings-page:not([hidden])")].map((s) => s.dataset["section"] ?? "");
+
+const barTitle = (sheet: HTMLElement): string | null => sheet.querySelector(".sheet-head .sheet-title")?.textContent ?? null;
+
+const back = (sheet: HTMLElement): HTMLElement => {
+  const el = sheet.querySelector<HTMLElement>(".sheet-head button.sheet-back");
+  if (el === null) throw new Error("no Back");
+  return el;
+};
+
+const sheetBody = (sheet: HTMLElement): HTMLElement => {
+  const el = sheet.querySelector<HTMLElement>(".sheet-body");
+  if (el === null) throw new Error("no sheet body");
   return el;
 };
 
@@ -747,16 +803,20 @@ describe("the plan group: Overview, Baselines, Danger zone", () => {
     await t.session.close();
   });
 
-  it("Workflow renders the same rows in the phone sheet", async () => {
+  it("Workflow renders its steps in the list form on its pushed page in the phone sheet, with Edit in the bar", async () => {
     const t = await testSession(MESA_SEED);
-    const m = mount({ frame: "sheet", t });
-    const group = m.view.getByRole("dialog", { name: "Settings" }).querySelector<HTMLElement>('section.settings-group[data-section="workflow"]');
-    if (group === null) throw new Error("no Workflow group");
-    expect([group.querySelector("h2")?.textContent, [...group.querySelectorAll<HTMLElement>("li.workflow-row")].map((r) => r.dataset["step"]), group.querySelector(".workflow-add")?.textContent]).toEqual([
-      "Workflow",
-      ["now", "next", "later", "done"],
-      "+ Add step",
-    ]);
+    const m = mount({ frame: "sheet", t, root: true });
+    const sheet = m.view.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(rootRow(sheet, "workflow"));
+    const page = pageEl(sheet, "workflow");
+    expect([
+      barTitle(sheet),
+      page.hidden,
+      [...page.querySelectorAll<HTMLElement>('ul.ios-list[data-list="workflow"] li.ios-row[data-step]')].map((r) => r.dataset["step"]),
+      page.querySelector("button.ios-add")?.textContent,
+      page.querySelectorAll("li.workflow-row").length,
+      sheet.querySelector(".sheet-head .sheet-actions button.sheet-edit")?.textContent,
+    ]).toEqual(["Workflow", false, ["now", "next", "later", "done"], "+Add step", 0, "Edit"]);
     await t.session.close();
   });
 
@@ -940,22 +1000,29 @@ describe("the plan group: Overview, Baselines, Danger zone", () => {
     await t.session.close();
   });
 
-  it("Defaults renders its rows and status line in the phone sheet, where Add people in Settings… scrolls to People", async () => {
+  it("Defaults renders its rows and status line on its page in the phone sheet, where Add people in Settings… pushes People on Add person", async () => {
     const t = await testSession(MESA_SEED);
-    const m = mount({ frame: "sheet", t });
+    const m = mount({ frame: "sheet", t, section: "defaults" });
     const sheet = m.view.getByRole("dialog", { name: "Settings" });
-    const group = sheet.querySelector<HTMLElement>('section.settings-group[data-section="defaults"]');
-    if (group === null) throw new Error("no Defaults group");
-    expect([group.querySelector("h2")?.textContent, [...group.querySelectorAll<HTMLElement>(".defaults-row")].map((r) => r.dataset["settingsRow"]), group.querySelectorAll('p.defaults-line[role="status"]').length]).toEqual([
+    const page = pageEl(sheet, "defaults");
+    expect([barTitle(sheet), [...page.querySelectorAll<HTMLElement>(".defaults-row")].map((r) => r.dataset["settingsRow"]), page.querySelectorAll('p.defaults-line[role="status"]').length]).toEqual([
       "Defaults",
       ["defaults.duration", "defaults.dated", "defaults.assignee", "defaults.group", "defaults.step"],
       1,
     ]);
     const scrolled = vi.mocked(Element.prototype.scrollIntoView);
     scrolled.mockClear();
-    fireEvent.click(within(group).getByRole("button", { name: "Default assignee: Nobody" }));
+    fireEvent.click(within(page).getByRole("button", { name: "Default assignee: Nobody" }));
     fireEvent.click(within(sheet).getByRole("menuitem", { name: "Add people in Settings…" }));
-    expect(scrolled.mock.contexts).toEqual([sheet.querySelector('section.settings-group[data-section="people"] h2')]);
+    const add = pageEl(sheet, "people").querySelector('[data-settings-row="people.add"]');
+    expect([m.onSection.mock.calls, barTitle(sheet), shownPages(sheet), scrolled.mock.contexts, document.activeElement?.textContent, back(sheet).getAttribute("aria-label")]).toEqual([
+      [["people"]],
+      "People",
+      ["people"],
+      [add],
+      "+Add person",
+      "Back to Settings",
+    ]);
     await t.session.close();
   });
 
@@ -1212,39 +1279,714 @@ describe("Working time", () => {
 });
 
 describe("Settings in the sheet frame", () => {
-  it("lists the plan sections after the plan's name", async () => {
+  const ASK = "Discard calendar changes?";
+  const sheetNow = (m: ReturnType<typeof mount>): HTMLElement => m.view.getByRole("dialog", { name: "Settings" });
+  const rowsIn = (sheet: HTMLElement, group: string): (string | undefined)[][] =>
+    [...rootList(sheet).querySelectorAll<HTMLElement>(`div.settings-root-group[data-group="${group}"] button.settings-root-row`)].map((b) => [
+      b.dataset["section"],
+      b.querySelector(".settings-root-name")?.textContent ?? undefined,
+      b.querySelector(".settings-chev")?.getAttribute("aria-hidden") ?? undefined,
+    ]);
+
+  it("opens on the root: an untitled App group, then the plan's group under the plan's name, with no search", async () => {
     const t = await testSession(MESA_SEED);
-    const m = mount({ frame: "sheet", t });
-    const sheet = m.view.getByRole("dialog", { name: "Settings" });
-    const list = sheet.querySelector(".settings-list");
-    if (list === null) throw new Error("no list");
-    const order = [...list.querySelectorAll<HTMLElement>("p.settings-list-plan, section.settings-group > h2")].map((el) => el.textContent);
-    expect(order).toEqual(["General", "Theme", "Sync", "Import & export", t.session.view().plan.name, "Overview", "People", "Workflow", "Working time", "Defaults", "Baselines", "Danger zone"]);
+    const m = mount({ frame: "sheet", t, root: true });
+    const sheet = sheetNow(m);
+    const groups = [...rootList(sheet).querySelectorAll<HTMLElement>("div.settings-root-group")];
+    expect([
+      sheet.classList.contains("sheet"),
+      barTitle(sheet),
+      sheet.querySelector(".sheet-back"),
+      rootList(sheet).hidden,
+      groups.map((g) => [g.dataset["group"], g.querySelector("h2.settings-root-title")?.textContent ?? null]),
+      within(sheet).getByRole("group", { name: "App" }) === groups[0],
+      within(sheet).getByRole("group", { name: t.session.view().plan.name }) === groups[1],
+      within(sheet).queryByRole("searchbox"),
+      sheet.querySelectorAll("section.settings-page").length,
+    ]).toEqual([
+      true,
+      "Settings",
+      null,
+      false,
+      [
+        ["app", null],
+        ["plan", t.session.view().plan.name],
+      ],
+      true,
+      true,
+      null,
+      0,
+    ]);
+    expect([rowsIn(sheet, "app"), rowsIn(sheet, "plan")]).toEqual([
+      [
+        ["general", "General", "true"],
+        ["theme", "Theme", "true"],
+        ["sync", "Sync", "true"],
+        ["files", "Import & export", "true"],
+      ],
+      [
+        ["overview", "Overview", "true"],
+        ["people", "People", "true"],
+        ["workflow", "Workflow", "true"],
+        ["working-time", "Working time", "true"],
+        ["defaults", "Defaults", "true"],
+        ["baselines", "Baselines", "true"],
+        ["danger", "Danger zone", "true"],
+      ],
+    ]);
     await t.session.close();
   });
 
-  it("is the Settings sheet listing every section as a group, headings in order, with no search", () => {
-    const m = mount({ frame: "sheet", updates: fakeUpdates() });
-    const sheet = m.view.getByRole("dialog", { name: "Settings" });
-    expect(sheet.classList.contains("sheet")).toBe(true);
-    expect(within(sheet).queryByRole("searchbox")).toBeNull();
-    expect(sheet.querySelector(".settings-list")).not.toBeNull();
-    expect([...sheet.querySelectorAll<HTMLElement>("section.settings-group")].map((s) => [s.dataset["section"], s.querySelector("h2.settings-group-title")?.textContent])).toEqual([
-      ["general", "General"],
-      ["theme", "Theme"],
-      ["sync", "Sync"],
-      ["files", "Import & export"],
+  it("has only the App group without a plan, and General shows the update line once pushed", () => {
+    const m = mount({ frame: "sheet", updates: fakeUpdates(), root: true });
+    const sheet = sheetNow(m);
+    expect([rootList(sheet).querySelectorAll("div.settings-root-group").length, sheet.querySelector(".settings-root-title"), rowsIn(sheet, "app").map((r) => r[0])]).toEqual([
+      1,
+      null,
+      ["general", "theme", "sync", "files"],
     ]);
-    expect(sheet.querySelector(".settings-list-plan")).toBeNull();
-    expect(within(sheet).getByText("WebBoard 9.9.9 is available")).toBeTruthy();
+    fireEvent.click(rootRow(sheet, "general"));
+    expect([barTitle(sheet), within(pageEl(sheet, "general")).getByText("WebBoard 9.9.9 is available") !== null]).toEqual(["General", true]);
   });
 
-  it("scrolls the asked section's heading into view on open", () => {
+  it("a row pushes its page with its title and Back; Back returns to the root where it was and focuses the row", () => {
+    const m = mount({ frame: "sheet", root: true });
+    const sheet = sheetNow(m);
+    sheetBody(sheet).scrollTop = 120;
+    fireEvent.click(rootRow(sheet, "sync"));
+    expect([m.onRoot.mock.calls, m.onSection.mock.calls, barTitle(sheet), sheet.getAttribute("aria-label"), rootList(sheet).hidden, shownPages(sheet), sheetBody(sheet).scrollTop, document.activeElement === back(sheet), back(sheet).getAttribute("aria-label"), back(sheet).textContent]).toEqual([
+      [[false]],
+      [["sync"]],
+      "Sync",
+      "Settings",
+      true,
+      ["sync"],
+      0,
+      true,
+      "Back to Settings",
+      "‹",
+    ]);
+    fireEvent.click(back(sheet));
+    expect([m.onRoot.mock.calls, barTitle(sheet), rootList(sheet).hidden, shownPages(sheet), pageEl(sheet, "sync").hidden, sheetBody(sheet).scrollTop, document.activeElement === rootRow(sheet, "sync"), sheet.querySelector(".sheet-back")]).toEqual([
+      [[false], [true]],
+      "Settings",
+      false,
+      [],
+      true,
+      120,
+      true,
+      null,
+    ]);
+    fireEvent.click(rootRow(sheet, "theme"));
+    expect([shownPages(sheet), [...sheet.querySelectorAll<HTMLElement>("section.settings-page")].map((s) => s.dataset["section"])]).toEqual([["theme"], ["theme", "sync"]]);
+  });
+
+  it("a directed section opens on its page", () => {
+    const m = mount({ frame: "sheet", section: "sync" });
+    const sheet = sheetNow(m);
+    expect([barTitle(sheet), back(sheet).getAttribute("aria-label"), rootList(sheet).hidden, shownPages(sheet), m.onRoot.mock.calls]).toEqual(["Sync", "Back to Settings", true, ["sync"], []]);
+  });
+
+  it("the root saves nothing; a push saves its section", () => {
+    const m = mount({ frame: "sheet", root: true, section: "sync" });
+    expect(window.localStorage.getItem(SETTINGS_KEY)).toBeNull();
+    fireEvent.click(rootRow(sheetNow(m), "theme"));
+    expect(window.localStorage.getItem(SETTINGS_KEY)).toBe(JSON.stringify({ v: 1, at: "theme" }));
+  });
+
+  it("a plan page without a plan shows General", () => {
+    const m = mount({ frame: "sheet", section: "people" });
+    const sheet = sheetNow(m);
+    expect([m.onSection.mock.lastCall, barTitle(sheet), shownPages(sheet)]).toEqual([["general"], "General", ["general"]]);
+  });
+
+  it("a plan change on a plan page shows General", async () => {
+    const a = await testSession(MESA_SEED);
+    const b = await testSession(MESA_SEED, { plan: "plan0000002" });
+    const m = mount({ frame: "sheet", session: a.session, section: "baselines" });
+    expect(barTitle(sheetNow(m))).toBe("Baselines");
+    m.plan(b.session);
+    expect([m.onSection.mock.lastCall, barTitle(sheetNow(m)), shownPages(sheetNow(m))]).toEqual([["general"], "General", ["general"]]);
+    await a.session.close();
+    await b.session.close();
+  });
+
+  it("a calendar draft still asks after Back", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ frame: "sheet", t, section: "working-time" });
+    const sheet = sheetNow(m);
+    fireEvent.click(within(within(pageEl(sheet, "working-time")).getByRole("group", { name: "Working days" })).getByRole("button", { name: "Sat" }));
+    fireEvent.click(back(sheet));
+    expect([rootList(sheet).hidden, pageEl(sheet, "working-time").hidden]).toEqual([false, true]);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+    expect([within(document.body).queryByRole("alertdialog", { name: ASK }) !== null, m.onClose.mock.calls.length]).toEqual([true, 0]);
+    await t.session.close();
+  });
+
+  it("a settingsRow jump from the root pushes the page, scrolls the row in and focuses it", async () => {
+    const t = await testSession(MESA_SEED);
     const scrolled = vi.mocked(Element.prototype.scrollIntoView);
     scrolled.mockClear();
-    const m = mount({ frame: "sheet", section: "sync" });
-    const heading = m.view.getByRole("dialog").querySelector('section.settings-group[data-section="sync"] h2');
-    expect(scrolled.mock.contexts).toEqual([heading]);
+    const m = mount({ frame: "sheet", t, root: true, row: "me" });
+    expect(m.onRoot.mock.calls).toEqual([[false]]);
+    m.rooted(false);
+    const sheet = sheetNow(m);
+    const row = pageEl(sheet, "general").querySelector('[data-settings-row="general.me"]');
+    expect([m.onRoot.mock.calls, barTitle(sheet), shownPages(sheet), scrolled.mock.contexts, document.activeElement?.matches('button.settings-pick[data-pick="me"]'), m.onRowShown.mock.calls.length]).toEqual([
+      [[false]],
+      "General",
+      ["general"],
+      [row],
+      true,
+      1,
+    ]);
+    await t.session.close();
+  });
+
+  it.each([
+    ["the root", "root"],
+    ["a section page", "page"],
+    ["a person page, from Back", "person"],
+    ["a person page, from the name field after the field's own Escape", "person-name"],
+    ["a step page", "step"],
+  ] as const)("Escape closes from %s", async (_where, at) => {
+    const t = await testSession(MESA_SEED);
+    act(() => {
+      t.session.apply({ t: "person", op: "add", name: "Mira Okafor", initials: "MO", colour: "violet", after: null });
+    });
+    const person = t.session.view().people.people[0].id;
+    const m = mount({ frame: "sheet", t, root: at === "root", section: at === "root" || at === "page" ? "theme" : at === "step" ? "workflow" : "people" });
+    const sheet = sheetNow(m);
+    const open = (sel: string): void => {
+      const el = sheet.querySelector<HTMLElement>(sel);
+      if (el === null) throw new Error(`no ${sel}`);
+      fireEvent.click(el);
+    };
+    if (at === "person" || at === "person-name") open(`li.ios-row[data-person="${person}"] button.ios-row-main`);
+    if (at === "step") open('li.ios-row[data-step="later"] button.ios-row-main');
+    const field = sheet.querySelector<HTMLElement>('section[data-detail="person"] input.people-name');
+    const target = at === "root" ? rootRow(sheet, "theme") : at === "person-name" ? field : back(sheet);
+    if (target === null) throw new Error("no name field");
+    act(() => {
+      target.focus();
+    });
+    fireEvent.keyDown(target, { key: "Escape" });
+    const reverted = m.onClose.mock.calls.length;
+    if (at === "person-name") fireEvent.keyDown(document.activeElement ?? sheet, { key: "Escape" });
+    expect(reverted).toBe(at === "person-name" ? 0 : 1);
+    expect([barTitle(sheet), m.onClose.mock.calls.length]).toEqual([at === "root" ? "Settings" : at === "page" ? "Theme" : at === "step" ? "Later" : "Mira Okafor", 1]);
+    await t.session.close();
+  });
+
+  it.each([
+    ["person", "people", 'li.ios-row[data-person] button.ios-row-main'],
+    ["step", "workflow", 'li.ios-row[data-step="later"] button.ios-row-main'],
+  ] as const)("a plan that closes under a %s page shows General", async (kind, section, row) => {
+    const t = await testSession(MESA_SEED);
+    act(() => {
+      t.session.apply({ t: "person", op: "add", name: "Mira Okafor", initials: "MO", colour: "violet", after: null });
+    });
+    const m = mount({ frame: "sheet", t, section });
+    const sheet = sheetNow(m);
+    const main = sheet.querySelector<HTMLElement>(row);
+    if (main === null) throw new Error("no row");
+    fireEvent.click(main);
+    expect(sheet.querySelector(`section.settings-page[data-detail="${kind}"]`)).not.toBeNull();
+    m.plan(null);
+    expect([barTitle(sheetNow(m)), sheetNow(m).querySelector("section.settings-page[data-detail]"), shownPages(sheetNow(m)), back(sheetNow(m)).getAttribute("aria-label"), m.onSection.mock.lastCall]).toEqual([
+      "General",
+      null,
+      ["general"],
+      "Back to Settings",
+      ["general"],
+    ]);
+    await t.session.close();
+  });
+
+  it("a section chosen in the modal opened on the root is the page a flip to the sheet shows", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ t, root: true, section: "general" });
+    fireEvent.click(within(nav(m.root())).getByRole("button", { name: "Workflow" }));
+    expect(m.onRoot.mock.calls).toEqual([[false]]);
+    m.reframe("sheet");
+    const sheet = sheetNow(m);
+    expect([barTitle(sheet), rootList(sheet).hidden, shownPages(sheet), back(sheet).getAttribute("aria-label")]).toEqual(["Workflow", true, ["workflow"], "Back to Settings"]);
+    await t.session.close();
+  });
+
+  it("a modal opened on the root that stays on its section keeps the root for a flip to the sheet", async () => {
+    const t = await testSession(MESA_SEED);
+    const m = mount({ t, root: true, section: "general" });
+    m.reframe("sheet");
+    expect([m.onRoot.mock.calls, barTitle(sheetNow(m)), rootList(sheetNow(m)).hidden]).toEqual([[], "Settings", false]);
+    await t.session.close();
+  });
+
+  it("a jump to a row with nothing enabled to focus focuses Back", async () => {
+    const t = await testSession(MESA_SEED);
+    expect(t.session.view().people.people).toEqual([]);
+    setPlatform(IPHONE);
+    const m = mount({ frame: "sheet", t, section: "people", row: "add", readOnly: true });
+    const sheet = sheetNow(m);
+    expect([barTitle(sheet), pageEl(sheet, "people").querySelector<HTMLButtonElement>("button.ios-add")?.disabled, document.activeElement === back(sheet), back(sheet).getAttribute("aria-label")]).toEqual([
+      "People",
+      true,
+      true,
+      "Back to Settings",
+    ]);
+    await t.session.close();
+  });
+
+  describe("People", () => {
+    const crew = async (): Promise<{ t: TestSession; ids: string[] }> => {
+      const t = await testSession(MESA_SEED);
+      act(() => {
+        t.session.apply({ t: "person", op: "add", name: "Mira Okafor", initials: "MO", colour: "violet", after: null });
+      });
+      act(() => {
+        t.session.apply({ t: "person", op: "add", name: "Ole Berg", initials: "OB", colour: "lime", after: t.session.view().people.people[0].id });
+      });
+      return { t, ids: t.session.view().people.people.map((p) => p.id) };
+    };
+    const edit = (sheet: HTMLElement): HTMLButtonElement => {
+      const el = sheet.querySelector<HTMLButtonElement>(".sheet-head .sheet-actions button.sheet-edit");
+      if (el === null) throw new Error("no Edit");
+      return el;
+    };
+    const personRow = (sheet: HTMLElement, id: string): HTMLElement => {
+      const el = pageEl(sheet, "people").querySelector<HTMLElement>(`li.ios-row[data-person="${id}"]`);
+      if (el === null) throw new Error(`no row for ${id}`);
+      return el;
+    };
+    const detail = (sheet: HTMLElement): HTMLElement | null => sheet.querySelector<HTMLElement>('section.settings-page[data-detail="person"]');
+
+    it("puts Edit in the bar of the People page only; Edit shows minus and grips, Done and Back end it", async () => {
+      const { t, ids } = await crew();
+      const m = mount({ frame: "sheet", t, section: "people" });
+      const sheet = sheetNow(m);
+      expect([edit(sheet).textContent, edit(sheet).getAttribute("aria-pressed"), edit(sheet).disabled, pageEl(sheet, "people").querySelectorAll("button.ios-minus").length]).toEqual(["Edit", null, false, 0]);
+      fireEvent.click(edit(sheet));
+      expect([edit(sheet).textContent, edit(sheet).getAttribute("aria-pressed"), pageEl(sheet, "people").querySelectorAll("button.ios-minus").length, pageEl(sheet, "people").querySelectorAll("button.ios-grip").length]).toEqual(["Done", null, ids.length, ids.length]);
+      fireEvent.click(edit(sheet));
+      expect([edit(sheet).textContent, pageEl(sheet, "people").querySelectorAll("button.ios-minus").length]).toEqual(["Edit", 0]);
+      fireEvent.click(edit(sheet));
+      fireEvent.click(back(sheet));
+      expect(sheet.querySelector(".sheet-edit")).toBeNull();
+      fireEvent.click(rootRow(sheet, "people"));
+      expect([edit(sheet).textContent, pageEl(sheet, "people").querySelectorAll("button.ios-minus").length]).toEqual(["Edit", 0]);
+      fireEvent.click(back(sheet));
+      fireEvent.click(rootRow(sheet, "overview"));
+      expect(sheet.querySelector(".sheet-edit")).toBeNull();
+      await t.session.close();
+    });
+
+    it("disables Edit and Add when the plan is read-only", async () => {
+      const { t } = await crew();
+      const m = mount({ frame: "sheet", t, section: "people", readOnly: true });
+      const sheet = sheetNow(m);
+      expect([edit(sheet).disabled, pageEl(sheet, "people").querySelector<HTMLButtonElement>("button.ios-add")?.disabled]).toEqual([true, true]);
+      await t.session.close();
+    });
+
+    it("a person row pushes the person page under the person's name; Back returns to People and focuses the row", async () => {
+      const { t, ids } = await crew();
+      const m = mount({ frame: "sheet", t, section: "people" });
+      const sheet = sheetNow(m);
+      sheetBody(sheet).scrollTop = 40;
+      const main = personRow(sheet, ids[1]).querySelector<HTMLElement>("button.ios-row-main");
+      if (main === null) throw new Error("no row main");
+      fireEvent.click(main);
+      const page = detail(sheet);
+      expect([
+        barTitle(sheet),
+        sheet.getAttribute("aria-label"),
+        back(sheet).getAttribute("aria-label"),
+        document.activeElement === back(sheet),
+        sheetBody(sheet).scrollTop,
+        page?.hidden,
+        page?.getAttribute("aria-label"),
+        pageEl(sheet, "people").hidden,
+        sheet.querySelector(".sheet-edit"),
+        page?.querySelector<HTMLInputElement>("input.people-name")?.value,
+      ]).toEqual(["Ole Berg", "Settings", "Back to People", true, 0, false, "Ole Berg", true, null, "Ole Berg"]);
+      fireEvent.click(back(sheet));
+      expect([barTitle(sheet), detail(sheet), pageEl(sheet, "people").hidden, sheetBody(sheet).scrollTop, document.activeElement === personRow(sheet, ids[1]).querySelector("button.ios-row-main"), back(sheet).getAttribute("aria-label"), m.onRoot.mock.calls]).toEqual([
+        "People",
+        null,
+        false,
+        40,
+        true,
+        "Back to Settings",
+        [],
+      ]);
+      await t.session.close();
+    });
+
+    it("Add person pushes the new person's page with Initials focused", async () => {
+      const { t } = await crew();
+      const m = mount({ frame: "sheet", t, section: "people" });
+      const sheet = sheetNow(m);
+      const add = pageEl(sheet, "people").querySelector<HTMLElement>("button.ios-add");
+      if (add === null) throw new Error("no Add");
+      fireEvent.click(add);
+      const draft = pageEl(sheet, "people").querySelector<HTMLInputElement>("li.ios-draft input.people-draft-name");
+      if (draft === null) throw new Error("no draft");
+      fireEvent.change(draft, { target: { value: "Dana Lee" } });
+      fireEvent.keyDown(draft, { key: "Enter" });
+      const initials = detail(sheet)?.querySelector<HTMLInputElement>("input.people-initials");
+      expect([barTitle(sheet), document.activeElement === initials, initials?.value, back(sheet).getAttribute("aria-label")]).toEqual(["Dana Lee", true, "DL", "Back to People"]);
+      await t.session.close();
+    });
+
+    it("Remove person on the person page pops back to People and focuses the next row", async () => {
+      const { t, ids } = await crew();
+      const m = mount({ frame: "sheet", t, section: "people" });
+      const sheet = sheetNow(m);
+      const main = personRow(sheet, ids[0]).querySelector<HTMLElement>("button.ios-row-main");
+      if (main === null) throw new Error("no row main");
+      fireEvent.click(main);
+      const danger = detail(sheet)?.querySelector<HTMLElement>("button.settings-detail-danger");
+      if (danger === undefined || danger === null) throw new Error("no Remove person");
+      fireEvent.click(danger);
+      fireEvent.click(within(within(document.body).getByRole("dialog", { name: "Remove person" })).getByRole("button", { name: "Remove" }));
+      expect([barTitle(sheet), detail(sheet), [...pageEl(sheet, "people").querySelectorAll<HTMLElement>("li.ios-row[data-person]")].map((r) => r.dataset["person"]), document.activeElement === personRow(sheet, ids[1]).querySelector("button.ios-row-main")]).toEqual([
+        "People",
+        null,
+        [ids[1]],
+        true,
+      ]);
+      await t.session.close();
+    });
+
+    it("a person removed elsewhere leaves a line on the page, titled Person; Back focuses Add person", async () => {
+      const { t, ids } = await crew();
+      const m = mount({ frame: "sheet", t, section: "people" });
+      const sheet = sheetNow(m);
+      const main = personRow(sheet, ids[0]).querySelector<HTMLElement>("button.ios-row-main");
+      if (main === null) throw new Error("no row main");
+      fireEvent.click(main);
+      act(() => {
+        t.session.apply({ t: "person", op: "remove", person: ids[0], to: null });
+      });
+      expect([barTitle(sheet), detail(sheet)?.querySelector("p.settings-line")?.textContent, back(sheet).getAttribute("aria-label")]).toEqual(["Person", "This person is no longer in this plan.", "Back to People"]);
+      fireEvent.click(back(sheet));
+      expect([barTitle(sheet), document.activeElement === pageEl(sheet, "people").querySelector("button.ios-add")]).toEqual(["People", true]);
+      await t.session.close();
+    });
+
+    it("on a read-only plan, Back from a person removed elsewhere focuses Back, since Add is disabled", async () => {
+      const { t, ids } = await crew();
+      const m = mount({ frame: "sheet", t, section: "people", readOnly: true });
+      const sheet = sheetNow(m);
+      const main = personRow(sheet, ids[0]).querySelector<HTMLElement>("button.ios-row-main");
+      if (main === null) throw new Error("no row main");
+      fireEvent.click(main);
+      act(() => {
+        t.session.apply({ t: "person", op: "remove", person: ids[0], to: null });
+      });
+      act(() => {
+        sheet.focus();
+      });
+      fireEvent.click(back(sheet));
+      expect([barTitle(sheet), document.activeElement === back(sheet), back(sheet).getAttribute("aria-label")]).toEqual(["People", true, "Back to Settings"]);
+      await t.session.close();
+    });
+
+    it("a plan that turns read-only ends Edit, which stays off when it turns writable again", async () => {
+      const { t } = await crew();
+      const m = mount({ frame: "sheet", t, section: "people" });
+      const sheet = sheetNow(m);
+      fireEvent.click(edit(sheet));
+      expect([edit(sheet).textContent, pageEl(sheet, "people").querySelectorAll("button.ios-minus").length]).toEqual(["Done", 2]);
+      m.lock(true);
+      expect([edit(sheet).textContent, edit(sheet).disabled]).toEqual(["Edit", true]);
+      m.lock(false);
+      expect([edit(sheet).textContent, edit(sheet).disabled, pageEl(sheet, "people").querySelectorAll("button.ios-minus").length, pageEl(sheet, "people").querySelectorAll("button.ios-grip").length]).toEqual([
+        "Edit",
+        false,
+        0,
+        0,
+      ]);
+      await t.session.close();
+    });
+  });
+
+  describe("Workflow", () => {
+    const edit = (sheet: HTMLElement): HTMLButtonElement => {
+      const el = sheet.querySelector<HTMLButtonElement>(".sheet-head .sheet-actions button.sheet-edit");
+      if (el === null) throw new Error("no Edit");
+      return el;
+    };
+    const stepRow = (sheet: HTMLElement, id: string): HTMLElement => {
+      const el = pageEl(sheet, "workflow").querySelector<HTMLElement>(`li.ios-row[data-step="${id}"]`);
+      if (el === null) throw new Error(`no row for ${id}`);
+      return el;
+    };
+    const openStep = (sheet: HTMLElement, id: string): void => {
+      const main = stepRow(sheet, id).querySelector<HTMLElement>("button.ios-row-main");
+      if (main === null) throw new Error("no row main");
+      fireEvent.click(main);
+    };
+    const detail = (sheet: HTMLElement): HTMLElement | null => sheet.querySelector<HTMLElement>('section.settings-page[data-detail="step"]');
+
+    it("puts Edit in the bar of the Workflow page; Edit shows minus and grips, Done and Back end it", async () => {
+      const t = await testSession(MESA_SEED);
+      const m = mount({ frame: "sheet", t, section: "workflow" });
+      const sheet = sheetNow(m);
+      const page = pageEl(sheet, "workflow");
+      expect([edit(sheet).textContent, edit(sheet).getAttribute("aria-pressed"), page.querySelectorAll("button.ios-minus").length]).toEqual(["Edit", null, 0]);
+      fireEvent.click(edit(sheet));
+      expect([edit(sheet).textContent, edit(sheet).getAttribute("aria-pressed"), page.querySelectorAll("button.ios-minus").length, page.querySelectorAll("button.ios-grip").length, page.querySelector("p.settings-foot")?.textContent]).toEqual([
+        "Done",
+        null,
+        4,
+        4,
+        "Drag a handle to reorder, tap the red minus to delete. Tap Done when finished.",
+      ]);
+      fireEvent.click(edit(sheet));
+      expect([edit(sheet).textContent, page.querySelectorAll("button.ios-minus").length]).toEqual(["Edit", 0]);
+      fireEvent.click(edit(sheet));
+      fireEvent.click(back(sheet));
+      fireEvent.click(rootRow(sheet, "workflow"));
+      expect([edit(sheet).textContent, page.querySelectorAll("button.ios-minus").length]).toEqual(["Edit", 0]);
+      await t.session.close();
+    });
+
+    it("disables Edit and Add when the plan is read-only", async () => {
+      const t = await testSession(MESA_SEED);
+      const m = mount({ frame: "sheet", t, section: "workflow", readOnly: true });
+      const sheet = sheetNow(m);
+      expect([edit(sheet).disabled, pageEl(sheet, "workflow").querySelector<HTMLButtonElement>("button.ios-add")?.disabled]).toEqual([true, true]);
+      await t.session.close();
+    });
+
+    it("a step row pushes the step page under the step's name; Back returns to Workflow and focuses the row", async () => {
+      const t = await testSession(MESA_SEED);
+      const m = mount({ frame: "sheet", t, section: "workflow" });
+      const sheet = sheetNow(m);
+      sheetBody(sheet).scrollTop = 30;
+      openStep(sheet, "later");
+      const page = detail(sheet);
+      expect([
+        barTitle(sheet),
+        sheet.getAttribute("aria-label"),
+        back(sheet).getAttribute("aria-label"),
+        document.activeElement === back(sheet),
+        sheetBody(sheet).scrollTop,
+        page?.hidden,
+        page?.getAttribute("aria-label"),
+        pageEl(sheet, "workflow").hidden,
+        sheet.querySelector(".sheet-edit"),
+        page?.querySelector<HTMLInputElement>("input.workflow-name")?.value,
+        page?.querySelector('button.switch[role="switch"]')?.getAttribute("aria-label"),
+      ]).toEqual(["Later", "Settings", "Back to Workflow", true, 0, false, "Later", true, null, "Later", "Later completes items"]);
+      fireEvent.click(back(sheet));
+      expect([barTitle(sheet), detail(sheet), pageEl(sheet, "workflow").hidden, sheetBody(sheet).scrollTop, document.activeElement === stepRow(sheet, "later").querySelector("button.ios-row-main"), back(sheet).getAttribute("aria-label"), m.onRoot.mock.calls]).toEqual([
+        "Workflow",
+        null,
+        false,
+        30,
+        true,
+        "Back to Settings",
+        [],
+      ]);
+      await t.session.close();
+    });
+
+    it("a rename on the step page retitles the bar", async () => {
+      const t = await testSession(MESA_SEED);
+      const m = mount({ frame: "sheet", t, section: "workflow" });
+      const sheet = sheetNow(m);
+      openStep(sheet, "next");
+      const name = detail(sheet)?.querySelector<HTMLInputElement>("input.workflow-name");
+      if (name === null || name === undefined) throw new Error("no name");
+      act(() => {
+        name.focus();
+      });
+      fireEvent.change(name, { target: { value: "Review" } });
+      fireEvent.keyDown(name, { key: "Enter" });
+      expect([barTitle(sheet), detail(sheet)?.getAttribute("aria-label")]).toEqual(["Review", "Review"]);
+      await t.session.close();
+    });
+
+    it("Add step pushes the new step's page with the name selected", async () => {
+      const t = await testSession(MESA_SEED);
+      const m = mount({ frame: "sheet", t, section: "workflow" });
+      const sheet = sheetNow(m);
+      const add = pageEl(sheet, "workflow").querySelector<HTMLElement>("button.ios-add");
+      if (add === null) throw new Error("no Add");
+      fireEvent.click(add);
+      const name = detail(sheet)?.querySelector<HTMLInputElement>("input.workflow-name");
+      expect([barTitle(sheet), document.activeElement === name, name?.value, name?.selectionStart, name?.selectionEnd, back(sheet).getAttribute("aria-label")]).toEqual([
+        "New step",
+        true,
+        "New step",
+        0,
+        8,
+        "Back to Workflow",
+      ]);
+      await t.session.close();
+    });
+
+    it("a step deleted from its page leaves the line, titled Step; Back focuses Add step", async () => {
+      const t = await testSession(MESA_SEED);
+      act(() => {
+        t.session.apply({ t: "step", op: "add", name: "Spare", colour: "sky", after: "done" });
+      });
+      const id = stepsOf(t.session.view().plan).find((s) => s.name === "Spare")?.id;
+      if (id === undefined) throw new Error("no Spare");
+      const m = mount({ frame: "sheet", t, section: "workflow" });
+      const sheet = sheetNow(m);
+      openStep(sheet, id);
+      const danger = detail(sheet)?.querySelector<HTMLElement>("button.settings-detail-danger");
+      if (danger === undefined || danger === null) throw new Error("no Delete step");
+      fireEvent.click(danger);
+      fireEvent.click(within(within(document.body).getByRole("dialog", { name: "Delete step" })).getByRole("button", { name: "Delete" }));
+      expect([barTitle(sheet), detail(sheet)?.querySelector("p.settings-line")?.textContent, back(sheet).getAttribute("aria-label")]).toEqual(["Step", "This step is no longer in this plan.", "Back to Workflow"]);
+      fireEvent.click(back(sheet));
+      expect([barTitle(sheet), document.activeElement === pageEl(sheet, "workflow").querySelector("button.ios-add")]).toEqual(["Workflow", true]);
+      await t.session.close();
+    });
+
+    it("Back from a step page then Back again returns to the root at the Workflow row", async () => {
+      const t = await testSession(MESA_SEED);
+      const m = mount({ frame: "sheet", t, section: "workflow" });
+      const sheet = sheetNow(m);
+      openStep(sheet, "now");
+      fireEvent.click(back(sheet));
+      fireEvent.click(back(sheet));
+      expect([barTitle(sheet), document.activeElement === rootRow(sheet, "workflow"), sheet.querySelector('section.settings-page[data-detail]')]).toEqual(["Settings", true, null]);
+      await t.session.close();
+    });
+  });
+
+  describe("an unsaved theme draft on iOS", () => {
+    const SHEET_HEIGHT = 600;
+    const settle = async (): Promise<void> => {
+      for (let i = 0; i < 5; i += 1) {
+        await act(async () => {
+          await Promise.resolve();
+        });
+      }
+    };
+    const draftOn = (sheet: HTMLElement): void => {
+      const field = within(pageEl(sheet, "theme")).getByRole("textbox", { name: "Background hex" });
+      fireEvent.change(field, { target: { value: "#222222" } });
+      fireEvent.blur(field);
+    };
+    const closeX = (sheet: HTMLElement): void => {
+      fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+    };
+    const swipeDown = (sheet: HTMLElement): void => {
+      const head = sheet.querySelector<HTMLElement>(".sheet-head");
+      if (head === null) throw new Error("no sheet head");
+      vi.spyOn(sheet, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 200, 390, SHEET_HEIGHT));
+      const to = SHEET_HEIGHT * 0.25 + 10;
+      fireEvent.pointerDown(head, { button: 0, pointerId: 7, pointerType: "touch", clientX: 100, clientY: 220 });
+      fireEvent.pointerMove(head, { pointerId: 7, pointerType: "touch", clientX: 100, clientY: 220 + to / 2 });
+      fireEvent.pointerMove(head, { pointerId: 7, pointerType: "touch", clientX: 100, clientY: 220 + to });
+      fireEvent.pointerUp(head, { pointerId: 7, pointerType: "touch", clientX: 100, clientY: 220 + to });
+    };
+    const asks = (): unknown[] => tauri.calls.filter((c) => c.cmd === "alert_ask").map((c) => c.args);
+    const theAsk = (guard: { title: string; message: string }): unknown => ({ ask: { title: guard.title, message: guard.message, confirm: { label: "Discard", destructive: true }, cancel: "Keep editing" } });
+
+    beforeEach(() => {
+      setPlatform(IPHONE);
+    });
+
+    afterEach(() => {
+      resetTauri({});
+      vi.restoreAllMocks();
+    });
+
+    it("names the theme draft", () => {
+      expect(THEME_DRAFT).toEqual({ title: "Discard theme changes?", message: "Your colour changes are not saved yet." });
+    });
+
+    it.each([
+      ["the X", closeX],
+      ["a swipe down", swipeDown],
+    ])("%s asks UIKit with the theme draft; Keep editing keeps the page and the draft", async (_how, close) => {
+      resetTauri({ alert_ask: () => "cancel" });
+      const m = mount({ frame: "sheet", section: "theme" });
+      const sheet = sheetNow(m);
+      draftOn(sheet);
+      close(sheet);
+      await settle();
+      expect([asks(), m.onClose.mock.calls.length, barTitle(sheet), shownPages(sheet), voidNow(), vi.mocked(toast).mock.calls, within(document.body).queryByRole("alertdialog")]).toEqual([
+        [theAsk(THEME_DRAFT)],
+        0,
+        "Theme",
+        ["theme"],
+        "#222222",
+        [],
+        null,
+      ]);
+    });
+
+    it.each([
+      ["the X", closeX],
+      ["a swipe down", swipeDown],
+    ])("%s with Discard closes and drops the draft without the toast", async (_how, close) => {
+      resetTauri({ alert_ask: () => "confirm" });
+      const m = mount({ frame: "sheet", section: "theme" });
+      const sheet = sheetNow(m);
+      draftOn(sheet);
+      close(sheet);
+      await settle();
+      expect([asks(), m.onClose.mock.calls.length, vi.mocked(toast).mock.calls, voidNow()]).toEqual([[theAsk(THEME_DRAFT)], 1, [], CYBERDECK_VOID]);
+    });
+
+    it("closes at once without a draft, asking nothing", async () => {
+      resetTauri({ alert_ask: () => "confirm" });
+      const m = mount({ frame: "sheet", section: "theme" });
+      closeX(sheetNow(m));
+      await settle();
+      expect([asks(), m.onClose.mock.calls.length, vi.mocked(toast).mock.calls]).toEqual([[], 1, []]);
+    });
+
+    it("toasts a failed ask and keeps the page and the draft", async () => {
+      resetTauri({
+        alert_ask: () => {
+          throw { code: "alert.busy", message: "The alert cannot be shown: something else is already presented over the window." };
+        },
+      });
+      const m = mount({ frame: "sheet", section: "theme" });
+      const sheet = sheetNow(m);
+      draftOn(sheet);
+      closeX(sheet);
+      await settle();
+      expect([m.onClose.mock.calls.length, vi.mocked(toast).mock.calls.map((c) => [c[0], c[1]]), shownPages(sheet), voidNow()]).toEqual([
+        0,
+        [["The alert cannot be shown: something else is already presented over the window.", "bad"]],
+        ["theme"],
+        "#222222",
+      ]);
+    });
+
+    it("a theme draft and a calendar draft ask once, naming both", async () => {
+      resetTauri({ alert_ask: () => "cancel" });
+      const t = await testSession(MESA_SEED);
+      const m = mount({ frame: "sheet", t, section: "working-time" });
+      const sheet = sheetNow(m);
+      fireEvent.click(within(within(pageEl(sheet, "working-time")).getByRole("group", { name: "Working days" })).getByRole("button", { name: "Sat" }));
+      fireEvent.click(back(sheet));
+      fireEvent.click(rootRow(sheet, "theme"));
+      draftOn(sheet);
+      closeX(sheet);
+      await settle();
+      expect([asks(), m.onClose.mock.calls.length]).toEqual([[theAsk({ title: UNSAVED_TITLE, message: `${THEME_DRAFT.message} ${CALENDAR_DRAFT.message}` })], 0]);
+      await t.session.close();
+    });
+
+    it("a phone-sized Mac window keeps the inline path and the toast", () => {
+      setPlatform(MAC);
+      const m = mount({ frame: "sheet", section: "theme" });
+      const sheet = sheetNow(m);
+      draftOn(sheet);
+      closeX(sheet);
+      expect([asks(), m.onClose.mock.calls.length, vi.mocked(toast).mock.calls]).toEqual([[], 1, [[DISCARDED]]]);
+    });
   });
 
   it("discards a theme draft with the toast when the sheet closes", () => {

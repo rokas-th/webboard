@@ -386,6 +386,8 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
           <Settings
             frame="sheet"
             section={ui.settings}
+            root={ui.settingsRoot}
+            onRoot={(r) => setUi({ settingsRoot: r })}
             row={ui.settingsRow}
             onRowShown={() => setUi({ settingsRow: null })}
             session={session}
@@ -396,7 +398,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
             files={files}
             onSection={(s) => setUi({ settings: s })}
             syncPane={ui.syncPane}
-            onClose={() => setUi({ settings: null, settingsRow: null, syncPane: null })}
+            onClose={() => setUi({ settings: null, settingsRow: null, settingsRoot: false, syncPane: null })}
             onSyncPane={(pane) => setUi({ syncPane: pane })}
             onTrashPlan={trash}
           />

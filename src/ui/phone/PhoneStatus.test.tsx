@@ -593,7 +593,7 @@ describe("PhoneStatus lines (Step 1)", () => {
     fireEvent.click(within(lineOf(NO_REGION)).getByRole("button", { name: "Choose region" }));
     expect(screen.getAllByRole("dialog").map((d) => d.getAttribute("aria-label"))).toEqual(["Settings"]);
     expect([lastUi().settings, lastUi().dialog]).toEqual(["working-time", null]);
-    expect(screen.getByRole("dialog", { name: "Settings" }).querySelector('section.settings-group[data-section="working-time"] .cal-body')).not.toBeNull();
+    expect(screen.getByRole("dialog", { name: "Settings" }).querySelector('section.settings-page[data-section="working-time"]:not([hidden]) .cal-body')).not.toBeNull();
   });
 
   const withNotices = async (notices: HolidayNotice[]) => {
