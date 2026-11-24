@@ -8,7 +8,7 @@ import { resetTauri, tauri } from "../../test/tauriMock";
 import { TextField } from "../panel/TextField";
 import { Dialog } from "./Dialog";
 import { useCloseGuard } from "./dismiss";
-import { Sheet, type SheetDetent } from "./Sheet";
+import { Sheet, useSheetOpen, type SheetDetent } from "./Sheet";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
 
@@ -728,5 +728,54 @@ describe("a swipe down from the sheet head on iOS", () => {
       await Promise.resolve();
     });
     expect([tauri.calls.map((c) => c.cmd), onClose.mock.calls.length, screen.queryByRole("dialog") !== null, dialog().style.transform]).toEqual([["alert_ask"], 0, true, ""]);
+  });
+});
+
+describe("useSheetOpen", () => {
+  it("is true while one sheet is open and false after it closes, counting two sheets", () => {
+    const seen: boolean[] = [];
+    function Watch() {
+      seen.push(useSheetOpen());
+      return null;
+    }
+    function Two(p: { a: boolean; b: boolean }) {
+      return (
+        <>
+          <Watch />
+          <Sheet open={p.a} title="A" onClose={() => undefined}>
+            <p>A</p>
+          </Sheet>
+          <Sheet open={p.b} title="B" onClose={() => undefined}>
+            <p>B</p>
+          </Sheet>
+        </>
+      );
+    }
+    const { rerender } = render(<Two a={false} b={false} />);
+    expect(seen[seen.length - 1]).toBe(false);
+    rerender(<Two a b={false} />);
+    expect(seen[seen.length - 1]).toBe(true);
+    rerender(<Two a b />);
+    rerender(<Two a={false} b />);
+    expect(seen[seen.length - 1]).toBe(true);
+    rerender(<Two a={false} b={false} />);
+    expect(seen[seen.length - 1]).toBe(false);
+  });
+
+  it("is false again after an open sheet unmounts", () => {
+    const seen: boolean[] = [];
+    function Watch() {
+      seen.push(useSheetOpen());
+      return null;
+    }
+    const sheet = render(
+      <Sheet open title="A" onClose={() => undefined}>
+        <p>A</p>
+      </Sheet>,
+    );
+    render(<Watch />);
+    expect(seen[seen.length - 1]).toBe(true);
+    sheet.unmount();
+    expect(seen[seen.length - 1]).toBe(false);
   });
 });

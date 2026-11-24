@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { failure, keyData, probeAlert, probeAppearance, probeHaptic, probeHolidays, probeLine, probeMenu, probeOpen, probePaths, probeSave, sendLine, windowData, type ProbeData, type ProbeEntry } from "./probes";
+import { failure, keyData, probeAlert, probeAppearance, probeHaptic, probeHolidays, probeLine, probeMenu, probeOpen, probePaths, probeSave, probeTabBar, sendLine, windowData, type ProbeData, type ProbeEntry } from "./probes";
 import "./probe.css";
 import { readPlatform } from "../platform";
 
@@ -166,9 +166,9 @@ export default function ProbeApp() {
     [log, show],
   );
 
-  const runMenu = useCallback(
-    (): Promise<void> =>
-      probeMenu(say)
+  const runSaying = useCallback(
+    (probe: (say: (line: string) => void) => Promise<ProbeEntry | null>): Promise<void> =>
+      probe(say)
         .then((entry) => {
           if (entry !== null) log(...entry);
         })
@@ -189,10 +189,11 @@ export default function ProbeApp() {
     if (readPlatform(window).os === "ios") {
       void run(probeAppearance)
         .then(() => run(probeHaptic))
-        .then(runMenu)
+        .then(() => runSaying(probeTabBar))
+        .then(() => runSaying(probeMenu))
         .then(() => run(probeAlert));
     }
-  }, [log, run, runMenu]);
+  }, [log, run, runSaying]);
 
   useEffect(() => {
     const insetEl = insetRef.current;

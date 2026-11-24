@@ -1,8 +1,10 @@
+import { readPlatform } from "../platform";
 import { askNative, type NativeAsk } from "../services/alert";
 import { setNativeScheme } from "../services/appearance";
 import { sendHaptic } from "../services/haptics";
 import { AppError, call, callBytes, callName } from "../services/ipc";
 import { dismissNativeMenu, showNativeMenu, type NativeMenuAnchor, type NativeMenuSection } from "../services/nativeMenu";
+import { installTabBar, listened, parseFault, parseGeometry, parsePick, setTabBar, usesNativeTabBar, type TabBarState } from "../services/tabBar";
 import { unframe } from "../store/file";
 
 export type ProbeData = Record<string, unknown>;
@@ -144,6 +146,49 @@ export async function probeHaptic(): Promise<ProbeEntry> {
     return ["haptic", { sent: "selection" }];
   } catch (e) {
     return ["haptic", failure(e)];
+  }
+}
+
+export const PROBE_TABBAR: TabBarState = { selected: "timeline", hidden: true, tint: "#24E0FF" };
+
+const sayingFailure =
+  (say: (line: string) => void, read: (payload: unknown) => ProbeData, name: string) =>
+  (payload: unknown): void => {
+    try {
+      say(probeLine(name, read(payload)));
+    } catch (e) {
+      say(probeLine("tabbar", failure(e)));
+    }
+  };
+
+export async function probeTabBar(say: (line: string) => void): Promise<ProbeEntry | null> {
+  try {
+    if (!usesNativeTabBar()) {
+      say(probeLine("tabbar skipped", { idiom: readPlatform(window).idiom }));
+      return null;
+    }
+    await Promise.all([
+      listened("tabbar-geometry", sayingFailure(say, (p) => ({ height: parseGeometry(p) }), "tabbar geometry")),
+      listened("tabbar-picked", sayingFailure(say, (p) => ({ ...parsePick(p) }), "tabbar picked")),
+      listened(
+        "tabbar-fault",
+        sayingFailure(
+          say,
+          (p) => {
+            const fault = parseFault(p);
+            return { code: fault.code, message: fault.message };
+          },
+          "tabbar fault",
+        ),
+      ),
+    ]);
+    say(probeLine("tabbar installed", { hidden: PROBE_TABBAR.hidden, height: await installTabBar(PROBE_TABBAR) }));
+    const shown: TabBarState = { ...PROBE_TABBAR, hidden: false };
+    await setTabBar(shown);
+    say(probeLine("tabbar shown", { hidden: shown.hidden }));
+    return null;
+  } catch (e) {
+    return ["tabbar", failure(e)];
   }
 }
 

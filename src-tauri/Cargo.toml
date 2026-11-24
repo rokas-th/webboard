@@ -41,7 +41,7 @@ objc2-web-kit = { version = "0.3", default-features = false, features = ["std", 
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"
-objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIDevice", "UIAlertController", "UIResponder", "UIViewController", "UIInterface", "UIView", "UIWindow", "UIFeedbackGenerator", "UIImpactFeedbackGenerator", "UINotificationFeedbackGenerator", "UISelectionFeedbackGenerator", "block2", "objc2-core-foundation", "UIControl", "UIButton", "UIMenu", "UIMenuElement", "UIAction", "UIImage", "UIContextMenuInteraction", "UIContextMenuConfiguration"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIDevice", "UIAlertController", "UIResponder", "UIViewController", "UIInterface", "UIView", "UIWindow", "UIFeedbackGenerator", "UIImpactFeedbackGenerator", "UINotificationFeedbackGenerator", "UISelectionFeedbackGenerator", "block2", "objc2-core-foundation", "UIControl", "UIButton", "UIMenu", "UIMenuElement", "UIAction", "UIImage", "UIContextMenuInteraction", "UIContextMenuConfiguration", "UITabBarController", "UITabBar", "UITabBarItem", "UIBarItem", "UIColor", "UIOrientation"] }
 block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }

@@ -7,6 +7,7 @@ export function orderKey(n: number): string;
 export const LONG_NAMES: readonly string[];
 export const CONVERTED_FILE: string;
 export const OUT_OF_RANGE: { code: string; message: string };
+export const TABBAR_NO_IMAGE: { code: string; message: string };
 export const UNREADABLE_ID: string;
 export const UNREADABLE_LINE: string;
 export const UPDATE_VERSION: string;

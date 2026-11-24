@@ -85,12 +85,18 @@ const IPAD_TIERS = [padWindow(560, 1000), padWindow(MEDIUM_MIN - 1, 1000), padWi
 const VIEWPORTS = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PHONE, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...PHONE_LANDSCAPE, ...IPAD_WINDOWS, ...IPAD_TIERS, ...IPAD_OWNER, ...SHEET_DESK];
 const TOOLBAR = [...DESKTOP, ...BREAK_EDGE, ...ABOVE_BREAK, ...COMPACT_DESK, ...PORTRAIT, ...LANDSCAPE, ...NARROW, ...IPAD_11, ...IPAD_WINDOWS, ...IPAD_TIERS, ...IPAD_OWNER, ...SHEET_DESK];
 const LOAD_MS = 2000;
+const PHONE_TABS = [
+  { id: "timeline", title: "Timeline", image: "calendar.day.timeline.left" },
+  { id: "board", title: "Board", image: "rectangle.split.3x1" },
+  { id: "list", title: "List", image: "list.bullet" },
+];
 
 const nameOf = (v) => v.name ?? `${v.size[0]}x${v.size[1]}`;
 const CONTROL = ":is(button, a[href], select, summary)";
 export const CHROME = Object.freeze({
   toolbar: [`.toolbar ${CONTROL}:not(.overlay *)`],
-  phoneBars: [`.phone-head ${CONTROL}:not(.overlay *)`, `.phone-views ${CONTROL}`],
+  phoneBars: [`.phone-head ${CONTROL}:not(.overlay *)`],
+  phoneViews: [`.phone-views ${CONTROL}`],
   phoneStatus: [`.phone-status ${CONTROL}`],
   planList: [`.sidebar ${CONTROL}`],
   sheetHead: [`.sheet-head ${CONTROL}`],
@@ -209,6 +215,13 @@ const asked = (titles) => ({ nativeMenu: titles });
 const askedExactly = (byWidth) => ({ nativeMenu: [], byWidth });
 const chooseNative = (title) => ({ choose: title });
 const alerted = (asks) => ({ alerted: asks });
+const THEME_CYAN = "#24E0FF";
+const tabBar = (state, install = null) => ({ tabBar: { selected: state.selected, hidden: state.hidden, tint: THEME_CYAN, install } });
+const pickTab = (id, again = false) => ({ pickTab: [id, again] });
+const barGeometry = (h) => ({ barGeometry: h });
+const insetBy = (h) => ({ insetBy: h });
+const placed = (view) => ({ placed: view });
+const scrolledTo = (selector, where) => ({ scrolledTo: [selector, where] });
 
 const VIEWS = [
   ["timeline-w", { view: "timeline", zoom: "W" }, ".tl-row .name"],
@@ -2217,7 +2230,9 @@ function states() {
     place: phoneBoardPlace,
     sizes: "phone",
     actions: [
-      expect('.phone-views [role="tab"][aria-selected="true"]', "Board"),
+      count(".phone-views", 0),
+      tabBar({ selected: "board", hidden: false }),
+      count('.phone-main[role="region"][aria-label="Board"]', 1),
       count(".board-pages > .board-page", 4),
       count(".step-bar > .step-tab", 4),
       width(".board-pages", 390, 390),
@@ -2309,7 +2324,8 @@ function states() {
     sizes: "phone",
     actions: [
       fill(".phone-list .plist-top input", "dome"),
-      click('.phone-views [role="tab"]', "Board"),
+      pickTab("board"),
+      tabBar({ selected: "board", hidden: false }),
       expect(".phone-board .board-line .filter-chip .chip-text", "Filtered: dome"),
       height(PB_CHIP_X, 44, 60),
       width(PB_CHIP_X, 44, 60),
@@ -2391,6 +2407,77 @@ function states() {
     sizes: "ipad-11-landscape",
     panes: OUTLINE_CLOSED,
     actions: [...fullShell, click('.plan-head button[aria-label="Plan menu"]'), asked(PLAN_ROWS)],
+  });
+  const TABBAR_FAILED = "The tab bar could not be installed: The system image calendar.day.timeline.left does not exist. The views stay at the bottom of the screen.";
+  add("phone-tabbar/installed", "mesa-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone-tabbar",
+    actions: [expect(".phone-board .step-bar .step-tab"), count(".phone-views", 0), count('.phone-main[role="region"][aria-label="Board"]', 1), insetBy(83), tabBar({ selected: "board", hidden: false }, { selected: "board", hidden: true, tint: THEME_CYAN })],
+  });
+  add("phone-tabbar/pick", "mesa-ios-phone", {
+    place: phoneBoardPlace,
+    sizes: "phone-tabbar",
+    actions: [
+      pickTab("list"),
+      expect(".phone-list .prow .prow-name"),
+      count('.phone-main[aria-label="List"]', 1),
+      placed("list"),
+      tabBar({ selected: "list", hidden: false }),
+      pickTab("timeline"),
+      expect(".phone-main .tl-canvas"),
+      count('.phone-main[aria-label="Timeline"]', 1),
+      placed("timeline"),
+      tabBar({ selected: "timeline", hidden: false }),
+    ],
+  });
+  add("phone-tabbar/again", "mesa-ios-phone", {
+    place: listPlace,
+    sizes: "phone-tabbar",
+    actions: [
+      expect(".phone-list .prow .prow-name"),
+      reveal(".phone-list .psec:last-of-type .prow:last-of-type"),
+      scrolledTo(".phone-main", "down"),
+      pickTab("list", true),
+      scrolledTo(".phone-main", "top"),
+      count('.phone-main[aria-label="List"]', 1),
+      tabBar({ selected: "list", hidden: false }),
+    ],
+  });
+  add("phone-tabbar/sheet", "mesa-ios-phone", {
+    place: listPlace,
+    sizes: "phone-tabbar",
+    actions: [
+      ...phoneItemSheet,
+      tabBar({ selected: "list", hidden: true }),
+      count('html[data-tabbar="covered"]', 1),
+      insetBy(83),
+      style(".toasts", "bottom", "26px"),
+      click(".sheet .sheet-close"),
+      count('.sheet[role="dialog"]', 0),
+      count('html[data-tabbar="bar"]', 1),
+      style(".toasts", "bottom", "109px"),
+      insetBy(83),
+      tabBar({ selected: "list", hidden: false }),
+    ],
+  });
+  add("phone-tabbar/landscape", "mesa-ios-phone", {
+    place: listPlace,
+    sizes: "phone-tabbar",
+    actions: [expect(".phone-list .prow .prow-name"), insetBy(83), barGeometry(64), insetBy(64), style(".toasts", "bottom", "90px"), tabBar({ selected: "list", hidden: false })],
+  });
+  add("phone-tabbar/failed", "mesa-tabbar-failed-ios-phone", {
+    place: listPlace,
+    sizes: "phone-tabbar",
+    actions: [
+      expect('.phone-views [role="tab"][aria-selected="true"]', "List"),
+      count('.phone-main[role="tabpanel"]', 1),
+      count("html[data-tabbar]", 0),
+      count(".toasts .toast-bad", 1),
+      expect('.toast-bad [role="alert"]', TABBAR_FAILED),
+      click('.phone-views [role="tab"]', "Board"),
+      expect('.phone-views [role="tab"][aria-selected="true"]', "Board"),
+      hitChrome("phoneBars", "phoneViews"),
+    ],
   });
   add("ios44/phone-landscape/plan", "mesa-ios-phone", { sizes: "phone-landscape", actions: [expect(".phone-head button", "Plans"), hitChrome("phoneBars")] });
   add("ios44/phone/status-strip", "phone-status-ios", { sizes: "phone", actions: [expect(".phone-status .status-strip .status-text", STATUS_FIRST), hitChrome("phoneBars", "phoneStatus")] });
@@ -2967,8 +3054,9 @@ function states() {
     place: listPlace,
     sizes: "phone",
     actions: [
-      expect('.phone-views [role="tab"][aria-selected="true"]', "List"),
-      click('.phone-views [role="tab"]', "Timeline"),
+      tabBar({ selected: "list", hidden: false }),
+      pickTab("timeline"),
+      tabBar({ selected: "timeline", hidden: false }),
       expect(".tl-canvas"),
       width(".tl-grid", 132, 132),
       width(".tl-corner", 132, 132),
@@ -3040,7 +3128,7 @@ function states() {
     if (names.has(s.name)) throw new Error(`layout-probe: two states are named ${s.name}`);
     names.add(s.name);
     const last = s.actions[s.actions.length - 1];
-    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.unclipped === undefined && last.noOverhang === undefined && last.within === undefined && last.fitLabels === undefined && last.weekStart === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.centredAcross === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.alerted === undefined && last.aligned === undefined && last.paged === undefined)) {
+    if (last === undefined || (last.expect === undefined && last.count === undefined && last.loaded === undefined && last.shown === undefined && last.width === undefined && last.height === undefined && last.style === undefined && last.valued === undefined && last.ellipsed === undefined && last.unclipped === undefined && last.noOverhang === undefined && last.within === undefined && last.fitLabels === undefined && last.weekStart === undefined && last.monthCut === undefined && last.centred === undefined && last.nearCentre === undefined && last.edgeAt === undefined && last.oneLine === undefined && last.spare === undefined && last.hit44 === undefined && last.fontMin === undefined && last.kept === undefined && last.meets === undefined && last.centredIn === undefined && last.centredAcross === undefined && last.corner === undefined && last.inWindow === undefined && last.uncovered === undefined && last.nativeMenu === undefined && last.alerted === undefined && last.aligned === undefined && last.paged === undefined && last.tabBar === undefined && last.insetBy === undefined && last.placed === undefined && last.scrolledTo === undefined)) {
       throw new Error(`layout-probe: state ${s.name} does not end with an expect`);
     }
   });
@@ -3073,6 +3161,7 @@ const SIZES = {
   "ipad-11-portrait": namesOf([IPAD_11[0]]),
   "ipad-11-landscape": namesOf([IPAD_11[1]]),
   "phone-landscape": namesOf(PHONE_LANDSCAPE),
+  "phone-tabbar": namesOf([...PHONE, ...PHONE_LANDSCAPE]),
   "ipad-699": namesOf([IPAD_WINDOWS[1]]),
   "ipad-1179": namesOf([IPAD_WINDOWS[2]]),
   "ipad-overlay": namesOf([IPAD_WINDOWS[0], IPAD_11[0], IPAD_WINDOWS[2], IPAD_OWNER[0]]),
@@ -3129,6 +3218,7 @@ const SHIM = String.raw`
   window.__PROBE_TICKETS__ = {};
   window.__PROBE_MENUS__ = [];
   window.__PROBE_ALERTS__ = [];
+  window.__PROBE_TABBAR__ = [];
   window.__PROBE_LISTENERS__ = {};
   var RealDate = Date;
   var pin = new RealDate(2026, 10, 9, 9, 0, 0, 0).getTime();
@@ -3172,6 +3262,7 @@ const SHIM = String.raw`
     }
     if (cmd === "menu_show") window.__PROBE_MENUS__.push(JSON.parse(JSON.stringify(args.menu)));
     if (cmd === "alert_ask") window.__PROBE_ALERTS__.push(JSON.parse(JSON.stringify(args.ask)));
+    if (cmd === "tabbar_install" || cmd === "tabbar_set") window.__PROBE_TABBAR__.push({ cmd: cmd, args: JSON.parse(JSON.stringify(args)) });
     if (cmd === "sync_ticket") {
       var ticketDoc = String(args ? args.doc : undefined);
       var asked = (window.__PROBE_TICKETS__[ticketDoc] || 0) + 1;
@@ -4187,6 +4278,71 @@ window.__probeAct = function (a) {
     }
     return { ok: true };
   }
+  function emitTo(name, payload) {
+    var heard = window.__PROBE_LISTENERS__ && window.__PROBE_LISTENERS__[name];
+    if (!heard || heard.length === 0) return { fail: "the page listens to no " + name + " event" };
+    heard.forEach(function (handler) {
+      window["_" + handler]({ event: name, id: 0, payload: payload });
+    });
+    return { ok: true };
+  }
+  if (a.tabBar !== undefined) {
+    var tbSent = window.__PROBE_TABBAR__;
+    if (!Array.isArray(tbSent)) return { fail: "the probe recorded no tabbar_* list" };
+    var tbInstalls = tbSent.filter(function (c) { return c.cmd === "tabbar_install"; });
+    if (tbInstalls.length !== 1) return { fail: "tabbar_install was sent " + tbInstalls.length + " times, not once" };
+    var tbTabs = JSON.stringify(tbInstalls[0].args.bar.tabs);
+    if (tbTabs !== JSON.stringify(${JSON.stringify(PHONE_TABS)})) return { fail: "tabbar_install sent the tabs " + tbTabs + ", not exactly " + JSON.stringify(${JSON.stringify(PHONE_TABS)}) };
+    var tbLast = tbSent[tbSent.length - 1];
+    var tbState = tbLast.cmd === "tabbar_install" ? tbLast.args.bar.state : tbLast.args.state;
+    if (tbState.selected !== a.tabBar.selected || tbState.hidden !== a.tabBar.hidden) {
+      return { fail: "the last tab bar state sent is " + JSON.stringify(tbState) + " (" + tbLast.cmd + "), not selected " + a.tabBar.selected + " and hidden " + a.tabBar.hidden };
+    }
+    if (tbState.tint !== a.tabBar.tint) return { fail: "the tab bar tint " + JSON.stringify(tbState.tint) + " is not the theme's cyan " + a.tabBar.tint };
+    if (a.tabBar.install !== null) {
+      var tbAsked = tbInstalls[0].args.bar.state;
+      var tbWant = a.tabBar.install;
+      var tbExact = Object.keys(tbAsked).length === 3 && tbAsked.selected === tbWant.selected && tbAsked.hidden === tbWant.hidden && tbAsked.tint === tbWant.tint;
+      if (!tbExact) return { fail: "tabbar_install asked " + JSON.stringify(tbAsked) + ", not exactly " + JSON.stringify(tbWant) };
+    }
+    return { ok: true };
+  }
+  if (a.pickTab !== undefined) return emitTo("tabbar-picked", { id: a.pickTab[0], again: a.pickTab[1] });
+  if (a.barGeometry !== undefined) return emitTo("tabbar-geometry", { height: a.barGeometry });
+  if (a.insetBy !== undefined) {
+    var inApp = document.querySelector(".app.phone");
+    var inMain = document.querySelector(".phone-main");
+    if (inApp === null || inMain === null) return { fail: "no .app.phone and .phone-main to measure the tab bar inset on" };
+    var inPad = getComputedStyle(inApp).paddingBottom;
+    if (inPad !== a.insetBy + "px") return { fail: ".app.phone has padding-bottom " + inPad + ", not " + a.insetBy + "px" };
+    var inBottom = inMain.getBoundingClientRect().bottom;
+    if (inBottom > window.innerHeight - a.insetBy + 0.5) return { fail: ".phone-main ends at " + Math.round(inBottom * 10) / 10 + " px, under the " + a.insetBy + " px tab bar of the " + window.innerHeight + " px window" };
+    return { ok: true };
+  }
+  if (a.placed !== undefined) {
+    var plRaw = localStorage.getItem("webboard.place");
+    if (plRaw === null) return { fail: "no webboard.place was written" };
+    var plView = JSON.parse(plRaw).view;
+    if (plView !== a.placed) return { fail: "webboard.place holds the view " + JSON.stringify(plView) + ", not " + JSON.stringify(a.placed) };
+    return { ok: true };
+  }
+  if (a.scrolledTo !== undefined) {
+    var stEl = document.querySelector(a.scrolledTo[0]);
+    if (stEl === null) return { fail: "no " + a.scrolledTo[0] + " to read the scroll of" };
+    if (a.scrolledTo[1] === "down") {
+      if (stEl.scrollTop > 0) return { ok: true };
+      return { fail: a.scrolledTo[0] + " is at scrollTop " + stEl.scrollTop + ", not scrolled down" };
+    }
+    if (a.scrolledTo[1] !== "top") throw new Error("scrolledTo: no place " + a.scrolledTo[1]);
+    var stBegun = performance.now();
+    return new Promise(function (resolve) {
+      (function poll() {
+        if (stEl.scrollTop <= 0.5) return resolve({ ok: true });
+        if (performance.now() - stBegun < ${LOAD_MS}) return setTimeout(poll, 25);
+        resolve({ fail: a.scrolledTo[0] + " is still at scrollTop " + stEl.scrollTop + " after " + ${LOAD_MS} + " ms, not back at the top" });
+      })();
+    });
+  }
   if (a.choose !== undefined) {
     var cm = lastMenu();
     if (cm === null) return { fail: "no menu_show was sent to choose " + JSON.stringify(a.choose) + " from" };
@@ -5013,7 +5169,7 @@ async function settle(cdp, sessionId) {
     while (!ready && performance.now() - begun < ${READY_MS}) {
       ready = document.querySelector(".app") !== null &&
         (document.querySelector(".plan-head") !== null || document.querySelector(".empty-state") !== null ||
-          document.querySelector(".phone-views") !== null);
+          document.querySelector(".phone-head") !== null);
       if (!ready) await new Promise(function (r) { setTimeout(r, 25); });
     }
     if (!ready) return { ready: false, quiet: false };
@@ -5036,7 +5192,7 @@ async function settle(cdp, sessionId) {
 
 const unsettled = (s) =>
   !s.ready
-    ? `app never rendered .app and .plan-head/.empty-state/.phone-views within ${READY_MS / 1000} s`
+    ? `app never rendered .app and .plan-head/.empty-state/.phone-head within ${READY_MS / 1000} s`
     : !s.quiet
       ? `DOM still changing after ${QUIET_MS / 1000} s`
       : null;

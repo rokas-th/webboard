@@ -2,6 +2,10 @@
   background: var(--void);
 }
 
+html[data-tabbar] .app.phone {
+  padding-bottom: var(--tabbar-h);
+}
+
 .phone-main {
   flex: 1;
   min-height: 0;

@@ -1,7 +1,7 @@
 import * as Y from "yjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InvokeArgs } from "@tauri-apps/api/core";
-import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, OUT_OF_RANGE, STEP_GONE, STEP_QA, UNREADABLE_ID, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "../../scripts/layout-fixtures.mjs";
+import { buildFixtures, encodeTuple, LONG_NAMES, orderKey, OUT_OF_RANGE, STEP_GONE, STEP_QA, TABBAR_NO_IMAGE, UNREADABLE_ID, UNREADABLE_LINE, UPDATE_CHECK_FAILED, UPDATE_VERSION } from "../../scripts/layout-fixtures.mjs";
 import { normalizeName } from "../actions/build";
 import { projectDefaults } from "../domain/defaults";
 import { derive } from "../domain/derive";
@@ -38,6 +38,8 @@ const UIKIT = {
   menu_show: null,
   menu_dismiss: null,
   alert_ask: "cancel",
+  tabbar_install: { height: 83 },
+  tabbar_set: null,
 };
 
 const fixture = (name: string): Fixture => {
@@ -146,7 +148,7 @@ function decoded(f: Fixture, doc: string) {
   return { ydoc, actions, log, plan, cs, held: heldItems(cs, plan) };
 }
 
-const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-discard-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "mesa-steps-ios-phone": "iPhone", "mesa-people-ios-pad": "iPad", "mesa-people-ios-phone": "iPhone", "mesa-defaults-ios-pad": "iPad", "mesa-defaults-ios-phone": "iPhone", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
+const DEVICE_NAMES: Readonly<Record<string, string>> = { "mesa-linux": "Linux", "mesa-ios-phone": "iPhone", "mesa-discard-ios-phone": "iPhone", "mesa-tabbar-failed-ios-phone": "iPhone", "mesa-ios-pad": "iPad", "mesa-steps-ios-pad": "iPad", "mesa-steps-ios-phone": "iPhone", "mesa-people-ios-pad": "iPad", "mesa-people-ios-phone": "iPhone", "mesa-defaults-ios-pad": "iPad", "mesa-defaults-ios-phone": "iPhone", "phone-status-ios": "iPhone", "phone-removed-banner-ios": "iPhone", "sync-removed-ios-pad": "iPad", "choices-ios-pad": "iPad", "unreadable-ios-pad": "iPad", "unreadable-ios-phone": "iPhone" };
 
 const openRegistries: Registry[] = [];
 
@@ -229,6 +231,7 @@ describe("layout fixtures", () => {
       "mesa-steps",
       "mesa-steps-ios-pad",
       "mesa-steps-ios-phone",
+      "mesa-tabbar-failed-ios-phone",
       "phone-choice",
       "phone-plans",
       "phone-removed-banner",
@@ -405,12 +408,19 @@ describe("layout fixtures", () => {
     expect(fixture("mesa-ios-phone").ipc.alert_ask).toBe("cancel");
   });
 
-  it("exactly the iOS fixtures answer appearance_set, haptic, menu_show, menu_dismiss and alert_ask, so a desktop state that sends any is unreached", () => {
+  it("mesa-tabbar-failed-ios-phone is mesa on the iPhone, with UIKit refusing the tab bar for a missing system image", () => {
+    expect(fixture("mesa-tabbar-failed-ios-phone").docs).toEqual(fixture("mesa-ios-phone").docs);
+    expect(fixture("mesa-tabbar-failed-ios-phone").platform).toEqual({ os: "ios", idiom: "phone" });
+    expect(fixture("mesa-tabbar-failed-ios-phone").ipc).toEqual({ ...fixture("mesa-ios-phone").ipc, tabbar_install: { __reject: TABBAR_NO_IMAGE } });
+    expect(TABBAR_NO_IMAGE).toEqual({ code: "tabbar.no_image", message: "The system image calendar.day.timeline.left does not exist." });
+  });
+
+  it("exactly the iOS fixtures answer appearance_set, haptic, menu_show, menu_dismiss, alert_ask, tabbar_install and tabbar_set, so a desktop state that sends any is unreached", () => {
     Object.entries(FIXTURES).forEach(([name, f]) => {
       const answered = Object.keys(f.ipc).filter((cmd) => cmd in UIKIT);
       expect([name, answered]).toEqual([name, f.platform.os === "ios" ? Object.keys(UIKIT) : []]);
     });
-    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(15);
+    expect(Object.values(FIXTURES).filter((f) => f.platform.os === "ios")).toHaveLength(16);
   });
 
   it("every fixture carries a platform global its device_info agrees with", () => {

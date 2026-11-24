@@ -22,6 +22,7 @@ import { PurgeConfirm } from "./PurgeConfirm";
 import { Shell } from "./Shell";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("@tauri-apps/api/event", () => import("../../test/tauriMock"));
 
 const UNKNOWN = "The server does not know this plan yet. Let it sync, then delete it again.";
 const PENDING = "The plan is deleted, but the server has not erased its history yet. It tries again every minute.";

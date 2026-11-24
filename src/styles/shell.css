@@ -1152,6 +1152,10 @@ html[data-os="ios"] .modal-head {
   pointer-events: none;
 }
 
+html[data-tabbar="bar"] .toasts {
+  bottom: calc(26px + var(--tabbar-h));
+}
+
 .toast {
   max-width: 640px;
   padding: 9px 16px;

@@ -179,7 +179,7 @@ export function PhoneBoard(p: { session: PlanSession }) {
     };
   });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const observer = new ResizeObserver(() => replaceRef.current());
     observer.observe(pagerEl());
     return () => observer.disconnect();

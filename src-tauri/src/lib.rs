@@ -192,6 +192,10 @@ pub fn run() {
             commands::menu::menu_show,
             #[cfg(target_os = "ios")]
             commands::menu::menu_dismiss,
+            #[cfg(target_os = "ios")]
+            commands::tabbar::tabbar_install,
+            #[cfg(target_os = "ios")]
+            commands::tabbar::tabbar_set,
             #[cfg(feature = "probe")]
             commands::probe::probe_log
         ])
@@ -590,6 +594,21 @@ mod tests {
                 "objc2-ui-kit lacks the {feature} feature the native menu needs: {line}"
             )
         });
+        [
+            "UITabBarController",
+            "UITabBar",
+            "UITabBarItem",
+            "UIBarItem",
+            "UIColor",
+            "UIOrientation",
+        ]
+        .iter()
+        .for_each(|feature| {
+            assert!(
+                line.contains(&format!("\"{feature}\"")),
+                "objc2-ui-kit lacks the {feature} feature the native tab bar needs: {line}"
+            )
+        });
         assert!(
             ios.lines().any(|l| l.starts_with("objc2-core-foundation")
                 && l.contains("\"CFCGTypes\"")),
@@ -629,6 +648,37 @@ mod tests {
         assert!(
             modules.contains("#[cfg(any(target_os = \"ios\", test))]\npub mod menu;"),
             "commands/mod.rs does not declare the menu module under the iOS (and test) cfg"
+        );
+    }
+
+    #[test]
+    fn run_offers_the_tab_bar_on_ios_only() {
+        let body = run_body();
+        let modules = include_str!("commands/mod.rs");
+        [
+            "commands::tabbar::tabbar_install",
+            "commands::tabbar::tabbar_set",
+        ]
+        .iter()
+        .for_each(|command| {
+            let handler = body
+                .find(command)
+                .unwrap_or_else(|| panic!("run() does not register {command}"));
+            let attr = body[..handler]
+                .lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or_default();
+            assert_eq!(
+                attr.trim(),
+                "#[cfg(target_os = \"ios\")]",
+                "{command} is registered under {attr}, not the iOS cfg: UITabBarController exists only on iOS"
+            );
+            assert_eq!(body.matches(command).count(), 1);
+        });
+        assert!(
+            modules.contains("#[cfg(any(target_os = \"ios\", test))]\npub mod tabbar;"),
+            "commands/mod.rs does not declare the tabbar module under the iOS (and test) cfg"
         );
     }
 

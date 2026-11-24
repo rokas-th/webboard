@@ -581,7 +581,10 @@ const UIKIT_ANSWERS = {
   menu_show: null,
   menu_dismiss: null,
   alert_ask: "cancel",
+  tabbar_install: { height: 83 },
+  tabbar_set: null,
 };
+export const TABBAR_NO_IMAGE = { code: "tabbar.no_image", message: "The system image calendar.day.timeline.left does not exist." };
 const onIosPhone = (f) => ({ ...f, platform: { os: "ios", idiom: "phone" }, ipc: { ...f.ipc, device_info: { deviceId: "iphone", platform: "ios" }, ...UIKIT_ANSWERS } });
 const onIosPad = (f) => ({ ...f, platform: { os: "ios", idiom: "pad" }, ipc: { ...f.ipc, device_info: { deviceId: "ipad", platform: "ios" }, ...UIKIT_ANSWERS } });
 
@@ -747,6 +750,7 @@ export function buildFixtures() {
     "mesa-linux": onLinux(mesaOnMac),
     "mesa-ios-phone": onIosPhone(mesaOnMac),
     "mesa-discard-ios-phone": withUpdate(onIosPhone(mesaOnMac), { alert_ask: "confirm" }),
+    "mesa-tabbar-failed-ios-phone": withUpdate(onIosPhone(mesaOnMac), { tabbar_install: { __reject: { ...TABBAR_NO_IMAGE } } }),
     "mesa-ios-pad": onIosPad(mesaOnMac),
     "mesa-steps": mesaSteps,
     "mesa-steps-ios-pad": onIosPad(mesaSteps),

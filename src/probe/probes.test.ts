@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { framed } from "../test/fixtures/framed";
-import { emitFromRust, resetTauri, tauri } from "../test/tauriMock";
-import { IPAD, setPlatform } from "../test/platform";
+import { DEFAULT_ANSWERS, emitFromRust, failNextListen, pickTab, resetTauri, tauri } from "../test/tauriMock";
+import { IPAD, IPHONE, setPlatform } from "../test/platform";
 import {
   failure,
   MENU_END_MS,
@@ -9,6 +9,7 @@ import {
   PROBE_BYTES,
   PROBE_MENU,
   PROBE_MENU_ANCHOR,
+  PROBE_TABBAR,
   probeAlert,
   probeAppearance,
   probeHaptic,
@@ -18,6 +19,7 @@ import {
   probeOpen,
   probePaths,
   probeSave,
+  probeTabBar,
   sendLine,
 } from "./probes";
 
@@ -250,5 +252,108 @@ describe("probeAlert", () => {
       throw { code: "alert.busy", message: "busy" };
     };
     await expect(probeAlert()).resolves.toEqual(["alert", { error: "alert.busy", message: "busy" }]);
+  });
+});
+
+describe("probeTabBar", () => {
+  const tabCalls = (): unknown[][] => tauri.calls.filter((c) => c.cmd.startsWith("tabbar_")).map((c) => [c.cmd, c.args]);
+
+  it("skips the iPad without a call and says so", async () => {
+    setPlatform(IPAD);
+    const said: string[] = [];
+    await expect(probeTabBar((line) => said.push(line))).resolves.toBeNull();
+    expect(said).toEqual(['tabbar skipped {"idiom":"pad"}']);
+    expect(tabCalls()).toEqual([]);
+  });
+
+  it("installs the three tabs hidden on the iPhone as the app does with no plan open, says the height, shows the bar, then says every geometry, pick and fault", async () => {
+    setPlatform(IPHONE);
+    const said: string[] = [];
+    await expect(probeTabBar((line) => said.push(line))).resolves.toBeNull();
+    expect(PROBE_TABBAR).toEqual({ selected: "timeline", hidden: true, tint: "#24E0FF" });
+    expect(tabCalls()).toEqual([
+      [
+        "tabbar_install",
+        {
+          bar: {
+            tabs: [
+              { id: "timeline", title: "Timeline", image: "calendar.day.timeline.left" },
+              { id: "board", title: "Board", image: "rectangle.split.3x1" },
+              { id: "list", title: "List", image: "list.bullet" },
+            ],
+            state: { selected: "timeline", hidden: true, tint: "#24E0FF" },
+          },
+        },
+      ],
+      ["tabbar_set", { state: { selected: "timeline", hidden: false, tint: "#24E0FF" } }],
+    ]);
+    emitFromRust("tabbar-geometry", { height: 64 });
+    pickTab("board");
+    pickTab("board", true);
+    emitFromRust("tabbar-fault", { code: "tabbar.order", message: "The tab bar cannot be laid out: gone." });
+    expect(said).toEqual([
+      'tabbar installed {"hidden":true,"height":83}',
+      'tabbar shown {"hidden":false}',
+      'tabbar geometry {"height":64}',
+      'tabbar picked {"id":"board","again":false}',
+      'tabbar picked {"id":"board","again":true}',
+      'tabbar fault {"code":"tabbar.order","message":"The tab bar cannot be laid out: gone."}',
+    ]);
+  });
+
+  it("listens before it installs, so a geometry sent during the install is not missed", async () => {
+    setPlatform(IPHONE);
+    tauri.answers.tabbar_install = (args) => {
+      emitFromRust("tabbar-geometry", { height: 83 });
+      return DEFAULT_ANSWERS.tabbar_install(args);
+    };
+    const said: string[] = [];
+    await expect(probeTabBar((line) => said.push(line))).resolves.toBeNull();
+    expect(said).toEqual(['tabbar geometry {"height":83}', 'tabbar installed {"hidden":true,"height":83}', 'tabbar shown {"hidden":false}']);
+  });
+
+  it("reports a refused install by its code and says nothing", async () => {
+    setPlatform(IPHONE);
+    tauri.answers.tabbar_install = () => {
+      throw { code: "tabbar.no_image", message: "The system image calendar.day.timeline.left does not exist." };
+    };
+    const said: string[] = [];
+    await expect(probeTabBar((line) => said.push(line))).resolves.toEqual([
+      "tabbar",
+      { error: "tabbar.no_image", message: "The system image calendar.day.timeline.left does not exist." },
+    ]);
+    expect(said).toEqual([]);
+  });
+
+  it("reports an install answer that is not a geometry as ipc.shape", async () => {
+    setPlatform(IPHONE);
+    tauri.answers.tabbar_install = () => ({ height: 0 });
+    const said: string[] = [];
+    await expect(probeTabBar((line) => said.push(line))).resolves.toEqual([
+      "tabbar",
+      { error: "ipc.shape", message: `The tab bar's geometry ${JSON.stringify({ height: 0 })} is not { height: a number above 0 }.` },
+    ]);
+    expect(said).toEqual([]);
+  });
+
+  it("reports a failed listen by its code and does not install", async () => {
+    setPlatform(IPHONE);
+    failNextListen("tabbar-picked", new Error("event plugin gone"));
+    const said: string[] = [];
+    await expect(probeTabBar((line) => said.push(line))).resolves.toEqual(["tabbar", { error: "ipc.failed", message: "listen tabbar-picked: event plugin gone." }]);
+    expect(tabCalls()).toEqual([]);
+    expect(said).toEqual([]);
+  });
+
+  it("says a malformed event as its ipc.shape failure", async () => {
+    setPlatform(IPHONE);
+    const said: string[] = [];
+    await probeTabBar((line) => said.push(line));
+    pickTab("plans");
+    emitFromRust("tabbar-geometry", { height: 83, width: 390 });
+    expect(said.slice(2)).toEqual([
+      probeLine("tabbar", { error: "ipc.shape", message: `The tab bar's pick ${JSON.stringify({ id: "plans", again: false })} is not { id: timeline, board or list, again: a boolean }.` }),
+      probeLine("tabbar", { error: "ipc.shape", message: `The tab bar's geometry ${JSON.stringify({ height: 83, width: 390 })} is not { height: a number above 0 }.` }),
+    ]);
   });
 });

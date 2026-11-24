@@ -29,6 +29,7 @@ import { NO_REGION, PhoneStatus } from "./PhoneStatus";
 import { IPHONE, MAC, setPlatform } from "../../test/platform";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
+vi.mock("@tauri-apps/api/event", () => import("../../test/tauriMock"));
 vi.mock("../state", async (importOriginal) => {
   const m = await importOriginal<typeof import("../state")>();
   return { ...m, useUi: vi.fn(m.useUi) };

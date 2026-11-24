@@ -65,6 +65,7 @@ setPlatform({ os: "macos", idiom: null });
 beforeEach(async () => {
   (await import("../services/haptics")).resetHaptics();
   (await import("../services/nativeMenu")).resetNativeMenus();
+  (await import("../services/tabBar")).resetTabBar();
   setPlatform({ os: "macos", idiom: null });
   scrollIntoView.mockClear();
   scrollTo.mockClear();
@@ -83,6 +84,7 @@ afterEach(() => {
   delete document.documentElement.dataset.density;
   delete document.documentElement.dataset.textSize;
   delete document.documentElement.dataset.glow;
+  delete document.documentElement.dataset.tabbar;
 });
 if (!("isContentEditable" in HTMLElement.prototype)) {
   Object.defineProperty(HTMLElement.prototype, "isContentEditable", {

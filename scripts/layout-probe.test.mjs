@@ -419,6 +419,75 @@ test("aligned passes outline rows level with their chart rows and fails a row or
   );
 });
 
+test("tabBar passes one install of the three tabs whose last state and theme cyan match, and the exact install state when asked, and names what was sent otherwise", async () => {
+  const TABS = [
+    { id: "timeline", title: "Timeline", image: "calendar.day.timeline.left" },
+    { id: "board", title: "Board", image: "rectangle.split.3x1" },
+    { id: "list", title: "List", image: "list.bullet" },
+  ];
+  const sent = (calls) => `<script>window.__PROBE_TABBAR__ = ${JSON.stringify(calls)};</script>`;
+  const install = (state, tabs = TABS) => ({ cmd: "tabbar_install", args: { bar: { tabs, state } } });
+  const set = (state) => ({ cmd: "tabbar_set", args: { state } });
+  const shown = { selected: "board", hidden: false, tint: "#24E0FF" };
+  const want = (selected, hidden, install = null) => ({ tabBar: { selected, hidden, tint: "#24E0FF", install } });
+  assert.deepEqual(await act(sent([install(shown)]), want("board", false)), { ok: true });
+  assert.deepEqual(await act(sent([install(shown), set({ ...shown, hidden: true })]), want("board", true)), { ok: true });
+  assert.equal(
+    (await act(sent([install(shown), set({ ...shown, hidden: true })]), want("board", false))).fail,
+    'the last tab bar state sent is {"selected":"board","hidden":true,"tint":"#24E0FF"} (tabbar_set), not selected board and hidden false',
+  );
+  assert.equal((await act(sent([]), want("board", false))).fail, "tabbar_install was sent 0 times, not once");
+  assert.equal((await act(sent([install(shown), install(shown)]), want("board", false))).fail, "tabbar_install was sent 2 times, not once");
+  assert.match((await act(sent([install(shown, TABS.slice(0, 2))]), want("board", false))).fail, /^tabbar_install sent the tabs /);
+  assert.equal((await act(sent([install({ ...shown, tint: "cyan" })]), want("board", false))).fail, "the tab bar tint \"cyan\" is not the theme's cyan #24E0FF");
+  assert.equal((await act(sent([install({ ...shown, tint: "#24E0FE" })]), want("board", false))).fail, "the tab bar tint \"#24E0FE\" is not the theme's cyan #24E0FF");
+  const hiddenAsk = { selected: "board", hidden: true, tint: "#24E0FF" };
+  assert.deepEqual(await act(sent([install(hiddenAsk), set(shown)]), want("board", false, hiddenAsk)), { ok: true });
+  assert.equal(
+    (await act(sent([install(shown)]), want("board", false, hiddenAsk))).fail,
+    'tabbar_install asked {"selected":"board","hidden":false,"tint":"#24E0FF"}, not exactly {"selected":"board","hidden":true,"tint":"#24E0FF"}',
+  );
+  assert.match((await act(sent([install({ ...hiddenAsk, extra: 1 }), set(shown)]), want("board", false, hiddenAsk))).fail, /^tabbar_install asked /);
+  assert.equal((await act("<script>delete window.__PROBE_TABBAR__;</script>", want("board", false))).fail, "the probe recorded no tabbar_* list");
+});
+
+test("pickTab and barGeometry call every tabbar listener with the payload, and fail when the page listens to none", async () => {
+  const heard = `<script>window.__PROBE_LISTENERS__ = { "tabbar-picked": [7], "tabbar-geometry": [8] }; window.got = []; window._7 = function (e) { window.got.push(e); }; window._8 = function (e) { window.got.push(e); };</script>`;
+  assert.deepEqual(await actAll(heard, [{ pickTab: ["list", true] }, { barGeometry: 64 }]), [{ ok: true }, { ok: true }]);
+  assert.deepEqual(await evaluate(page.cdp, page.sessionId, "window.got"), [
+    { event: "tabbar-picked", id: 0, payload: { id: "list", again: true } },
+    { event: "tabbar-geometry", id: 0, payload: { height: 64 } },
+  ]);
+  assert.equal((await act("<script>window.__PROBE_LISTENERS__ = {};</script>", { pickTab: ["list", false] })).fail, "the page listens to no tabbar-picked event");
+  assert.equal((await act("<script>window.__PROBE_LISTENERS__ = {};</script>", { barGeometry: 83 })).fail, "the page listens to no tabbar-geometry event");
+});
+
+test("insetBy passes a phone shell padded by the bar with its main area above it, and fails a wrong padding or a main area under the bar", async () => {
+  const shell = (pad, mainHeight) =>
+    `<div class="app phone" style="box-sizing: border-box; height: 300px; padding-bottom: ${pad}px; display: flex; flex-direction: column"><div class="phone-main" style="height: ${mainHeight}px; flex: none"></div></div>`;
+  assert.deepEqual(await act(shell(83, 217), { insetBy: 83 }), { ok: true });
+  assert.equal((await act(shell(0, 217), { insetBy: 83 })).fail, ".app.phone has padding-bottom 0px, not 83px");
+  assert.equal((await act(shell(83, 260), { insetBy: 83 })).fail, ".phone-main ends at 260 px, under the 83 px tab bar of the 300 px window");
+  assert.equal((await act("<div></div>", { insetBy: 83 })).fail, "no .app.phone and .phone-main to measure the tab bar inset on");
+});
+
+test("placed reads the view written to webboard.place", async () => {
+  const stored = (place) =>
+    `<script>var held = ${JSON.stringify(place === null ? {} : { "webboard.place": JSON.stringify(place) })}; Object.defineProperty(window, "localStorage", { configurable: true, value: { getItem: function (k) { return k in held ? held[k] : null; } } });</script>`;
+  assert.deepEqual(await act(stored({ view: "list" }), { placed: "list" }), { ok: true });
+  assert.equal((await act(stored({ view: "board" }), { placed: "list" })).fail, 'webboard.place holds the view "board", not "list"');
+  assert.equal((await act(stored(null), { placed: "list" })).fail, "no webboard.place was written");
+});
+
+test("scrolledTo passes a scroller down or back at the top and fails one that is not", async () => {
+  const box = (top) => `<div class="s" style="height: 50px; overflow: auto"><div style="height: 500px"></div></div><script>document.querySelector(".s").scrollTop = ${top};</script>`;
+  assert.deepEqual(await act(box(100), { scrolledTo: [".s", "down"] }), { ok: true });
+  assert.equal((await act(box(0), { scrolledTo: [".s", "down"] })).fail, ".s is at scrollTop 0, not scrolled down");
+  assert.deepEqual(await act(box(0), { scrolledTo: [".s", "top"] }), { ok: true });
+  assert.equal((await act(box(100), { scrolledTo: [".s", "top"] })).fail, ".s is still at scrollTop 100 after 2000 ms, not back at the top");
+  assert.equal((await act("<div></div>", { scrolledTo: [".s", "top"] })).fail, "no .s to read the scroll of");
+});
+
 test("unexpectedAlerts: a native ask fails a state unless the state asserts its alerts", () => {
   const plain = { actions: [{ click: ["button"] }] };
   const asserting = { actions: [{ click: ["button"] }, { alerted: ["Discard theme changes?"] }] };

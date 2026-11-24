@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setPlatform } from "../test/platform";
-import { emitFromRust, hold, resetTauri, tauri } from "../test/tauriMock";
+import { emitFromRust, hold, pickTab, resetTauri, tauri } from "../test/tauriMock";
 import ProbeApp from "./ProbeApp";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
@@ -139,6 +139,55 @@ describe("ProbeApp", () => {
     expect(tauri.calls.filter((c) => c.cmd === "alert_ask")).toHaveLength(1);
   });
 
+  it("on the iPhone installs the tab bar after the haptic and before the menu and the alert, then logs each geometry and pick", async () => {
+    setPlatform({ os: "ios", idiom: "phone" });
+    tauri.answers.alert_ask = () => "cancel";
+    mount();
+    await settle();
+    await settle();
+    const native = tauri.calls.map((c) => c.cmd).filter((c) => ["haptic", "tabbar_install", "tabbar_set", "menu_show", "alert_ask"].includes(c));
+    expect(native).toEqual(["haptic", "tabbar_install", "tabbar_set", "menu_show", "alert_ask"]);
+    await act(async () => {
+      emitFromRust("tabbar-geometry", { height: 64 });
+      pickTab("list");
+      pickTab("list", true);
+    });
+    await settle();
+    const lines = logged();
+    expect(lines.indexOf('tabbar installed {"hidden":true,"height":83}')).toBeGreaterThan(lines.indexOf('haptic {"sent":"selection"}'));
+    expect(lines.indexOf("menu shown")).toBeGreaterThan(lines.indexOf('tabbar installed {"hidden":true,"height":83}'));
+    expect(lines.slice(-3)).toEqual(['tabbar geometry {"height":64}', 'tabbar picked {"id":"list","again":false}', 'tabbar picked {"id":"list","again":true}']);
+  });
+
+  it("on the iPad logs the tab bar as skipped between the haptic and the alert and sends no tabbar call", async () => {
+    setPlatform({ os: "ios", idiom: "pad" });
+    tauri.answers.alert_ask = () => "cancel";
+    mount();
+    await settle();
+    await settle();
+    const lines = logged();
+    expect(lines.filter((l) => l.startsWith("tabbar "))).toEqual(['tabbar skipped {"idiom":"pad"}']);
+    expect(lines.indexOf('tabbar skipped {"idiom":"pad"}')).toBeGreaterThan(lines.indexOf('haptic {"sent":"selection"}'));
+    expect(lines.indexOf('alert {"answer":"cancel"}')).toBeGreaterThan(lines.indexOf('tabbar skipped {"idiom":"pad"}'));
+    expect(tauri.calls.filter((c) => c.cmd.startsWith("tabbar_"))).toEqual([]);
+  });
+
+  it("on the iPhone logs a refused tab bar install as a bad line with its code and still shows the menu and asks the alert", async () => {
+    setPlatform({ os: "ios", idiom: "phone" });
+    tauri.answers.alert_ask = () => "cancel";
+    tauri.answers.tabbar_install = () => {
+      throw { code: "tabbar.no_image", message: "The system image calendar.day.timeline.left does not exist." };
+    };
+    mount();
+    await settle();
+    await settle();
+    const line = 'tabbar {"error":"tabbar.no_image","message":"The system image calendar.day.timeline.left does not exist."}';
+    expect(screen.getByText(line)).toHaveProperty("className", "probe-bad");
+    expect(logged()).toContain(line);
+    expect(tauri.calls.filter((c) => c.cmd === "menu_show")).toHaveLength(1);
+    expect(tauri.calls.filter((c) => c.cmd === "alert_ask")).toHaveLength(1);
+  });
+
   it("on iOS sets the dark appearance and plays the selection haptic before it asks the alert", async () => {
     setPlatform({ os: "ios", idiom: "pad" });
     tauri.answers.alert_ask = () => "cancel";
@@ -200,6 +249,8 @@ describe("ProbeApp", () => {
     expect(logged().filter((l) => l.startsWith("alert "))).toEqual([]);
     expect(tauri.calls.filter((c) => c.cmd === "appearance_set" || c.cmd === "haptic")).toEqual([]);
     expect(logged().filter((l) => l.startsWith("appearance ") || l.startsWith("haptic "))).toEqual([]);
+    expect(tauri.calls.filter((c) => c.cmd.startsWith("tabbar_"))).toEqual([]);
+    expect(logged().filter((l) => l.startsWith("tabbar"))).toEqual([]);
   });
 
   it("logs a keydown with its modifiers", async () => {

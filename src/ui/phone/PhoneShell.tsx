@@ -1,12 +1,17 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
 import type { ItemId, PlanId } from "../../domain/model";
 import { usesNativeAlert } from "../../services/alert";
+import { haptic } from "../../services/haptics";
+import type { TabBarStatus, TabPick } from "../../services/tabBar";
+import { useTheme } from "../../theme/ThemeContext";
+import { tokensOf } from "../../theme/presets";
 import type { Clock } from "../../services/clock";
 import type { Registry } from "../../store/registry";
 import { useNotes, usePlanView, type PlanSession } from "../../store/session";
 import type { SyncState } from "../../sync/manager";
 import { canReload, stopsArrival } from "../../sync/reload";
 import { docName, useSyncState } from "../../sync/SyncProvider";
+import { useSheetOpen } from "../common/Sheet";
 import { toast, Toasts } from "../common/Toast";
 import { DetailContext, type DetailApi } from "../detail/DetailContext";
 import { stepPatch, tabSearch } from "../detail/order";
@@ -34,7 +39,8 @@ import { RevertDialog } from "../panel/History";
 import { ItemSheet } from "./ItemSheet";
 import { PhoneBoard } from "./PhoneBoard";
 import { PhoneList } from "./PhoneList";
-import { PHONE_VIEWS, phoneViewPatch } from "./views";
+import { useNativeTabBar } from "./nativeTabBar";
+import { PHONE_VIEWS, phoneViewPatch, scrollToStart } from "./views";
 import { PhoneStatus } from "./PhoneStatus";
 import { PhoneTopBar } from "./PhoneTopBar";
 import { CreateError, ImportButton, NEW_PLAN, PlansSheet } from "./PlansSheet";
@@ -86,6 +92,8 @@ function useSheetLetGo(session: PlanSession, device: string): void {
 
 const ViewIds = createContext<string | null>(null);
 
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
 const viewTabId = (base: string, v: ViewKind): string => `${base}-tab-${v}`;
 const viewPanelId = (base: string): string => `${base}-panel`;
 
@@ -128,7 +136,15 @@ function ViewPanel(p: { view: ViewKind; session: PlanSession; outline: ReturnTyp
   }
 }
 
-function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock }) {
+function viewTitle(view: ViewKind): string {
+  const found = PHONE_VIEWS.find(([v]) => v === view);
+  if (found === undefined) throw new Error(`PhoneShell: no title for the view ${view}`);
+  return found[1];
+}
+
+const webSwitch = (status: TabBarStatus): boolean => status.k === "off" || status.k === "failed";
+
+function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock; tabBar: TabBarStatus }) {
   const { ui, setUi } = useUiValue();
   const view = ui.view;
   const outline = usePhoneOutline();
@@ -165,20 +181,30 @@ function OpenPlan(p: { session: PlanSession; registry: Registry; clock: Clock })
       if (patch !== null) setUi(patch);
     },
   };
+  const web = webSwitch(p.tabBar);
+  const panel = <ViewPanel view={view} session={p.session} outline={outline} onOpen={(id) => setUi({ selected: id })} />;
   return (
     <DetailContext.Provider value={detailApi}>
-      <div id={viewPanelId(base)} className="phone-main" role="tabpanel" aria-labelledby={viewTabId(base, view)}>
-        <ViewPanel view={view} session={p.session} outline={outline} onOpen={(id) => setUi({ selected: id })} />
-      </div>
-      <ViewIds.Provider value={base}>
-        <PhoneViews
-          value={view}
-          onPick={(v) => {
-            const patch = phoneViewPatch(view, v);
-            if (patch !== null) setUi(patch);
-          }}
-        />
-      </ViewIds.Provider>
+      {web ? (
+        <div id={viewPanelId(base)} className="phone-main" role="tabpanel" aria-labelledby={viewTabId(base, view)}>
+          {panel}
+        </div>
+      ) : (
+        <div className="phone-main" role="region" aria-label={viewTitle(view)}>
+          {panel}
+        </div>
+      )}
+      {web && (
+        <ViewIds.Provider value={base}>
+          <PhoneViews
+            value={view}
+            onPick={(v) => {
+              const patch = phoneViewPatch(view, v);
+              if (patch !== null) setUi(patch);
+            }}
+          />
+        </ViewIds.Provider>
+      )}
       {dialog !== null ? (
         <PlanDialog session={p.session} dialog={dialog} local={local} onClose={closeDialog} />
       ) : (
@@ -209,6 +235,7 @@ function Main(p: {
   onSync(pane: SyncPane | null): void;
   open(id: PlanId): void;
   trash(id: PlanId): void;
+  tabBar: TabBarStatus;
 }) {
   const m = p.main;
   if (m.k === "empty") {
@@ -266,7 +293,7 @@ function Main(p: {
       </div>
     );
   }
-  return <OpenPlan key={m.id} session={m.session} registry={p.registry} clock={p.clock} />;
+  return <OpenPlan key={m.id} session={m.session} registry={p.registry} clock={p.clock} tabBar={p.tabBar} />;
 }
 
 function listedName(registry: Registry, main: PlanMain, selected: PlanId | null): string | null {
@@ -331,6 +358,20 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
     closePlans();
     setUi({ settings: "sync", syncPane: pane });
   };
+  const planOpen = main.k === "open";
+  const sheetOpen = useSheetOpen();
+  const tint = tokensOf(useTheme().shown).cyan;
+  const pick = ({ id, again }: TabPick): void => {
+    if (again && id === ui.view) {
+      scrollToStart(document, id, !window.matchMedia(REDUCED_MOTION).matches);
+      return;
+    }
+    const patch = phoneViewPatch(ui.view, id);
+    if (patch === null) return;
+    setUi(patch);
+    haptic("selection");
+  };
+  const tabBar = useNativeTabBar({ selected: ui.view, hidden: !planOpen || sheetOpen, tint }, pick, planOpen);
   return (
     <OpenChoice.Provider value={openChoice}>
       <div className="app phone">
@@ -363,6 +404,7 @@ function PhoneBody(p: { registry: Registry; clock: Clock }) {
           onSync={openSync}
           open={open}
           trash={trash}
+          tabBar={tabBar}
         />
         {plans && (
           <PlansSheet

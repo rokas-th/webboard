@@ -39,6 +39,7 @@ import { fixedClock } from "../services/clock";
 const fake = vi.hoisted(() => ({ factory: null as ProviderFactory | null }));
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauriMock"));
+vi.mock("@tauri-apps/api/event", () => import("../test/tauriMock"));
 vi.mock("@tauri-apps/api/window", () => import("../test/tauriMock"));
 vi.mock("../services/updates", () => ({
   check: vi.fn(async () => null),

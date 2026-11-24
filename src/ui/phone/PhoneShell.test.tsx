@@ -14,7 +14,8 @@ import { phoneRegistry, startOnList } from "../../test/phone";
 import { testSession, type SeedItem, type TestSession } from "../../test/session";
 import { setScreen } from "../../test/setup";
 import { seededStore, shellFor, type SeededStore } from "../../test/shell";
-import { emitFromRust, offeredSettings, resetTauri, tauri } from "../../test/tauriMock";
+import { DEFAULT_ANSWERS, emitFromRust, offeredSettings, pickTab, resetTauri, tauri } from "../../test/tauriMock";
+import { setReducedMotion } from "../../test/matchMedia";
 import { withSync } from "../../test/withSync";
 import { clearToasts } from "../common/Toast";
 import { OpenChoice } from "../run";
@@ -41,7 +42,9 @@ import { NO_REGION } from "./PhoneStatus";
 import { paintNative } from "../../theme/apply";
 import { PRESETS, tokensOf } from "../../theme/presets";
 import { Shell } from "../shell/Shell";
-import { IPHONE, MAC, setPlatform, stubVisualViewport } from "../../test/platform";
+import { IPAD, IPHONE, MAC, setPlatform, stubVisualViewport } from "../../test/platform";
+import { phoneTabs, resetTabBar } from "../../services/tabBar";
+import { INSTALL_FAILED, SET_FAILED } from "./nativeTabBar";
 import type { Platform } from "../../platform";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauriMock"));
@@ -162,18 +165,29 @@ const rowOf = (name: string): HTMLElement => {
 
 const views = (): HTMLElement => screen.getByRole("tablist", { name: "Views" });
 
+const pickView = (id: ViewKind): void => {
+  act(() => pickTab(id));
+};
+
+const shownView = (): string | null => document.querySelector(".phone-main")?.getAttribute("aria-label") ?? null;
+
+const onMac = async (t: TestSession): Promise<void> => {
+  tauri.answers.device_info = () => ({ deviceId: "mac", platform: "macos" });
+  setPlatform(MAC);
+  await shown(t);
+};
+
 describe('PhoneShell, data-form="phone"', () => {
   it("opens on the stored view, the List here, and switches to a read-only Timeline", async () => {
     const t = await made();
     const apply = vi.spyOn(t.session, "apply");
     window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, view: "list", zoom: "W", collapsed: [], sidebarOpen: true, sidebarWidth: null }));
     await shown(t, "timeline");
-    const list = within(views()).getByRole("tab", { name: "List" });
-    expect(list.getAttribute("aria-selected")).toBe("true");
+    expect(shownView()).toBe("List");
     expect(document.querySelector(".phone-list")).not.toBeNull();
     expect(document.querySelector(".tl-scroll")).toBeNull();
-    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
-    expect(within(views()).getByRole("tab", { name: "Timeline" }).getAttribute("aria-selected")).toBe("true");
+    pickView("timeline");
+    expect(shownView()).toBe("Timeline");
     expect(document.querySelector(".phone-list")).toBeNull();
     expect(document.querySelectorAll(".tl-scroll")).toHaveLength(1);
     expect(document.querySelectorAll(".nub")).toHaveLength(0);
@@ -193,7 +207,7 @@ describe('PhoneShell, data-form="phone"', () => {
 
   it("each view tab controls the tab panel, which the selected tab labels", async () => {
     const t = await made();
-    await shown(t);
+    await onMac(t);
     const panel = (): HTMLElement => screen.getByRole("tabpanel", { name: within(views()).getByRole("tab", { selected: true }).textContent ?? "" });
     const tabs = within(views()).getAllByRole("tab");
     expect(tabs.map((tb) => tb.getAttribute("aria-controls"))).toEqual(tabs.map(() => panel().id));
@@ -209,30 +223,31 @@ describe('PhoneShell, data-form="phone"', () => {
     const field = (): HTMLElement => screen.getByRole("searchbox", { name: "Search this plan" });
     fireEvent.change(field(), { target: { value: "rev" } });
     expect([field().getAttribute("value"), lastUi().query]).toEqual(["rev", "rev"]);
-    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    pickView("timeline");
     expect(document.querySelectorAll(".tl-row")).not.toHaveLength(0);
     expect(document.querySelectorAll(".dimmed")).toHaveLength(0);
     expect(lastUi().query).toBe("");
-    fireEvent.click(within(views()).getByRole("tab", { name: "List" }));
+    pickView("list");
     expect([field().getAttribute("value"), lastUi().query]).toEqual(["", ""]);
     expect(document.querySelectorAll(".phone-list .prow")).toHaveLength(2);
   });
 
   it("reads Timeline, Board, List in its view tabs", async () => {
     const t = await made();
-    await shown(t);
+    await onMac(t);
     expect(within(views()).getAllByRole("tab").map((tb) => tb.textContent)).toEqual(["Timeline", "Board", "List"]);
   });
 
   it("with no stored view opens the Default tab", async () => {
     const t = await made();
     await shown(t, "board");
-    expect(within(views()).getByRole("tab", { selected: true }).textContent).toBe("Board");
+    expect(shownView()).toBe("Board");
     expect(document.querySelector(".phone-board")).not.toBeNull();
     cleanup();
+    resetTabBar();
     window.localStorage.clear();
     await shown(t, "timeline");
-    expect(within(views()).getByRole("tab", { selected: true }).textContent).toBe("Timeline");
+    expect(shownView()).toBe("Timeline");
     expect(document.querySelector(".tl-scroll")).not.toBeNull();
   });
 
@@ -240,7 +255,7 @@ describe('PhoneShell, data-form="phone"', () => {
     const t = await made();
     window.localStorage.setItem(PLACE_KEY, JSON.stringify({ plan: t.session.view().plan.id, view: "board", zoom: "W", collapsed: [], sidebarOpen: true, sidebarWidth: null }));
     await shown(t, "list");
-    expect(within(views()).getByRole("tab", { selected: true }).textContent).toBe("Board");
+    expect(shownView()).toBe("Board");
     expect(document.querySelector(".phone-board")).not.toBeNull();
     expect(document.querySelector(".phone-list")).toBeNull();
   });
@@ -255,9 +270,9 @@ describe('PhoneShell, data-form="phone"', () => {
       if (typeof place !== "object" || place === null || !("view" in place)) throw new Error("the stored place has no view");
       return place.view;
     };
-    fireEvent.click(within(views()).getByRole("tab", { name: "Board" }));
+    pickView("board");
     expect([lastUi().view, stored()]).toEqual(["board", "board"]);
-    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    pickView("timeline");
     expect([lastUi().view, stored()]).toEqual(["timeline", "timeline"]);
   });
 
@@ -265,14 +280,14 @@ describe('PhoneShell, data-form="phone"', () => {
     const t = await made();
     await shown(t);
     fireEvent.change(screen.getByRole("searchbox", { name: "Search this plan" }), { target: { value: "rev" } });
-    fireEvent.click(within(views()).getByRole("tab", { name: "Board" }));
+    pickView("board");
     expect(lastUi().query).toBe("rev");
     const chip = document.querySelector(".phone-board .filter-chip .chip-text");
     expect(chip?.textContent).toBe("Filtered: rev");
     expect([...document.querySelectorAll(".board-page .card")].map((c) => c.getAttribute("data-card"))).toEqual(["Review"]);
-    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    pickView("timeline");
     expect(lastUi().query).toBe("");
-    fireEvent.click(within(views()).getByRole("tab", { name: "Board" }));
+    pickView("board");
     expect(document.querySelector(".phone-board .filter-chip")).toBeNull();
   });
 
@@ -376,7 +391,7 @@ describe('PhoneShell, data-form="phone"', () => {
     const t = await made();
     const apply = vi.spyOn(t.session, "apply");
     await shown(t);
-    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    pickView("timeline");
     const setUi = (): ((patch: { zoom: "M" }) => void) => {
       const results = vi.mocked(useUi).mock.results;
       const r = results[results.length - 1];
@@ -449,6 +464,7 @@ describe('PhoneShell, data-form="phone"', () => {
     expect(screen.getByRole("dialog", { name: "Choose which to keep" })).toBeTruthy();
     expect(document.querySelectorAll(".choice-col")).toHaveLength(2);
     cleanup();
+    resetTabBar();
     const only = await testSession([{ name: "Review", start: "2026-11-10", dur: 2 }], { clashes: [away] });
     sessions.push(only.session);
     await shown(only);
@@ -2055,7 +2071,7 @@ describe("PhoneShell plan sheet (Task 5.8 Step 3)", () => {
     expect(within(rowOfBaseline(first)).getByRole("button", { name: "Hide" })).toBeTruthy();
     expect(apply.mock.calls.length).toBe(writes);
     fireEvent.click(within(planSheet()).getByRole("button", { name: "Close" }));
-    fireEvent.click(within(views()).getByRole("tab", { name: "Timeline" }));
+    pickView("timeline");
     expect(document.querySelectorAll(".ghost")).toHaveLength(1);
     expect([...document.querySelectorAll(".bar-label .meta")].map((e) => e.textContent)).toContain("+3d vs baseline");
     openPlanSheet();
@@ -2186,6 +2202,7 @@ describe("PhoneShell sync (Task 6.7 Step 2)", () => {
     await Promise.all(registries.splice(0).map((r) => r.close()));
     window.localStorage.clear();
     startOnList();
+    resetTabBar();
   };
   const prov = (f: FakeFactory, doc: string): FakeProvider => {
     const p = f.providers.get(doc);
@@ -2776,5 +2793,255 @@ describe("the settings sheet on the phone", () => {
     expect(vi.mocked(paintNative).mock.calls).toEqual([[groundOf("cyberdeck")]]);
     await choosePaper();
     expect(vi.mocked(paintNative).mock.calls).toEqual([[groundOf("cyberdeck")], [groundOf("paper")]]);
+  });
+});
+
+describe("PhoneShell native tab bar", () => {
+  const presetCyan = (id: string): string => {
+    const preset = PRESETS.find((x) => x.id === id);
+    if (preset === undefined) throw new Error(`no ${id} preset`);
+    return tokensOf(preset).cyan;
+  };
+  const CYAN = presetCyan("cyberdeck");
+  const barCalls = (): [string, unknown][] => tauri.calls.filter((c) => c.cmd.startsWith("tabbar_")).map((c) => [c.cmd, c.args]);
+  const lastBar = (): unknown => {
+    const calls = barCalls();
+    const last = calls[calls.length - 1];
+    if (last === undefined) throw new Error("no tabbar_* call");
+    const [cmd, args] = last;
+    if (typeof args !== "object" || args === null) throw new Error(`${cmd} sent no arguments`);
+    if ("state" in args) return args.state;
+    if ("bar" in args && typeof args.bar === "object" && args.bar !== null && "state" in args.bar) return args.bar.state;
+    throw new Error(`${cmd} sent no state`);
+  };
+  const hapticKinds = (): unknown[] => tauri.calls.filter((c) => c.cmd === "haptic").map((c) => c.args);
+  const picked = (id: ViewKind, again = false): void => {
+    act(() => pickTab(id, again));
+  };
+  const storedView = (): unknown => {
+    const raw = window.localStorage.getItem(PLACE_KEY);
+    if (raw === null) throw new Error("no stored place");
+    const place: unknown = JSON.parse(raw);
+    if (typeof place !== "object" || place === null || !("view" in place)) throw new Error("the stored place has no view");
+    return place.view;
+  };
+  const scrolled = (): [unknown, unknown][] => {
+    const m = vi.mocked(Element.prototype.scrollTo);
+    return m.mock.contexts.map((ctx, i) => [ctx, m.mock.calls[i]?.[0]]);
+  };
+  const clearScrolls = (): void => {
+    vi.mocked(Element.prototype.scrollTo).mockClear();
+  };
+  const badToasts = (): (string | null)[] => Array.from(document.querySelectorAll(".toasts .toast.bad")).map((e) => e.textContent);
+
+  it("is installed on the iPhone, with no web switch and the main area a region named by the view", async () => {
+    await shown(await made());
+    expect(screen.queryByRole("tablist", { name: "Views" })).toBeNull();
+    expect(document.querySelector(".phone-views")).toBeNull();
+    const main = screen.getByRole("region", { name: "List" });
+    expect(main.classList.contains("phone-main")).toBe(true);
+    expect(main.hasAttribute("aria-labelledby")).toBe(false);
+    expect(document.documentElement.dataset.tabbar).toBe("bar");
+    expect(document.documentElement.style.getPropertyValue("--tabbar-h")).toBe("83px");
+  });
+
+  it("install sends the three tabs and the stored view, hidden while no plan is open and tinted with the theme's cyan, and shows once the plan is open", async () => {
+    await shown(await made());
+    expect(barCalls()).toEqual([
+      ["tabbar_install", { bar: { tabs: phoneTabs(), state: { selected: "list", hidden: true, tint: CYAN } } }],
+      ["tabbar_set", { state: { selected: "list", hidden: false, tint: CYAN } }],
+    ]);
+  });
+
+  it("shows no switch while the install is on its way, with the main area a region named by the view, then the installed form", async () => {
+    const t = await made();
+    const held = { resolve: (): void => undefined };
+    tauri.answers.tabbar_install = (args) => {
+      const checked = DEFAULT_ANSWERS.tabbar_install(args);
+      return new Promise((resolve) => {
+        held.resolve = () => resolve(checked);
+      });
+    };
+    await shown(t);
+    expect(screen.queryByRole("tablist", { name: "Views" })).toBeNull();
+    expect(document.querySelector(".phone-views")).toBeNull();
+    const main = screen.getByRole("region", { name: "List" });
+    expect(main.classList.contains("phone-main")).toBe(true);
+    expect(main.hasAttribute("aria-labelledby")).toBe(false);
+    expect(document.documentElement.dataset.tabbar).toBeUndefined();
+    await act(async () => {
+      held.resolve();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(screen.queryByRole("tablist", { name: "Views" })).toBeNull();
+    expect(screen.getByRole("region", { name: "List" })).toBeTruthy();
+    expect(document.documentElement.dataset.tabbar).toBe("bar");
+  });
+
+  it("a pick moves the view, writes the stored place and plays one selection haptic", async () => {
+    await shown(await made());
+    picked("board");
+    expect([lastUi().view, storedView()]).toEqual(["board", "board"]);
+    expect(screen.getByRole("region", { name: "Board" }).querySelector(".phone-board")).not.toBeNull();
+    expect(hapticKinds()).toEqual([{ kind: "selection" }]);
+    await settle();
+    expect(lastBar()).toEqual({ selected: "board", hidden: false, tint: CYAN });
+    picked("timeline");
+    expect([lastUi().view, storedView()]).toEqual(["timeline", "timeline"]);
+    expect(document.querySelectorAll(".phone-main .tl-scroll")).toHaveLength(1);
+    expect(hapticKinds()).toEqual([{ kind: "selection" }, { kind: "selection" }]);
+  });
+
+  it("a pick of the shown view moves nothing and plays no haptic", async () => {
+    await shown(await made());
+    picked("list");
+    expect(lastUi().view).toBe("list");
+    expect(hapticKinds()).toEqual([]);
+  });
+
+  it("Board to Timeline clears the search", async () => {
+    await shown(await made());
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search this plan" }), { target: { value: "rev" } });
+    picked("board");
+    expect(lastUi().query).toBe("rev");
+    picked("timeline");
+    expect(lastUi().query).toBe("");
+  });
+
+  it("again scrolls the List, the Timeline and the Board page to the top, and nothing else", async () => {
+    await shown(await made());
+    clearScrolls();
+    picked("list", true);
+    expect(scrolled()).toEqual([[document.querySelector(".phone-main"), { top: 0, behavior: "smooth" }]]);
+    picked("timeline");
+    await settle();
+    clearScrolls();
+    picked("timeline", true);
+    expect(scrolled()).toEqual([[document.querySelector(".phone-main .tl-scroll"), { top: 0, behavior: "smooth" }]]);
+    picked("board");
+    await settle();
+    clearScrolls();
+    picked("board", true);
+    const step = document.querySelector<HTMLElement>('.phone-main .step-tab[aria-selected="true"]');
+    if (step === null) throw new Error("no selected step tab");
+    expect(scrolled()).toEqual([[document.querySelector(`.phone-main .board-page[data-page="${step.dataset.page ?? ""}"]`), { top: 0, behavior: "smooth" }]]);
+    expect(hapticKinds()).toEqual([{ kind: "selection" }, { kind: "selection" }]);
+    expect(lastUi().view).toBe("board");
+    expect(badToasts()).toEqual([]);
+  });
+
+  it("again scrolls without smoothing under Reduce Motion", async () => {
+    setReducedMotion(true);
+    await shown(await made());
+    clearScrolls();
+    picked("list", true);
+    expect(scrolled()).toEqual([[document.querySelector(".phone-main"), { top: 0, behavior: "auto" }]]);
+  });
+
+  it("hides under the item sheet, the Plans sheet and the Settings sheet, and shows again on close", async () => {
+    const t = await made();
+    await shown(t);
+    const review = [...t.session.view().plan.items].find(([, it]) => it.name === "Review")?.[0];
+    if (review === undefined) throw new Error("no Review item");
+    setUiNow({ selected: review });
+    await settle();
+    expect(lastBar()).toEqual({ selected: "list", hidden: true, tint: CYAN });
+    expect(document.documentElement.dataset.tabbar).toBe("covered");
+    expect(document.documentElement.style.getPropertyValue("--tabbar-h")).toBe("83px");
+    setUiNow({ selected: null });
+    await settle();
+    expect(lastBar()).toEqual({ selected: "list", hidden: false, tint: CYAN });
+    expect(document.documentElement.dataset.tabbar).toBe("bar");
+    openPlans();
+    await settle();
+    expect(lastBar()).toEqual({ selected: "list", hidden: true, tint: CYAN });
+    closePlans();
+    await settle();
+    expect(lastBar()).toEqual({ selected: "list", hidden: false, tint: CYAN });
+    setUiNow({ settings: "general" });
+    await settle();
+    expect(lastBar()).toEqual({ selected: "list", hidden: true, tint: CYAN });
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Settings" })).getAllByRole("button", { name: "Close" })[0]);
+    await settle();
+    expect(lastBar()).toEqual({ selected: "list", hidden: false, tint: CYAN });
+  });
+
+  it("sends the cyan of a newly chosen theme as the tint", async () => {
+    await shown(await made());
+    setUiNow({ settings: "general", settingsRoot: true });
+    const sheet = screen.getByRole("dialog", { name: "Settings" });
+    const row = sheet.querySelector<HTMLElement>('div.settings-root button.settings-root-row[data-section="theme"]');
+    if (row === null) throw new Error("no theme row on the Settings root");
+    fireEvent.click(row);
+    const page = sheet.querySelector<HTMLElement>('section.settings-page[data-section="theme"]:not([hidden])');
+    if (page === null) throw new Error("no theme page shown");
+    fireEvent.click(within(page).getByRole("button", { name: /^Paper/ }));
+    await settle();
+    expect(presetCyan("paper")).not.toBe(CYAN);
+    expect(lastBar()).toEqual({ selected: "list", hidden: true, tint: presetCyan("paper") });
+  });
+
+  it("a failed install shows the web switch and one bad toast with the reason", async () => {
+    const t = await made();
+    tauri.answers.tabbar_install = () => {
+      throw { code: "tabbar.no_image", message: "The system image calendar.day.timeline.left does not exist." };
+    };
+    await shown(t);
+    expect(within(screen.getByRole("tablist", { name: "Views" })).getAllByRole("tab").map((tb) => tb.textContent)).toEqual(["Timeline", "Board", "List"]);
+    const tabs = within(views()).getAllByRole("tab");
+    const panel = screen.getByRole("tabpanel", { name: "List" });
+    expect(panel.classList.contains("phone-main")).toBe(true);
+    expect(tabs.map((tb) => tb.getAttribute("aria-controls"))).toEqual(tabs.map(() => panel.id));
+    expect(panel.getAttribute("aria-labelledby")).toBe(within(views()).getByRole("tab", { name: "List" }).id);
+    expect(badToasts()).toEqual([INSTALL_FAILED("The system image calendar.day.timeline.left does not exist.")]);
+    expect(document.documentElement.dataset.tabbar).toBeUndefined();
+    fireEvent.click(within(screen.getByRole("tablist", { name: "Views" })).getByRole("tab", { name: "Board" }));
+    expect(lastUi().view).toBe("board");
+    await settle();
+    expect(barCalls().map(([cmd]) => cmd)).toEqual(["tabbar_install"]);
+    expect(badToasts()).toHaveLength(1);
+  });
+
+  it("a refused set brings the web switch back above the native bar that stays on screen", async () => {
+    await shown(await made());
+    tauri.answers.tabbar_set = () => {
+      throw { code: "tabbar.tint", message: "The tab bar cannot be set: the tint \"#24E0F\" is not # and six hex digits." };
+    };
+    picked("board");
+    await settle();
+    expect(badToasts()).toEqual([SET_FAILED("The tab bar cannot be set: the tint \"#24E0F\" is not # and six hex digits.")]);
+    expect(within(views()).getByRole("tab", { selected: true }).textContent).toBe("Board");
+    expect(screen.getByRole("tabpanel", { name: "Board" }).classList.contains("phone-main")).toBe(true);
+    expect(document.documentElement.dataset.tabbar).toBe("bar");
+    expect(document.documentElement.style.getPropertyValue("--tabbar-h")).toBe("83px");
+    picked("list");
+    expect(lastUi().view).toBe("list");
+    await settle();
+    expect(barCalls().map(([cmd]) => cmd)).toEqual(["tabbar_install", "tabbar_set", "tabbar_set"]);
+  });
+
+  it("the Mac sends no tabbar_* and keeps the web switch", async () => {
+    const t = await made();
+    tauri.answers.device_info = () => ({ deviceId: "mac", platform: "macos" });
+    setPlatform(MAC);
+    await shown(t);
+    expect(screen.getByRole("tablist", { name: "Views" })).toBeTruthy();
+    expect(barCalls()).toEqual([]);
+    expect(document.documentElement.dataset.tabbar).toBeUndefined();
+  });
+
+  it("the iPad below 700 pt sends no tabbar_* and keeps the web switch", async () => {
+    const t = await made();
+    tauri.answers.device_info = () => ({ deviceId: "ipad", platform: "ios" });
+    setPlatform(IPAD);
+    const registry = await phoneRegistry(t);
+    registries.push(registry);
+    render(withSync(<Shell registry={registry} clock={t.clock} />));
+    await settle();
+    expect(document.documentElement.dataset.form).toBe("phone");
+    expect(screen.getByRole("tablist", { name: "Views" })).toBeTruthy();
+    expect(barCalls()).toEqual([]);
+    expect(document.documentElement.dataset.tabbar).toBeUndefined();
   });
 });

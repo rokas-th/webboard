@@ -45,6 +45,7 @@
 		9A621965959ABB9155BE4E15 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		9AF01950E31203C17E62BC78 /* webboard_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = webboard_iOS.entitlements; sourceTree = "<group>"; };
 		9C3C6D6CD527BA8F40814166 /* device.rs */ = {isa = PBXFileReference; path = device.rs; sourceTree = "<group>"; };
+		A2C4EE31CDCCD54EAA809ADF /* tabbar.rs */ = {isa = PBXFileReference; path = tabbar.rs; sourceTree = "<group>"; };
 		A2EC153CD773C3BB797878E9 /* webboard_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = webboard_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A5BA71A119B4C7E8AECCB34E /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		AED93979FB9E5889D4FFBCEF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -189,6 +190,7 @@
 				AF1EC1E5AADCC386CED2EDA0 /* settings.rs */,
 				2FE8014F2D8820C0060AA672 /* store.rs */,
 				4993BCB814378AD5633DAAE3 /* sync.rs */,
+				A2C4EE31CDCCD54EAA809ADF /* tabbar.rs */,
 			);
 			path = commands;
 			sourceTree = "<group>";

@@ -297,7 +297,12 @@ mod uikit {
         }) else {
             return Err((sender, no_controller()));
         };
-        if controller.presentedViewController().is_some() {
+        let outer = std::iter::successors(controller.parentViewController(), |parent| {
+            parent.parentViewController()
+        })
+        .last();
+        let presenter: &UIViewController = outer.as_deref().unwrap_or(controller);
+        if presenter.presentedViewController().is_some() {
             return Err((sender, busy(&alert.title)));
         }
         let shown = UIAlertController::alertControllerWithTitle_message_preferredStyle(
@@ -325,9 +330,9 @@ mod uikit {
             }
         });
         let done = completion(presented, &alert.title);
-        controller.presentViewController_animated_completion(&shown, true, done.as_deref());
+        presenter.presentViewController_animated_completion(&shown, true, done.as_deref());
         let asked: &UIViewController = &shown;
-        let on_screen = controller
+        let on_screen = presenter
             .presentedViewController()
             .is_some_and(|now| std::ptr::eq(&*now, asked));
         if !on_screen {

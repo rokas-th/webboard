@@ -5,6 +5,7 @@ import { channels } from "../theme/colour";
 import { HEX_TOKENS, type Tokens } from "../theme/derive";
 import { PRESETS, tokensOf } from "../theme/presets";
 import { paint, swatch } from "../ui/theme/ThemeCards";
+import { TABBAR_HEIGHT } from "../ui/phone/nativeTabBar";
 
 const SHEETS: Record<string, string> = import.meta.glob("./*.css", { query: "?raw", import: "default", eager: true });
 
@@ -25,7 +26,7 @@ const cyberdeckTheme = PRESETS.find((t) => t.id === "cyberdeck");
 if (cyberdeckTheme === undefined) throw new Error("no cyberdeck preset");
 const CYBERDECK = tokensOf(cyberdeckTheme);
 
-const INLINE = [...Object.keys(paint(CYBERDECK)), ...Object.keys(swatch(CYBERDECK.void))];
+const INLINE = [...Object.keys(paint(CYBERDECK)), ...Object.keys(swatch(CYBERDECK.void)), TABBAR_HEIGHT];
 
 const DECLARED = new Set([...[...stripComments(tokensCss).matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]), ...INLINE]);
 

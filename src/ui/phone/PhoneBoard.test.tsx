@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { useCallback, useState } from "react";
+import { useCallback, useLayoutEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StepColour } from "../../domain/model";
 import { peopleOf } from "../../domain/people";
@@ -350,6 +350,46 @@ describe("PhoneBoard paging", () => {
     laidOut();
     act(() => watched.forEach((cb) => cb()));
     expect([selectedTab(), scrollCalls(), pager().scrollLeft]).toEqual(["later", [{ left: 2 * WIDTH, behavior: "auto" }], 2 * WIDTH]);
+    vi.unstubAllGlobals();
+  });
+
+  it("stops watching the pager's size in the same commit that removes it, so a resize note cannot reach a pager that is gone", async () => {
+    const watching = { now: 0 };
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe(): void {
+          watching.now += 1;
+        }
+        unobserve(): void {}
+        disconnect(): void {
+          watching.now -= 1;
+        }
+      },
+    );
+    const t = await made(SEED);
+    const seen: number[] = [];
+    const toggle: { set: (on: boolean) => void } = { set: () => undefined };
+    function Watch(p: { on: boolean }) {
+      useLayoutEffect(() => {
+        if (!p.on) seen.push(watching.now);
+      }, [p.on]);
+      return null;
+    }
+    function Swap() {
+      const [on, setOn] = useState(true);
+      toggle.set = setOn;
+      return (
+        <>
+          {on && <Harness session={t.session} initial={{}} />}
+          <Watch on={on} />
+        </>
+      );
+    }
+    render(themed(<OpenChoice.Provider value={vi.fn()}>{<Swap />}</OpenChoice.Provider>));
+    expect(watching.now).toBe(1);
+    act(() => toggle.set(false));
+    expect(seen).toEqual([0]);
     vi.unstubAllGlobals();
   });
 

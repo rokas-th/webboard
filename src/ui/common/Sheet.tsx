@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { readPlatform } from "../../platform";
 import { modalKeyDown, useModalFocus } from "./Dialog";
 import { CloseButton, useOverlayEntry, useRequestClose, useScrimPress, type CloseReason } from "./dismiss";
@@ -20,6 +20,25 @@ export const RELEASE_MS = 100;
 export const DETENT_UP = 48;
 
 export type SheetDetent = "medium" | "large";
+
+const sheetListeners = new Set<() => void>();
+let openSheets = 0;
+
+const countSheets = (by: number): void => {
+  openSheets += by;
+  [...sheetListeners].forEach((cb) => cb());
+};
+
+const subscribeSheets = (cb: () => void): (() => void) => {
+  sheetListeners.add(cb);
+  return () => {
+    sheetListeners.delete(cb);
+  };
+};
+
+export function useSheetOpen(): boolean {
+  return useSyncExternalStore(subscribeSheets, () => openSheets > 0);
+}
 
 type DetentProps = { detent?: undefined; onDetent?: undefined } | { detent: SheetDetent; onDetent(d: SheetDetent): void };
 
@@ -124,6 +143,10 @@ function SheetEnd(p: { actions: ReactNode }) {
 function OpenSheet(p: SheetProps) {
   const ref = useRef<HTMLDivElement>(null);
   const ios = readPlatform(window).os === "ios";
+  useLayoutEffect(() => {
+    countSheets(1);
+    return () => countSheets(-1);
+  }, []);
   useModalFocus(ref, "Sheet", ios);
   const { close, scope } = useRequestClose(ref, p.onClose, "Sheet");
   useOverlayEntry(ref, close);

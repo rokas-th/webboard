@@ -16,6 +16,8 @@ pub mod probe;
 pub mod settings;
 pub mod store;
 pub mod sync;
+#[cfg(any(target_os = "ios", test))]
+pub mod tabbar;
 
 pub(crate) use webboard_core::fsutil::replace_file;
 
@@ -53,29 +55,22 @@ pub(crate) mod main_thread {
         fn off_main(self) -> CommandError;
         fn no_controller(self) -> CommandError;
         fn unreachable(self, e: &str) -> CommandError;
+        fn stopped(why: &str) -> CommandError {
+            CommandError::new(Self::STOPPED, format!("{} stopped: {why}", Self::CMD))
+        }
     }
 
     pub(crate) fn dropped<A: Asked>() -> CommandError {
-        CommandError::new(
-            A::STOPPED,
-            format!(
-                "{} stopped: the main thread dropped it without a result",
-                A::CMD
-            ),
-        )
+        A::stopped("the main thread dropped it without a result")
     }
 
     pub(crate) const MAIN_THREAD_WAIT: Duration = Duration::from_secs(5);
 
-    fn unrun<A: Asked>(wait: Duration) -> CommandError {
-        CommandError::new(
-            A::STOPPED,
-            format!(
-                "{} stopped: the main thread did not run it within {} ms",
-                A::CMD,
-                wait.as_millis()
-            ),
-        )
+    pub(crate) fn unrun<A: Asked>(wait: Duration) -> CommandError {
+        A::stopped(&format!(
+            "the main thread did not run it within {} ms",
+            wait.as_millis()
+        ))
     }
 
     pub(crate) async fn settle<A: Asked, T: Send + 'static>(

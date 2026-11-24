@@ -79,11 +79,49 @@ const iosShaped =
     return null;
   };
 
+const TINT = /^#[0-9a-fA-F]{6}$/;
+
+const goodTab = (t: unknown): t is { id: string } => exactly(t, ["id", "title", "image"]) && filled(t.id) && filled(t.title) && filled(t.image);
+
+const goodState = (s: unknown, ids: readonly string[]): boolean =>
+  exactly(s, ["selected", "hidden", "tint"]) && typeof s.selected === "string" && ids.includes(s.selected) && typeof s.hidden === "boolean" && typeof s.tint === "string" && TINT.test(s.tint);
+
+function barIds(b: unknown): readonly string[] | null {
+  if (!exactly(b, ["tabs", "state"]) || !Array.isArray(b.tabs) || b.tabs.length < 2 || b.tabs.length > 5 || !b.tabs.every(goodTab)) return null;
+  const ids = b.tabs.filter(goodTab).map((t) => t.id);
+  return new Set(ids).size === ids.length && goodState(b.state, ids) ? ids : null;
+}
+
+const tabBar: { ids: readonly string[] | null } = { ids: null };
+
+const onPhone = (cmd: string): void => {
+  const { os, idiom } = readPlatform(window);
+  if (os !== "ios" || idiom !== "phone") refuse(`${cmd} was called on ${idiom === null ? os : `${os} ${idiom}`}, where only the iPhone has it`);
+};
+
+const tabBarInstall: Answer = (args) => {
+  onPhone("tabbar_install");
+  if (!exactly(args, ["bar"])) return refuse(`tabbar_install got ${JSON.stringify(args)}, not a bar tabbar.rs accepts`);
+  const ids = barIds(args.bar);
+  if (ids === null) return refuse(`tabbar_install got ${JSON.stringify(args)}, not a bar tabbar.rs accepts`);
+  tabBar.ids = ids;
+  return { height: 83 };
+};
+
+const tabBarSet: Answer = (args) => {
+  onPhone("tabbar_set");
+  if (tabBar.ids === null) return refuse("tabbar_set was called before tabbar_install");
+  if (!exactly(args, ["state"]) || !goodState(args.state, tabBar.ids)) return refuse(`tabbar_set got ${JSON.stringify(args)}, not a state tabbar.rs accepts for the tabs ${tabBar.ids.join(", ")}`);
+  return null;
+};
+
 export const DEFAULT_ANSWERS: Readonly<Record<string, Answer>> = {
   sync_status: () => ({ space: null, revoked: false }),
   ...Object.fromEntries(UIKIT_COMMANDS.map(([cmd, key, allowed]) => [cmd, iosOnly(cmd, key, allowed)])),
   menu_show: iosShaped("menu_show", "menu", goodMenu, "a menu menu.rs accepts"),
   menu_dismiss: iosShaped("menu_dismiss", "token", filled, "a non-empty string"),
+  tabbar_install: tabBarInstall,
+  tabbar_set: tabBarSet,
 };
 
 export const tauri = {
@@ -165,6 +203,10 @@ export function emitFromRust(name: string, payload: unknown): void {
   for (const handler of [...open]) handler({ payload } as { payload: never });
 }
 
+export function pickTab(id: string, again = false): void {
+  emitFromRust("tabbar-picked", { id, again });
+}
+
 export function listenerCount(name: string): number {
   return subscriptions.get(name)?.size ?? 0;
 }
@@ -227,6 +269,7 @@ export function resetTauri(answers: Record<string, Answer>): void {
   windowState.destroyed = 0;
   windowState.destroyFailure = null;
   holds.clear();
+  tabBar.ids = null;
   tauri.calls.length = 0;
   for (const k of Object.keys(tauri.answers)) delete tauri.answers[k];
   Object.assign(tauri.answers, DEFAULT_ANSWERS, answers);
