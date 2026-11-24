@@ -64,9 +64,10 @@ The server runs with `npm ci --prefix server`, then `cp server/.dev.vars.example
 npm test                               # interface and domain (Vitest, jsdom)
 npm run lint
 npx tsc -b                             # type check
-npx playwright install chromium-headless-shell  # once: the browser the layout probe drives (found in the ms-playwright cache; Playwright is not a project dependency)
+npm run build                          # the script tests and the layout probe read dist/
+npx playwright install chromium-headless-shell  # once: the browser the layout probe and its test drive (found in the ms-playwright cache; Playwright is not a project dependency)
 npm run test:scripts                   # Node tests for scripts/ and the Linux installer test
-npm run build && npm run layout:probe  # layout measurements; the probe reads dist/
+npm run layout:probe                   # layout measurements over dist/; about half an hour
 npm ci --prefix server                 # once, before the server tests
 npm test --prefix server               # Worker and Durable Objects in workerd
 cargo test --workspace --no-fail-fast  # store, holidays, sync client, Tauri commands
