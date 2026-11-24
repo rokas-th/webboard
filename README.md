@@ -33,7 +33,6 @@ WebBoard is a project planner for macOS, Linux and iPhone/iPad, with a timeline,
 - One server deployment holds one space. Every device in it sees every plan; there are no per-plan permissions or separate users.
 - Plan data is encrypted in transit only, not end to end.
 - Release builds cover Apple silicon Macs and amd64 Linux (`.deb`) only. The macOS build is ad-hoc signed and not notarised. The iOS build installs for development only; there is no App Store or TestFlight release.
-- No continuous integration; tests are run by hand.
 
 ## Architecture
 
@@ -72,6 +71,8 @@ npm ci --prefix server                 # once, before the server tests
 npm test --prefix server               # Worker and Durable Objects in workerd
 cargo test --workspace --no-fail-fast  # store, holidays, sync client, Tauri commands
 ```
+
+CI (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests: lint, the type check and the Vitest suite on Linux; the script tests; the server tests; clippy and the Rust tests on Linux and macOS, with clippy for the iOS simulator target. The layout probe is not part of CI and is run by hand.
 
 `src/log/budget.test.ts` holds timing budgets measured on an Apple silicon Mac; its replay budgets run on macOS only, its size budget everywhere. On a slower or busy machine it can fail with nothing wrong: run it again on its own (`npx vitest run src/log/budget.test.ts`) before reading it as a regression.
 

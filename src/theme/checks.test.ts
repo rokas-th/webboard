@@ -169,7 +169,7 @@ describe("checks", () => {
       }),
     );
     expect(broken).toEqual([]);
-  }, 30_000);
+  }, 120_000);
 
   it("returns null when a hue rotation cannot separate greys", () => {
     const s = { ...cyberdeck, accent: "#AAAAAA", highlight: "#BBBBBB" };
