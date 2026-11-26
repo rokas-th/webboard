@@ -260,7 +260,7 @@ describe("useNativeTabBar on the iPhone", () => {
   });
 
   it("turns a fault from the native side into one bad toast and keeps the page above the bar", async () => {
-    const message = "The tab bar cannot be laid out: the web view or the tab bar is not inside the tab bar controller's view.";
+    const message = "The tab bar cannot be laid out: the tab bar's views are not on top of the web view.";
     const view = render(<Bar />);
     await flush();
     act(() => emitFromRust("tabbar-fault", { code: "tabbar.order", message }));

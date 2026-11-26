@@ -44,7 +44,7 @@ const NO_VIEW: &str = "the view controller has no view";
 const NOT_SHOWN: &str = "its view is in no window";
 const NO_HOST_VIEW: &str = "the tab bar controller has no view";
 const NO_CARRIER_VIEW: &str = "a tab's view controller has no view";
-const OUT_OF_HOST: &str = "the web view or the tab bar is not inside the tab bar controller's view";
+const OUT_OF_HOST: &str = "the tab bar's views are not on top of the web view";
 
 fn cannot(verb: &str, why: &str) -> String {
     format!("The tab bar cannot be {verb}: {why}.")
@@ -102,16 +102,6 @@ fn no_image(name: &str) -> CommandError {
     )
 }
 
-fn refused() -> CommandError {
-    CommandError::new(
-        "tabbar.refused",
-        cannot(
-            INSTALLED,
-            "the window kept another root, so everything was undone",
-        ),
-    )
-}
-
 fn no_height(height: f64) -> CommandError {
     CommandError::new(
         "tabbar.no_height",
@@ -148,19 +138,6 @@ fn out_of_host(verb: &str) -> CommandError {
         OUT_OF_HOST.to_string()
     };
     CommandError::new("tabbar.order", cannot(verb, &why))
-}
-
-fn undo_failed(after: &CommandError) -> CommandError {
-    CommandError::new(
-        "tabbar.undo_failed",
-        cannot(
-            INSTALLED,
-            &format!(
-                "after {}, the web view's controller could not be made root again",
-                after.code
-            ),
-        ),
-    )
 }
 
 fn not_installed() -> CommandError {
@@ -323,14 +300,10 @@ enum Order {
     Lost,
 }
 
-fn order_of(count: usize, content: Option<usize>, holder: Option<usize>) -> Order {
-    match (content, holder) {
-        (Some(content), Some(holder))
-            if count >= 2 && holder == count - 1 && content == count - 2 =>
-        {
-            Order::Kept
-        }
-        (Some(_), Some(_)) => Order::Raise,
+fn order_of(count: usize, veil: Option<usize>, held: bool) -> Order {
+    match (veil, held) {
+        (Some(veil), true) if veil + 1 == count => Order::Kept,
+        (Some(_), true) => Order::Raise,
         _ => Order::Lost,
     }
 }
@@ -453,10 +426,13 @@ mod uikit {
 
     use objc2::rc::Retained;
     use objc2::runtime::ProtocolObject;
-    use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
+    use objc2::{
+        define_class, msg_send, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly,
+    };
+    use objc2_core_foundation::{CGPoint, CGRect};
     use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString};
     use objc2_ui_kit::{
-        UIColor, UIDevice, UIImage, UIInterfaceOrientationMask, UIResponder, UITabBarController,
+        UIColor, UIDevice, UIEvent, UIImage, UIResponder, UITabBar, UITabBarController,
         UITabBarControllerDelegate, UITabBarItem, UIUserInterfaceIdiom, UIView, UIViewAutoresizing,
         UIViewController, UIWindow,
     };
@@ -467,19 +443,47 @@ mod uikit {
     use super::super::main_thread::report;
     use super::{
         applied, emit_fault, flat_shown, gone, installed_height, measure, mismatch, no_image,
-        no_window, not_installed, not_phone, not_root, order_of, out_of_host, picked, refused,
-        reinstalled_height, undo_failed, Applied, BarAsk, BarState, Geometry, Measure, Order, Out,
-        Tab, INSTALLED, LAID_OUT, NOT_SHOWN, NO_CARRIER_VIEW, NO_HOST_VIEW, NO_VIEW, SET,
+        no_window, not_installed, not_phone, not_root, order_of, out_of_host, picked,
+        reinstalled_height, Applied, BarAsk, BarState, Geometry, Measure, Order, Out, Tab,
+        INSTALLED, LAID_OUT, NOT_SHOWN, NO_CARRIER_VIEW, NO_HOST_VIEW, NO_VIEW, SET,
     };
 
     pub(super) struct Ivars {
         window: tauri::WebviewWindow,
         tabs: Vec<Tab>,
-        controller: Retained<UIViewController>,
         content: Retained<UIView>,
+        veil: Retained<TabVeil>,
         sent: Cell<f64>,
         live: Cell<bool>,
         faulted: Cell<bool>,
+    }
+
+    define_class!(
+        #[unsafe(super(UIView, UIResponder, NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "WBTabVeil"]
+        pub(super) struct TabVeil;
+
+        impl TabVeil {
+            #[unsafe(method_id(hitTest:withEvent:))]
+            fn hit_test(&self, point: CGPoint, event: Option<&UIEvent>) -> Option<Retained<UIView>> {
+                let hit: Option<Retained<UIView>> =
+                    unsafe { msg_send![super(self), hitTest: point, withEvent: event] };
+                hit.filter(|view| {
+                    std::iter::successors(Some(view.clone()), |v| v.superview())
+                        .any(|v| v.isKindOfClass(UITabBar::class()))
+                })
+            }
+        }
+
+        unsafe impl NSObjectProtocol for TabVeil {}
+    );
+
+    impl TabVeil {
+        fn new(main: MainThreadMarker, frame: CGRect) -> Retained<Self> {
+            let this = main.alloc::<Self>().set_ivars(());
+            unsafe { msg_send![super(this), initWithFrame: frame] }
+        }
     }
 
     define_class!(
@@ -496,31 +500,6 @@ mod uikit {
                     let _: () = msg_send![super(self), viewDidLayoutSubviews];
                 }
                 self.arrange();
-            }
-
-            #[unsafe(method_id(childViewControllerForStatusBarStyle))]
-            fn child_for_status_bar_style(&self) -> Option<Retained<UIViewController>> {
-                Some(self.ivars().controller.clone())
-            }
-
-            #[unsafe(method_id(childViewControllerForStatusBarHidden))]
-            fn child_for_status_bar_hidden(&self) -> Option<Retained<UIViewController>> {
-                Some(self.ivars().controller.clone())
-            }
-
-            #[unsafe(method_id(childViewControllerForHomeIndicatorAutoHidden))]
-            fn child_for_home_indicator(&self) -> Option<Retained<UIViewController>> {
-                Some(self.ivars().controller.clone())
-            }
-
-            #[unsafe(method_id(childViewControllerForScreenEdgesDeferringSystemGestures))]
-            fn child_for_screen_edges(&self) -> Option<Retained<UIViewController>> {
-                Some(self.ivars().controller.clone())
-            }
-
-            #[unsafe(method(supportedInterfaceOrientations))]
-            fn supported_orientations(&self) -> UIInterfaceOrientationMask {
-                self.ivars().controller.supportedInterfaceOrientations()
             }
         }
 
@@ -584,23 +563,18 @@ mod uikit {
         }
 
         fn order(&self, view: &UIView) -> Order {
-            let content = &self.ivars().content;
-            let bar = self.tabBar();
-            let holder = std::iter::successors(Some(Retained::into_super(bar)), |v| v.superview())
-                .find(|v| {
-                    v.superview()
-                        .is_some_and(|parent| same::<UIView>(&parent, view))
-                });
-            let subviews = view.subviews().to_vec();
-            let at = |target: &UIView| {
-                subviews
-                    .iter()
-                    .position(|known| same::<UIView>(known, target))
-            };
-            let order = order_of(subviews.len(), at(content), holder.as_deref().and_then(at));
-            if let (Order::Raise, Some(holder)) = (order, &holder) {
-                view.bringSubviewToFront(content);
-                view.bringSubviewToFront(holder);
+            let Ivars { content, veil, .. } = self.ivars();
+            let veil: &UIView = veil;
+            let subviews = content.subviews().to_vec();
+            let at = subviews
+                .iter()
+                .position(|known| same::<UIView>(known, veil));
+            let held = view
+                .superview()
+                .is_some_and(|parent| same::<UIView>(&parent, veil));
+            let order = order_of(subviews.len(), at, held);
+            if order == Order::Raise {
+                content.bringSubviewToFront(veil);
             }
             order
         }
@@ -613,11 +587,6 @@ mod uikit {
                 }
                 return;
             };
-            let content = &ivars.content;
-            let bounds = view.bounds();
-            if content.frame() != bounds {
-                content.setFrame(bounds);
-            }
             let order = self.order(&view);
             if !ivars.live.get() {
                 return;
@@ -716,23 +685,11 @@ mod uikit {
             .is_some_and(|root| same::<UIViewController>(&root, controller))
     }
 
-    fn back(
-        screen: &UIWindow,
-        controller: &UIViewController,
-        content: Option<&UIView>,
-        e: CommandError,
-    ) -> CommandError {
-        if let Some(content) = content {
-            controller.willMoveToParentViewController(None);
-            content.removeFromSuperview();
-            controller.removeFromParentViewController();
-        }
-        screen.setRootViewController(Some(controller));
-        if rooted(screen, controller) {
-            e
-        } else {
-            undo_failed(&e)
-        }
+    fn back(host: &TabHost, e: CommandError) -> CommandError {
+        host.willMoveToParentViewController(None);
+        host.ivars().veil.removeFromSuperview();
+        host.removeFromParentViewController();
+        e
     }
 
     pub(super) fn install(
@@ -770,13 +727,16 @@ mod uikit {
             .zip(&images)
             .map(|(tab, image)| carrier(main, tab, image))
             .collect::<Result<Vec<_>>>()?;
+        let flexible = UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight;
+        let veil = TabVeil::new(main, content.bounds());
+        veil.setAutoresizingMask(flexible);
         let host = TabHost::new(
             main,
             Ivars {
                 window,
                 tabs,
-                controller: controller.retain(),
                 content: content.clone(),
+                veil: veil.clone(),
                 sent: Cell::new(0.0),
                 live: Cell::new(false),
                 faulted: Cell::new(false),
@@ -785,46 +745,26 @@ mod uikit {
         host.setViewControllers(Some(&NSArray::from_retained_slice(&carriers)));
         host.setDelegate(Some(ProtocolObject::from_ref(&*host)));
         host.apply(&applied.shown());
-        screen.setRootViewController(Some(&host));
-        if !rooted(&screen, &host) {
-            return Err(back(&screen, controller, None, refused()));
-        }
         let Some(frame) = host.view() else {
-            return Err(back(
-                &screen,
-                controller,
-                None,
-                no_window(INSTALLED, NO_HOST_VIEW),
-            ));
+            return Err(no_window(INSTALLED, NO_HOST_VIEW));
         };
-        host.addChildViewController(controller);
-        frame.addSubview(&content);
-        content.setAutoresizingMask(
-            UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
-        );
-        content.setFrame(frame.bounds());
-        controller.didMoveToParentViewController(Some(&host));
+        content.addSubview(&veil);
+        controller.addChildViewController(&host);
+        frame.setBackgroundColor(Some(&UIColor::clearColor()));
+        frame.setAutoresizingMask(flexible);
+        frame.setFrame(veil.bounds());
+        veil.addSubview(&frame);
+        host.didMoveToParentViewController(Some(controller));
         let Some((view, measured)) = host.laid_out() else {
-            return Err(back(
-                &screen,
-                controller,
-                Some(&content),
-                no_window(INSTALLED, NO_HOST_VIEW),
-            ));
+            return Err(back(&host, no_window(INSTALLED, NO_HOST_VIEW)));
         };
-        let height =
-            installed_height(measured).map_err(|e| back(&screen, controller, Some(&content), e))?;
+        let height = installed_height(measured).map_err(|e| back(&host, e))?;
         if host.order(&view) == Order::Lost {
-            return Err(back(
-                &screen,
-                controller,
-                Some(&content),
-                out_of_host(INSTALLED),
-            ));
+            return Err(back(&host, out_of_host(INSTALLED)));
         }
         host.apply(&applied);
         host.ivars().sent.set(height);
-        keep(host.clone()).map_err(|e| back(&screen, controller, Some(&content), e))?;
+        keep(host.clone()).map_err(|e| back(&host, e))?;
         host.ivars().live.set(true);
         host.send(Out::Moved(Geometry { height }));
         Ok(height)
@@ -1132,16 +1072,16 @@ mod tests {
     }
 
     #[test]
-    fn content_and_bar_are_raised_only_when_out_of_order_and_lost_outside_the_host() {
-        assert_eq!(order_of(3, Some(1), Some(2)), Order::Kept);
-        assert_eq!(order_of(2, Some(0), Some(1)), Order::Kept);
-        assert_eq!(order_of(3, Some(2), Some(1)), Order::Raise);
-        assert_eq!(order_of(3, Some(0), Some(2)), Order::Raise);
-        assert_eq!(order_of(3, Some(1), Some(0)), Order::Raise);
-        assert_eq!(order_of(4, Some(1), Some(3)), Order::Raise);
-        assert_eq!(order_of(3, None, Some(2)), Order::Lost);
-        assert_eq!(order_of(3, Some(1), None), Order::Lost);
-        assert_eq!(order_of(0, None, None), Order::Lost);
+    fn the_veil_is_raised_when_not_topmost_and_lost_without_the_host_or_the_web_view() {
+        assert_eq!(order_of(1, Some(0), true), Order::Kept);
+        assert_eq!(order_of(3, Some(2), true), Order::Kept);
+        assert_eq!(order_of(3, Some(1), true), Order::Raise);
+        assert_eq!(order_of(3, Some(0), true), Order::Raise);
+        assert_eq!(order_of(3, Some(2), false), Order::Lost);
+        assert_eq!(order_of(3, Some(0), false), Order::Lost);
+        assert_eq!(order_of(3, None, true), Order::Lost);
+        assert_eq!(order_of(0, None, true), Order::Lost);
+        assert_eq!(order_of(0, None, false), Order::Lost);
     }
 
     #[test]
@@ -1186,7 +1126,7 @@ mod tests {
                 "tabbar-fault",
                 json!({
                     "code": "tabbar.order",
-                    "message": "The tab bar cannot be laid out: the web view or the tab bar is not inside the tab bar controller's view."
+                    "message": "The tab bar cannot be laid out: the tab bar's views are not on top of the web view."
                 })
             )
         );
@@ -1218,13 +1158,11 @@ mod tests {
             no_window(LAID_OUT, NO_HOST_VIEW),
             not_root(),
             no_image("calendar.day.timeline.left"),
-            refused(),
             no_height(0.0),
             kept_flat(0.0),
             flat_shown(0.0),
             out_of_host(INSTALLED),
             out_of_host(LAID_OUT),
-            undo_failed(&no_height(0.0)),
             not_installed(),
             mismatch(),
         ]
@@ -1256,13 +1194,11 @@ mod tests {
                 "tabbar.no_window",
                 "tabbar.not_root",
                 "tabbar.no_image",
-                "tabbar.refused",
                 "tabbar.no_height",
                 "tabbar.no_height",
                 "tabbar.no_height",
                 "tabbar.order",
                 "tabbar.order",
-                "tabbar.undo_failed",
                 "tabbar.not_installed",
                 "tabbar.mismatch",
             ]
@@ -1290,13 +1226,11 @@ mod tests {
                 "The tab bar cannot be laid out: the tab bar controller has no view.",
                 "The tab bar cannot be installed: the window's root is not the web view's controller.",
                 "The system image calendar.day.timeline.left does not exist.",
-                "The tab bar cannot be installed: the window kept another root, so everything was undone.",
                 "The tab bar cannot be installed: the bar's height is 0 after layout, so everything was undone.",
                 "The tab bar cannot be installed again: the bar that is already installed is 0 high after layout, and it stays installed.",
                 "The tab bar cannot be laid out: its height is 0 while it is shown.",
-                "The tab bar cannot be installed: the web view or the tab bar is not inside the tab bar controller's view, so everything was undone.",
-                "The tab bar cannot be laid out: the web view or the tab bar is not inside the tab bar controller's view.",
-                "The tab bar cannot be installed: after tabbar.no_height, the web view's controller could not be made root again.",
+                "The tab bar cannot be installed: the tab bar's views are not on top of the web view, so everything was undone.",
+                "The tab bar cannot be laid out: the tab bar's views are not on top of the web view.",
                 "The tab bar cannot be set: it is not installed yet.",
                 "The tab bar cannot be installed: it is already installed with other tabs.",
             ]

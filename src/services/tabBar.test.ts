@@ -265,7 +265,7 @@ describe("moveTabBar", () => {
 });
 
 describe("faultTabBar", () => {
-  const FAULT = new AppError("tabbar.order", "The tab bar cannot be laid out: the web view or the tab bar is not inside the tab bar controller's view.");
+  const FAULT = new AppError("tabbar.order", "The tab bar cannot be laid out: the tab bar's views are not on top of the web view.");
 
   it("fails an installed bar, keeps its height and asks for a toast", async () => {
     await installTabBar(STATE);

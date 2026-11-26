@@ -600,7 +600,7 @@ mod tests {
             "UITabBarItem",
             "UIBarItem",
             "UIColor",
-            "UIOrientation",
+            "UIEvent",
         ]
         .iter()
         .for_each(|feature| {

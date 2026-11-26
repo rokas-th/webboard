@@ -463,6 +463,19 @@ describe("the Cyberdeck look", () => {
     expect([decls["display"], decls["-webkit-line-clamp"], decls["-webkit-box-orient"], decls["overflow"], decls["white-space"]]).toEqual(["-webkit-box", "2", "vertical", "hidden", "normal"]);
   });
 
+  it("sizes every control of the phone's top bar at 36 px, the held chip aside, with even 8 px gaps on iOS", () => {
+    const of = (sel: string): Decls => Object.assign({}, ...sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0).map((r) => r.decls));
+    [".phone-head > button:not(.chip)", ".phone-head > .plan-menu > button"].forEach((sel) => {
+      const decls = of(sel);
+      expect([sel, decls["height"], decls["min-width"], decls["padding-top"], decls["padding-bottom"], decls["align-items"], decls["justify-content"]]).toEqual([sel, "36px", "36px", "0", "0", "center", "center"]);
+    });
+    const chip = of(".phone-head > button.sync-chip.chip-compact");
+    expect([chip["min-width"], chip["padding"]]).toEqual(["36px", "0"]);
+    expect(of(".phone-head")["gap"]).toBe("6px");
+    expect(of('html[data-os="ios"] .phone-head .phone-glyph')["margin-left"]).toBe("2px");
+    expect(of('html[data-os="ios"] .phone-head .sync-chip')["margin"]).toBe("0 2px");
+  });
+
   it("sizes the shared modal at 520 px and the wide calendar modal at 600 px", () => {
     const widths = (sel: string): string[] => sheet.rules.filter((r) => r.selector === sel && r.conditions.length === 0 && r.decls["width"] !== undefined).map((r) => r.decls["width"] ?? "");
     expect(widths(".modal")).toEqual(["520px"]);

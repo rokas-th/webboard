@@ -238,6 +238,22 @@ html[data-form="phone"] .sheet[data-detent="large"] {
   flex-shrink: 0;
 }
 
+.phone-head > button:not(.chip),
+.phone-head > .plan-menu > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  min-width: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.phone-head > button.sync-chip.chip-compact {
+  min-width: 36px;
+  padding: 0;
+}
+
 .phone-add {
   min-width: 36px;
   padding: 6px 10px;
@@ -435,7 +451,7 @@ html[data-os="ios"] .phone-head .phone-glyph {
 }
 
 html[data-os="ios"] .phone-head .sync-chip {
-  margin: 0 6px;
+  margin: 0 2px;
 }
 
 html[data-os="ios"] .plans-new {
